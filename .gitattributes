@@ -1,0 +1,14 @@
+# git-crypt: encrypt secrets at rest in the repo
+
+# OpenVPN certificates and keys
+openvpn/config/ca.crt filter=git-crypt diff=git-crypt
+openvpn/config/server.crt filter=git-crypt diff=git-crypt
+openvpn/config/server.key filter=git-crypt diff=git-crypt
+openvpn/config/dh.pem filter=git-crypt diff=git-crypt
+openvpn/config/ta.key filter=git-crypt diff=git-crypt
+
+# Nginx / Certbot credentials
+nginx/cloudflare.ini filter=git-crypt diff=git-crypt
+
+# Environment variables
+.env filter=git-crypt diff=git-crypt
