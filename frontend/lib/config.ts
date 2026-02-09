@@ -1,4 +1,18 @@
-const HA_URL = process.env.EXPO_PUBLIC_HA_URL ?? "http://localhost:8123";
+import { Platform } from "react-native";
+
+function getHAUrl(): string {
+  // On web, if served over HTTPS (e.g. via nginx), use the same origin
+  // so WebSocket goes through WSS and avoids mixed content
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    const loc = window.location;
+    if (loc.protocol === "https:") {
+      return loc.origin;
+    }
+  }
+  return process.env.EXPO_PUBLIC_HA_URL ?? "http://localhost:8123";
+}
+
+const HA_URL = getHAUrl();
 const HA_TOKEN = process.env.EXPO_PUBLIC_HA_TOKEN ?? "";
 
 const wsProtocol = HA_URL.startsWith("https") ? "wss" : "ws";
