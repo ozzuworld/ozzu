@@ -1,19 +1,19 @@
 # Home Assistant runtime/generated files
-config/.storage/
-config/.cloud/
-config/deps/
-config/tts/
-config/home-assistant_v2.db
-config/home-assistant_v2.db-shm
-config/home-assistant_v2.db-wal
-config/home-assistant.log
-config/secrets.yaml
-config/.HA_VERSION
+backend/config/.storage/
+backend/config/.cloud/
+backend/config/deps/
+backend/config/tts/
+backend/config/home-assistant_v2.db
+backend/config/home-assistant_v2.db-shm
+backend/config/home-assistant_v2.db-wal
+backend/config/home-assistant.log
+backend/config/secrets.yaml
+backend/config/.HA_VERSION
 
 # OpenVPN runtime files
-openvpn/config/ipp.txt
-openvpn/config/openvpn-status.log
-openvpn/config/*.pid
+backend/openvpn/config/ipp.txt
+backend/openvpn/config/openvpn-status.log
+backend/openvpn/config/*.pid
 
 # OS
 .DS_Store
