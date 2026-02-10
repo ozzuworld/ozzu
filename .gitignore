@@ -15,6 +15,15 @@ backend/openvpn/config/ipp.txt
 backend/openvpn/config/openvpn-status.log
 backend/openvpn/config/*.pid
 
+# Native module build artifacts
+frontend/modules/*/android/build/
+
+# HA runtime artifacts
+backend/config/.ha_run.lock
+backend/config/blueprints/
+backend/config/custom_components/
+backend/config/home-assistant.log.*
+
 # OS
 .DS_Store
 Thumbs.db
