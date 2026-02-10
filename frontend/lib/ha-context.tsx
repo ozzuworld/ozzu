@@ -49,28 +49,37 @@ export function HAProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     async function connect() {
-      setStatus("connecting");
-      try {
-        const conn = await connectToHA();
-        if (cancelled) {
-          conn.close();
+      let delay = 2000;
+      const MAX_DELAY = 30000;
+
+      while (!cancelled) {
+        setStatus("connecting");
+        try {
+          const conn = await connectToHA();
+          if (cancelled) {
+            conn.close();
+            return;
+          }
+          connectionRef.current = conn;
+          setStatus("connected");
+
+          conn.addEventListener("disconnected", () => {
+            if (!cancelled) setStatus("disconnected");
+          });
+          conn.addEventListener("ready", () => {
+            if (!cancelled) setStatus("connected");
+          });
+
+          unsub = subscribeEntities(conn, (ents) => {
+            if (!cancelled) setEntities(ents);
+          });
           return;
+        } catch {
+          if (cancelled) return;
+          setStatus("error");
+          await new Promise((r) => setTimeout(r, delay));
+          delay = Math.min(delay * 2, MAX_DELAY);
         }
-        connectionRef.current = conn;
-        setStatus("connected");
-
-        conn.addEventListener("disconnected", () => {
-          if (!cancelled) setStatus("disconnected");
-        });
-        conn.addEventListener("ready", () => {
-          if (!cancelled) setStatus("connected");
-        });
-
-        unsub = subscribeEntities(conn, (ents) => {
-          if (!cancelled) setEntities(ents);
-        });
-      } catch {
-        if (!cancelled) setStatus("error");
       }
     }
 

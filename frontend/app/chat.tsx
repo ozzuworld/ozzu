@@ -1,12 +1,13 @@
-import { useState, useCallback, useRef } from "react";
-import { View, Text, TextInput } from "react-native";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { View, Text, TextInput, PermissionsAndroid, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
 import { SciFiOrb } from "../components/SciFiOrb";
 import { StreamingText } from "../components/StreamingText";
-import { streamChat } from "../lib/gemini";
+import { LiveChat, type LiveCallbacks } from "../lib/live-session";
+import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { useEntitySummary } from "../lib/useEntitySummary";
 
 const QUICK_PROMPTS = [
@@ -20,30 +21,118 @@ export default function ChatScreen() {
 
   const [responseText, setResponseText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [customInput, setCustomInput] = useState("");
   const [showInput, setShowInput] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
+  const liveChatRef = useRef<LiveChat>(new LiveChat());
+  const playerRef = useRef<StreamingPlayer>(new StreamingPlayer());
+  const micRef = useRef<MicRecorder>(new MicRecorder());
+
+  // Connect persistent session on mount
+  useEffect(() => {
+    if (!entitySummary) return;
+
+    const liveChat = liveChatRef.current;
+
+    const callbacks: LiveCallbacks = {
+      onAudioChunk: (pcm) => {
+        playerRef.current.addChunk(pcm);
+      },
+      onTranscript: (text) => {
+        setResponseText((prev) => prev + text);
+      },
+      onTurnComplete: () => {
+        setIsStreaming(false);
+      },
+      onError: (msg) => {
+        setResponseText((prev) => prev + `\n[Error: ${msg}]`);
+        setIsStreaming(false);
+      },
+    };
+
+    liveChat
+      .connect(entitySummary, callbacks)
+      .then(() => setSessionReady(true))
+      .catch(() => setSessionReady(false));
+
+    return () => {
+      liveChat.close();
+      playerRef.current.stop();
+      micRef.current.stop();
+    };
+  }, [entitySummary]);
+
   const sendMessage = useCallback(
-    async (message: string) => {
-      if (isStreaming || !message.trim()) return;
+    (message: string) => {
+      if (isStreaming || !message.trim() || !sessionReady) return;
+
+      // Stop any current audio + reset
+      playerRef.current.stop();
+      playerRef.current = new StreamingPlayer();
+
+      // Re-wire callbacks for this turn's player
+      liveChatRef.current.setCallbacks({
+        onAudioChunk: (pcm) => playerRef.current.addChunk(pcm),
+        onTranscript: (text) => setResponseText((prev) => prev + text),
+        onTurnComplete: () => setIsStreaming(false),
+        onError: (msg) => {
+          setResponseText((prev) => prev + `\n[Error: ${msg}]`);
+          setIsStreaming(false);
+        },
+      });
+
       setIsStreaming(true);
       setResponseText("");
       setShowInput(false);
 
-      try {
-        for await (const chunk of streamChat(message, entitySummary)) {
-          setResponseText((prev) => prev + chunk);
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        setResponseText((prev) => prev + `\n[Error: ${msg}]`);
-      } finally {
-        setIsStreaming(false);
-      }
+      liveChatRef.current.send(message);
     },
-    [isStreaming, entitySummary]
+    [isStreaming, sessionReady]
   );
+
+  const toggleMic = useCallback(async () => {
+    if (isListening) {
+      // Stop listening
+      micRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    // Request mic permission
+    if (Platform.OS === "android") {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+      );
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) return;
+    }
+
+    if (!sessionReady) return;
+
+    // Stop any current playback + reset for new turn
+    playerRef.current.stop();
+    playerRef.current = new StreamingPlayer();
+
+    liveChatRef.current.setCallbacks({
+      onAudioChunk: (pcm) => playerRef.current.addChunk(pcm),
+      onTranscript: (text) => setResponseText((prev) => prev + text),
+      onTurnComplete: () => setIsStreaming(false),
+      onError: (msg) => {
+        setResponseText((prev) => prev + `\n[Error: ${msg}]`);
+        setIsStreaming(false);
+      },
+    });
+
+    setResponseText("");
+    setIsStreaming(true);
+    setIsListening(true);
+
+    micRef.current.start((pcmBase64) => {
+      liveChatRef.current.sendAudio(pcmBase64);
+    });
+  }, [isListening, sessionReady]);
 
   const handleCustomSubmit = useCallback(() => {
     if (customInput.trim()) {
@@ -105,7 +194,7 @@ export default function ChatScreen() {
           paddingBottom: 80,
         }}
       >
-        <SciFiOrb active={isStreaming} />
+        <SciFiOrb active={isStreaming || isListening} />
         <StreamingText text={responseText} streaming={isStreaming} />
       </View>
 
@@ -142,6 +231,28 @@ export default function ChatScreen() {
             </Text>
           </TVPressable>
         ))}
+
+        {/* Mic button */}
+        <TVPressable
+          rarity={isListening ? "legendary" : "epic"}
+          onPress={toggleMic}
+          style={{
+            paddingHorizontal: 20,
+            paddingVertical: 12,
+            borderRadius: 8,
+          }}
+        >
+          <Text
+            style={{
+              color: isListening ? "#FCD34D" : "#C084FC",
+              fontSize: 13,
+              fontWeight: "bold",
+              letterSpacing: 1,
+            }}
+          >
+            {isListening ? "Stop" : "Speak"}
+          </Text>
+        </TVPressable>
 
         {showInput ? (
           <View

@@ -7,7 +7,7 @@ set -e
 export ANDROID_HOME=/opt/android-sdk
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 
-TV_IP="172.168.0.56:33813"
+TV_IP="172.168.0.56:35309"
 APK_PATH="frontend/android/app/build/outputs/apk/debug/app-debug.apk"
 PACKAGE="com.anonymous.ozzu"
 
