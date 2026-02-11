@@ -549,10 +549,10 @@ const SYSTEM_PROMPT =
   "PERSONALITY: Warm, efficient, confident. Slight formality. You are a mature, capable companion — " +
   "not a servant, not an assistant. You manage the ecosystem alongside King Kazuma. " +
   "\n\n" +
-  "WAKE WORD: You are always listening but should ONLY respond when directly addressed as 'June'. " +
-  "Ignore ambient conversation, background noise, and speech not directed at you. " +
-  "If someone says your name or clearly addresses you, respond normally. " +
-  "If speech is not directed at you, remain silent — do not acknowledge or respond. " +
+  "WAKE WORD: Multiple microphones are always on and streaming audio to you. " +
+  "You should ONLY respond when someone addresses you as 'June' or is clearly talking to you. " +
+  "Ignore ambient conversation, background noise, TV audio, and speech not directed at you. " +
+  "Do NOT speak when the session first starts — wait to be addressed. " +
   "\n\n" +
   "HOME MANAGEMENT: You control smart home devices using the provided tool functions. " +
   "When asked to control a device, call the appropriate function and confirm briefly. " +
@@ -897,7 +897,15 @@ async function handleToolCall(name, args) {
 // ── Device tracking ──
 
 const devices = new Map(); // ws -> { role, deviceId }
+let audioMsgCount = 0;
 const pendingPinRequests = new Map(); // pinId -> { approvalId, approved, resolve }
+
+// Amplitude-based mic switching: only forward audio from the mic with detected speech.
+// When multiple mics send simultaneously, interleaved audio confuses Gemini's VAD.
+let activeMic = null; // ws of the currently forwarding mic
+let activeMicSilenceSince = 0; // timestamp when active mic last had low amplitude
+const MIC_SPEECH_THRESHOLD = 500; // peak amplitude to consider "speech" (ambient noise ~5-20, speech ~1000+)
+const MIC_RELEASE_MS = 2000; // release active mic after 2s of silence
 
 function broadcastToAll(msg) {
   const data = JSON.stringify(msg);
@@ -985,7 +993,7 @@ async function connectGemini() {
       const msg = JSON.parse(raw.toString());
       handleGeminiMessage(msg);
     } catch (err) {
-      // skip unparseable messages
+      console.error("[gemini] Parse error:", err.message);
     }
   });
 
@@ -996,13 +1004,15 @@ async function connectGemini() {
 
   ws.on("close", () => {
     console.log("[gemini] WebSocket closed");
-    const wasReady = geminiReady;
     geminiWs = null;
     geminiConnecting = false;
     geminiReady = false;
+    activeMic = null;
+    activeMicSilenceSince = 0;
+    geminiAudioSentCount = 0;
 
-    // Auto-reconnect if devices are still connected and we have a resume token
-    if (devices.size > 0 && geminiResumeToken) {
+    // Auto-reconnect as long as devices are still connected
+    if (devices.size > 0) {
       console.log("[gemini] Auto-reconnecting in 2s...");
       setTimeout(() => connectGemini(), 2000);
     }
@@ -1014,14 +1024,18 @@ function handleGeminiMessage(msg) {
   if (msg.setupComplete !== undefined) {
     geminiConnecting = false;
     geminiReady = true;
+    geminiAudioSentCount = 0;
     console.log("[gemini] Setup complete, session active");
     broadcastToAll({ type: "ready" });
     return;
   }
 
   // Session resumption token
-  if (msg.sessionResumptionUpdate?.resumable && msg.sessionResumptionUpdate?.handle) {
-    geminiResumeToken = msg.sessionResumptionUpdate.handle;
+  if (msg.sessionResumptionUpdate) {
+    if (msg.sessionResumptionUpdate.resumable && msg.sessionResumptionUpdate.handle) {
+      geminiResumeToken = msg.sessionResumptionUpdate.handle;
+      console.log("[gemini] Got resume token");
+    }
     return;
   }
 
@@ -1065,11 +1079,13 @@ function handleGeminiMessage(msg) {
 
   // Output transcript (model speech)
   if (sc.outputTranscription?.text) {
+    console.log(`[gemini] OUTPUT: "${sc.outputTranscription.text}"`);
     broadcastToAll({ type: "transcript", text: sc.outputTranscription.text });
   }
 
   // Input transcript (user speech)
   if (sc.inputTranscription?.text) {
+    console.log(`[gemini] INPUT: "${sc.inputTranscription.text}"`);
     broadcastToAll({ type: "inputTranscript", text: sc.inputTranscription.text });
   }
 
@@ -1098,23 +1114,76 @@ async function handleGeminiToolCalls(functionCalls) {
     })
   );
 
-  if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
+  if (geminiWs && geminiWs.readyState === 1) {
     geminiWs.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
   }
 }
 
-function sendToGeminiAudio(pcmBase64) {
-  if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
-    geminiWs.send(JSON.stringify({
-      realtimeInput: {
-        mediaChunks: [{ data: pcmBase64, mimeType: "audio/pcm;rate=16000" }],
-      },
-    }));
+let geminiAudioSentCount = 0;
+
+// Get peak amplitude from first few samples of a PCM chunk
+function getPeakAmplitude(pcmBase64) {
+  try {
+    const buf = Buffer.from(pcmBase64.substring(0, 88), "base64"); // ~64 bytes = 32 samples
+    let peak = 0;
+    for (let i = 0; i + 1 < buf.length; i += 2) {
+      const sample = buf.readInt16LE(i);
+      const abs = sample < 0 ? -sample : sample;
+      if (abs > peak) peak = abs;
+    }
+    return peak;
+  } catch {
+    return 0;
   }
 }
 
+function sendToGeminiAudio(pcmBase64, ws, deviceId) {
+  if (!geminiReady || !geminiWs || geminiWs.readyState !== 1) return;
+
+  const peak = getPeakAmplitude(pcmBase64);
+  const now = Date.now();
+
+  // If no active mic, first sender claims it
+  if (!activeMic) {
+    activeMic = ws;
+    console.log(`[audio] Mic active: ${deviceId}`);
+  }
+
+  if (activeMic === ws) {
+    // This is the active mic — always forward (silence + speech)
+    if (peak < MIC_SPEECH_THRESHOLD) {
+      if (activeMicSilenceSince === 0) activeMicSilenceSince = now;
+    } else {
+      activeMicSilenceSince = 0;
+    }
+  } else {
+    // Different mic — only take over if it has speech AND active mic has been silent
+    if (peak >= MIC_SPEECH_THRESHOLD &&
+        activeMicSilenceSince > 0 &&
+        now - activeMicSilenceSince > MIC_RELEASE_MS) {
+      const oldInfo = devices.get(activeMic);
+      console.log(`[audio] Mic switch: ${deviceId} (peak=${peak}) takes over from ${oldInfo?.deviceId}`);
+      activeMic = ws;
+      activeMicSilenceSince = 0;
+    } else {
+      return; // Drop audio from non-active mic
+    }
+  }
+
+  geminiAudioSentCount++;
+  if (geminiAudioSentCount === 1 || geminiAudioSentCount % 2500 === 0) {
+    console.log(`[gemini] Audio chunk #${geminiAudioSentCount} from ${deviceId}`);
+  }
+
+  geminiWs.send(JSON.stringify({
+    realtimeInput: {
+      mediaChunks: [{ data: pcmBase64, mimeType: "audio/pcm;rate=16000" }],
+    },
+  }));
+}
+
 function sendToGeminiText(text) {
-  if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
+  if (geminiReady && geminiWs && geminiWs.readyState === 1) {
     geminiWs.send(JSON.stringify({
       clientContent: {
         turns: [{ role: "user", parts: [{ text }] }],
@@ -1174,7 +1243,10 @@ wss.on("connection", (ws) => {
       }
 
       if (msg.type === "audio") {
-        sendToGeminiAudio(msg.data);
+        const info = devices.get(ws);
+        if (info?.role !== "mic") return;
+        audioMsgCount++;
+        sendToGeminiAudio(msg.data, ws, info.deviceId);
         return;
       }
 
@@ -1222,6 +1294,10 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     const info = devices.get(ws);
     devices.delete(ws);
+    if (ws === activeMic) {
+      activeMic = null;
+      activeMicSilenceSince = 0;
+    }
     console.log(`[ws] Device disconnected: ${info?.deviceId || "unknown"}, remaining: ${devices.size}`);
     disconnectGeminiIfEmpty();
   });
