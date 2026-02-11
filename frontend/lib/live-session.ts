@@ -1,112 +1,217 @@
-import { GoogleGenAI, Modality, type Session } from "@google/genai";
+import { HA_FUNCTION_DECLARATIONS } from "./ha-tools";
 
 const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? "";
-const ai = new GoogleGenAI({ apiKey: API_KEY });
 
-const MODEL = "gemini-2.5-flash-native-audio-preview-09-2025";
+const MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
 const VOICE = "Orus";
 
 const SYSTEM_PREFIX =
   "You are the AI overseer of a smart home called ozzu. " +
   "Concise, slightly sci-fi tone. " +
+  "You can control devices using the provided tool functions. " +
+  "When the user asks you to control a device, call the appropriate function. " +
+  "After a successful action, confirm what you did briefly. " +
+  "If a device is not controllable, explain that it is read-only. " +
   "Current entity states:\n";
+
+const WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${API_KEY}`;
+
+export interface ToolCallResult {
+  success: boolean;
+  message: string;
+}
 
 export interface LiveCallbacks {
   onAudioChunk: (pcmBase64: string) => void;
   onTranscript: (text: string) => void;
   onTurnComplete: () => void;
   onError: (msg: string) => void;
+  onToolCall?: (name: string, args: Record<string, unknown>) => Promise<ToolCallResult>;
 }
 
-/**
- * Persistent Live API session.
- * Connects once and stays open for multiple turns.
- */
+interface FunctionCall {
+  name?: string;
+  args?: Record<string, unknown>;
+  id?: string;
+}
+
 export class LiveChat {
-  private session: Session | null = null;
+  private ws: WebSocket | null = null;
   private callbacks: LiveCallbacks | null = null;
-  private entityContext = "";
+  private msgCount = 0;
 
   async connect(
     entityContext: string,
     callbacks: LiveCallbacks
   ): Promise<void> {
     this.callbacks = callbacks;
-    this.entityContext = entityContext;
 
-    this.session = await ai.live.connect({
-      model: MODEL,
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: VOICE },
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(WS_URL);
+      this.ws = ws;
+
+      ws.onopen = () => {
+        console.log("LiveChat WS opened, sending setup...");
+        ws.send(JSON.stringify({
+          setup: {
+            model: `models/${MODEL}`,
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } },
+              },
+            },
+            systemInstruction: {
+              parts: [{ text: SYSTEM_PREFIX + entityContext }],
+            },
+            tools: [{ functionDeclarations: HA_FUNCTION_DECLARATIONS }],
+            outputAudioTranscription: {},
           },
-        },
-        systemInstruction: SYSTEM_PREFIX + entityContext,
-        outputAudioTranscription: {},
-      },
-      callbacks: {
-        onopen: () => {},
-        onmessage: (message) => {
-          const parts = message.serverContent?.modelTurn?.parts;
-          if (parts) {
-            for (const part of parts) {
-              if ("inlineData" in part && part.inlineData?.data) {
-                this.callbacks?.onAudioChunk(part.inlineData.data);
-              }
-            }
-          }
+        }));
+      };
 
-          const transcript = message.serverContent?.outputTranscription?.text;
-          if (transcript) {
-            this.callbacks?.onTranscript(transcript);
+      ws.onmessage = (event: any) => {
+        this.msgCount++;
+        const n = this.msgCount;
+        try {
+          let jsonStr: string;
+          const d = event.data;
+          if (typeof d === "string") {
+            jsonStr = d;
+          } else if (d instanceof ArrayBuffer) {
+            jsonStr = new TextDecoder().decode(d);
+          } else if (d && typeof d.toString === "function") {
+            jsonStr = d.toString();
+          } else {
+            return;
           }
+          const msg = JSON.parse(jsonStr);
+          this.handleParsedMessage(msg, n, resolve);
+        } catch (_err) {
+          // Parse or handling error — skip this message
+        }
+      };
 
-          if (message.serverContent?.turnComplete) {
-            this.callbacks?.onTurnComplete();
-          }
-        },
-        onerror: (e) => {
-          this.callbacks?.onError(e.message ?? "Live API error");
-        },
-        onclose: () => {
-          this.session = null;
-        },
-      },
+      ws.onerror = (e: any) => {
+        console.error("LiveChat WS error:", e.message ?? e);
+        this.callbacks?.onError(e.message ?? "Live API error");
+        reject(new Error(e.message ?? "WebSocket error"));
+      };
+
+      ws.onclose = () => {
+        console.log("LiveChat WS closed, total msgs:", this.msgCount);
+        this.ws = null;
+      };
     });
   }
 
-  /** Update callbacks (e.g. when starting a new turn). */
+  private handleParsedMessage(
+    msg: any,
+    _n: number,
+    onSetupComplete?: (value: void) => void
+  ) {
+    // Setup complete
+    if (msg.setupComplete !== undefined) {
+      onSetupComplete?.();
+      return;
+    }
+
+    // Tool calls
+    if (msg.toolCall?.functionCalls) {
+      this.handleToolCalls(msg.toolCall.functionCalls);
+      return;
+    }
+
+    // Server content
+    const sc = msg.serverContent;
+    if (!sc) return;
+
+    // Audio chunks
+    const parts = sc.modelTurn?.parts;
+    if (parts) {
+      for (const part of parts) {
+        if (part.inlineData?.data) {
+          this.callbacks?.onAudioChunk(part.inlineData.data);
+        }
+      }
+    }
+
+    // Transcript
+    if (sc.outputTranscription?.text) {
+      this.callbacks?.onTranscript(sc.outputTranscription.text);
+    }
+
+    // Turn complete
+    if (sc.turnComplete) {
+      this.callbacks?.onTurnComplete();
+    }
+  }
+
   setCallbacks(callbacks: LiveCallbacks) {
     this.callbacks = callbacks;
   }
 
-  /** Send a text message on the existing session. */
   send(text: string) {
-    this.session?.sendClientContent({
-      turns: text,
-      turnComplete: true,
-    });
+    console.log("LiveChat send:", text.substring(0, 50), "ws:", this.ws?.readyState);
+    this.ws?.send(
+      JSON.stringify({
+        clientContent: {
+          turns: [{ role: "user", parts: [{ text }] }],
+          turnComplete: true,
+        },
+      })
+    );
   }
 
-  /** Send raw mic audio (16kHz 16-bit PCM, base64). */
   sendAudio(pcmBase64: string) {
-    this.session?.sendRealtimeInput({
-      audio: new Blob(
-        [Uint8Array.from(atob(pcmBase64), (c) => c.charCodeAt(0))],
-        { type: "audio/pcm;rate=16000" }
-      ) as any,
-    });
+    this.ws?.send(
+      JSON.stringify({
+        realtimeInput: {
+          mediaChunks: [
+            { data: pcmBase64, mimeType: "audio/pcm;rate=16000" },
+          ],
+        },
+      })
+    );
   }
 
   close() {
-    this.session?.close();
-    this.session = null;
+    this.ws?.close();
+    this.ws = null;
     this.callbacks = null;
   }
 
   get connected() {
-    return this.session !== null;
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  private async handleToolCalls(functionCalls: FunctionCall[]) {
+    const responses = await Promise.all(
+      functionCalls.map(async (fc) => {
+        const name = fc.name ?? "unknown";
+        const args = (fc.args as Record<string, unknown>) ?? {};
+        let result: ToolCallResult;
+
+        if (this.callbacks?.onToolCall) {
+          try {
+            result = await this.callbacks.onToolCall(name, args);
+          } catch (err: any) {
+            result = { success: false, message: err?.message ?? "Tool call failed" };
+          }
+        } else {
+          result = { success: false, message: "No tool handler registered" };
+        }
+
+        return {
+          id: fc.id,
+          name,
+          response: { success: result.success, message: result.message },
+        };
+      })
+    );
+
+    this.ws?.send(
+      JSON.stringify({ toolResponse: { functionResponses: responses } })
+    );
   }
 }

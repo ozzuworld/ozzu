@@ -74,7 +74,8 @@ export function HAProvider({ children }: { children: React.ReactNode }) {
             if (!cancelled) setEntities(ents);
           });
           return;
-        } catch {
+        } catch (err) {
+          console.error("HA connection error:", err);
           if (cancelled) return;
           setStatus("error");
           await new Promise((r) => setTimeout(r, delay));

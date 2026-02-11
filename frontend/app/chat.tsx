@@ -6,9 +6,11 @@ import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
 import { SciFiOrb } from "../components/SciFiOrb";
 import { StreamingText } from "../components/StreamingText";
-import { LiveChat, type LiveCallbacks } from "../lib/live-session";
+import { LiveChat, type LiveCallbacks, type ToolCallResult } from "../lib/live-session";
 import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { useEntitySummary } from "../lib/useEntitySummary";
+import { useHA } from "../lib/ha-context";
+import { resolveToolCall } from "../lib/ha-tools";
 
 const QUICK_PROMPTS = [
   { label: "Status Report", message: "Give me a full status report of all systems" },
@@ -18,6 +20,25 @@ const QUICK_PROMPTS = [
 export default function ChatScreen() {
   const router = useRouter();
   const entitySummary = useEntitySummary();
+  const { callService } = useHA();
+
+  const handleToolCall = useCallback(
+    async (name: string, args: Record<string, unknown>): Promise<ToolCallResult> => {
+      const resolved = resolveToolCall(name, args);
+      if (!resolved) {
+        return { success: false, message: `Entity ${args.entity_id} is not controllable or not recognized.` };
+      }
+      try {
+        await callService(resolved.domain, resolved.service, resolved.data, {
+          entity_id: resolved.entityId,
+        });
+        return { success: true, message: `Called ${resolved.domain}.${resolved.service} on ${resolved.entityId}` };
+      } catch (err: any) {
+        return { success: false, message: err?.message ?? "Service call failed" };
+      }
+    },
+    [callService]
+  );
 
   const [responseText, setResponseText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -25,45 +46,70 @@ export default function ChatScreen() {
   const [customInput, setCustomInput] = useState("");
   const [showInput, setShowInput] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const [connectError, setConnectError] = useState("");
   const inputRef = useRef<TextInput>(null);
 
   const liveChatRef = useRef<LiveChat>(new LiveChat());
   const playerRef = useRef<StreamingPlayer>(new StreamingPlayer());
   const micRef = useRef<MicRecorder>(new MicRecorder());
+  const entitySummaryRef = useRef(entitySummary);
+  entitySummaryRef.current = entitySummary;
+  const handleToolCallRef = useRef(handleToolCall);
+  handleToolCallRef.current = handleToolCall;
 
-  // Connect persistent session on mount
+  // Connect once on mount — uses refs for latest entity data and tool handler
   useEffect(() => {
-    if (!entitySummary) return;
-
     const liveChat = liveChatRef.current;
+    let cancelled = false;
 
-    const callbacks: LiveCallbacks = {
-      onAudioChunk: (pcm) => {
-        playerRef.current.addChunk(pcm);
-      },
-      onTranscript: (text) => {
-        setResponseText((prev) => prev + text);
-      },
-      onTurnComplete: () => {
-        setIsStreaming(false);
-      },
-      onError: (msg) => {
-        setResponseText((prev) => prev + `\n[Error: ${msg}]`);
-        setIsStreaming(false);
-      },
-    };
+    // Wait briefly for HA entity data to arrive, then connect
+    const timer = setTimeout(() => {
+      if (cancelled) return;
 
-    liveChat
-      .connect(entitySummary, callbacks)
-      .then(() => setSessionReady(true))
-      .catch(() => setSessionReady(false));
+      const callbacks: LiveCallbacks = {
+        onAudioChunk: (pcm) => {
+          playerRef.current.addChunk(pcm);
+        },
+        onTranscript: (text) => {
+          setResponseText((prev) => prev + text);
+        },
+        onTurnComplete: () => {
+          setIsStreaming(false);
+        },
+        onError: (msg) => {
+          console.error("LiveChat session error:", msg);
+          setResponseText((prev) => prev + `\n[Error: ${msg}]`);
+          setIsStreaming(false);
+        },
+        onToolCall: (name, args) => handleToolCallRef.current(name, args),
+      };
+
+      const context = entitySummaryRef.current || "(No entity data available yet)";
+      console.log("Connecting LiveChat with context length:", context.length);
+
+      liveChat
+        .connect(context, callbacks)
+        .then(() => {
+          if (cancelled) return;
+          setSessionReady(true);
+          setConnectError("");
+        })
+        .catch((err) => {
+          console.error("LiveChat connect error:", err);
+          if (cancelled) return;
+          setSessionReady(false);
+          setConnectError(err?.message ?? "Failed to connect to AI");
+        });
+    }, 2000);
 
     return () => {
+      cancelled = true;
+      clearTimeout(timer);
       liveChat.close();
       playerRef.current.stop();
       micRef.current.stop();
     };
-  }, [entitySummary]);
+  }, []);
 
   const sendMessage = useCallback(
     (message: string) => {
@@ -82,6 +128,7 @@ export default function ChatScreen() {
           setResponseText((prev) => prev + `\n[Error: ${msg}]`);
           setIsStreaming(false);
         },
+        onToolCall: handleToolCall,
       });
 
       setIsStreaming(true);
@@ -90,7 +137,7 @@ export default function ChatScreen() {
 
       liveChatRef.current.send(message);
     },
-    [isStreaming, sessionReady]
+    [isStreaming, sessionReady, handleToolCall]
   );
 
   const toggleMic = useCallback(async () => {
@@ -123,6 +170,7 @@ export default function ChatScreen() {
         setResponseText((prev) => prev + `\n[Error: ${msg}]`);
         setIsStreaming(false);
       },
+      onToolCall: handleToolCall,
     });
 
     setResponseText("");
@@ -132,7 +180,7 @@ export default function ChatScreen() {
     micRef.current.start((pcmBase64) => {
       liveChatRef.current.sendAudio(pcmBase64);
     });
-  }, [isListening, sessionReady]);
+  }, [isListening, sessionReady, handleToolCall]);
 
   const handleCustomSubmit = useCallback(() => {
     if (customInput.trim()) {
@@ -195,6 +243,16 @@ export default function ChatScreen() {
         }}
       >
         <SciFiOrb active={isStreaming || isListening} />
+        {!sessionReady && !connectError && (
+          <Text style={{ color: "#525252", fontSize: 13, fontFamily: "monospace", marginTop: 12 }}>
+            Connecting to AI...
+          </Text>
+        )}
+        {connectError ? (
+          <Text style={{ color: "#EF4444", fontSize: 13, fontFamily: "monospace", marginTop: 12 }}>
+            {connectError}
+          </Text>
+        ) : null}
         <StreamingText text={responseText} streaming={isStreaming} />
       </View>
 
