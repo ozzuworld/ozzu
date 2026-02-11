@@ -7,8 +7,9 @@ const { withAppBuildGradle } = require("expo/config-plugins");
 
 module.exports = function forceBundleJs(config) {
   return withAppBuildGradle(config, (config) => {
+    // Replace the commented-out line with an active one
     config.modResults.contents = config.modResults.contents.replace(
-      /debuggableVariants\s*=\s*\[.*?\]/,
+      /\/\/\s*debuggableVariants\s*=\s*\[.*?\]/,
       'debuggableVariants = []'
     );
     return config;
