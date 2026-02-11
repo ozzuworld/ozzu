@@ -907,6 +907,13 @@ let activeMicSilenceSince = 0; // timestamp when active mic last had low amplitu
 const MIC_SPEECH_THRESHOLD = 500; // peak amplitude to consider "speech" (ambient noise ~5-20, speech ~1000+)
 const MIC_RELEASE_MS = 2000; // release active mic after 2s of silence
 
+// Bridge-side VAD: send activityStart/activityEnd to Gemini based on amplitude
+let vadActive = false; // currently in speech activity
+let vadSilenceStart = 0; // when silence began after speech
+const VAD_SILENCE_END_MS = 1500; // end activity after 1.5s of silence
+const VAD_SPEECH_CHUNKS = 2; // require 2 consecutive speech chunks to start
+let vadSpeechCount = 0; // consecutive speech chunks counter
+
 function broadcastToAll(msg) {
   const data = JSON.stringify(msg);
   for (const [ws, info] of devices) {
@@ -964,12 +971,8 @@ async function connectGemini() {
       },
       tools: [{ functionDeclarations: [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS] }],
       realtimeInputConfig: {
-        automaticActivityDetection: {
-          startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
-          endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
-          prefixPaddingMs: 40,
-          silenceDurationMs: 500,
-        },
+        // Manual VAD: bridge controls activityStart/activityEnd based on amplitude
+        automaticActivityDetection: { disabled: true },
         activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
       },
       inputAudioTranscription: {},
@@ -1010,6 +1013,9 @@ async function connectGemini() {
     activeMic = null;
     activeMicSilenceSince = 0;
     geminiAudioSentCount = 0;
+    vadActive = false;
+    vadSilenceStart = 0;
+    vadSpeechCount = 0;
 
     // Auto-reconnect as long as devices are still connected
     if (devices.size > 0) {
@@ -1167,6 +1173,28 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
       activeMicSilenceSince = 0;
     } else {
       return; // Drop audio from non-active mic
+    }
+  }
+
+  // Bridge-side VAD: signal activityStart/activityEnd to Gemini
+  if (peak >= MIC_SPEECH_THRESHOLD) {
+    vadSpeechCount++;
+    vadSilenceStart = 0;
+    if (!vadActive && vadSpeechCount >= VAD_SPEECH_CHUNKS) {
+      vadActive = true;
+      console.log(`[vad] Activity START (peak=${peak}, device=${deviceId})`);
+      geminiWs.send(JSON.stringify({ realtimeInput: { activityStart: {} } }));
+    }
+  } else {
+    vadSpeechCount = 0;
+    if (vadActive) {
+      if (vadSilenceStart === 0) vadSilenceStart = now;
+      if (now - vadSilenceStart > VAD_SILENCE_END_MS) {
+        vadActive = false;
+        vadSilenceStart = 0;
+        console.log(`[vad] Activity END`);
+        geminiWs.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
+      }
     }
   }
 
