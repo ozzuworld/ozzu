@@ -5,8 +5,8 @@
 
 set -e
 
-TABLET="172.168.0.53:41107"
-TV="172.168.0.56:34387"
+TABLET="172.168.0.53:44847"
+TV="172.168.0.56:36331"
 REPO="ozzuworld/ozzu"
 APK_DIR="/tmp/ozzu-apk"
 LOCAL_APK="frontend/android/app/build/outputs/apk/debug/app-debug.apk"
