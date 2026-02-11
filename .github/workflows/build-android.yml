@@ -40,6 +40,14 @@ jobs:
 
       - run: npm ci
 
+      - name: Write .env from secrets
+        run: |
+          echo "EXPO_PUBLIC_HA_URL=${EXPO_PUBLIC_HA_URL}" > .env
+          echo "EXPO_PUBLIC_HA_TOKEN=${EXPO_PUBLIC_HA_TOKEN}" >> .env
+          echo "EXPO_PUBLIC_GEMINI_API_KEY=${EXPO_PUBLIC_GEMINI_API_KEY}" >> .env
+          echo "EXPO_PUBLIC_BRIDGE_URL=${EXPO_PUBLIC_BRIDGE_URL}" >> .env
+          echo "EXPO_PUBLIC_BRIDGE_PIN=${EXPO_PUBLIC_BRIDGE_PIN}" >> .env
+
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean --no-install
 
