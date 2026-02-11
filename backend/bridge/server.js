@@ -16,7 +16,7 @@ const APPROVALS_FILE = path.join(DATA_DIR, "approvals.json");
 const DIRECTIVES_FILE = path.join(DATA_DIR, "directives.json");
 const MAX_STATUS_ENTRIES = 20;
 const MAX_DIRECTIVES = 20;
-const APPROVAL_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+const APPROVAL_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours (plan reviews need time)
 
 const BRIDGE_PIN = process.env.BRIDGE_PIN || "1234";
 const HA_URL = process.env.HA_URL || "http://localhost:8123";
@@ -236,6 +236,7 @@ async function handleRequest(req, res) {
     approval.approved = !!data.approved;
     approval.resolvedAt = Date.now();
     saveApprovals(approvals);
+    syncDirectiveFromApproval(id, approval.approved);
     sendJSON(res, 200, { ok: true, approved: approval.approved });
     return;
   }
@@ -719,6 +720,26 @@ const GEMINI_BRIDGE_TOOLS = [
   },
 ];
 
+// ── Directive-approval sync: when a plan-approval resolves, update the directive ──
+
+function syncDirectiveFromApproval(approvalId, approved) {
+  const directives = getDirectives();
+  const directive = directives.find((d) => d.directiveApprovalId === approvalId);
+  if (!directive) return;
+
+  if (approved) {
+    directive.status = "approved";
+  } else {
+    // Denied or expired — reset to pending so it can be re-planned
+    directive.status = "pending";
+    directive.plan = null;
+    directive.directiveApprovalId = null;
+  }
+  directive.updatedAt = Date.now();
+  saveDirectives(directives);
+  console.log(`[directive] ${directive.id} → ${directive.status} (approval ${approvalId} ${approved ? "approved" : "denied"})`);
+}
+
 // ── HA REST API helper ──
 
 async function haFetch(urlPath, options = {}) {
@@ -788,7 +809,7 @@ async function handleToolCall(name, args) {
       }
 
       if (name === "get_pending_approvals") {
-        const pending = expireApprovals(getApprovals()).filter((a) => !a.resolved && a.tool !== "directive_plan");
+        const pending = expireApprovals(getApprovals()).filter((a) => !a.resolved);
         if (pending.length === 0) return { success: true, message: "No pending approvals." };
         const list = pending.map((a) => `${a.id}: ${a.risk} risk, ${a.tool}, ${a.description}`).join(". ");
         return { success: true, message: `${pending.length} pending. ${list}` };
@@ -812,6 +833,7 @@ async function handleToolCall(name, args) {
           approval.approved = approved;
           approval.resolvedAt = Date.now();
           saveApprovals(approvals);
+          syncDirectiveFromApproval(approvalId, approved);
           return {
             success: true,
             message: approved
@@ -1296,6 +1318,7 @@ wss.on("connection", (ws) => {
         approval.approved = pending.approved;
         approval.resolvedAt = Date.now();
         saveApprovals(approvals);
+        syncDirectiveFromApproval(pending.approvalId, pending.approved);
         pending.resolve({
           success: true,
           message: pending.approved
