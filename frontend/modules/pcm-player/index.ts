@@ -36,3 +36,7 @@ export function onMicData(
 ): EventSubscription {
   return emitter.addListener("onMicData", callback);
 }
+
+export function getDeviceType(): string {
+  return PcmPlayer.getDeviceType();
+}

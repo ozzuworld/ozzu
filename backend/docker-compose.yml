@@ -45,11 +45,14 @@ services:
     network_mode: host
     working_dir: /app
     volumes:
-      - ./bridge:/app:ro
+      - ./bridge:/app
       - /tmp/ozzu-bridge:/tmp/ozzu-bridge
     environment:
       - BRIDGE_PIN=${BRIDGE_PIN:-1234}
-    command: node server.js
+      - HA_URL=${HA_URL:-http://localhost:8123}
+      - HA_TOKEN=${HA_TOKEN}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    command: sh -c "[ -d node_modules/ws ] || npm install --omit=dev; node server.js"
 
   certbot:
     container_name: certbot

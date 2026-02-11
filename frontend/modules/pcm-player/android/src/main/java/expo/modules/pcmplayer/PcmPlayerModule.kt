@@ -1,5 +1,8 @@
 package expo.modules.pcmplayer
 
+import android.app.UiModeManager
+import android.content.Context
+import android.content.res.Configuration
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -29,6 +32,14 @@ class PcmPlayerModule : Module() {
         Name("PcmPlayer")
 
         Events("onMicData")
+
+        // ── Device type detection ──
+
+        Function("getDeviceType") {
+            val uiModeManager = appContext.reactContext?.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+            val mode = uiModeManager?.currentModeType ?: Configuration.UI_MODE_TYPE_NORMAL
+            if (mode == Configuration.UI_MODE_TYPE_TELEVISION) "tv" else "tablet"
+        }
 
         // ── Playback ──
 
