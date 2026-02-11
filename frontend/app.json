@@ -30,6 +30,13 @@
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
     },
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "url": "http://10.8.0.1:3333/api/manifest",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 5000
+    },
     "experiments": {
       "baseUrl": "/dashboard"
     },

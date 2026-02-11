@@ -6,8 +6,11 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
+const crypto = require("crypto");
+
 const PORT = 3333;
 const DATA_DIR = "/tmp/ozzu-bridge";
+const UPDATES_DIR = path.join(DATA_DIR, "updates");
 const STATUS_FILE = path.join(DATA_DIR, "status.json");
 const APPROVALS_FILE = path.join(DATA_DIR, "approvals.json");
 const DIRECTIVES_FILE = path.join(DATA_DIR, "directives.json");
@@ -305,6 +308,177 @@ async function handleRequest(req, res) {
 
     saveDirectives(directives);
     sendJSON(res, 200, { ok: true, directive });
+    return;
+  }
+
+  // ── OTA Update endpoints ──
+
+  // GET /api/manifest — Expo Updates protocol v1
+  if (req.method === "GET" && pathname === "/api/manifest") {
+    const platform = req.headers["expo-platform"] || "android";
+    const runtimeVersion = req.headers["expo-runtime-version"] || "1.0.0";
+    const currentUpdateId = req.headers["expo-current-update-id"];
+
+    const updateDir = path.join(UPDATES_DIR, runtimeVersion);
+    const metadataPath = path.join(updateDir, "metadata.json");
+
+    if (!fs.existsSync(metadataPath)) {
+      // No update available — return directive
+      const boundary = "ota-boundary";
+      res.writeHead(200, {
+        "expo-protocol-version": "1",
+        "expo-sfv-version": "0",
+        "cache-control": "private, max-age=0",
+        "content-type": `multipart/mixed; boundary=${boundary}`,
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="directive"\r\n` +
+        `Content-Type: application/json\r\n\r\n` +
+        `{"type":"noUpdateAvailable"}\r\n` +
+        `--${boundary}--\r\n`
+      );
+      return;
+    }
+
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+    const platformMeta = metadata.fileMetadata?.[platform];
+    if (!platformMeta) {
+      sendJSON(res, 404, { error: `No ${platform} update found` });
+      return;
+    }
+
+    // Compute update ID from metadata
+    const metaHash = crypto.createHash("sha256").update(fs.readFileSync(metadataPath)).digest("hex");
+    const updateId = `${metaHash.slice(0,8)}-${metaHash.slice(8,12)}-${metaHash.slice(12,16)}-${metaHash.slice(16,20)}-${metaHash.slice(20,32)}`;
+
+    // If client already has this update, return no-update
+    if (currentUpdateId === updateId) {
+      const boundary = "ota-boundary";
+      res.writeHead(200, {
+        "expo-protocol-version": "1",
+        "expo-sfv-version": "0",
+        "cache-control": "private, max-age=0",
+        "content-type": `multipart/mixed; boundary=${boundary}`,
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="directive"\r\n` +
+        `Content-Type: application/json\r\n\r\n` +
+        `{"type":"noUpdateAvailable"}\r\n` +
+        `--${boundary}--\r\n`
+      );
+      return;
+    }
+
+    // Build launch asset info
+    const bundlePath = path.join(updateDir, platformMeta.bundle);
+    const bundleData = fs.readFileSync(bundlePath);
+    const bundleHash = crypto.createHash("sha256").update(bundleData).digest("base64url");
+    const bundleKey = crypto.createHash("md5").update(bundleData).digest("hex");
+
+    const baseUrl = `http://10.8.0.1:${PORT}/api/assets?runtimeVersion=${runtimeVersion}&platform=${platform}`;
+
+    const launchAsset = {
+      hash: bundleHash,
+      key: bundleKey,
+      fileExtension: ".bundle",
+      contentType: "application/javascript",
+      url: `${baseUrl}&asset=${encodeURIComponent(platformMeta.bundle)}`,
+    };
+
+    // Build assets list
+    const assets = (platformMeta.assets || []).map((a) => {
+      const assetPath = path.join(updateDir, a.path);
+      const assetData = fs.readFileSync(assetPath);
+      return {
+        hash: crypto.createHash("sha256").update(assetData).digest("base64url"),
+        key: crypto.createHash("md5").update(assetData).digest("hex"),
+        fileExtension: `.${a.ext}`,
+        contentType: a.ext === "png" ? "image/png" : a.ext === "jpg" ? "image/jpeg" : "application/octet-stream",
+        url: `${baseUrl}&asset=${encodeURIComponent(a.path)}`,
+      };
+    });
+
+    // Load expoConfig if available
+    const expoConfigPath = path.join(updateDir, "expoConfig.json");
+    const expoClient = fs.existsSync(expoConfigPath) ? JSON.parse(fs.readFileSync(expoConfigPath, "utf8")) : {};
+
+    const createdAt = fs.statSync(metadataPath).mtime.toISOString();
+
+    const manifest = {
+      id: updateId,
+      createdAt,
+      runtimeVersion,
+      launchAsset,
+      assets,
+      metadata: {},
+      extra: { expoClient },
+    };
+
+    const boundary = "ota-boundary";
+    const manifestJson = JSON.stringify(manifest);
+    const extensionsJson = JSON.stringify({ assetRequestHeaders: {} });
+
+    res.writeHead(200, {
+      "expo-protocol-version": "1",
+      "expo-sfv-version": "0",
+      "cache-control": "private, max-age=0",
+      "content-type": `multipart/mixed; boundary=${boundary}`,
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.end(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="manifest"\r\n` +
+      `Content-Type: application/json; charset=utf-8\r\n\r\n` +
+      `${manifestJson}\r\n` +
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="extensions"\r\n` +
+      `Content-Type: application/json\r\n\r\n` +
+      `${extensionsJson}\r\n` +
+      `--${boundary}--\r\n`
+    );
+    return;
+  }
+
+  // GET /api/assets — Serve update assets
+  if (req.method === "GET" && pathname === "/api/assets") {
+    const runtimeVersion = url.searchParams.get("runtimeVersion") || "1.0.0";
+    const assetPath = url.searchParams.get("asset");
+    if (!assetPath) {
+      sendJSON(res, 400, { error: "Missing asset parameter" });
+      return;
+    }
+
+    const filePath = path.join(UPDATES_DIR, runtimeVersion, assetPath);
+    // Prevent directory traversal
+    if (!filePath.startsWith(path.join(UPDATES_DIR, runtimeVersion))) {
+      sendJSON(res, 403, { error: "Forbidden" });
+      return;
+    }
+
+    if (!fs.existsSync(filePath)) {
+      sendJSON(res, 404, { error: "Asset not found" });
+      return;
+    }
+
+    const ext = path.extname(assetPath).toLowerCase();
+    const contentTypes = {
+      ".hbc": "application/javascript",
+      ".bundle": "application/javascript",
+      ".js": "application/javascript",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".gif": "image/gif",
+    };
+
+    res.writeHead(200, {
+      "Content-Type": contentTypes[ext] || "application/octet-stream",
+      "Access-Control-Allow-Origin": "*",
+    });
+    fs.createReadStream(filePath).pipe(res);
     return;
   }
 
