@@ -549,10 +549,9 @@ const SYSTEM_PROMPT =
   "PERSONALITY: Warm, efficient, confident. Slight formality. You are a mature, capable companion — " +
   "not a servant, not an assistant. You manage the ecosystem alongside King Kazuma. " +
   "\n\n" +
-  "WAKE WORD: Multiple microphones are always on and streaming audio to you. " +
-  "You should ONLY respond when someone addresses you as 'June' or is clearly talking to you. " +
-  "Ignore ambient conversation, background noise, TV audio, and speech not directed at you. " +
-  "Do NOT speak when the session first starts — wait to be addressed. " +
+  "You are always listening but should ONLY respond when directly addressed as 'June'. " +
+  "Ignore ambient conversation, background noise, and speech not directed at you. " +
+  "When addressed, respond naturally and helpfully. " +
   "\n\n" +
   "HOME MANAGEMENT: You control smart home devices using the provided tool functions. " +
   "When asked to control a device, call the appropriate function and confirm briefly. " +
@@ -904,15 +903,12 @@ const pendingPinRequests = new Map(); // pinId -> { approvalId, approved, resolv
 // When multiple mics send simultaneously, interleaved audio confuses Gemini's VAD.
 let activeMic = null; // ws of the currently forwarding mic
 let activeMicSilenceSince = 0; // timestamp when active mic last had low amplitude
-const MIC_SPEECH_THRESHOLD = 500; // peak amplitude to consider "speech" (ambient noise ~5-20, speech ~1000+)
+const MIC_SPEECH_THRESHOLD = 400; // peak amplitude to consider "speech" (ambient ~15-100, TV bleed ~200-300, speech ~500+)
 const MIC_RELEASE_MS = 2000; // release active mic after 2s of silence
 
-// Bridge-side VAD: send activityStart/activityEnd to Gemini based on amplitude
-let vadActive = false; // currently in speech activity
-let vadSilenceStart = 0; // when silence began after speech
-const VAD_SILENCE_END_MS = 1500; // end activity after 1.5s of silence
-const VAD_SPEECH_CHUNKS = 2; // require 2 consecutive speech chunks to start
-let vadSpeechCount = 0; // consecutive speech chunks counter
+// Audio amplification: tablet mics produce very quiet audio (peaks ~200-300 for speech)
+// Gemini needs peaks of ~2000+ to reliably detect and transcribe speech
+const AUDIO_GAIN = 8;
 
 function broadcastToAll(msg) {
   const data = JSON.stringify(msg);
@@ -971,8 +967,13 @@ async function connectGemini() {
       },
       tools: [{ functionDeclarations: [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS] }],
       realtimeInputConfig: {
-        // Manual VAD: bridge controls activityStart/activityEnd based on amplitude
-        automaticActivityDetection: { disabled: true },
+        // Auto VAD with high sensitivity (same config as direct tablet→Gemini that worked)
+        automaticActivityDetection: {
+          startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
+          endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
+          prefixPaddingMs: 40,
+          silenceDurationMs: 500,
+        },
         activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
       },
       inputAudioTranscription: {},
@@ -1013,9 +1014,6 @@ async function connectGemini() {
     activeMic = null;
     activeMicSilenceSince = 0;
     geminiAudioSentCount = 0;
-    vadActive = false;
-    vadSilenceStart = 0;
-    vadSpeechCount = 0;
 
     // Auto-reconnect as long as devices are still connected
     if (devices.size > 0) {
@@ -1127,10 +1125,10 @@ async function handleGeminiToolCalls(functionCalls) {
 
 let geminiAudioSentCount = 0;
 
-// Get peak amplitude from first few samples of a PCM chunk
+// Get peak amplitude from a PCM chunk (full chunk analysis)
 function getPeakAmplitude(pcmBase64) {
   try {
-    const buf = Buffer.from(pcmBase64.substring(0, 88), "base64"); // ~64 bytes = 32 samples
+    const buf = Buffer.from(pcmBase64, "base64");
     let peak = 0;
     for (let i = 0; i + 1 < buf.length; i += 2) {
       const sample = buf.readInt16LE(i);
@@ -1143,27 +1141,39 @@ function getPeakAmplitude(pcmBase64) {
   }
 }
 
+// Amplify PCM audio by a fixed gain factor with hard clipping
+function amplifyAudio(pcmBase64, gain) {
+  const buf = Buffer.from(pcmBase64, "base64");
+  const out = Buffer.alloc(buf.length);
+  for (let i = 0; i + 1 < buf.length; i += 2) {
+    let sample = buf.readInt16LE(i);
+    sample = Math.round(sample * gain);
+    if (sample > 32767) sample = 32767;
+    else if (sample < -32768) sample = -32768;
+    out.writeInt16LE(sample, i);
+  }
+  return out.toString("base64");
+}
+
 function sendToGeminiAudio(pcmBase64, ws, deviceId) {
   if (!geminiReady || !geminiWs || geminiWs.readyState !== 1) return;
 
   const peak = getPeakAmplitude(pcmBase64);
   const now = Date.now();
 
-  // If no active mic, first sender claims it
+  // Mic switching: only forward audio from one mic at a time
   if (!activeMic) {
     activeMic = ws;
     console.log(`[audio] Mic active: ${deviceId}`);
   }
 
   if (activeMic === ws) {
-    // This is the active mic — always forward (silence + speech)
     if (peak < MIC_SPEECH_THRESHOLD) {
       if (activeMicSilenceSince === 0) activeMicSilenceSince = now;
     } else {
       activeMicSilenceSince = 0;
     }
   } else {
-    // Different mic — only take over if it has speech AND active mic has been silent
     if (peak >= MIC_SPEECH_THRESHOLD &&
         activeMicSilenceSince > 0 &&
         now - activeMicSilenceSince > MIC_RELEASE_MS) {
@@ -1176,36 +1186,16 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
     }
   }
 
-  // Bridge-side VAD: signal activityStart/activityEnd to Gemini
-  if (peak >= MIC_SPEECH_THRESHOLD) {
-    vadSpeechCount++;
-    vadSilenceStart = 0;
-    if (!vadActive && vadSpeechCount >= VAD_SPEECH_CHUNKS) {
-      vadActive = true;
-      console.log(`[vad] Activity START (peak=${peak}, device=${deviceId})`);
-      geminiWs.send(JSON.stringify({ realtimeInput: { activityStart: {} } }));
-    }
-  } else {
-    vadSpeechCount = 0;
-    if (vadActive) {
-      if (vadSilenceStart === 0) vadSilenceStart = now;
-      if (now - vadSilenceStart > VAD_SILENCE_END_MS) {
-        vadActive = false;
-        vadSilenceStart = 0;
-        console.log(`[vad] Activity END`);
-        geminiWs.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
-      }
-    }
-  }
-
   geminiAudioSentCount++;
   if (geminiAudioSentCount === 1 || geminiAudioSentCount % 2500 === 0) {
-    console.log(`[gemini] Audio chunk #${geminiAudioSentCount} from ${deviceId}`);
+    console.log(`[gemini] Audio chunk #${geminiAudioSentCount} from ${deviceId}, rawPeak=${peak}, amplified=${peak * AUDIO_GAIN}`);
   }
 
+  // Amplify audio to compensate for quiet tablet mics, then forward to Gemini
+  const amplified = amplifyAudio(pcmBase64, AUDIO_GAIN);
   geminiWs.send(JSON.stringify({
     realtimeInput: {
-      mediaChunks: [{ data: pcmBase64, mimeType: "audio/pcm;rate=16000" }],
+      mediaChunks: [{ data: amplified, mimeType: "audio/pcm;rate=16000" }],
     },
   }));
 }
