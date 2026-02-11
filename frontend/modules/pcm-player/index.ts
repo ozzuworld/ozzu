@@ -15,6 +15,10 @@ export function writeAudio(base64Pcm: string): void {
   PcmPlayer.writeAudio(base64Pcm);
 }
 
+export function flushPlayback(): void {
+  PcmPlayer.flushPlayback();
+}
+
 export function stopPlayback(): void {
   PcmPlayer.stopPlayback();
 }

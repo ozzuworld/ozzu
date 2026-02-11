@@ -11,6 +11,9 @@ import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { useEntitySummary } from "../lib/useEntitySummary";
 import { useHA } from "../lib/ha-context";
 import { resolveToolCall } from "../lib/ha-tools";
+import { BRIDGE_TOOL_NAMES } from "../lib/bridge-tools";
+import { fetchDevStatus, fetchPendingApprovals, resolveApproval, fetchDirectives, sendDirective } from "../lib/bridge-api";
+import { Keypad } from "../components/Keypad";
 
 const QUICK_PROMPTS = [
   { label: "Status Report", message: "Give me a full status report of all systems" },
@@ -22,8 +25,115 @@ export default function ChatScreen() {
   const entitySummary = useEntitySummary();
   const { callService } = useHA();
 
+  const [showKeypad, setShowKeypad] = useState(false);
+  const pendingApprovalRef = useRef<{
+    id: string;
+    approved: boolean;
+    resolve: (result: ToolCallResult) => void;
+  } | null>(null);
+
   const handleToolCall = useCallback(
     async (name: string, args: Record<string, unknown>): Promise<ToolCallResult> => {
+      // ── Bridge tools ──
+      if (BRIDGE_TOOL_NAMES.has(name)) {
+        try {
+          if (name === "get_dev_status") {
+            const entries = await fetchDevStatus();
+            if (entries.length === 0) {
+              return { success: true, message: "No recent dev activity." };
+            }
+            const summary = entries
+              .slice(-10)
+              .map((e) => `[${e.timestamp}] ${e.event}: ${e.tool} — ${e.message}`)
+              .join("\n");
+            return { success: true, message: summary };
+          }
+
+          if (name === "get_pending_approvals") {
+            const pending = await fetchPendingApprovals();
+            // Filter out directive-plan approvals — those are handled via get_directives
+            const nonDirective = pending.filter((a) => a.tool !== "directive_plan");
+            if (nonDirective.length === 0) {
+              return { success: true, message: "No pending approvals." };
+            }
+            const list = nonDirective
+              .map((a) => `${a.id}: ${a.risk} risk, ${a.tool}, ${a.description}`)
+              .join(". ");
+            return { success: true, message: `${nonDirective.length} pending. ${list}` };
+          }
+
+          if (name === "approve_action") {
+            const approvalId = args.approval_id as string;
+            const approved = args.approved !== false;
+            const needsUserPin = args.needs_user_pin !== false;
+            if (!approvalId) {
+              return { success: false, message: "Missing approval_id" };
+            }
+            // Auto-approve: June handles routine ops with stored PIN
+            if (!needsUserPin) {
+              const autoPin = process.env.EXPO_PUBLIC_BRIDGE_PIN ?? "";
+              if (!autoPin) {
+                return { success: false, message: "Auto-approve failed: no BRIDGE_PIN configured." };
+              }
+              try {
+                const result = await resolveApproval(approvalId, approved, autoPin);
+                if (result.error) {
+                  return { success: false, message: result.error };
+                }
+                return {
+                  success: true,
+                  message: approved
+                    ? `Auto-approved action ${approvalId}. Cipher can proceed.`
+                    : `Auto-denied action ${approvalId}.`,
+                };
+              } catch (err: any) {
+                return { success: false, message: err?.message ?? "Auto-approve failed" };
+              }
+            }
+            // Escalate: show keypad for King Kazuma's PIN
+            return new Promise<ToolCallResult>((resolve) => {
+              pendingApprovalRef.current = { id: approvalId, approved, resolve };
+              setShowKeypad(true);
+            });
+          }
+
+          if (name === "send_dev_directive") {
+            const type = args.type as string;
+            const title = args.title as string;
+            const description = args.description as string;
+            if (!type || !description) {
+              return { success: false, message: "Missing required fields: type, description" };
+            }
+            const result = await sendDirective(type, title, description);
+            const d = result.directive;
+            return {
+              success: true,
+              message: `Directive created: ${d.id} [${d.type}] "${d.title}" — status: ${d.status}`,
+            };
+          }
+
+          if (name === "get_directives") {
+            const status = args.status as string | undefined;
+            const directives = await fetchDirectives(status);
+            if (directives.length === 0) {
+              return { success: true, message: status ? `No directives with status: ${status}` : "No directives found." };
+            }
+            const list = directives
+              .map((d) => {
+                let line = `${d.title || "Untitled"}, type: ${d.type}, status: ${d.status}`;
+                if (d.plan) line += ", has plan ready for review";
+                if (d.directiveApprovalId) line += `, approval: ${d.directiveApprovalId}`;
+                return line;
+              })
+              .join(". ");
+            return { success: true, message: `${directives.length} directive(s). ${list}` };
+          }
+        } catch (err: any) {
+          return { success: false, message: err?.message ?? "Bridge call failed" };
+        }
+      }
+
+      // ── HA tools ──
       const resolved = resolveToolCall(name, args);
       if (!resolved) {
         return { success: false, message: `Entity ${args.entity_id} is not controllable or not recognized.` };
@@ -40,7 +150,39 @@ export default function ChatScreen() {
     [callService]
   );
 
+  const handleKeypadSubmit = useCallback(async (pin: string) => {
+    setShowKeypad(false);
+    const pending = pendingApprovalRef.current;
+    if (!pending) return;
+    pendingApprovalRef.current = null;
+    try {
+      const result = await resolveApproval(pending.id, pending.approved, pin);
+      if (result.error) {
+        pending.resolve({ success: false, message: result.error });
+      } else {
+        pending.resolve({
+          success: true,
+          message: pending.approved
+            ? `Action ${pending.id} approved.`
+            : `Action ${pending.id} denied.`,
+        });
+      }
+    } catch (err: any) {
+      pending.resolve({ success: false, message: err?.message ?? "Resolve failed" });
+    }
+  }, []);
+
+  const handleKeypadCancel = useCallback(() => {
+    setShowKeypad(false);
+    const pending = pendingApprovalRef.current;
+    if (pending) {
+      pendingApprovalRef.current = null;
+      pending.resolve({ success: false, message: "PIN entry cancelled by user." });
+    }
+  }, []);
+
   const [responseText, setResponseText] = useState("");
+  const [inputTranscript, setInputTranscript] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [customInput, setCustomInput] = useState("");
@@ -80,6 +222,14 @@ export default function ChatScreen() {
           console.error("LiveChat session error:", msg);
           setResponseText((prev) => prev + `\n[Error: ${msg}]`);
           setIsStreaming(false);
+        },
+        onInterrupted: () => {
+          playerRef.current.flush();
+          setResponseText("");
+          setIsStreaming(true);
+        },
+        onInputTranscript: (text) => {
+          setInputTranscript((prev) => prev + text);
         },
         onToolCall: (name, args) => handleToolCallRef.current(name, args),
       };
@@ -128,11 +278,20 @@ export default function ChatScreen() {
           setResponseText((prev) => prev + `\n[Error: ${msg}]`);
           setIsStreaming(false);
         },
+        onInterrupted: () => {
+          playerRef.current.flush();
+          setResponseText("");
+          setIsStreaming(true);
+        },
+        onInputTranscript: (text) => {
+          setInputTranscript((prev) => prev + text);
+        },
         onToolCall: handleToolCall,
       });
 
       setIsStreaming(true);
       setResponseText("");
+      setInputTranscript("");
       setShowInput(false);
 
       liveChatRef.current.send(message);
@@ -170,10 +329,19 @@ export default function ChatScreen() {
         setResponseText((prev) => prev + `\n[Error: ${msg}]`);
         setIsStreaming(false);
       },
+      onInterrupted: () => {
+        playerRef.current.flush();
+        setResponseText("");
+        setIsStreaming(true);
+      },
+      onInputTranscript: (text) => {
+        setInputTranscript((prev) => prev + text);
+      },
       onToolCall: handleToolCall,
     });
 
     setResponseText("");
+    setInputTranscript("");
     setIsStreaming(true);
     setIsListening(true);
 
@@ -207,7 +375,7 @@ export default function ChatScreen() {
         }}
       >
         <Text style={{ color: "#F59E0B", fontSize: 24, fontWeight: "bold" }}>
-          ozzu
+          JUNE
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
           <TVPressable
@@ -251,6 +419,11 @@ export default function ChatScreen() {
         {connectError ? (
           <Text style={{ color: "#EF4444", fontSize: 13, fontFamily: "monospace", marginTop: 12 }}>
             {connectError}
+          </Text>
+        ) : null}
+        {isListening && inputTranscript ? (
+          <Text style={{ color: "#6B7280", fontSize: 12, fontFamily: "monospace", marginBottom: 8, fontStyle: "italic" }}>
+            {inputTranscript}
           </Text>
         ) : null}
         <StreamingText text={responseText} streaming={isStreaming} />
@@ -364,6 +537,13 @@ export default function ChatScreen() {
           </TVPressable>
         )}
       </View>
+
+      <Keypad
+        visible={showKeypad}
+        title="AUTHORIZE ACTION"
+        onSubmit={handleKeypadSubmit}
+        onCancel={handleKeypadCancel}
+      />
 
       <StatusBar style="light" />
     </View>

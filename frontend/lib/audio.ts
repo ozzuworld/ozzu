@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import {
   startPlayback,
   writeAudio,
+  flushPlayback,
   stopPlayback,
   startRecording,
   stopRecording,
@@ -26,7 +27,8 @@ export class StreamingPlayer {
   }
 
   flush() {
-    // Native AudioTrack handles draining automatically
+    if (!this.started) return;
+    flushPlayback();
   }
 
   async stop() {

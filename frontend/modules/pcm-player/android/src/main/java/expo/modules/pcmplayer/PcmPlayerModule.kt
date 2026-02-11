@@ -6,7 +6,9 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
 import android.util.Base64
+import android.util.Log
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.concurrent.LinkedBlockingQueue
@@ -21,6 +23,7 @@ class PcmPlayerModule : Module() {
     private var audioRecord: AudioRecord? = null
     private var recordThread: Thread? = null
     @Volatile private var recording = false
+    private var aec: AcousticEchoCanceler? = null
 
     override fun definition() = ModuleDefinition {
         Name("PcmPlayer")
@@ -44,7 +47,7 @@ class PcmPlayerModule : Module() {
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
                 )
@@ -82,6 +85,10 @@ class PcmPlayerModule : Module() {
             playQueue.add(bytes)
         }
 
+        Function("flushPlayback") {
+            playQueue.clear()
+        }
+
         Function("stopPlayback") {
             playing = false
             playQueue.clear()
@@ -105,12 +112,22 @@ class PcmPlayerModule : Module() {
             )
 
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 sampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
                 bufferSize * 2
             )
+
+            // Attach acoustic echo canceler if available
+            val sessionId = audioRecord?.audioSessionId ?: 0
+            if (AcousticEchoCanceler.isAvailable()) {
+                aec = AcousticEchoCanceler.create(sessionId)
+                aec?.enabled = true
+                Log.i("PcmPlayer", "AEC enabled, session=$sessionId")
+            } else {
+                Log.w("PcmPlayer", "AEC not available on this device")
+            }
 
             audioRecord?.startRecording()
             recording = true
@@ -138,6 +155,8 @@ class PcmPlayerModule : Module() {
             audioRecord?.stop()
             audioRecord?.release()
             audioRecord = null
+            aec?.release()
+            aec = null
         }
     }
 }

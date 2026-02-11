@@ -24,6 +24,9 @@ backend/config/blueprints/
 backend/config/custom_components/
 backend/config/home-assistant.log.*
 
+# Root config (HA data outside backend/)
+config/
+
 # OS
 .DS_Store
 Thumbs.db

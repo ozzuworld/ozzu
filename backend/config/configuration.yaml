@@ -11,6 +11,11 @@ http:
 frontend:
   themes: !include_dir_merge_named themes
 
+tuya_smart_ir_ac:
+  access_id: "g8fkujfkppqc3cytfv3h"
+  access_secret: "22f078f8869c47dab1c0a9757e1542de"
+  country: "US"
+
 automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml

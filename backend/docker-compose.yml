@@ -38,6 +38,19 @@ services:
     depends_on:
       - homeassistant
 
+  bridge:
+    container_name: bridge
+    image: node:22-alpine
+    restart: unless-stopped
+    network_mode: host
+    working_dir: /app
+    volumes:
+      - ./bridge:/app:ro
+      - /tmp/ozzu-bridge:/tmp/ozzu-bridge
+    environment:
+      - BRIDGE_PIN=${BRIDGE_PIN:-1234}
+    command: node server.js
+
   certbot:
     container_name: certbot
     image: certbot/dns-cloudflare
