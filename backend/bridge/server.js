@@ -346,8 +346,10 @@ async function handleRequest(req, res) {
         createdAt: Date.now(),
       };
       const approvals = getApprovals();
-      approvals.push(approval);
-      saveApprovals(approvals);
+      // Remove any existing approvals with the same ID (e.g. expired duplicates)
+      const filtered = approvals.filter((a) => a.id !== approvalId);
+      filtered.push(approval);
+      saveApprovals(filtered);
       directive.directiveApprovalId = approvalId;
     }
 
@@ -849,13 +851,13 @@ async function handleToolCall(name, args) {
 
           broadcastToAll({ type: "pinRequest", approvalId: pinId, description: `Authorize: ${approvalId}` });
 
-          // 30s timeout
+          // 2 min timeout (user needs to hear June, find tablet, enter PIN)
           setTimeout(() => {
             if (pendingPinRequests.has(pinId)) {
               pendingPinRequests.delete(pinId);
-              resolve({ success: false, message: "PIN entry timed out (30s)" });
+              resolve({ success: false, message: "PIN entry timed out (2 min)" });
             }
-          }, 30000);
+          }, 120000);
         });
       }
 
