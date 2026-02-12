@@ -1,31 +1,14 @@
-import { useState, useEffect } from "react";
-import { View, Text } from "react-native";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { View, Text, PermissionsAndroid, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { useRouter } from "expo-router";
 import { StatusBadge } from "../components/StatusBadge";
 import { SciFiOrb } from "../components/SciFiOrb";
-import { TVPressable } from "../components/TVPressable";
-import { EntityStatusCards } from "../components/EntityStatusCards";
-
-const TOP_BAR_HEIGHT = 48;
-
-function useGreeting(): string {
-  const [greeting, setGreeting] = useState(() => getGreeting());
-  useEffect(() => {
-    const id = setInterval(() => setGreeting(getGreeting()), 60000);
-    return () => clearInterval(id);
-  }, []);
-  return greeting;
-}
-
-function getGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 5) return "Late night, King Kazuma";
-  if (hour < 12) return "Good morning, King Kazuma";
-  if (hour < 17) return "Good afternoon, King Kazuma";
-  if (hour < 21) return "Good evening, King Kazuma";
-  return "Good night, King Kazuma";
-}
+import { TranscriptBubble } from "../components/TranscriptBubble";
+import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
+import { StreamingPlayer, MicRecorder } from "../lib/audio";
+import { getDeviceType } from "../modules/pcm-player";
+import { Keypad } from "../components/Keypad";
+import { useKeepAwake } from "expo-keep-awake";
 
 function useClock() {
   const [time, setTime] = useState(() => formatTime());
@@ -42,153 +25,165 @@ function formatTime(): string {
 }
 
 export default function LandingScreen() {
-  const router = useRouter();
-  const greeting = useGreeting();
+  useKeepAwake();
   const clock = useClock();
 
+  // Detect device role once
+  const deviceRole = useRef<"mic" | "speaker">("mic");
+  try {
+    deviceRole.current = getDeviceType() === "tv" ? "speaker" : "mic";
+  } catch {}
+
+  const isMic = deviceRole.current === "mic";
+
+  const [showKeypad, setShowKeypad] = useState(false);
+  const pendingPinRef = useRef<{ approvalId: string } | null>(null);
+
+  const [responseText, setResponseText] = useState("");
+  const [inputTranscript, setInputTranscript] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+
+  const bridgeRef = useRef<BridgeSession>(new BridgeSession());
+  const playerRef = useRef<StreamingPlayer>(new StreamingPlayer());
+  const micRef = useRef<MicRecorder>(new MicRecorder());
+
+  // Connect to bridge on mount
+  useEffect(() => {
+    const bridge = bridgeRef.current;
+    let cancelled = false;
+
+    const requestMicAndStart = async () => {
+      if (Platform.OS === "android") {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) return;
+      }
+      if (cancelled) return;
+      micRef.current.start((pcmBase64) => {
+        bridge.sendAudio(pcmBase64);
+      });
+      setIsListening(true);
+    };
+
+    const callbacks: BridgeCallbacks = {
+      onReady: () => {
+        if (cancelled) return;
+        setSessionReady(true);
+
+        // Tablets: auto-start mic on ready
+        if (isMic) {
+          requestMicAndStart();
+        }
+      },
+      onAudioChunk: (pcm) => {
+        playerRef.current.addChunk(pcm);
+      },
+      onTranscript: (text) => {
+        setResponseText((prev) => prev + text);
+      },
+      onInputTranscript: (text) => {
+        setInputTranscript((prev) => prev + text);
+      },
+      onTurnComplete: () => {
+        setIsStreaming(false);
+      },
+      onInterrupted: () => {
+        playerRef.current.flush();
+        setResponseText("");
+        setIsStreaming(true);
+      },
+      onPinRequest: (approvalId) => {
+        pendingPinRef.current = { approvalId };
+        setShowKeypad(true);
+      },
+      onPinResolved: () => {
+        setShowKeypad(false);
+        pendingPinRef.current = null;
+      },
+      onError: (msg) => {
+        console.error("BridgeSession error:", msg);
+        setResponseText((prev) => prev + `\n[Error: ${msg}]`);
+        setIsStreaming(false);
+      },
+    };
+
+    bridge.connect(callbacks);
+
+    return () => {
+      cancelled = true;
+      bridge.close();
+      playerRef.current.stop();
+      micRef.current.stop();
+    };
+  }, []);
+
+  const handleKeypadSubmit = useCallback((pin: string) => {
+    setShowKeypad(false);
+    const pending = pendingPinRef.current;
+    if (!pending) return;
+    pendingPinRef.current = null;
+    bridgeRef.current.sendPinResponse(pending.approvalId, pin);
+  }, []);
+
+  const handleKeypadCancel = useCallback(() => {
+    setShowKeypad(false);
+    pendingPinRef.current = null;
+  }, []);
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#111111" }}>
-      {/* Top Bar */}
+    <View style={{ flex: 1, backgroundColor: "#000000" }}>
+      {/* Top Bar — status left, clock right */}
       <View
         style={{
-          height: TOP_BAR_HEIGHT,
+          height: 48,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingHorizontal: 16,
+          paddingHorizontal: 20,
         }}
       >
-        <Text style={{ color: "#F59E0B", fontSize: 24, fontWeight: "bold" }}>
-          ozzu
+        <StatusBadge />
+        <Text
+          style={{
+            color: "#525252",
+            fontSize: 14,
+            fontFamily: "monospace",
+          }}
+        >
+          {clock}
         </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-          <StatusBadge />
-          <Text
-            style={{
-              color: "#525252",
-              fontSize: 14,
-              fontFamily: "monospace",
-            }}
-          >
-            {clock}
-          </Text>
-        </View>
       </View>
 
-      {/* Center Content */}
+      {/* Center — SciFiOrb only */}
       <View
         style={{
           flex: 1,
           alignItems: "center",
           justifyContent: "center",
-          paddingBottom: 40,
-          gap: 24,
         }}
       >
-        {/* Greeting */}
-        <Text
-          style={{
-            color: "#737373",
-            fontSize: 14,
-            fontFamily: "monospace",
-            letterSpacing: 1,
-          }}
-        >
-          {greeting}
-        </Text>
-
-        {/* June Orb centerpiece */}
-        <TVPressable
-          rarity="epic"
-          onPress={() => router.push("/chat")}
-          style={{
-            padding: 20,
-            borderRadius: 80,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <SciFiOrb active={false} />
-        </TVPressable>
-
-        {/* June label */}
-        <Text
-          style={{
-            color: "#06B6D4",
-            fontSize: 12,
-            fontWeight: "bold",
-            letterSpacing: 3,
-            fontFamily: "monospace",
-          }}
-        >
-          JUNE
-        </Text>
-        <Text
-          style={{
-            color: "#444",
-            fontSize: 11,
-            fontFamily: "monospace",
-          }}
-        >
-          Tap the orb to talk
-        </Text>
-
-        {/* Entity Status Cards */}
-        <View style={{ marginTop: 16 }}>
-          <EntityStatusCards />
-        </View>
-
-        {/* Quick Actions */}
-        <View
-          style={{
-            flexDirection: "row",
-            gap: 12,
-            marginTop: 8,
-          }}
-        >
-          <TVPressable
-            rarity="rare"
-            onPress={() => router.push("/equipment")}
-            style={{
-              paddingHorizontal: 20,
-              paddingVertical: 12,
-              borderRadius: 8,
-            }}
-          >
-            <Text
-              style={{
-                color: "#93C5FD",
-                fontSize: 12,
-                fontWeight: "bold",
-                letterSpacing: 1,
-              }}
-            >
-              EQUIPMENT
-            </Text>
-          </TVPressable>
-
-          <TVPressable
-            rarity="epic"
-            onPress={() => router.push("/chat")}
-            style={{
-              paddingHorizontal: 20,
-              paddingVertical: 12,
-              borderRadius: 8,
-            }}
-          >
-            <Text
-              style={{
-                color: "#C084FC",
-                fontSize: 12,
-                fontWeight: "bold",
-                letterSpacing: 1,
-              }}
-            >
-              ASK JUNE
-            </Text>
-          </TVPressable>
-        </View>
+        <SciFiOrb
+          active={isStreaming}
+          ambient={isListening && !isStreaming}
+        />
       </View>
+
+      {/* Transcription bubble — bottom-left corner */}
+      <TranscriptBubble
+        inputTranscript={inputTranscript}
+        responseText={responseText}
+        isStreaming={isStreaming}
+      />
+
+      <Keypad
+        visible={showKeypad}
+        title="AUTHORIZE ACTION"
+        onSubmit={handleKeypadSubmit}
+        onCancel={handleKeypadCancel}
+      />
 
       <StatusBar style="light" />
     </View>

@@ -1,8 +1,12 @@
 import { useEffect, useRef } from "react";
 import { View, Animated, type ViewStyle } from "react-native";
 
+type OrbMode = "idle" | "ambient" | "active";
+
 interface SciFiOrbProps {
   active: boolean;
+  /** Ambient mode: slow gentle pulse when mic is open but no speech detected */
+  ambient?: boolean;
 }
 
 const CYAN = "#06B6D4";
@@ -13,15 +17,18 @@ const RINGS = [
   { size: 60, borderWidth: 1 },
 ];
 
-export function SciFiOrb({ active }: SciFiOrbProps) {
+export function SciFiOrb({ active, ambient }: SciFiOrbProps) {
   const opacity = useRef(new Animated.Value(0.2)).current;
   const scale = useRef(new Animated.Value(1)).current;
+
+  const mode: OrbMode = active ? "active" : ambient ? "ambient" : "idle";
 
   useEffect(() => {
     opacity.stopAnimation();
     scale.stopAnimation();
 
-    if (active) {
+    if (mode === "active") {
+      // Fast pulse — speech being processed/streamed
       const pulseOpacity = Animated.loop(
         Animated.sequence([
           Animated.timing(opacity, {
@@ -56,7 +63,44 @@ export function SciFiOrb({ active }: SciFiOrbProps) {
         pulseOpacity.stop();
         pulseScale.stop();
       };
+    } else if (mode === "ambient") {
+      // Slow gentle pulse — mic open, listening quietly
+      const pulseOpacity = Animated.loop(
+        Animated.sequence([
+          Animated.timing(opacity, {
+            toValue: 0.6,
+            duration: 2500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.25,
+            duration: 2500,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      const pulseScale = Animated.loop(
+        Animated.sequence([
+          Animated.timing(scale, {
+            toValue: 1.03,
+            duration: 2500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(scale, {
+            toValue: 1,
+            duration: 2500,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseOpacity.start();
+      pulseScale.start();
+      return () => {
+        pulseOpacity.stop();
+        pulseScale.stop();
+      };
     } else {
+      // Idle — very subtle breathing
       const pulseOpacity = Animated.loop(
         Animated.sequence([
           Animated.timing(opacity, {
@@ -77,7 +121,7 @@ export function SciFiOrb({ active }: SciFiOrbProps) {
         pulseOpacity.stop();
       };
     }
-  }, [active, opacity, scale]);
+  }, [mode, opacity, scale]);
 
   const containerStyle: ViewStyle = {
     width: RINGS[0].size,
