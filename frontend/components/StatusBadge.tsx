@@ -1,28 +1,34 @@
+import { useState, useEffect } from "react";
 import { View, Text } from "react-native";
 import { useHA } from "../lib/ha-context";
 
-const statusConfig: Record<string, { dot: string; label: string }> = {
-  connected: { dot: "#22C55E", label: "ONLINE" },
-  connecting: { dot: "#EAB308", label: "CONNECTING" },
-  disconnected: { dot: "#737373", label: "OFFLINE" },
-  error: { dot: "#EF4444", label: "ERROR" },
+const statusConfig: Record<string, { dot: string }> = {
+  connected: { dot: "#22C55E" },
+  connecting: { dot: "#EAB308" },
+  disconnected: { dot: "#737373" },
+  error: { dot: "#EF4444" },
 };
+
+function getTimeString() {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
 
 export function StatusBadge() {
   const { status } = useHA();
   const cfg = statusConfig[status] ?? statusConfig.disconnected;
+  const [time, setTime] = useState(getTimeString);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTime(getTimeString()), 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
-        borderWidth: 1,
-        borderColor: "#333333",
-        borderRadius: 6,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        backgroundColor: "#1A1A1A",
         gap: 6,
       }}
     >
@@ -34,8 +40,15 @@ export function StatusBadge() {
           backgroundColor: cfg.dot,
         }}
       />
-      <Text style={{ color: cfg.dot, fontSize: 11, fontWeight: "bold", letterSpacing: 1 }}>
-        {cfg.label}
+      <Text
+        style={{
+          color: "#525252",
+          fontSize: 11,
+          fontWeight: "bold",
+          fontFamily: "monospace",
+        }}
+      >
+        {time}
       </Text>
     </View>
   );

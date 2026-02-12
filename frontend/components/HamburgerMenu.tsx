@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { View, Text, Pressable, Animated, Dimensions } from "react-native";
+import { View, Text, Pressable, Animated } from "react-native";
 import { useRouter } from "expo-router";
 import { TVPressable } from "./TVPressable";
 
-const MENU_WIDTH = 250;
+const PANEL_WIDTH = 200;
 
 const menuItems = [
   { icon: "⚔️", label: "INVENTORY", route: "/equipment" as const },
@@ -12,14 +12,14 @@ const menuItems = [
 export function HamburgerMenu() {
   const router = useRouter();
   const [visible, setVisible] = useState(false);
-  const slideAnim = useRef(new Animated.Value(-MENU_WIDTH)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
       Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
+        Animated.timing(scaleAnim, {
+          toValue: 1,
           duration: 200,
           useNativeDriver: true,
         }),
@@ -31,8 +31,8 @@ export function HamburgerMenu() {
       ]).start();
     } else {
       Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: -MENU_WIDTH,
+        Animated.timing(scaleAnim, {
+          toValue: 0.9,
           duration: 150,
           useNativeDriver: true,
         }),
@@ -82,6 +82,8 @@ export function HamburgerMenu() {
             right: 0,
             bottom: 0,
             zIndex: 100,
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
           {/* Backdrop */}
@@ -102,22 +104,48 @@ export function HamburgerMenu() {
             />
           </Animated.View>
 
-          {/* Slide-out panel */}
+          {/* Centered HUD panel */}
           <Animated.View
             style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              bottom: 0,
-              width: MENU_WIDTH,
+              width: PANEL_WIDTH,
               backgroundColor: "#111111",
-              borderRightWidth: 1,
-              borderRightColor: "#222",
-              paddingTop: 60,
+              borderWidth: 1,
+              borderColor: "#333",
+              borderRadius: 12,
+              paddingTop: 16,
+              paddingBottom: 8,
               paddingHorizontal: 16,
-              transform: [{ translateX: slideAnim }],
+              shadowColor: "#06B6D4",
+              shadowOpacity: 0.15,
+              shadowRadius: 16,
+              shadowOffset: { width: 0, height: 0 },
+              elevation: 8,
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }],
             }}
           >
+            {/* Panel title */}
+            <Text
+              style={{
+                color: "#06B6D4",
+                fontSize: 12,
+                fontFamily: "monospace",
+                fontWeight: "bold",
+                letterSpacing: 3,
+                textAlign: "center",
+              }}
+            >
+              MENU
+            </Text>
+            <View
+              style={{
+                height: 1,
+                backgroundColor: "#222",
+                marginTop: 10,
+                marginBottom: 12,
+              }}
+            />
+
             {menuItems.map((item) => (
               <TVPressable
                 key={item.route}
