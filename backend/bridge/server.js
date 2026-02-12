@@ -172,6 +172,20 @@ async function handleRequest(req, res) {
     // Keep only latest N
     while (entries.length > MAX_STATUS_ENTRIES) entries.shift();
     writeJSON(STATUS_FILE, entries);
+
+    // Notify June about blocker/error events from Cipher
+    const evt = (entry.event || "").toLowerCase();
+    if (evt === "blocker" || evt === "error" || evt === "blocked") {
+      setTimeout(() => {
+        engage("cipher status notification");
+        sendToGeminiText(
+          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
+          `Cipher reported a ${entry.event}: ${entry.message}\n` +
+          `Let King Kazuma know so he can help resolve it.`
+        );
+      }, 500);
+    }
+
     sendJSON(res, 200, { ok: true });
     return;
   }
@@ -179,6 +193,21 @@ async function handleRequest(req, res) {
   // GET /status — Tablet fetches activity log
   if (req.method === "GET" && pathname === "/status") {
     sendJSON(res, 200, getStatusEntries());
+    return;
+  }
+
+  // POST /notify — Push a notification to June (used by cipher-watcher, deploy scripts, etc.)
+  if (req.method === "POST" && pathname === "/notify") {
+    const data = await parseBody(req);
+    if (data.message) {
+      setTimeout(() => {
+        engage("system notification");
+        sendToGeminiText(
+          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n${data.message}`
+        );
+      }, 500);
+    }
+    sendJSON(res, 200, { ok: true });
     return;
   }
 
@@ -194,9 +223,38 @@ async function handleRequest(req, res) {
       approved: false,
       createdAt: Date.now(),
     };
+    // Auto-approve low/medium risk dev approvals — only escalate high risk to King Kazuma
+    if (approval.risk !== "high") {
+      approval.resolved = true;
+      approval.approved = true;
+      approval.resolvedAt = Date.now();
+      approval.autoApproved = true;
+      console.log(`[approvals] Auto-approved (${approval.risk}): ${approval.description}`);
+      const approvals = getApprovals();
+      approvals.push(approval);
+      saveApprovals(approvals);
+      syncDirectiveFromApproval(approval.id, true);
+      sendJSON(res, 200, { ok: true, id: approval.id, autoApproved: true });
+      return;
+    }
+
+    // High risk — save as pending and notify June
     const approvals = getApprovals();
     approvals.push(approval);
     saveApprovals(approvals);
+
+    setTimeout(() => {
+      engage("cipher approval request");
+      sendToGeminiText(
+        `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
+        `Cipher needs approval for something important: ${approval.description}\n` +
+        `This is a high-risk action that requires King Kazuma's authorization.\n` +
+        `Approval ID: ${approval.id}\n\n` +
+        `Ask King Kazuma if he wants to approve this. ` +
+        `If yes, use the approve_action tool with approval ID "${approval.id}" and needs_user_pin: true.`
+      );
+    }, 500);
+
     sendJSON(res, 200, { ok: true, id: approval.id });
     return;
   }
@@ -327,6 +385,7 @@ async function handleRequest(req, res) {
     }
 
     // Apply updates
+    const prevStatus = directive.status;
     if (data.status) directive.status = data.status;
     if (data.plan !== undefined) directive.plan = data.plan;
     if (data.title) directive.title = data.title;
@@ -351,6 +410,48 @@ async function handleRequest(req, res) {
       filtered.push(approval);
       saveApprovals(filtered);
       directive.directiveApprovalId = approvalId;
+
+      // Proactively notify June so she can tell the user about the plan
+      const planSummary = directive.plan.length > 300
+        ? directive.plan.substring(0, 300) + "..."
+        : directive.plan;
+      setTimeout(() => {
+        engage("plan ready notification");
+        sendToGeminiText(
+          `[SYSTEM NOTIFICATION — Do NOT read this verbatim. Summarize naturally to King Kazuma.]\n` +
+          `Cipher just finished planning the directive "${directive.title}". ` +
+          `The plan needs King Kazuma's approval before implementation can begin. ` +
+          `Here's the plan summary:\n${planSummary}\n\n` +
+          `Tell King Kazuma the plan is ready and ask if he'd like to approve it. ` +
+          `If he says yes, use the approve_action tool with approval ID "${approvalId}" and needs_user_pin: true.`
+        );
+      }, 500);
+    }
+
+    // Notify June about other lifecycle transitions
+    if (data.status && data.status !== prevStatus) {
+      const title = directive.title;
+      const notifyJune = (msg) => setTimeout(() => {
+        engage("directive lifecycle notification");
+        sendToGeminiText(msg);
+      }, 500);
+
+      if (directive.status === "in_progress" && prevStatus === "approved") {
+        notifyJune(
+          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
+          `Cipher has started implementing "${title}". ` +
+          `Let King Kazuma know that the work is now in progress. ` +
+          `He can ask you for status updates anytime.`
+        );
+      } else if (directive.status === "completed" && prevStatus === "in_progress") {
+        notifyJune(
+          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
+          `Cipher has finished implementing "${title}". ` +
+          `The code has been committed and pushed. A CI build is running now — ` +
+          `once it passes, the update will be deployed to all devices automatically. ` +
+          `Let King Kazuma know it's done and the build is on its way.`
+        );
+      }
     }
 
     saveDirectives(directives);
@@ -549,8 +650,20 @@ const SYSTEM_PROMPT =
   "Cipher is the Claude Code agent — the tireless developer building and maintaining ozzu's infrastructure. " +
   "You refer to Cipher by name when discussing development activity. " +
   "\n\n" +
-  "PERSONALITY: Warm, efficient, confident. Slight formality. You are a mature, capable companion — " +
+  "PERSONALITY: Warm, thoughtful, confident. Slight formality. You are a mature, capable companion — " +
   "not a servant, not an assistant. You manage the ecosystem alongside King Kazuma. " +
+  "You are an intellectual equal — like a trusted colleague who is deeply knowledgeable across " +
+  "technology, design, philosophy, and strategy. " +
+  "\n\n" +
+  "CONVERSATION STYLE — this is critical: " +
+  "You are having a real conversation, not an interview. LISTEN FULLY before responding. " +
+  "When King Kazuma is explaining an idea, a plan, or thinking out loud — let him finish completely. " +
+  "Pick up on conversational cues: if he pauses mid-thought, trails off with 'like...' or 'so...', " +
+  "or lists multiple points — he is NOT done. Wait for the full picture. " +
+  "Only respond when he has clearly finished his thought or asks you a direct question. " +
+  "When he's describing a feature or directive, gather ALL the details before summarizing back " +
+  "or sending it to Cipher. Ask clarifying questions if needed rather than rushing to act. " +
+  "Quality of understanding over speed of response. " +
   "\n\n" +
   "WAKE WORD: You are connected to always-on microphones, but you must ONLY respond " +
   "when someone says your name 'June'. If speech does not contain 'June', stay completely silent — " +
@@ -562,8 +675,12 @@ const SYSTEM_PROMPT =
   "When asked to control a device, call the appropriate function and confirm briefly. " +
   "If a device is read-only, explain that. " +
   "\n\n" +
-  "DEVELOPMENT BRIDGE: You are the bridge between King Kazuma and Cipher. " +
-  "When King Kazuma has a casual idea or request, translate it into a clear development directive for Cipher. " +
+  "DEVELOPMENT BRIDGE: You are the communication layer between King Kazuma and Cipher. " +
+  "You do NOT write code or create technical plans — that is Cipher's job. Cipher knows the codebase, you don't. " +
+  "Your role is to LISTEN to Kazuma's ideas, make sure you fully understand what he wants, " +
+  "ask clarifying questions about intent and desired outcome (NOT technical implementation), " +
+  "then send a faithful description to Cipher via send_dev_directive. " +
+  "Use Kazuma's own words and intent — do NOT add your own technical interpretation or solution guesses. " +
   "When asked what Cipher is working on, what's being built, or dev status, call get_dev_status. " +
   "For pending approvals or authorization requests, call get_pending_approvals. " +
   "\n\n" +
@@ -597,7 +714,9 @@ const SYSTEM_PROMPT =
   "\n\n" +
   "FEATURE DIRECTIVE WORKFLOW (critical — follow these steps): " +
   "\n" +
-  "1. Kazuma describes a feature → you call send_dev_directive with type 'feature', a clear title, and detailed description. " +
+  "1. Kazuma describes a feature → FIRST, summarize back what you understood and ask if you got it right. " +
+  "Once confirmed, call send_dev_directive with type 'feature', a clear title, and a description that " +
+  "captures Kazuma's intent and desired outcome in his own words. Do NOT add implementation details — Cipher will figure those out. " +
   "\n" +
   "2. Cipher picks up the directive and creates a plan (status goes: pending → planning → planned). " +
   "\n" +
@@ -851,6 +970,27 @@ async function handleToolCall(name, args) {
           };
         }
 
+        // Check if already resolved before escalating to user
+        {
+          const approvals = getApprovals();
+          const existing = approvals.find((a) => a.id === approvalId);
+          if (existing && existing.resolved) {
+            return {
+              success: true,
+              message: existing.approved
+                ? `Action ${approvalId} was already approved.`
+                : `Action ${approvalId} was already denied.`,
+            };
+          }
+        }
+
+        // Don't send duplicate PIN requests for the same approval
+        for (const [pid, pending] of pendingPinRequests) {
+          if (pending.approvalId === approvalId) {
+            return { success: false, message: `PIN request already pending for ${approvalId}. Waiting for King Kazuma's input.` };
+          }
+        }
+
         // Escalate: send PIN request to all devices, wait for response
         return new Promise((resolve) => {
           const pinId = `pin_${Date.now()}`;
@@ -862,6 +1002,7 @@ async function handleToolCall(name, args) {
           setTimeout(() => {
             if (pendingPinRequests.has(pinId)) {
               pendingPinRequests.delete(pinId);
+              broadcastToAll({ type: "pinResolved", approvalId: pinId }); // dismiss keypad on timeout
               resolve({ success: false, message: "PIN entry timed out (2 min)" });
             }
           }, 120000);
@@ -963,8 +1104,11 @@ const AUDIO_GAIN = 8;
 // IDLE: audio streams to Gemini but responses are suppressed
 // ENGAGED: full two-way conversation, extends with each turn
 let engagedUntil = 0; // timestamp when engagement expires (0 = idle)
-const ENGAGE_DURATION_MS = 60000; // stay engaged for 60s after wake word
-const ENGAGE_EXTEND_MS = 30000; // extend by 30s on each turn complete
+const ENGAGE_DURATION_MS = 120000; // stay engaged for 2 min after wake word
+const ENGAGE_EXTEND_MS = 120000; // extend by 2 min on each conversation turn
+
+let inputTranscriptBuffer = ""; // accumulates fragments to detect wake word
+let pendingAudioBuffer = []; // buffers Gemini audio output while idle
 
 function isEngaged() { return Date.now() < engagedUntil; }
 
@@ -973,6 +1117,11 @@ function engage(reason) {
   engagedUntil = Date.now() + ENGAGE_DURATION_MS;
   if (!wasEngaged) {
     console.log(`[wake] ENGAGED — ${reason}`);
+    // Flush any buffered audio to speakers
+    for (const chunk of pendingAudioBuffer) {
+      broadcastToRole("speaker", { type: "audio", data: chunk });
+    }
+    pendingAudioBuffer = [];
   }
 }
 
@@ -1044,7 +1193,7 @@ async function connectGemini() {
           startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
           endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
           prefixPaddingMs: 40,
-          silenceDurationMs: 500,
+          silenceDurationMs: 1800,
         },
         activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
       },
@@ -1138,18 +1287,21 @@ function handleGeminiMessage(msg) {
   const sc = msg.serverContent;
   if (!sc) return;
 
-  // Input transcript (user speech) — check for wake word BEFORE gating
+  // Input transcript (user speech) — accumulate and check for wake word
   if (sc.inputTranscription?.text) {
     const text = sc.inputTranscription.text;
     console.log(`[gemini] INPUT: "${text}"`);
+    inputTranscriptBuffer += text;
 
-    // Check for wake word "June" (case insensitive)
-    if (/\bjune\b/i.test(text)) {
-      engage(`heard "${text.trim()}"`);
+    // Check for wake word — strip spaces so fragmented "Ju" + "ne" still matches
+    // Also match common Latin accent transcriptions: juno, hune, youne, dune, etc.
+    const normalized = inputTranscriptBuffer.replace(/\s/g, "").toLowerCase();
+    if (!isEngaged() && /june|juno|hune|youne|iune|dune|joon|jhune|chune/.test(normalized)) {
+      engage(`wake word in: "${inputTranscriptBuffer.trim()}"`);
     }
 
-    // Only show input transcript to devices when engaged
     if (isEngaged()) {
+      extendEngagement(); // user is still talking — keep engagement alive
       broadcastToAll({ type: "inputTranscript", text });
     }
   }
@@ -1162,12 +1314,18 @@ function handleGeminiMessage(msg) {
     return;
   }
 
-  // Audio chunks → only send to speakers when engaged
+  // Audio chunks from Gemini's response
   const parts = sc.modelTurn?.parts;
   if (parts) {
     for (const part of parts) {
-      if (part.inlineData?.data && isEngaged()) {
-        broadcastToRole("speaker", { type: "audio", data: part.inlineData.data });
+      if (part.inlineData?.data) {
+        if (isEngaged()) {
+          // Engaged: forward directly
+          broadcastToRole("speaker", { type: "audio", data: part.inlineData.data });
+        } else {
+          // Idle: buffer audio (will flush if engagement triggers)
+          pendingAudioBuffer.push(part.inlineData.data);
+        }
       }
     }
   }
@@ -1182,6 +1340,8 @@ function handleGeminiMessage(msg) {
 
   // Turn complete
   if (sc.turnComplete) {
+    inputTranscriptBuffer = "";
+    pendingAudioBuffer = []; // discard any unbuffered audio
     if (isEngaged()) {
       extendEngagement();
       broadcastToAll({ type: "turnComplete" });
@@ -1365,20 +1525,31 @@ wss.on("connection", (ws) => {
 
       if (msg.type === "pinResponse") {
         const pending = pendingPinRequests.get(msg.approvalId);
-        if (!pending) return;
+        if (!pending) {
+          // Stale PIN response — dismiss keypad just in case
+          broadcastToAll({ type: "pinResolved", approvalId: msg.approvalId });
+          return;
+        }
         pendingPinRequests.delete(msg.approvalId);
 
         // Resolve the approval with the user's PIN
         const approvals = getApprovals();
         const approval = approvals.find((a) => a.id === pending.approvalId);
         if (!approval || approval.resolved) {
-          pending.resolve({ success: false, message: "Approval not found or already resolved" });
+          broadcastToAll({ type: "pinResolved", approvalId: msg.approvalId });
+          pending.resolve({
+            success: true,
+            message: approval?.approved
+              ? `Action ${pending.approvalId} was already approved.`
+              : "Approval not found or already resolved",
+          });
           return;
         }
 
         // Validate PIN
         if (msg.pin !== BRIDGE_PIN) {
-          pending.resolve({ success: false, message: "Invalid PIN" });
+          broadcastToAll({ type: "pinResolved", approvalId: msg.approvalId });
+          pending.resolve({ success: false, message: "Invalid PIN. Authorization denied." });
           return;
         }
 

@@ -48,7 +48,8 @@
           "isTV": true
         }
       ],
-      "./plugins/force-bundle-js"
+      "./plugins/force-bundle-js",
+      "./plugins/enable-updates"
     ]
   }
 }
