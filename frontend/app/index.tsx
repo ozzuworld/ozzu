@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { View, Text, PermissionsAndroid, Platform } from "react-native";
+import { View, PermissionsAndroid, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { StatusBadge } from "../components/StatusBadge";
+import { HamburgerMenu } from "../components/HamburgerMenu";
 import { SciFiOrb } from "../components/SciFiOrb";
 import { TranscriptBubble } from "../components/TranscriptBubble";
 import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
@@ -10,23 +11,8 @@ import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
 import { useKeepAwake } from "expo-keep-awake";
 
-function useClock() {
-  const [time, setTime] = useState(() => formatTime());
-  useEffect(() => {
-    const id = setInterval(() => setTime(formatTime()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  return time;
-}
-
-function formatTime(): string {
-  const d = new Date();
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
 export default function LandingScreen() {
   useKeepAwake();
-  const clock = useClock();
 
   // Detect device role once
   const deviceRole = useRef<"mic" | "speaker">("mic");
@@ -135,7 +121,7 @@ export default function LandingScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000000" }}>
-      {/* Top Bar — status left, clock right */}
+      {/* Top Bar — hamburger left, status right */}
       <View
         style={{
           height: 48,
@@ -145,16 +131,8 @@ export default function LandingScreen() {
           paddingHorizontal: 20,
         }}
       >
+        <HamburgerMenu />
         <StatusBadge />
-        <Text
-          style={{
-            color: "#525252",
-            fontSize: 14,
-            fontFamily: "monospace",
-          }}
-        >
-          {clock}
-        </Text>
       </View>
 
       {/* Center — SciFiOrb only */}
