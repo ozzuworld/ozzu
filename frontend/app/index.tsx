@@ -1,19 +1,31 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { View, Text } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { StatusBadge } from "../components/StatusBadge";
-import { CharacterSilhouette } from "../components/CharacterSilhouette";
-import { EquipmentSlot } from "../components/EquipmentSlot";
-import { ItemCardModal } from "../components/ItemCardModal";
+import { SciFiOrb } from "../components/SciFiOrb";
 import { TVPressable } from "../components/TVPressable";
-import { useHA } from "../lib/ha-context";
-import { rooms, type InventoryItem, RARITY_COLORS } from "../lib/rooms";
+import { EntityStatusCards } from "../components/EntityStatusCards";
 
 const TOP_BAR_HEIGHT = 48;
-const INVENTORY_TOTAL_SLOTS = 20;
-const INV_SLOT_SIZE = 100;
-const INV_GAP = 10;
+
+function useGreeting(): string {
+  const [greeting, setGreeting] = useState(() => getGreeting());
+  useEffect(() => {
+    const id = setInterval(() => setGreeting(getGreeting()), 60000);
+    return () => clearInterval(id);
+  }, []);
+  return greeting;
+}
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return "Late night, King Kazuma";
+  if (hour < 12) return "Good morning, King Kazuma";
+  if (hour < 17) return "Good afternoon, King Kazuma";
+  if (hour < 21) return "Good evening, King Kazuma";
+  return "Good night, King Kazuma";
+}
 
 function useClock() {
   const [time, setTime] = useState(() => formatTime());
@@ -29,122 +41,10 @@ function formatTime(): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-const allItems = rooms.flatMap((r) => r.items);
-
-const ITEM_SLOT_MAP: Record<string, string> = {
-  main_tv: "HELM",
-  kazuma_iphone: "WEAPON",
-  sous_vide: "CHEST",
-  living_room_cam: "GLOVES",
-  security_cam: "SHIELD",
-  king_kazuma: "BOOTS",
-  shopping_list: "RING",
-};
-
-const LEFT_SLOTS = ["HELM", "WEAPON", "CHEST", "GLOVES"] as const;
-const RIGHT_SLOTS = ["SHIELD", "BOOTS", "RING"] as const;
-
-type EquippedState = Record<string, InventoryItem | null>;
-
-const iphone = allItems.find((i) => i.id === "kazuma_iphone") ?? null;
-
-const INITIAL_EQUIPPED: EquippedState = {
-  HELM: null,
-  WEAPON: iphone,
-  CHEST: null,
-  GLOVES: null,
-  SHIELD: null,
-  BOOTS: null,
-  RING: null,
-};
-
-function EmptyInvSlot() {
-  return (
-    <View
-      style={{
-        width: INV_SLOT_SIZE,
-        height: INV_SLOT_SIZE,
-        borderWidth: 1,
-        borderColor: "#222",
-        borderRadius: 8,
-        backgroundColor: "rgba(18,18,18,0.8)",
-      }}
-    />
-  );
-}
-
-export default function DashboardScreen() {
-  const clock = useClock();
+export default function LandingScreen() {
   const router = useRouter();
-  const { callService } = useHA();
-
-  const [equipped, setEquipped] = useState<EquippedState>(INITIAL_EQUIPPED);
-  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
-
-  const equippedIds = new Set(
-    Object.values(equipped)
-      .filter((i): i is InventoryItem => i !== null)
-      .map((i) => i.id)
-  );
-
-  const inventoryItems = allItems.filter((i) => !equippedIds.has(i.id));
-  const emptySlotCount = Math.max(
-    0,
-    INVENTORY_TOTAL_SLOTS - inventoryItems.length
-  );
-
-  const handleEquip = useCallback((item: InventoryItem) => {
-    const slot = ITEM_SLOT_MAP[item.id];
-    if (slot) {
-      setEquipped((prev) => ({ ...prev, [slot]: item }));
-    }
-  }, []);
-
-  const handleUnequip = useCallback((item: InventoryItem) => {
-    const slot = ITEM_SLOT_MAP[item.id];
-    if (slot) {
-      setEquipped((prev) => ({ ...prev, [slot]: null }));
-      setModalVisible(false);
-    }
-  }, []);
-
-  const handleSlotPress = useCallback(
-    (slotLabel: string) => {
-      const item = equipped[slotLabel];
-      if (item) {
-        setSelectedItem(item);
-        setModalVisible(true);
-      }
-    },
-    [equipped]
-  );
-
-  const handleModalClose = useCallback(() => {
-    setModalVisible(false);
-  }, []);
-
-  const handleUse = useCallback(
-    (item: InventoryItem) => {
-      const domain = item.primaryEntityId.split(".")[0];
-      switch (domain) {
-        case "media_player":
-          callService("media_player", "media_play_pause", undefined, {
-            entity_id: item.primaryEntityId,
-          });
-          break;
-        case "switch":
-        case "siren":
-          callService(domain, "toggle", undefined, {
-            entity_id: item.primaryEntityId,
-          });
-          break;
-        default:
-          break;
-      }
-    },
-    [callService]
-  );
+  const greeting = useGreeting();
+  const clock = useClock();
 
   return (
     <View style={{ flex: 1, backgroundColor: "#111111" }}>
@@ -162,26 +62,6 @@ export default function DashboardScreen() {
           ozzu
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-          <TVPressable
-            rarity="epic"
-            onPress={() => router.push("/chat")}
-            style={{
-              paddingHorizontal: 12,
-              paddingVertical: 4,
-              borderRadius: 6,
-            }}
-          >
-            <Text
-              style={{
-                color: "#06B6D4",
-                fontSize: 12,
-                fontWeight: "bold",
-                letterSpacing: 1,
-              }}
-            >
-              AI
-            </Text>
-          </TVPressable>
           <StatusBadge />
           <Text
             style={{
@@ -195,181 +75,120 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      {/* Main: Character Panel | Inventory Panel */}
-      <View style={{ flex: 1, flexDirection: "row" }}>
-        {/* Character Panel */}
-        <View
+      {/* Center Content */}
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingBottom: 40,
+          gap: 24,
+        }}
+      >
+        {/* Greeting */}
+        <Text
           style={{
-            width: "25%",
-            alignItems: "center",
-            justifyContent: "center",
-            paddingHorizontal: 8,
+            color: "#737373",
+            fontSize: 14,
+            fontFamily: "monospace",
+            letterSpacing: 1,
           }}
         >
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            {/* Left Slots */}
-            <View style={{ gap: 6, alignItems: "center" }}>
-              {LEFT_SLOTS.map((slot) => (
-                <EquipmentSlot
-                  key={slot}
-                  item={equipped[slot]}
-                  slotLabel={slot}
-                  onPress={() => handleSlotPress(slot)}
-                />
-              ))}
-            </View>
+          {greeting}
+        </Text>
 
-            {/* Character Silhouette */}
-            <CharacterSilhouette />
+        {/* June Orb centerpiece */}
+        <TVPressable
+          rarity="epic"
+          onPress={() => router.push("/chat")}
+          style={{
+            padding: 20,
+            borderRadius: 80,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <SciFiOrb active={false} />
+        </TVPressable>
 
-            {/* Right Slots */}
-            <View style={{ gap: 6, alignItems: "center" }}>
-              {RIGHT_SLOTS.map((slot) => (
-                <EquipmentSlot
-                  key={slot}
-                  item={equipped[slot]}
-                  slotLabel={slot}
-                  onPress={() => handleSlotPress(slot)}
-                />
-              ))}
-            </View>
-          </View>
+        {/* June label */}
+        <Text
+          style={{
+            color: "#06B6D4",
+            fontSize: 12,
+            fontWeight: "bold",
+            letterSpacing: 3,
+            fontFamily: "monospace",
+          }}
+        >
+          JUNE
+        </Text>
+        <Text
+          style={{
+            color: "#444",
+            fontSize: 11,
+            fontFamily: "monospace",
+          }}
+        >
+          Tap the orb to talk
+        </Text>
+
+        {/* Entity Status Cards */}
+        <View style={{ marginTop: 16 }}>
+          <EntityStatusCards />
         </View>
 
-        {/* Divider */}
+        {/* Quick Actions */}
         <View
           style={{
-            width: 1,
-            backgroundColor: "#2A2A2A",
-            marginVertical: 20,
+            flexDirection: "row",
+            gap: 12,
+            marginTop: 8,
           }}
-        />
-
-        {/* Inventory Panel */}
-        <View style={{ flex: 1, padding: 20 }}>
-          {/* Inventory Header */}
-          <View
+        >
+          <TVPressable
+            rarity="rare"
+            onPress={() => router.push("/equipment")}
             style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 10,
-              marginBottom: 16,
+              paddingHorizontal: 20,
+              paddingVertical: 12,
+              borderRadius: 8,
             }}
           >
-            <View
-              style={{
-                width: 32,
-                height: 32,
-                borderWidth: 1,
-                borderColor: "#444",
-                borderRadius: 6,
-                backgroundColor: "#1A1A1A",
-                justifyContent: "center",
-                alignItems: "center",
-              }}
-            >
-              <Text style={{ fontSize: 16 }}>📦</Text>
-            </View>
             <Text
               style={{
-                color: "#737373",
-                fontSize: 14,
-                fontWeight: "bold",
-                letterSpacing: 2,
-              }}
-            >
-              INVENTORY
-            </Text>
-            <Text
-              style={{
-                color: "#444",
+                color: "#93C5FD",
                 fontSize: 12,
+                fontWeight: "bold",
+                letterSpacing: 1,
               }}
             >
-              {inventoryItems.length}/{INVENTORY_TOTAL_SLOTS}
+              EQUIPMENT
             </Text>
-          </View>
+          </TVPressable>
 
-          {/* Inventory Grid */}
-          <View
+          <TVPressable
+            rarity="epic"
+            onPress={() => router.push("/chat")}
             style={{
-              flexDirection: "row",
-              flexWrap: "wrap",
-              gap: INV_GAP,
+              paddingHorizontal: 20,
+              paddingVertical: 12,
+              borderRadius: 8,
             }}
           >
-            {/* Filled slots */}
-            {inventoryItems.map((item) => {
-              const colors = RARITY_COLORS[item.rarity];
-              const slot = ITEM_SLOT_MAP[item.id];
-              return (
-                <TVPressable
-                  key={item.id}
-                  rarity={item.rarity}
-                  onPress={() => handleEquip(item)}
-                  style={{
-                    width: INV_SLOT_SIZE,
-                    height: INV_SLOT_SIZE,
-                    padding: 6,
-                    justifyContent: "center",
-                    alignItems: "center",
-                    gap: 3,
-                  }}
-                >
-                  <Text style={{ fontSize: 28 }}>{item.icon}</Text>
-                  <Text
-                    style={{
-                      color: "#FFF",
-                      fontSize: 10,
-                      fontWeight: "bold",
-                      textAlign: "center",
-                    }}
-                    numberOfLines={1}
-                  >
-                    {item.name}
-                  </Text>
-                  <Text
-                    style={{
-                      color: colors.text,
-                      fontSize: 7,
-                      fontWeight: "bold",
-                      letterSpacing: 0.5,
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {item.rarity}
-                  </Text>
-                  <Text
-                    style={{ color: "#444", fontSize: 7, letterSpacing: 0.5 }}
-                  >
-                    {slot}
-                  </Text>
-                </TVPressable>
-              );
-            })}
-
-            {/* Empty slots */}
-            {Array.from({ length: emptySlotCount }, (_, i) => (
-              <EmptyInvSlot key={`empty-${i}`} />
-            ))}
-          </View>
+            <Text
+              style={{
+                color: "#C084FC",
+                fontSize: 12,
+                fontWeight: "bold",
+                letterSpacing: 1,
+              }}
+            >
+              ASK JUNE
+            </Text>
+          </TVPressable>
         </View>
       </View>
-
-      {/* Item Card Modal */}
-      <ItemCardModal
-        item={selectedItem}
-        visible={modalVisible}
-        onClose={handleModalClose}
-        onUse={handleUse}
-        onUnequip={handleUnequip}
-      />
 
       <StatusBar style="light" />
     </View>

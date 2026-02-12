@@ -201,7 +201,7 @@ export default function ChatScreen() {
                 letterSpacing: 1,
               }}
             >
-              {"◀ EQUIPMENT"}
+              {"◀ HOME"}
             </Text>
           </TVPressable>
           <StatusBadge />
