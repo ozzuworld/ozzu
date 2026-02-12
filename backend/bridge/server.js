@@ -1321,6 +1321,8 @@ wss.on("connection", (ws) => {
         approval.resolvedAt = Date.now();
         saveApprovals(approvals);
         syncDirectiveFromApproval(pending.approvalId, pending.approved);
+        // Tell ALL devices to dismiss their keypads
+        broadcastToAll({ type: "pinResolved", approvalId: msg.approvalId });
         pending.resolve({
           success: true,
           message: pending.approved

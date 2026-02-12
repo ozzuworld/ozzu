@@ -91,6 +91,10 @@ export default function ChatScreen() {
         pendingPinRef.current = { approvalId };
         setShowKeypad(true);
       },
+      onPinResolved: () => {
+        setShowKeypad(false);
+        pendingPinRef.current = null;
+      },
       onError: (msg) => {
         console.error("BridgeSession error:", msg);
         if (!sessionReady) {

@@ -17,6 +17,7 @@ export interface BridgeCallbacks {
   onTurnComplete: () => void;
   onInterrupted: () => void;
   onPinRequest: (approvalId: string, description: string) => void;
+  onPinResolved: () => void;
   onError: (message: string) => void;
 }
 
@@ -131,6 +132,9 @@ export class BridgeSession {
         break;
       case "pinRequest":
         this.callbacks?.onPinRequest(msg.approvalId, msg.description);
+        break;
+      case "pinResolved":
+        this.callbacks?.onPinResolved();
         break;
       case "error":
         this.callbacks?.onError(msg.message);
