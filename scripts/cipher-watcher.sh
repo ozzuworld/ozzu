@@ -1,6 +1,6 @@
 #!/bin/bash
 # cipher-watcher.sh — Daemon that polls for directives and invokes Claude Code
-# Closes the automation gap: directive created → Cipher plans → approval → Cipher builds
+# Full lifecycle: directive created → Cipher plans → approval → Cipher builds → CI → auto-deploy
 
 BRIDGE="http://localhost:3333"
 WORKDIR="/home/gcp/ozzu"
@@ -17,6 +17,34 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
 fi
 echo $$ > "$PIDFILE"
 trap 'rm -f "$PIDFILE"' EXIT
+
+# Wait for CI build to finish and deploy
+wait_and_deploy() {
+  log "Waiting for CI build to complete..."
+
+  # Give GitHub Actions a moment to register the push
+  sleep 15
+
+  # Get the latest run ID
+  local RUN_ID
+  RUN_ID=$(cd "$WORKDIR" && gh run list --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+  if [ -z "$RUN_ID" ]; then
+    log "Could not find CI run, skipping deploy"
+    return
+  fi
+
+  log "Watching CI run $RUN_ID..."
+  cd "$WORKDIR" && gh run watch "$RUN_ID" --exit-status >> "$LOGFILE" 2>&1
+  local EXIT=$?
+
+  if [ $EXIT -eq 0 ]; then
+    log "CI build passed, deploying to all devices..."
+    cd "$WORKDIR" && ./scripts/deploy.sh >> "$LOGFILE" 2>&1
+    log "Deploy complete"
+  else
+    log "CI build failed (exit=$EXIT), skipping deploy"
+  fi
+}
 
 log "Cipher watcher started (polling every ${POLL_INTERVAL}s)"
 
@@ -49,7 +77,7 @@ print(f'DIR_TYPE={d[\"type\"]}')
 
         # Invoke Claude Code to plan
         cd "$WORKDIR"
-        claude -p "You are Cipher, the autonomous dev agent for the ozzu project.
+        claude --dangerously-skip-permissions -p "You are Cipher, the autonomous dev agent for the ozzu project.
 
 A new $DIR_TYPE directive needs planning:
 - Title: $DIR_TITLE
@@ -98,7 +126,7 @@ print(f'IMPL_ID={d[\"id\"]}')
 
         # Invoke Claude Code to implement
         cd "$WORKDIR"
-        claude -p "You are Cipher, the autonomous dev agent for the ozzu project.
+        claude --dangerously-skip-permissions -p "You are Cipher, the autonomous dev agent for the ozzu project.
 
 Implement this approved directive:
 - Title: $IMPL_TITLE
@@ -116,6 +144,9 @@ Your task:
 If you encounter a blocker or need King Kazuma's input, post to $BRIDGE/status and create an approval via $BRIDGE/approvals explaining what you need. Do NOT proceed with destructive or risky actions without approval." >> "$LOGFILE" 2>&1
 
         log "Done implementing: $IMPL_TITLE"
+
+        # Wait for CI and auto-deploy
+        wait_and_deploy
       fi
     fi
   fi

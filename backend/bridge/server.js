@@ -710,6 +710,11 @@ const GEMINI_BRIDGE_TOOLS = [
     },
   },
   {
+    name: "deploy_to_devices",
+    description: "Deploy the latest built APK to all devices (tablets and TV). Run this after a CI build completes or when King Kazuma asks to deploy.",
+    parameters: { type: "OBJECT", properties: {}, required: [] },
+  },
+  {
     name: "get_directives",
     description: "Get development directives and their status.",
     parameters: {
@@ -859,6 +864,24 @@ async function handleToolCall(name, args) {
             }
           }, 120000);
         });
+      }
+
+      if (name === "deploy_to_devices") {
+        try {
+          const { execSync } = require("child_process");
+          console.log("[deploy] Starting deploy to all devices...");
+          const output = execSync("/home/gcp/ozzu/scripts/deploy.sh", {
+            cwd: "/home/gcp/ozzu",
+            timeout: 300000,
+            encoding: "utf8",
+          });
+          const successes = (output.match(/SUCCESS/g) || []).length;
+          console.log(`[deploy] Done, ${successes} device(s) updated`);
+          return { success: true, message: `Deployed to ${successes} device(s). ${output.split("\n").slice(-5).join(". ")}` };
+        } catch (err) {
+          console.error("[deploy] Failed:", err.message);
+          return { success: false, message: `Deploy failed: ${err.message}` };
+        }
       }
 
       if (name === "send_dev_directive") {
