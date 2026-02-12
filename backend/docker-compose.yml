@@ -54,6 +54,18 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     command: sh -c "[ -d node_modules/ws ] || npm install --omit=dev; node server.js"
 
+  wyze-bridge:
+    container_name: wyze-bridge
+    image: mrlt8/wyze-bridge:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - WYZE_EMAIL=${WYZE_EMAIL}
+      - WYZE_PASSWORD=${WYZE_PASSWORD}
+      - WB_IP=10.8.0.1
+      - LLHLS=true
+      - WB_AUTH=false
+
   certbot:
     container_name: certbot
     image: certbot/dns-cloudflare

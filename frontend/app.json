@@ -42,6 +42,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-video",
       [
         "@react-native-tvos/config-tv",
         {

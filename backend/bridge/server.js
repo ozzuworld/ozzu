@@ -57,6 +57,16 @@ const ENTITY_CONFIG = [
   { entityId: "todo.shopping_list", label: "Shopping List — List" },
 ];
 
+// ── Camera config ──
+
+const CAMERAS = [
+  { id: 'living_room_cam', name: 'Living Room Camera', streamName: 'living-room-cam' },
+];
+
+function getCameraStreamUrl(streamName) {
+  return `http://10.8.0.1:8888/${streamName}/stream.m3u8`;
+}
+
 const CONTROLLABLE_DOMAINS = new Set(["switch", "siren", "media_player", "number"]);
 const ALLOWED_ENTITY_IDS = new Set(
   ENTITY_CONFIG
@@ -683,6 +693,11 @@ const SYSTEM_PROMPT =
   "You are a companion, not a surveillance system. Respect privacy. " +
   "Once addressed by name, respond naturally and helpfully. " +
   "\n\n" +
+  "CRITICAL TOOL USAGE RULE: When you need to perform an action (create a directive, approve something, " +
+  "check status, control a device), you MUST actually call the tool function — do NOT just describe or narrate " +
+  "what you would do. If you say 'I am sending this to Cipher', you must ACTUALLY call send_dev_directive in that turn. " +
+  "If you say 'I am approving this', you must ACTUALLY call approve_action. Never describe a tool call without executing it. " +
+  "\n\n" +
   "HOME MANAGEMENT: You control smart home devices using the provided tool functions. " +
   "When asked to control a device, call the appropriate function and confirm briefly. " +
   "If a device is read-only, explain that. " +
@@ -862,6 +877,22 @@ const GEMINI_BRIDGE_TOOLS = [
       },
       required: [],
     },
+  },
+  {
+    name: "show_camera",
+    description: "Show a live camera feed overlay on the TV screen. Use when King Kazuma asks to see a camera, bring up a camera, or check a room visually.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        camera_id: { type: "STRING", description: "Camera ID, e.g. living_room_cam" },
+      },
+      required: ["camera_id"],
+    },
+  },
+  {
+    name: "hide_camera",
+    description: "Dismiss/close the camera feed overlay on the TV screen. Use when King Kazuma asks to close, dismiss, or hide the camera view.",
+    parameters: { type: "OBJECT", properties: {}, required: [] },
   },
 ];
 
@@ -1073,6 +1104,25 @@ async function handleToolCall(name, args) {
         while (directives.length > MAX_DIRECTIVES) directives.shift();
         saveDirectives(directives);
         return { success: true, message: `Directive created: ${directive.id} [${type}] "${title}" — status: pending` };
+      }
+
+      if (name === "show_camera") {
+        const cameraId = args.camera_id;
+        const camera = CAMERAS.find((c) => c.id === cameraId);
+        if (!camera) {
+          const available = CAMERAS.map((c) => c.id).join(", ");
+          return { success: false, message: `Unknown camera: ${cameraId}. Available: ${available}` };
+        }
+        const streamUrl = getCameraStreamUrl(camera.streamName);
+        broadcastToAll({ type: "showCamera", cameraId: camera.id, streamUrl, cameraName: camera.name });
+        console.log(`[camera] Showing ${camera.name} → ${streamUrl}`);
+        return { success: true, message: `Showing ${camera.name} on TV.` };
+      }
+
+      if (name === "hide_camera") {
+        broadcastToAll({ type: "hideCamera" });
+        console.log("[camera] Hiding camera overlay");
+        return { success: true, message: "Camera overlay dismissed." };
       }
 
       if (name === "get_directives") {
@@ -1287,6 +1337,9 @@ async function connectGemini() {
 
     if (geminiResumeToken) {
       setup.sessionResumption = { handle: geminiResumeToken };
+      console.log("[gemini] Reconnecting with resume token");
+    } else {
+      console.log("[gemini] Fresh session (no resume token)");
     }
 
     ws.send(JSON.stringify({ setup }));
@@ -1346,18 +1399,33 @@ function handleGeminiMessage(msg) {
     return;
   }
 
-  // Session resumption token
+  // Session resumption token — may arrive as "handle" or "newHandle"
   if (msg.sessionResumptionUpdate) {
-    if (msg.sessionResumptionUpdate.resumable && msg.sessionResumptionUpdate.handle) {
-      geminiResumeToken = msg.sessionResumptionUpdate.handle;
-      console.log("[gemini] Got resume token");
+    const update = msg.sessionResumptionUpdate;
+    const handle = update.handle || update.newHandle;
+    console.log(`[gemini] Session resumption: resumable=${update.resumable}, hasHandle=${!!handle}, keys=${Object.keys(update).join(",")}`);
+    if (handle) {
+      geminiResumeToken = handle;
+      console.log("[gemini] Stored resume token for next reconnect");
     }
     return;
   }
 
-  // Go away — server is about to disconnect
+  // Go away — server is about to disconnect, proactively reconnect to preserve context
   if (msg.goAway) {
-    console.log("[gemini] Server goAway, timeLeft:", msg.goAway.timeLeft);
+    const timeLeft = msg.goAway.timeLeft ? parseInt(msg.goAway.timeLeft) : 0;
+    console.log(`[gemini] Server goAway, timeLeft: ${timeLeft}s — proactively reconnecting`);
+    // Close current connection and immediately reconnect with resume token
+    if (geminiWs) {
+      const ws = geminiWs;
+      geminiWs = null;
+      geminiReady = false;
+      geminiConnecting = false;
+      geminiSpeaking = false;
+      ws.close();
+    }
+    // Reconnect immediately (don't wait for the 2s auto-reconnect delay)
+    setTimeout(() => connectGemini(), 500);
     return;
   }
 
@@ -1376,7 +1444,12 @@ function handleGeminiMessage(msg) {
 
   // Server content
   const sc = msg.serverContent;
-  if (!sc) return;
+  if (!sc) {
+    // Log unhandled message types for debugging
+    const keys = Object.keys(msg).filter(k => k !== 'serverContent');
+    if (keys.length > 0) console.log(`[gemini] Unhandled msg keys: ${keys.join(', ')}`);
+    return;
+  }
 
   // Input transcript (user speech) — accumulate and check for wake word
   if (sc.inputTranscription?.text) {
