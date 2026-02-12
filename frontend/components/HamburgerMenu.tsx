@@ -1,13 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { View, Text, Pressable, Animated, Dimensions } from "react-native";
 import { useRouter } from "expo-router";
+import { TVPressable } from "./TVPressable";
 
-const MENU_WIDTH = 200;
-const SCREEN_WIDTH = Dimensions.get("window").width;
+const MENU_WIDTH = 250;
 
 const menuItems = [
-  { label: "CHAT", route: "/chat" as const },
-  { label: "EQUIPMENT", route: "/equipment" as const },
+  { icon: "⚔️", label: "INVENTORY", route: "/equipment" as const },
 ];
 
 export function HamburgerMenu() {
@@ -56,14 +55,21 @@ export function HamburgerMenu() {
       {/* Hamburger icon button */}
       <Pressable
         onPress={() => setVisible(true)}
-        style={{ padding: 8 }}
+        style={({ pressed }) => ({
+          padding: 8,
+          opacity: pressed ? 0.6 : 1,
+        })}
         hitSlop={8}
       >
-        <View style={{ gap: 4 }}>
-          <View style={{ width: 20, height: 2, backgroundColor: "#737373", borderRadius: 1 }} />
-          <View style={{ width: 20, height: 2, backgroundColor: "#737373", borderRadius: 1 }} />
-          <View style={{ width: 20, height: 2, backgroundColor: "#737373", borderRadius: 1 }} />
-        </View>
+        <Text
+          style={{
+            color: "#525252",
+            fontSize: 22,
+            fontFamily: "monospace",
+          }}
+        >
+          ☰
+        </Text>
       </Pressable>
 
       {/* Menu overlay */}
@@ -86,7 +92,7 @@ export function HamburgerMenu() {
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: "rgba(0,0,0,0.7)",
+              backgroundColor: "rgba(0,0,0,0.85)",
               opacity: fadeAnim,
             }}
           >
@@ -104,23 +110,29 @@ export function HamburgerMenu() {
               left: 0,
               bottom: 0,
               width: MENU_WIDTH,
-              backgroundColor: "#1A1A1A",
+              backgroundColor: "#111111",
               borderRightWidth: 1,
-              borderRightColor: "#333333",
+              borderRightColor: "#222",
               paddingTop: 60,
+              paddingHorizontal: 16,
               transform: [{ translateX: slideAnim }],
             }}
           >
             {menuItems.map((item) => (
-              <Pressable
+              <TVPressable
                 key={item.route}
                 onPress={() => navigate(item.route)}
-                style={({ pressed }) => ({
-                  paddingVertical: 16,
-                  paddingHorizontal: 24,
-                  backgroundColor: pressed ? "#262626" : "transparent",
-                })}
+                style={{
+                  paddingVertical: 14,
+                  paddingHorizontal: 16,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 12,
+                  borderRadius: 8,
+                  borderWidth: 0,
+                }}
               >
+                <Text style={{ fontSize: 18 }}>{item.icon}</Text>
                 <Text
                   style={{
                     color: "#A3A3A3",
@@ -132,7 +144,7 @@ export function HamburgerMenu() {
                 >
                   {item.label}
                 </Text>
-              </Pressable>
+              </TVPressable>
             ))}
           </Animated.View>
         </View>
