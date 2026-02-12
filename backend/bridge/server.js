@@ -1193,7 +1193,7 @@ async function connectGemini() {
           startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
           endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
           prefixPaddingMs: 40,
-          silenceDurationMs: 1800,
+          silenceDurationMs: 2500,
         },
         activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
       },
@@ -1236,6 +1236,10 @@ async function connectGemini() {
     activeMicSilenceSince = 0;
     geminiAudioSentCount = 0;
 
+    // Clean up engagement and buffer state so new session starts fresh
+    inputTranscriptBuffer = "";
+    pendingAudioBuffer = [];
+
     // Auto-reconnect as long as devices are still connected
     if (devices.size > 0) {
       console.log("[gemini] Auto-reconnecting in 2s...");
@@ -1252,6 +1256,13 @@ function handleGeminiMessage(msg) {
     geminiAudioSentCount = 0;
     console.log("[gemini] Setup complete, session active");
     broadcastToAll({ type: "ready" });
+
+    // Retry any tool responses that were queued when the previous session dropped
+    if (pendingToolResponses && geminiWs && geminiWs.readyState === 1) {
+      console.log("[gemini] Sending queued tool response from previous session");
+      geminiWs.send(pendingToolResponses);
+      pendingToolResponses = null;
+    }
     return;
   }
 
@@ -1349,6 +1360,9 @@ function handleGeminiMessage(msg) {
   }
 }
 
+// Queue for tool responses that couldn't be sent (session dropped mid-call)
+let pendingToolResponses = null;
+
 async function handleGeminiToolCalls(functionCalls) {
   const responses = await Promise.all(
     functionCalls.map(async (fc) => {
@@ -1360,6 +1374,7 @@ async function handleGeminiToolCalls(functionCalls) {
       } catch (err) {
         result = { success: false, message: err.message || "Tool call failed" };
       }
+      console.log(`[gemini] Tool ${name} → ${result.success ? "ok" : "fail"}: ${result.message?.substring(0, 80)}`);
       return {
         id: fc.id,
         name,
@@ -1368,8 +1383,14 @@ async function handleGeminiToolCalls(functionCalls) {
     })
   );
 
+  const payload = JSON.stringify({ toolResponse: { functionResponses: responses } });
   if (geminiWs && geminiWs.readyState === 1) {
-    geminiWs.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
+    geminiWs.send(payload);
+    pendingToolResponses = null;
+  } else {
+    // Session dropped while we were processing — queue for retry after reconnect
+    console.log("[gemini] Session dropped mid-tool-call, queuing response for retry");
+    pendingToolResponses = payload;
   }
 }
 

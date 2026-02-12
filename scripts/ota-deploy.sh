@@ -36,23 +36,18 @@ echo "Bundle: $(du -sh "$UPDATES_DIR" | cut -f1)"
 if [ "$RESTART" = true ]; then
   echo "[3/3] Restarting apps on devices..."
 
-  DEVICES=(
-    "tab-roaming|172.168.0.53:44847"
-    "tab-lroom|172.168.0.57:35897"
-    "tv-lroom|172.168.0.56:36331"
-  )
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  source "$SCRIPT_DIR/adb-discover.sh"
   PACKAGE="com.anonymous.ozzu"
   ACTIVITY=".MainActivity"
 
-  for entry in "${DEVICES[@]}"; do
+  for entry in "${KNOWN_DEVICES[@]}"; do
     name="${entry%%|*}"
-    addr="${entry##*|}"
-    adb connect "$addr" 2>/dev/null || true
-    status=$(adb -s "$addr" get-state 2>&1 || true)
-    if [ "$status" = "device" ]; then
+    addr=$(get_device_addr "$name" 2>/dev/null) || true
+    if [ -n "$addr" ]; then
       adb -s "$addr" shell am force-stop "$PACKAGE" 2>/dev/null || true
       adb -s "$addr" shell am start -n "$PACKAGE/$ACTIVITY" 2>/dev/null || true
-      echo "  [$name] restarted"
+      echo "  [$name] restarted ($addr)"
     else
       echo "  [$name] not reachable"
     fi

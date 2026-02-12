@@ -12,13 +12,9 @@
 
 set -e
 
-# ── Device registry ──
-# Format: NAME|IP:PORT
-DEVICES=(
-  "tab-roaming|172.168.0.53:44847"
-  "tab-lroom|172.168.0.57:35897"
-  "tv-lroom|172.168.0.56:36331"
-)
+# ── Device discovery ──
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/adb-discover.sh"
 
 REPO="ozzuworld/ozzu"
 APK_DIR="/tmp/ozzu-apk"
@@ -36,26 +32,29 @@ for arg in "$@"; do
   esac
 done
 
-# Build target list
+# Build target list via auto-discovery
+echo "Discovering ADB devices..."
 TARGETS=()
-for entry in "${DEVICES[@]}"; do
+for entry in "${KNOWN_DEVICES[@]}"; do
   name="${entry%%|*}"
-  addr="${entry##*|}"
-  if [ ${#FILTER[@]} -eq 0 ]; then
+  if [ ${#FILTER[@]} -gt 0 ]; then
+    match=false
+    for f in "${FILTER[@]}"; do
+      [[ "$name" == *"$f"* ]] && match=true && break
+    done
+    [ "$match" = false ] && continue
+  fi
+  addr=$(get_device_addr "$name" 2>/dev/null) || true
+  if [ -n "$addr" ]; then
     TARGETS+=("$name|$addr")
   else
-    for f in "${FILTER[@]}"; do
-      if [[ "$name" == *"$f"* ]]; then
-        TARGETS+=("$name|$addr")
-        break
-      fi
-    done
+    echo "SKIP  $name — ADB port not found"
   fi
 done
 
 if [ ${#TARGETS[@]} -eq 0 ]; then
-  echo "No devices matched. Available:"
-  for entry in "${DEVICES[@]}"; do echo "  ${entry%%|*}"; done
+  echo "No devices found. Available names:"
+  for entry in "${KNOWN_DEVICES[@]}"; do echo "  ${entry%%|*}"; done
   exit 1
 fi
 
@@ -72,28 +71,8 @@ else
 fi
 echo "APK size: $(du -h "$APK" | cut -f1)"
 
-# Verify devices are reachable
-echo ""
-LIVE=()
-for entry in "${TARGETS[@]}"; do
-  name="${entry%%|*}"
-  addr="${entry##*|}"
-  adb connect "$addr" 2>/dev/null || true
-  status=$(adb -s "$addr" get-state 2>&1 || true)
-  if [ "$status" != "device" ]; then
-    echo "SKIP  $name ($addr) — not reachable"
-  else
-    echo "OK    $name ($addr)"
-    LIVE+=("$entry")
-  fi
-done
-
-if [ ${#LIVE[@]} -eq 0 ]; then
-  echo "No devices reachable. Aborting."
-  exit 1
-fi
-
 # Install with progress
+LIVE=("${TARGETS[@]}")
 echo ""
 install_device() {
   local name=$1
