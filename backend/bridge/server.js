@@ -552,9 +552,11 @@ const SYSTEM_PROMPT =
   "PERSONALITY: Warm, efficient, confident. Slight formality. You are a mature, capable companion — " +
   "not a servant, not an assistant. You manage the ecosystem alongside King Kazuma. " +
   "\n\n" +
-  "You are always listening but should ONLY respond when directly addressed as 'June'. " +
-  "Ignore ambient conversation, background noise, and speech not directed at you. " +
-  "When addressed, respond naturally and helpfully. " +
+  "WAKE WORD: You are connected to always-on microphones, but you must ONLY respond " +
+  "when someone says your name 'June'. If speech does not contain 'June', stay completely silent — " +
+  "do NOT respond, do NOT acknowledge, do NOT comment on what you hear. " +
+  "You are a companion, not a surveillance system. Respect privacy. " +
+  "Once addressed by name, respond naturally and helpfully. " +
   "\n\n" +
   "HOME MANAGEMENT: You control smart home devices using the provided tool functions. " +
   "When asked to control a device, call the appropriate function and confirm briefly. " +
@@ -957,6 +959,29 @@ const MIC_RELEASE_MS = 2000; // release active mic after 2s of silence
 // Gemini needs peaks of ~2000+ to reliably detect and transcribe speech
 const AUDIO_GAIN = 8;
 
+// Wake word gating: June only responds when addressed by name
+// IDLE: audio streams to Gemini but responses are suppressed
+// ENGAGED: full two-way conversation, extends with each turn
+let engagedUntil = 0; // timestamp when engagement expires (0 = idle)
+const ENGAGE_DURATION_MS = 60000; // stay engaged for 60s after wake word
+const ENGAGE_EXTEND_MS = 30000; // extend by 30s on each turn complete
+
+function isEngaged() { return Date.now() < engagedUntil; }
+
+function engage(reason) {
+  const wasEngaged = isEngaged();
+  engagedUntil = Date.now() + ENGAGE_DURATION_MS;
+  if (!wasEngaged) {
+    console.log(`[wake] ENGAGED — ${reason}`);
+  }
+}
+
+function extendEngagement() {
+  if (isEngaged()) {
+    engagedUntil = Date.now() + ENGAGE_EXTEND_MS;
+  }
+}
+
 function broadcastToAll(msg) {
   const data = JSON.stringify(msg);
   for (const [ws, info] of devices) {
@@ -1102,8 +1127,9 @@ function handleGeminiMessage(msg) {
     return;
   }
 
-  // Tool calls — resolve server-side
+  // Tool calls — resolve server-side (always process, they only happen when engaged)
   if (msg.toolCall?.functionCalls) {
+    extendEngagement();
     handleGeminiToolCalls(msg.toolCall.functionCalls);
     return;
   }
@@ -1112,37 +1138,54 @@ function handleGeminiMessage(msg) {
   const sc = msg.serverContent;
   if (!sc) return;
 
-  // Interruption
+  // Input transcript (user speech) — check for wake word BEFORE gating
+  if (sc.inputTranscription?.text) {
+    const text = sc.inputTranscription.text;
+    console.log(`[gemini] INPUT: "${text}"`);
+
+    // Check for wake word "June" (case insensitive)
+    if (/\bjune\b/i.test(text)) {
+      engage(`heard "${text.trim()}"`);
+    }
+
+    // Only show input transcript to devices when engaged
+    if (isEngaged()) {
+      broadcastToAll({ type: "inputTranscript", text });
+    }
+  }
+
+  // Interruption — only forward when engaged
   if (sc.interrupted) {
-    broadcastToAll({ type: "interrupted" });
+    if (isEngaged()) {
+      broadcastToAll({ type: "interrupted" });
+    }
     return;
   }
 
-  // Audio chunks → send to speaker devices
+  // Audio chunks → only send to speakers when engaged
   const parts = sc.modelTurn?.parts;
   if (parts) {
     for (const part of parts) {
-      if (part.inlineData?.data) {
+      if (part.inlineData?.data && isEngaged()) {
         broadcastToRole("speaker", { type: "audio", data: part.inlineData.data });
       }
     }
   }
 
-  // Output transcript (model speech)
+  // Output transcript (model speech) — only forward when engaged
   if (sc.outputTranscription?.text) {
     console.log(`[gemini] OUTPUT: "${sc.outputTranscription.text}"`);
-    broadcastToAll({ type: "transcript", text: sc.outputTranscription.text });
-  }
-
-  // Input transcript (user speech)
-  if (sc.inputTranscription?.text) {
-    console.log(`[gemini] INPUT: "${sc.inputTranscription.text}"`);
-    broadcastToAll({ type: "inputTranscript", text: sc.inputTranscription.text });
+    if (isEngaged()) {
+      broadcastToAll({ type: "transcript", text: sc.outputTranscription.text });
+    }
   }
 
   // Turn complete
   if (sc.turnComplete) {
-    broadcastToAll({ type: "turnComplete" });
+    if (isEngaged()) {
+      extendEngagement();
+      broadcastToAll({ type: "turnComplete" });
+    }
   }
 }
 
