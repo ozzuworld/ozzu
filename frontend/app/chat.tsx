@@ -10,8 +10,10 @@ import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
+import { useKeepAwake } from "expo-keep-awake";
 
 export default function ChatScreen() {
+  useKeepAwake();
   const router = useRouter();
 
   // Detect device role once
