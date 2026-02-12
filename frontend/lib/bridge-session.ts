@@ -18,6 +18,8 @@ export interface BridgeCallbacks {
   onInterrupted: () => void;
   onPinRequest: (approvalId: string, description: string) => void;
   onPinResolved: () => void;
+  onShowCamera: (cameraId: string, streamUrl: string, cameraName: string) => void;
+  onHideCamera: () => void;
   onError: (message: string) => void;
 }
 
@@ -135,6 +137,12 @@ export class BridgeSession {
         break;
       case "pinResolved":
         this.callbacks?.onPinResolved();
+        break;
+      case "showCamera":
+        this.callbacks?.onShowCamera(msg.cameraId, msg.streamUrl, msg.cameraName);
+        break;
+      case "hideCamera":
+        this.callbacks?.onHideCamera();
         break;
       case "error":
         this.callbacks?.onError(msg.message);

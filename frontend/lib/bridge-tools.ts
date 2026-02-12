@@ -97,6 +97,33 @@ export const BRIDGE_FUNCTION_DECLARATIONS = [
       required: [],
     },
   },
+  {
+    name: "show_camera",
+    description:
+      "Show a live camera feed overlay on the TV screen. " +
+      "Use when King Kazuma asks to see a camera, bring up a camera, or check a room visually.",
+    parameters: {
+      type: "OBJECT" as any,
+      properties: {
+        camera_id: {
+          type: "STRING" as const,
+          description: "Camera ID, e.g. living_room_cam",
+        },
+      },
+      required: ["camera_id"],
+    },
+  },
+  {
+    name: "hide_camera",
+    description:
+      "Dismiss/close the camera feed overlay on the TV screen. " +
+      "Use when King Kazuma asks to close, dismiss, or hide the camera view.",
+    parameters: {
+      type: "OBJECT" as any,
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 export const BRIDGE_TOOL_NAMES = new Set(

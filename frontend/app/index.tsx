@@ -9,6 +9,7 @@ import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
+import { CameraOverlay } from "../components/CameraOverlay";
 import { useKeepAwake } from "expo-keep-awake";
 
 export default function LandingScreen() {
@@ -24,6 +25,12 @@ export default function LandingScreen() {
 
   const [showKeypad, setShowKeypad] = useState(false);
   const pendingPinRef = useRef<{ approvalId: string } | null>(null);
+
+  const [cameraOverlay, setCameraOverlay] = useState<{
+    visible: boolean;
+    streamUrl: string;
+    cameraName: string;
+  }>({ visible: false, streamUrl: "", cameraName: "" });
 
   const [responseText, setResponseText] = useState("");
   const [inputTranscript, setInputTranscript] = useState("");
@@ -88,6 +95,12 @@ export default function LandingScreen() {
       onPinResolved: () => {
         setShowKeypad(false);
         pendingPinRef.current = null;
+      },
+      onShowCamera: (_cameraId, streamUrl, cameraName) => {
+        setCameraOverlay({ visible: true, streamUrl, cameraName });
+      },
+      onHideCamera: () => {
+        setCameraOverlay({ visible: false, streamUrl: "", cameraName: "" });
       },
       onError: (msg) => {
         console.error("BridgeSession error:", msg);
@@ -154,6 +167,15 @@ export default function LandingScreen() {
         inputTranscript={inputTranscript}
         responseText={responseText}
         isStreaming={isStreaming}
+      />
+
+      <CameraOverlay
+        visible={cameraOverlay.visible}
+        streamUrl={cameraOverlay.streamUrl}
+        cameraName={cameraOverlay.cameraName}
+        onClose={() =>
+          setCameraOverlay({ visible: false, streamUrl: "", cameraName: "" })
+        }
       />
 
       <Keypad
