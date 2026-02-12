@@ -1125,13 +1125,14 @@ const pendingPinRequests = new Map(); // pinId -> { approvalId, approved, resolv
 // When multiple mics send simultaneously, interleaved audio confuses Gemini's VAD.
 let activeMic = null; // ws of the currently forwarding mic
 let activeMicSilenceSince = 0; // timestamp when active mic last had low amplitude
-const MIC_SPEECH_THRESHOLD = 50; // peak to consider "speech" for audio stats (VOICE_COMMUNICATION: ambient ~15-25, speech ~40-80)
-const MIC_SWITCH_THRESHOLD = 150; // peak required to steal active mic from another device (prevents ambient noise causing rapid switching)
+const MIC_SPEECH_THRESHOLD = 40; // peak to consider "speech" (VOICE_COMMUNICATION: ambient ~15-25, speech ~40-80)
+const MIC_SWITCH_THRESHOLD = 80; // peak required to steal active mic (clear speech only)
 const MIC_RELEASE_MS = 2000; // release active mic after 2s of silence
 
 // Audio amplification: tablet mics produce very quiet audio (peaks ~200-300 for speech)
 // Gemini needs peaks of ~2000+ to reliably detect and transcribe speech
-const AUDIO_GAIN = 32; // VOICE_COMMUNICATION produces very quiet audio, needs heavy amplification for Gemini
+const AUDIO_GAIN = 16; // VOICE_COMMUNICATION: raw peaks ~30-80 speech, amplified ~480-1280 for Gemini
+const OUTPUT_GAIN = 4; // Amplify Gemini's response audio before sending to speakers
 
 // Audio diagnostics: rolling window of peak levels per device
 const audioStats = new Map(); // deviceId -> { peaks: number[], lastChunkAt: number, chunksPerSec: number, chunkCount: number }
@@ -1187,7 +1188,7 @@ const ENGAGE_EXTEND_MS = 120000; // extend by 2 min on each conversation turn
 let inputTranscriptBuffer = ""; // accumulates fragments to detect wake word
 let pendingAudioBuffer = []; // buffers Gemini audio output while idle
 
-function isEngaged() { return Date.now() < engagedUntil; }
+function isEngaged() { return true; } // Wake word disabled — always engaged until on-device detection is implemented
 
 function engage(reason) {
   const wasEngaged = isEngaged();
@@ -1232,6 +1233,7 @@ let geminiWs = null;
 let geminiResumeToken = null;
 let geminiConnecting = false;
 let geminiReady = false;
+let geminiSpeaking = false; // true while model is outputting audio — used to gate mic input
 
 async function connectGemini() {
   if (geminiWs || geminiConnecting) return;
@@ -1313,9 +1315,10 @@ async function connectGemini() {
     activeMicSilenceSince = 0;
     geminiAudioSentCount = 0;
 
-    // Clean up engagement and buffer state so new session starts fresh
+    // Clean up state so new session starts fresh
     inputTranscriptBuffer = "";
     pendingAudioBuffer = [];
+    geminiSpeaking = false; // critical: unblock mic input after reconnect
 
     // Auto-reconnect as long as devices are still connected
     if (devices.size > 0) {
@@ -1396,6 +1399,7 @@ function handleGeminiMessage(msg) {
 
   // Interruption — only forward when engaged
   if (sc.interrupted) {
+    geminiSpeaking = false; // interrupted — resume mic input
     if (isEngaged()) {
       broadcastToAll({ type: "interrupted" });
     }
@@ -1407,11 +1411,10 @@ function handleGeminiMessage(msg) {
   if (parts) {
     for (const part of parts) {
       if (part.inlineData?.data) {
+        geminiSpeaking = true; // model is outputting audio — gate mic input
         if (isEngaged()) {
-          // Engaged: forward directly
           broadcastToRole("speaker", { type: "audio", data: part.inlineData.data });
         } else {
-          // Idle: buffer audio (will flush if engagement triggers)
           pendingAudioBuffer.push(part.inlineData.data);
         }
       }
@@ -1428,6 +1431,7 @@ function handleGeminiMessage(msg) {
 
   // Turn complete
   if (sc.turnComplete) {
+    geminiSpeaking = false; // model done speaking — resume mic input
     inputTranscriptBuffer = "";
     pendingAudioBuffer = []; // discard any unbuffered audio
     if (isEngaged()) {
@@ -1505,6 +1509,8 @@ function amplifyAudio(pcmBase64, gain) {
 
 function sendToGeminiAudio(pcmBase64, ws, deviceId) {
   if (!geminiReady || !geminiWs || geminiWs.readyState !== 1) return;
+  // Don't forward mic audio while model is speaking — prevents TV speaker echo from interrupting
+  if (geminiSpeaking) return;
 
   const peak = getPeakAmplitude(pcmBase64);
   const now = Date.now();

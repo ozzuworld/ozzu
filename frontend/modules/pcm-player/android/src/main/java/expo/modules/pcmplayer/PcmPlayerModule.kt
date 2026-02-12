@@ -9,7 +9,7 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
-// AcousticEchoCanceler removed — VOICE_RECOGNITION source provides better raw signal
+import android.media.audiofx.AcousticEchoCanceler
 import android.util.Base64
 import android.util.Log
 import expo.modules.kotlin.modules.Module
@@ -26,7 +26,7 @@ class PcmPlayerModule : Module() {
     private var audioRecord: AudioRecord? = null
     private var recordThread: Thread? = null
     @Volatile private var recording = false
-    // AEC removed — VOICE_RECOGNITION source provides cleaner signal than VOICE_COMMUNICATION + AEC
+    private var aec: AcousticEchoCanceler? = null
 
     override fun definition() = ModuleDefinition {
         Name("PcmPlayer")
@@ -124,14 +124,22 @@ class PcmPlayerModule : Module() {
             )
 
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 sampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
                 bufferSize * 2
             )
 
-            Log.i("PcmPlayer", "Recording with VOICE_RECOGNITION source, session=${audioRecord?.audioSessionId}")
+            // Re-enable AEC with VOICE_COMMUNICATION to filter TV speaker bleed
+            val sessionId = audioRecord?.audioSessionId ?: 0
+            if (AcousticEchoCanceler.isAvailable()) {
+                aec = AcousticEchoCanceler.create(sessionId)
+                aec?.enabled = true
+                Log.i("PcmPlayer", "AEC enabled, session=$sessionId")
+            } else {
+                Log.w("PcmPlayer", "AEC not available on this device")
+            }
 
             audioRecord?.startRecording()
             recording = true
@@ -159,7 +167,8 @@ class PcmPlayerModule : Module() {
             audioRecord?.stop()
             audioRecord?.release()
             audioRecord = null
-            // AEC removed — using VOICE_RECOGNITION source
+            aec?.release()
+            aec = null
         }
     }
 }
