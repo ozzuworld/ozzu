@@ -15,9 +15,9 @@ KNOWN_DEVICES=(
   "tv-lroom|172.168.0.56"
 )
 
-# Port range for Android wireless debugging (based on observed ports: 34421-44847)
-PORT_MIN=34000
-PORT_MAX=45000
+# Port range for Android wireless debugging
+PORT_MIN=30000
+PORT_MAX=50000
 
 _cache_get() {
   local ip=$1
@@ -121,8 +121,26 @@ discover_all() {
   done
 }
 
-# If run directly (not sourced), discover all
+# Seed ports manually: ./scripts/adb-discover.sh seed IP:PORT [IP:PORT ...]
+# Example: ./scripts/adb-discover.sh seed 172.168.0.53:33377 172.168.0.57:39821
+seed_ports() {
+  for addr in "$@"; do
+    local ip="${addr%%:*}"
+    local port="${addr##*:}"
+    adb connect "$addr" >/dev/null 2>&1 || true
+    _cache_set "$ip" "$port"
+    echo "Cached $addr"
+  done
+  touch "$CACHE_FILE"  # refresh TTL
+}
+
+# If run directly (not sourced)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  echo "Scanning for ADB devices..."
-  discover_all
+  if [ "$1" = "seed" ]; then
+    shift
+    seed_ports "$@"
+  else
+    echo "Scanning for ADB devices..."
+    discover_all
+  fi
 fi

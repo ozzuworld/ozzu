@@ -196,6 +196,18 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /audio-stats — Real-time audio diagnostics for all mics
+  if (req.method === "GET" && pathname === "/audio-stats") {
+    sendJSON(res, 200, {
+      devices: [...devices.values()].map(d => ({ deviceId: d.deviceId, role: d.role })),
+      activeMic: activeMic ? devices.get(activeMic)?.deviceId : null,
+      gain: AUDIO_GAIN,
+      speechThreshold: MIC_SPEECH_THRESHOLD,
+      diagnostics: getAudioDiagnostics(),
+    });
+    return;
+  }
+
   // POST /notify — Push a notification to June (used by cipher-watcher, deploy scripts, etc.)
   if (req.method === "POST" && pathname === "/notify") {
     const data = await parseBody(req);
@@ -836,6 +848,11 @@ const GEMINI_BRIDGE_TOOLS = [
     parameters: { type: "OBJECT", properties: {}, required: [] },
   },
   {
+    name: "mic_check",
+    description: "Run audio diagnostics on connected microphones. Reports peak levels, speech detection, and connection health for each device. Use when asked to check audio, mic levels, or diagnose why voice isn't being picked up.",
+    parameters: { type: "OBJECT", properties: {}, required: [] },
+  },
+  {
     name: "get_directives",
     description: "Get development directives and their status.",
     parameters: {
@@ -934,6 +951,21 @@ async function handleToolCall(name, args) {
           .map((e) => `[${e.timestamp}] ${e.event}: ${e.tool} — ${e.message}`)
           .join("\n");
         return { success: true, message: summary };
+      }
+
+      if (name === "mic_check") {
+        const diag = getAudioDiagnostics();
+        if (diag.length === 0) return { success: true, message: "No audio data yet. No microphones have sent audio." };
+        const lines = diag.map(d =>
+          `${d.deviceId}: ${d.status} | avgPeak=${d.avgPeak} maxPeak=${d.maxPeak} (amplified: avg=${d.amplifiedAvg} max=${d.amplifiedMax}) | speech=${d.speechPercent}% | ${d.chunksPerSec} chunks/s${d.stale ? " | STALE (no data >5s)" : ""}`
+        );
+        const connectedMics = [...devices.values()].filter(d => d.role === "mic").map(d => d.deviceId);
+        const connectedSpeakers = [...devices.values()].filter(d => d.role === "speaker").map(d => d.deviceId);
+        const activeMicId = activeMic ? devices.get(activeMic)?.deviceId : "none";
+        return {
+          success: true,
+          message: `Connected mics: ${connectedMics.join(", ") || "none"}\nConnected speakers: ${connectedSpeakers.join(", ") || "none"}\nActive mic: ${activeMicId}\nSpeech threshold: ${MIC_SPEECH_THRESHOLD} (raw), ${MIC_SPEECH_THRESHOLD * AUDIO_GAIN} (amplified)\nGain: ${AUDIO_GAIN}x\n\n${lines.join("\n")}`,
+        };
       }
 
       if (name === "get_pending_approvals") {
@@ -1093,12 +1125,57 @@ const pendingPinRequests = new Map(); // pinId -> { approvalId, approved, resolv
 // When multiple mics send simultaneously, interleaved audio confuses Gemini's VAD.
 let activeMic = null; // ws of the currently forwarding mic
 let activeMicSilenceSince = 0; // timestamp when active mic last had low amplitude
-const MIC_SPEECH_THRESHOLD = 400; // peak amplitude to consider "speech" (ambient ~15-100, TV bleed ~200-300, speech ~500+)
+const MIC_SPEECH_THRESHOLD = 50; // peak to consider "speech" for audio stats (VOICE_COMMUNICATION: ambient ~15-25, speech ~40-80)
+const MIC_SWITCH_THRESHOLD = 150; // peak required to steal active mic from another device (prevents ambient noise causing rapid switching)
 const MIC_RELEASE_MS = 2000; // release active mic after 2s of silence
 
 // Audio amplification: tablet mics produce very quiet audio (peaks ~200-300 for speech)
 // Gemini needs peaks of ~2000+ to reliably detect and transcribe speech
-const AUDIO_GAIN = 8;
+const AUDIO_GAIN = 32; // VOICE_COMMUNICATION produces very quiet audio, needs heavy amplification for Gemini
+
+// Audio diagnostics: rolling window of peak levels per device
+const audioStats = new Map(); // deviceId -> { peaks: number[], lastChunkAt: number, chunksPerSec: number, chunkCount: number }
+const AUDIO_STATS_WINDOW = 50; // keep last 50 peaks (~5 seconds at 10 chunks/s)
+
+function recordAudioStat(deviceId, rawPeak) {
+  if (!audioStats.has(deviceId)) {
+    audioStats.set(deviceId, { peaks: [], lastChunkAt: 0, chunksPerSec: 0, chunkCount: 0, firstChunkAt: Date.now() });
+  }
+  const stat = audioStats.get(deviceId);
+  stat.peaks.push(rawPeak);
+  if (stat.peaks.length > AUDIO_STATS_WINDOW) stat.peaks.shift();
+  const now = Date.now();
+  const elapsed = (now - stat.firstChunkAt) / 1000;
+  stat.chunkCount++;
+  stat.chunksPerSec = elapsed > 0 ? Math.round(stat.chunkCount / elapsed) : 0;
+  stat.lastChunkAt = now;
+}
+
+function getAudioDiagnostics() {
+  const results = [];
+  for (const [deviceId, stat] of audioStats) {
+    const peaks = stat.peaks;
+    if (peaks.length === 0) continue;
+    const avg = Math.round(peaks.reduce((a, b) => a + b, 0) / peaks.length);
+    const max = Math.max(...peaks);
+    const min = Math.min(...peaks);
+    const speechPct = Math.round(peaks.filter(p => p >= MIC_SPEECH_THRESHOLD).length / peaks.length * 100);
+    const stale = Date.now() - stat.lastChunkAt > 5000;
+    results.push({
+      deviceId,
+      avgPeak: avg,
+      maxPeak: max,
+      minPeak: min,
+      amplifiedAvg: avg * AUDIO_GAIN,
+      amplifiedMax: max * AUDIO_GAIN,
+      speechPercent: speechPct,
+      chunksPerSec: stat.chunksPerSec,
+      stale,
+      status: stale ? "NO_DATA" : max < 50 ? "SILENT" : max < MIC_SPEECH_THRESHOLD ? "AMBIENT_ONLY" : "RECEIVING_SPEECH",
+    });
+  }
+  return results;
+}
 
 // Wake word gating: June only responds when addressed by name
 // IDLE: audio streams to Gemini but responses are suppressed
@@ -1307,7 +1384,7 @@ function handleGeminiMessage(msg) {
     // Check for wake word — strip spaces so fragmented "Ju" + "ne" still matches
     // Also match common Latin accent transcriptions: juno, hune, youne, dune, etc.
     const normalized = inputTranscriptBuffer.replace(/\s/g, "").toLowerCase();
-    if (!isEngaged() && /june|juno|hune|youne|iune|dune|joon|jhune|chune/.test(normalized)) {
+    if (!isEngaged() && /june|juno|hune|youne|iune|dune|joon|jhune|chune|yun|yune|jun/.test(normalized)) {
       engage(`wake word in: "${inputTranscriptBuffer.trim()}"`);
     }
 
@@ -1431,6 +1508,7 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
 
   const peak = getPeakAmplitude(pcmBase64);
   const now = Date.now();
+  recordAudioStat(deviceId, peak);
 
   // Mic switching: only forward audio from one mic at a time
   if (!activeMic) {
@@ -1445,7 +1523,7 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
       activeMicSilenceSince = 0;
     }
   } else {
-    if (peak >= MIC_SPEECH_THRESHOLD &&
+    if (peak >= MIC_SWITCH_THRESHOLD &&
         activeMicSilenceSince > 0 &&
         now - activeMicSilenceSince > MIC_RELEASE_MS) {
       const oldInfo = devices.get(activeMic);
