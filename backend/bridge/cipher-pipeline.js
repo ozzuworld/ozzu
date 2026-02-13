@@ -515,14 +515,25 @@ class CipherPipeline extends EventEmitter {
     console.log("[cipher] TTS: streaming started");
   }
 
+  _stripMarkdownForTTS(text) {
+    return text
+      .replace(/\*+/g, "")           // bold/italic markers → "star star"
+      .replace(/`+/g, "")            // code markers
+      .replace(/^#+\s*/gm, "")       // header markers
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [links](url) → just text
+      .replace(/\s{2,}/g, " ");      // collapse extra whitespace
+  }
+
   _sendToTTS(text) {
     if (!this.dgTTS || !this._ttsActive) return;
+    const cleaned = this._stripMarkdownForTTS(text);
+    if (!cleaned) return; // skip if stripping left nothing (e.g. lone **)
     if (!this._ttsSendCount) this._ttsSendCount = 0;
     this._ttsSendCount++;
     if (this._ttsSendCount <= 3) {
-      console.log("[cipher] TTS sendText #%d: \"%s\" (connected=%s)", this._ttsSendCount, text, this.dgTTS.isConnected?.() ?? "unknown");
+      console.log("[cipher] TTS sendText #%d: \"%s\" (connected=%s)", this._ttsSendCount, cleaned, this.dgTTS.isConnected?.() ?? "unknown");
     }
-    this.dgTTS.sendText(text);
+    this.dgTTS.sendText(cleaned);
   }
 
   _flushTTS() {

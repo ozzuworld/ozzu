@@ -270,6 +270,15 @@ async function initStorage() {
     _redisConnected = true;
     console.log("[redis] Connected");
 
+    // Restore active persona from Redis
+    const savedPersona = await redis.get("ozzu:activePersona");
+    if (savedPersona) {
+      const { persona, cipherMode: mode } = JSON.parse(savedPersona);
+      currentPersona = persona;
+      cipherMode = mode;
+      console.log(`[startup] Restored persona: ${persona}${mode ? ` (${mode})` : ""}`);
+    }
+
     // Load from Redis, or migrate from JSON files
     const storedDirectives = await redis.get("ozzu:directives");
     if (storedDirectives) {
@@ -1650,6 +1659,74 @@ async function buildMemoryContext(persona) {
   return ctx;
 }
 
+function timeSince(date) {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+  return `${Math.floor(seconds / 86400)} days ago`;
+}
+
+async function buildSituationBriefing(persona) {
+  const lines = [];
+
+  // 1. Current time + timezone
+  const now = new Date();
+  lines.push(`Current time: ${now.toLocaleString("en-US", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZone: "America/New_York"
+  })} (Eastern Time)`);
+
+  // 2. Last conversation for THIS persona
+  const recentSummaries = await getRecentSummaries(persona, 1);
+  if (recentSummaries.length > 0) {
+    const last = recentSummaries[0];
+    const ts = last.started_at || last.timestamp;
+    if (ts) {
+      const ago = timeSince(new Date(ts));
+      lines.push(`Your last conversation with King Kazuma was ${ago} — ${last.summary || "no summary available"}`);
+    }
+  }
+
+  // 3. Last conversation for the OTHER persona (timing only, no content sharing)
+  const otherPersona = persona === "june" ? "cipher" : "june";
+  const otherSummaries = await getRecentSummaries(otherPersona, 1);
+  if (otherSummaries.length > 0) {
+    const last = otherSummaries[0];
+    const ts = last.started_at || last.timestamp;
+    if (ts) {
+      const ago = timeSince(new Date(ts));
+      lines.push(`King Kazuma last spoke with ${otherPersona === "june" ? "June" : "Cipher"} ${ago}.`);
+    }
+  }
+
+  // 4. Active directives overview
+  const directives = _directives;
+  if (directives.length > 0) {
+    const byStatus = {};
+    for (const d of directives) {
+      byStatus[d.status] = (byStatus[d.status] || 0) + 1;
+    }
+    const statusLine = Object.entries(byStatus).map(([s, c]) => `${c} ${s}`).join(", ");
+    lines.push(`Directives: ${statusLine}`);
+
+    const active = directives.filter(d =>
+      ["pending", "planning", "in_progress", "planned"].includes(d.status)
+    );
+    for (const d of active.slice(0, 5)) {
+      lines.push(`  - [${d.status}] ${d.title}`);
+    }
+  }
+
+  // 5. Pending approvals
+  const approvals = _approvals.filter(a => !a.resolved);
+  if (approvals.length > 0) {
+    lines.push(`Pending approvals: ${approvals.length}`);
+  }
+
+  return "\n\nSITUATION BRIEFING:\n" + lines.join("\n") + "\n";
+}
+
 async function fetchEntityContext() {
   try {
     const states = await haFetch("/api/states");
@@ -2058,7 +2135,7 @@ let lastMicSwitchAt = 0;
 
 // Audio amplification: tablet mics produce very quiet audio (peaks ~200-300 for speech)
 // Gemini needs peaks of ~2000+ to reliably detect and transcribe speech
-const AUDIO_GAIN = 1; // No server-side amplification — rely on Android AEC for echo cancellation
+const AUDIO_GAIN = 8; // raw peaks ~80-180 → amplified ~640-1440 for STT
 const OUTPUT_GAIN = 4; // Amplify Gemini's response audio before sending to speakers
 
 // Audio diagnostics: rolling window of peak levels per device
@@ -2178,9 +2255,10 @@ async function connectGemini() {
   geminiConnecting = true;
   console.log("[gemini] Connecting to Gemini Live API...");
 
-  const [entityContext, memoryContext] = await Promise.all([
+  const [entityContext, memoryContext, situationBriefing] = await Promise.all([
     fetchEntityContext(),
     buildMemoryContext(currentPersona),
+    buildSituationBriefing(currentPersona),
   ]);
 
   const ws = new WebSocket(GEMINI_WS_URL);
@@ -2194,7 +2272,7 @@ async function connectGemini() {
     if (currentPersona === "cipher") {
       voice = CIPHER_VOICE;
       if (cipherMode === "learning") {
-        systemPromptText = CIPHER_LEARNING_PROMPT + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+        systemPromptText = CIPHER_LEARNING_PROMPT + situationBriefing + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
         // Learning mode gets remember + read_file + run_command + show_content + hide_content + switch back to June
         const rememberTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "remember");
         const readFileTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "read_file");
@@ -2203,12 +2281,12 @@ async function connectGemini() {
         const hideContentTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "hide_content");
         toolDeclarations = [rememberTool, readFileTool, runCommandTool, showContentTool, hideContentTool, SWITCH_TO_JUNE_TOOL];
       } else {
-        systemPromptText = CIPHER_BUILDING_PROMPT + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+        systemPromptText = CIPHER_BUILDING_PROMPT + situationBriefing + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
         toolDeclarations = [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS, SWITCH_TO_JUNE_TOOL];
       }
     } else {
       voice = JUNE_VOICE;
-      systemPromptText = SYSTEM_PROMPT + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+      systemPromptText = SYSTEM_PROMPT + situationBriefing + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
       toolDeclarations = [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS, SWITCH_TO_CIPHER_TOOL];
     }
 
@@ -2699,6 +2777,16 @@ async function generateSessionSummary(persona) {
 
 async function switchPersona() {
   console.log(`[persona] Switching to ${currentPersona}${cipherMode ? ` (${cipherMode})` : ""}`);
+
+  // Persist active persona to Redis
+  if (_redisConnected) {
+    redis.set("ozzu:activePersona", JSON.stringify({
+      persona: currentPersona,
+      cipherMode: cipherMode,
+      switchedAt: new Date().toISOString(),
+    }));
+  }
+
   // Summarize the ending persona's conversation (async, fire-and-forget)
   const endingPersona = currentPersona === "june" ? "cipher" : "june"; // persona we're switching FROM
   generateSessionSummary(endingPersona).catch(err =>
@@ -2750,9 +2838,10 @@ async function switchPersona() {
 }
 
 async function startCipherPipeline() {
-  const [entityContext, memoryContext] = await Promise.all([
+  const [entityContext, memoryContext, situationBriefing] = await Promise.all([
     fetchEntityContext(),
     buildMemoryContext("cipher"),
+    buildSituationBriefing("cipher"),
   ]);
 
   // Build system prompt — add voice-conversation rules for the Claude pipeline
@@ -2760,14 +2849,26 @@ async function startCipherPipeline() {
     "\n\nVOICE MODE RULES (you are in a turn-based voice conversation):\n" +
     "- TURN FLOW: You speak → then stop → King Kazuma speaks → then you speak again.\n" +
     "- Keep verbal responses concise: 1-3 sentences for simple answers.\n" +
-    "- For complex output (tables, code, lists, device status, multiple items):\n" +
-    "  Call show_content to display it on screen, then give a SHORT verbal summary.\n" +
-    "  Example: show_content with the table, then say 'Here's the network status — three devices up, one down.'\n" +
-    "- NO markdown in speech — speak naturally with contractions.\n" +
+    "- NO markdown in speech — speak naturally with contractions. Never say asterisks, backticks, or formatting characters.\n" +
     "- When running tools, just do it silently. Only speak when you have results.\n" +
     "- NEVER call switch_to_june unless King Kazuma EXPLICITLY says 'switch to June', 'go back to June', or 'I'm done'.\n" +
     "- Short utterances like 'done', 'ok', 'yes' are conversational — NOT exit requests.\n" +
     "- If input is garbled/unclear, ask for clarification — don't guess intent.\n" +
+    "\n" +
+    "show_content — YOUR VISUAL DISPLAY TOOL:\n" +
+    "show_content pops up a rich panel on King Kazuma's screen. It renders markdown beautifully — " +
+    "headers, bold, code blocks, tables, bullet lists, status badges. USE IT PROACTIVELY:\n" +
+    "- When discussing a directive or plan: show_content with the full plan formatted in markdown. " +
+    "Speak a 1-2 sentence summary, let the screen do the detail work.\n" +
+    "- When showing status of multiple things: show_content with a table or status list. " +
+    "Say 'Here's the overview' and let the panel show the details.\n" +
+    "- When explaining architecture or how something works: show_content with a structured breakdown. " +
+    "Walk through it verbally at a high level.\n" +
+    "- When showing device states, command output, code: always show_content.\n" +
+    "- Format show_content markdown well: use ## headers to organize sections, **bold** for emphasis, " +
+    "`code` for technical terms, tables for comparisons, - bullets for lists, [status] badges for directive/task status.\n" +
+    "- Think of it like presenting to a screen — you're the voice, the panel is the slides.\n" +
+    "- After showing content, give a SHORT verbal walkthrough (2-3 sentences max). Don't read the panel aloud.\n" +
     "\n" +
     "ACTION vs DIRECTIVE — CRITICAL DISTINCTION:\n" +
     "- DIRECT ACTION (you do it yourself right now): status checks, device control (turn on/off lights, AC, etc.), " +
@@ -2790,9 +2891,9 @@ async function startCipherPipeline() {
 
   let systemPromptText;
   if (cipherMode === "learning") {
-    systemPromptText = CIPHER_LEARNING_PROMPT + VOICE_RULES + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+    systemPromptText = CIPHER_LEARNING_PROMPT + situationBriefing + VOICE_RULES + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
   } else {
-    systemPromptText = CIPHER_BUILDING_PROMPT + VOICE_RULES + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+    systemPromptText = CIPHER_BUILDING_PROMPT + situationBriefing + VOICE_RULES + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
   }
 
   // Build tool set — pass Gemini-format tools (pipeline converts to Zod/MCP internally)
@@ -2875,8 +2976,11 @@ async function startCipherPipeline() {
   // Signal ready to devices
   broadcastToAll({ type: "ready" });
 
-  // Send intro prompt
-  const intro = `[You just took over the conversation from June. King Kazuma wanted to speak with you directly in ${cipherMode} mode. Greet him briefly — one sentence — and let him know you're ready.]`;
+  // Send intro prompt — different for session restore vs live switch
+  const isRestore = !personaSwitchPending;
+  const intro = isRestore
+    ? `[Session restored after a service restart. King Kazuma was speaking with you before the restart. Resume naturally — acknowledge briefly that you're back, one sentence.]`
+    : `[You just took over the conversation from June. King Kazuma wanted to speak with you directly in ${cipherMode} mode. Greet him briefly — one sentence — and let him know you're ready.]`;
   setTimeout(() => {
     if (cipherPipeline && typeof cipherPipeline === "object") cipherPipeline.sendSystemPrompt(intro);
   }, 500);
@@ -2917,7 +3021,13 @@ wss.on("connection", (ws) => {
           // Cipher pipeline already active
           ws.send(JSON.stringify({ type: "ready" }));
         } else if (!geminiWs && !geminiConnecting) {
-          connectGemini();
+          // Start the correct persona backend
+          const hasCipherBackend = !!(process.env.ANTHROPIC_API_KEY || process.env.CIPHER_USE_SDK !== "false");
+          if (currentPersona === "cipher" && hasCipherBackend) {
+            startCipherPipeline();
+          } else {
+            connectGemini();
+          }
         } else if (geminiReady) {
           // Session already active, tell this device
           ws.send(JSON.stringify({ type: "ready" }));
