@@ -49,12 +49,19 @@ services:
       - /tmp/ozzu-bridge:/tmp/ozzu-bridge
       - /home/gcp/ozzu:/home/gcp/ozzu:ro
       - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.claude:/root/.claude
+      - /root/.claude.json:/root/.claude.json
     environment:
       - BRIDGE_PIN=${BRIDGE_PIN:-1234}
       - HA_URL=${HA_URL:-http://localhost:8123}
       - HA_TOKEN=${HA_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ozzu}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CIPHER_MODEL=${CIPHER_MODEL:-claude-sonnet-4-5-20250929}
+      - CIPHER_VOICE_ID=${CIPHER_VOICE_ID:-c99d36f3-5ffd-4253-803a-535c1bc9c306}
     command: sh -c "[ -d node_modules/ws ] || npm install --omit=dev; [ -d node_modules/ioredis ] || npm install --omit=dev; [ -d node_modules/pg ] || npm install --omit=dev; node server.js"
     depends_on:
       - redis

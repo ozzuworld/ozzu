@@ -28,6 +28,9 @@ class PcmPlayerModule : Module() {
     @Volatile private var recording = false
     private var aec: AcousticEchoCanceler? = null
 
+    // Shared audio session ID so AEC can correlate speaker output with mic input
+    private var sharedSessionId: Int = 0
+
     override fun definition() = ModuleDefinition {
         Name("PcmPlayer")
 
@@ -46,6 +49,13 @@ class PcmPlayerModule : Module() {
         Function("startPlayback") {
             if (playing) return@Function null
 
+            // Generate shared session ID for AEC correlation (speaker ↔ mic)
+            val audioManager = appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (sharedSessionId == 0) {
+                sharedSessionId = audioManager?.generateAudioSessionId() ?: 0
+                Log.i("PcmPlayer", "Generated shared audio session: $sharedSessionId")
+            }
+
             val sampleRate = 24000
             val bufferSize = AudioTrack.getMinBufferSize(
                 sampleRate,
@@ -55,10 +65,10 @@ class PcmPlayerModule : Module() {
 
             playQueue.clear()
 
-            audioTrack = AudioTrack.Builder()
+            val builder = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
                 )
@@ -72,7 +82,10 @@ class PcmPlayerModule : Module() {
                 .setBufferSizeInBytes(bufferSize * 2)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                .build()
+            if (sharedSessionId != 0) {
+                builder.setSessionId(sharedSessionId)
+            }
+            audioTrack = builder.build()
 
             audioTrack?.play()
             playing = true
@@ -116,6 +129,13 @@ class PcmPlayerModule : Module() {
         Function("startRecording") {
             if (recording) return@Function null
 
+            // Ensure shared session exists (in case recording starts before playback)
+            if (sharedSessionId == 0) {
+                val audioManager = appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                sharedSessionId = audioManager?.generateAudioSessionId() ?: 0
+                Log.i("PcmPlayer", "Generated shared audio session (from recording): $sharedSessionId")
+            }
+
             val sampleRate = 16000 // Live API expects 16kHz input
             val bufferSize = AudioRecord.getMinBufferSize(
                 sampleRate,
@@ -131,12 +151,12 @@ class PcmPlayerModule : Module() {
                 bufferSize * 2
             )
 
-            // Re-enable AEC with VOICE_COMMUNICATION to filter TV speaker bleed
-            val sessionId = audioRecord?.audioSessionId ?: 0
+            // Attach AEC to shared session so it can correlate speaker output with mic input
+            val sessionId = if (sharedSessionId != 0) sharedSessionId else (audioRecord?.audioSessionId ?: 0)
             if (AcousticEchoCanceler.isAvailable()) {
                 aec = AcousticEchoCanceler.create(sessionId)
                 aec?.enabled = true
-                Log.i("PcmPlayer", "AEC enabled, session=$sessionId")
+                Log.i("PcmPlayer", "AEC enabled, session=$sessionId (shared=$sharedSessionId, record=${audioRecord?.audioSessionId})")
             } else {
                 Log.w("PcmPlayer", "AEC not available on this device")
             }

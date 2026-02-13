@@ -20,6 +20,9 @@ export interface BridgeCallbacks {
   onPinResolved: () => void;
   onShowCamera: (cameraId: string, streamUrl: string, cameraName: string) => void;
   onHideCamera: () => void;
+  onShowContent: (title: string, content: string) => void;
+  onHideContent: () => void;
+  onListeningReady: () => void;
   onError: (message: string) => void;
 }
 
@@ -143,6 +146,15 @@ export class BridgeSession {
         break;
       case "hideCamera":
         this.callbacks?.onHideCamera();
+        break;
+      case "showContent":
+        this.callbacks?.onShowContent(msg.title, msg.content);
+        break;
+      case "hideContent":
+        this.callbacks?.onHideContent();
+        break;
+      case "listeningReady":
+        this.callbacks?.onListeningReady();
         break;
       case "error":
         this.callbacks?.onError(msg.message);

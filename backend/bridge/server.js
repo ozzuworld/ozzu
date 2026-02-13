@@ -9,6 +9,7 @@ const crypto = require("crypto");
 const WebSocket = require("ws");
 const Redis = require("ioredis");
 const db = require("./db");
+const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
 
 const PORT = 3333;
 const DATA_DIR = "/tmp/ozzu-bridge";
@@ -31,6 +32,9 @@ let currentPersona = "june"; // "june" or "cipher"
 let cipherMode = null; // "building" or "learning"
 let personaSwitchPending = false;
 let goAwayDuringToolCall = false;
+let goAwayPartialOutput = ""; // tracks what Gemini was saying before disconnect
+let goAwayNudgeTimer = null;  // retry timer for recovery nudge
+let cipherPipeline = null; // CipherPipeline instance when Cipher is active (Deepgram STT → Claude → Cartesia TTS)
 const JUNE_VOICE = "Kore";
 const CIPHER_VOICE = "Orus";
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
@@ -298,6 +302,43 @@ async function initStorage() {
     _directives = readJSON(DIRECTIVES_FILE, []);
     _approvals = readJSON(APPROVALS_FILE, []);
     _statusEntries = readJSON(STATUS_FILE, []);
+  }
+
+  // Clean up stale directives on startup — anything stuck in transient states
+  // (planning, in_progress) for over 1 hour is likely from a crashed session
+  const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
+  const now = Date.now();
+  let staleCount = 0;
+  for (const d of _directives) {
+    if ((d.status === "planning" || d.status === "in_progress") && d.updatedAt) {
+      const age = now - new Date(d.updatedAt).getTime();
+      if (age > STALE_THRESHOLD_MS) {
+        const oldStatus = d.status;
+        d.status = d.status === "planning" ? "pending" : "stale";
+        d.updatedAt = new Date().toISOString();
+        staleCount++;
+        console.log(`[directive] Cleaned stale: ${d.id} "${d.title}" (${oldStatus} → ${d.status}, age: ${Math.round(age / 60000)}min)`);
+      }
+    }
+  }
+  if (staleCount > 0) {
+    saveDirectives(_directives);
+    console.log(`[directive] Cleaned ${staleCount} stale directive(s) on startup`);
+  }
+
+  // Clean up expired approvals (older than 1 hour and still pending)
+  const freshApprovals = _approvals.filter(a => {
+    if (a.status !== "pending") return true;
+    const age = now - new Date(a.createdAt || 0).getTime();
+    if (age > STALE_THRESHOLD_MS) {
+      console.log(`[approval] Expired stale: ${a.id} (age: ${Math.round(age / 60000)}min)`);
+      return false;
+    }
+    return true;
+  });
+  if (freshApprovals.length < _approvals.length) {
+    _approvals = freshApprovals;
+    saveApprovals(_approvals);
   }
 
   // Connect to PostgreSQL and migrate data from Redis
@@ -1154,8 +1195,8 @@ const CIPHER_BUILDING_PROMPT =
   "BUILDING MODE: You are in building mode. Help King Kazuma refine ideas and create directives. " +
   "When a feature is ready to build, create it using send_dev_directive. " +
   "Your tools: send_dev_directive, get_directives, get_dev_status, get_pending_approvals, " +
-  "approve_action, deploy_to_devices, mic_check, show_camera, hide_camera, remember, read_file, " +
-  "run_command, switch_to_june, plus Home Assistant controls (turn_on, turn_off, toggle, etc.). " +
+  "approve_action, deploy_to_devices, mic_check, show_camera, hide_camera, show_content, hide_content, " +
+  "remember, read_file, run_command, switch_to_june, plus Home Assistant controls (turn_on, turn_off, toggle, etc.). " +
   "Same approval rules as June: auto-approve routine ops, escalate high-risk to King Kazuma's PIN. " +
   "\n\n" +
   "CRITICAL TOOL USAGE RULE: When you need to perform an action, you MUST actually call the tool function — " +
@@ -1194,7 +1235,7 @@ const CIPHER_LEARNING_PROMPT =
   "and the ozzu ecosystem specifically. " +
   "\n\n" +
   "TOOL BOUNDARIES — critical: " +
-  "You have ONLY these tools: remember, read_file, run_command, switch_to_june. " +
+  "You have ONLY these tools: remember, read_file, run_command, show_content, hide_content, switch_to_june. " +
   "You do NOT have: send_dev_directive, approve_action, deploy_to_devices, " +
   "get_directives, get_dev_status, get_pending_approvals, or any device controls. " +
   "NEVER narrate or promise actions you cannot perform. " +
@@ -1431,6 +1472,23 @@ const GEMINI_BRIDGE_TOOLS = [
   {
     name: "hide_camera",
     description: "Dismiss/close the camera feed overlay on the TV screen. Use when King Kazuma asks to close, dismiss, or hide the camera view.",
+    parameters: { type: "OBJECT", properties: {}, required: [] },
+  },
+  {
+    name: "show_content",
+    description: "Display rich content on King Kazuma's screen — use for tables, code, lists, long output, or anything too complex to speak aloud. Give a brief verbal summary and show the details here.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        title: { type: "STRING", description: "Panel title" },
+        content: { type: "STRING", description: "Content to display (supports markdown)" },
+      },
+      required: ["content"],
+    },
+  },
+  {
+    name: "hide_content",
+    description: "Close the content display panel.",
     parameters: { type: "OBJECT", properties: {}, required: [] },
   },
   {
@@ -1834,6 +1892,18 @@ async function handleToolCall(name, args) {
         return { success: true, message: "Camera overlay dismissed." };
       }
 
+      if (name === "show_content") {
+        broadcastToAll({ type: "showContent", title: args.title || "", content: args.content });
+        console.log(`[content] Showing panel: "${(args.title || "").substring(0, 40)}"`);
+        return { success: true, message: "Content displayed on screen." };
+      }
+
+      if (name === "hide_content") {
+        broadcastToAll({ type: "hideContent" });
+        console.log("[content] Hiding content panel");
+        return { success: true, message: "Content panel closed." };
+      }
+
       if (name === "read_file") {
         const validation = validateReadPath(args.path);
         if (!validation.ok) {
@@ -1988,7 +2058,7 @@ let lastMicSwitchAt = 0;
 
 // Audio amplification: tablet mics produce very quiet audio (peaks ~200-300 for speech)
 // Gemini needs peaks of ~2000+ to reliably detect and transcribe speech
-const AUDIO_GAIN = 16; // VOICE_COMMUNICATION: raw peaks ~30-80 speech, amplified ~480-1280 for Gemini
+const AUDIO_GAIN = 1; // No server-side amplification — rely on Android AEC for echo cancellation
 const OUTPUT_GAIN = 4; // Amplify Gemini's response audio before sending to speakers
 
 // Audio diagnostics: rolling window of peak levels per device
@@ -2125,11 +2195,13 @@ async function connectGemini() {
       voice = CIPHER_VOICE;
       if (cipherMode === "learning") {
         systemPromptText = CIPHER_LEARNING_PROMPT + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
-        // Learning mode gets remember + read_file + run_command + switch back to June
+        // Learning mode gets remember + read_file + run_command + show_content + hide_content + switch back to June
         const rememberTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "remember");
         const readFileTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "read_file");
         const runCommandTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "run_command");
-        toolDeclarations = [rememberTool, readFileTool, runCommandTool, SWITCH_TO_JUNE_TOOL];
+        const showContentTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "show_content");
+        const hideContentTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "hide_content");
+        toolDeclarations = [rememberTool, readFileTool, runCommandTool, showContentTool, hideContentTool, SWITCH_TO_JUNE_TOOL];
       } else {
         systemPromptText = CIPHER_BUILDING_PROMPT + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
         toolDeclarations = [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS, SWITCH_TO_JUNE_TOOL];
@@ -2204,7 +2276,9 @@ async function connectGemini() {
   });
 
   ws.on("close", () => {
-    console.log("[gemini] WebSocket closed");
+    const wasSpeaking = geminiSpeaking;
+    const hadPendingTools = pendingToolResponses !== null;
+    console.log("[gemini] WebSocket closed (wasSpeaking=%s, hadPendingTools=%s)", wasSpeaking, hadPendingTools);
     geminiWs = null;
     geminiConnecting = false;
     geminiReady = false;
@@ -2217,8 +2291,15 @@ async function connectGemini() {
     pendingAudioBuffer = [];
     geminiSpeaking = false; // critical: unblock mic input after reconnect
 
-    // Auto-reconnect as long as devices are still connected
-    if (devices.size > 0) {
+    // If connection dropped while Gemini was speaking or had pending tools,
+    // flag it so recovery nudge fires after reconnect
+    if ((wasSpeaking || hadPendingTools) && !goAwayDuringToolCall) {
+      goAwayDuringToolCall = true;
+      console.log("[gemini] Flagging for recovery nudge (dropped mid-action)");
+    }
+
+    // Auto-reconnect as long as devices are still connected and cipher pipeline isn't active
+    if (devices.size > 0 && !cipherPipeline) {
       console.log("[gemini] Auto-reconnecting in 2s...");
       setTimeout(() => connectGemini(), 2000);
     }
@@ -2250,16 +2331,36 @@ function handleGeminiMessage(msg) {
       setTimeout(() => sendToGeminiText(intro), 500);
     }
 
-    // Recovery after goAway interrupted a tool call
+    // Recovery after goAway interrupted a tool call or mid-speech
     if (goAwayDuringToolCall && !personaSwitchPending) {
       goAwayDuringToolCall = false;
+      // Find the user's last message and what Gemini was saying before disconnect
+      const lastUserMsg = [...conversationTranscript].reverse().find(t => t.role === "user");
+      const userContext = lastUserMsg ? ` King Kazuma said: "${lastUserMsg.text}".` : "";
+      const partialContext = goAwayPartialOutput.trim()
+        ? ` You were saying: "${goAwayPartialOutput.trim()}" before being cut off.`
+        : "";
+      goAwayPartialOutput = "";
       console.log("[gemini] Recovered from goAway that interrupted a tool call — nudging retry");
       setTimeout(() => {
         sendToGeminiText(
-          "[SYSTEM: Session briefly reconnected. If you were about to call a tool " +
-          "(e.g. switch_to_cipher or any other action), re-issue that tool call now. " +
-          "If you had already completed your response, continue normally.]"
+          "[SYSTEM: The session was briefly interrupted before you could finish." +
+          userContext + partialContext +
+          " You MUST complete the action NOW by calling the tool. " +
+          "Do NOT narrate or describe what you will do — just call the tool immediately. " +
+          "If the request was to switch to Cipher, call switch_to_cipher. Act now.]"
         );
+        // Safety net: if no tool call comes within 6s, nudge again harder
+        goAwayNudgeTimer = setTimeout(() => {
+          goAwayNudgeTimer = null;
+          if (!personaSwitchPending && geminiReady) {
+            console.log("[gemini] Post-nudge timeout — no tool call received, re-nudging");
+            sendToGeminiText(
+              "[SYSTEM: You still have not called the tool. This is urgent. " +
+              "Call the tool function RIGHT NOW. Do not speak, just call the tool.]"
+            );
+          }
+        }, 6000);
       }, 1000);
     } else {
       goAwayDuringToolCall = false;
@@ -2307,6 +2408,8 @@ function handleGeminiMessage(msg) {
 
   // Tool calls — resolve server-side (always process, they only happen when engaged)
   if (msg.toolCall?.functionCalls) {
+    goAwayPartialOutput = ""; // tool call succeeded, no recovery needed
+    if (goAwayNudgeTimer) { clearTimeout(goAwayNudgeTimer); goAwayNudgeTimer = null; }
     extendEngagement();
     handleGeminiToolCalls(msg.toolCall.functionCalls);
     return;
@@ -2372,6 +2475,7 @@ function handleGeminiMessage(msg) {
   // Output transcript (model speech) — only forward when engaged
   if (sc.outputTranscription?.text) {
     console.log(`[gemini] OUTPUT: "${sc.outputTranscription.text}"`);
+    goAwayPartialOutput += sc.outputTranscription.text; // track for goAway recovery
     conversationTranscript.push({ role: "model", text: sc.outputTranscription.text, timestamp: Date.now() });
     // Log turn to PG
     if (currentConversationId) {
@@ -2385,6 +2489,7 @@ function handleGeminiMessage(msg) {
   // Turn complete
   if (sc.turnComplete) {
     geminiSpeaking = false; // model done speaking — resume mic input
+    goAwayPartialOutput = ""; // turn finished cleanly, no recovery needed
     inputTranscriptBuffer = "";
     pendingAudioBuffer = []; // discard any unbuffered audio
     if (isEngaged()) {
@@ -2526,15 +2631,23 @@ function sendToGeminiText(text) {
 }
 
 function disconnectGeminiIfEmpty() {
-  if (devices.size === 0 && geminiWs) {
-    console.log("[gemini] No devices connected, closing Gemini session");
-    // Summarize conversation before closing (async, fire-and-forget)
-    generateSessionSummary(currentPersona).catch(err =>
-      console.error("[memory] disconnect summary error:", err.message));
-    geminiResumeToken = null; // Prevent auto-reconnect
-    geminiWs.close();
-    geminiWs = null;
-    geminiReady = false;
+  if (devices.size === 0) {
+    // Stop cipher pipeline if active
+    if (cipherPipeline && typeof cipherPipeline === "object") {
+      console.log("[cipher] No devices connected, stopping Cipher pipeline");
+      generateSessionSummary(currentPersona).catch(err =>
+        console.error("[memory] disconnect summary error:", err.message));
+      cipherPipeline.stop().then(() => { cipherPipeline = null; });
+    }
+    if (geminiWs) {
+      console.log("[gemini] No devices connected, closing Gemini session");
+      generateSessionSummary(currentPersona).catch(err =>
+        console.error("[memory] disconnect summary error:", err.message));
+      geminiResumeToken = null; // Prevent auto-reconnect
+      geminiWs.close();
+      geminiWs = null;
+      geminiReady = false;
+    }
   }
 }
 
@@ -2584,7 +2697,7 @@ async function generateSessionSummary(persona) {
 
 // ── Persona switching ──
 
-function switchPersona() {
+async function switchPersona() {
   console.log(`[persona] Switching to ${currentPersona}${cipherMode ? ` (${cipherMode})` : ""}`);
   // Summarize the ending persona's conversation (async, fire-and-forget)
   const endingPersona = currentPersona === "june" ? "cipher" : "june"; // persona we're switching FROM
@@ -2596,7 +2709,23 @@ function switchPersona() {
   pendingAudioBuffer = [];
   pendingToolResponses = null;  // old session's responses are stale
   goAwayDuringToolCall = false;
+  goAwayPartialOutput = "";
+  if (goAwayNudgeTimer) { clearTimeout(goAwayNudgeTimer); goAwayNudgeTimer = null; }
 
+  // Stop previous cipher pipeline if it was running
+  if (cipherPipeline) {
+    await cipherPipeline.stop();
+    cipherPipeline = null;
+  }
+
+  // Determine if we're starting cipher pipeline BEFORE closing Gemini
+  const hasCipherBackend = !!(process.env.ANTHROPIC_API_KEY || process.env.CIPHER_USE_SDK !== "false");
+  const willStartCipher = currentPersona === "cipher" && hasCipherBackend;
+
+  // Set a sentinel to prevent Gemini auto-reconnect during cipher pipeline startup
+  if (willStartCipher) cipherPipeline = "starting"; // truthy sentinel
+
+  // Close Gemini session
   if (geminiWs) {
     const ws = geminiWs;
     geminiWs = null;
@@ -2604,8 +2733,153 @@ function switchPersona() {
     geminiConnecting = false;
     ws.close();
   }
-  // Auto-reconnect in close handler will pick up new persona config
+
   broadcastToAll({ type: "personaSwitch", persona: currentPersona, mode: cipherMode });
+
+  // Start appropriate backend for new persona
+  if (willStartCipher) {
+    // Cipher uses Claude pipeline (Deepgram STT → Claude Agent SDK → Cartesia TTS)
+    await startCipherPipeline();
+  } else {
+    // June uses Gemini Live Audio — auto-reconnect will handle it
+    if (currentPersona === "cipher") {
+      console.warn("[cipher] Claude backend disabled — falling back to Gemini for Cipher");
+    }
+    if (devices.size > 0) connectGemini();
+  }
+}
+
+async function startCipherPipeline() {
+  const [entityContext, memoryContext] = await Promise.all([
+    fetchEntityContext(),
+    buildMemoryContext("cipher"),
+  ]);
+
+  // Build system prompt — add voice-conversation rules for the Claude pipeline
+  const VOICE_RULES =
+    "\n\nVOICE MODE RULES (you are in a turn-based voice conversation):\n" +
+    "- TURN FLOW: You speak → then stop → King Kazuma speaks → then you speak again.\n" +
+    "- Keep verbal responses concise: 1-3 sentences for simple answers.\n" +
+    "- For complex output (tables, code, lists, device status, multiple items):\n" +
+    "  Call show_content to display it on screen, then give a SHORT verbal summary.\n" +
+    "  Example: show_content with the table, then say 'Here's the network status — three devices up, one down.'\n" +
+    "- NO markdown in speech — speak naturally with contractions.\n" +
+    "- When running tools, just do it silently. Only speak when you have results.\n" +
+    "- NEVER call switch_to_june unless King Kazuma EXPLICITLY says 'switch to June', 'go back to June', or 'I'm done'.\n" +
+    "- Short utterances like 'done', 'ok', 'yes' are conversational — NOT exit requests.\n" +
+    "- If input is garbled/unclear, ask for clarification — don't guess intent.\n" +
+    "\n" +
+    "ACTION vs DIRECTIVE — CRITICAL DISTINCTION:\n" +
+    "- DIRECT ACTION (you do it yourself right now): status checks, device control (turn on/off lights, AC, etc.), " +
+    "running commands, reading files, looking up info, answering questions, checking device status, mic checks, deploys.\n" +
+    "- DIRECTIVE (use send_dev_directive — do NOT do it yourself): adding new devices to Home Assistant, " +
+    "building new features, changing code or config, integrating new hardware/services, " +
+    "anything that modifies the ozzu ecosystem's codebase or infrastructure.\n" +
+    "- When King Kazuma describes something to BUILD or IMPLEMENT, discuss it briefly, then create a directive " +
+    "with send_dev_directive. Do NOT start reading files, writing code, or running implementation commands yourself.\n" +
+    "- The directive lifecycle is: send_dev_directive → plan phase → PIN approval → implementation by Cipher agent.\n" +
+    "- Example: 'Add the new washing machine to Home Assistant' → discuss briefly, then send_dev_directive " +
+    "with type 'feature', a clear title, and description. Do NOT start reading HA config files yourself.\n" +
+    "\n" +
+    "CONTEXT AWARENESS:\n" +
+    "- You do NOT inherit conversation context from June. When King Kazuma references previous conversations " +
+    "or existing work, call get_directives (with NO status filter) to see ALL directives in the pipeline.\n" +
+    "- NEVER say 'I don't have context' without first checking get_directives and get_pending_approvals.\n" +
+    "- If King Kazuma asks about a directive, plan, or approval, ALWAYS check the tools first.\n" +
+    "- Call get_directives with NO status filter to see everything — don't guess which status to filter by.\n";
+
+  let systemPromptText;
+  if (cipherMode === "learning") {
+    systemPromptText = CIPHER_LEARNING_PROMPT + VOICE_RULES + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+  } else {
+    systemPromptText = CIPHER_BUILDING_PROMPT + VOICE_RULES + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+  }
+
+  // Build tool set — pass Gemini-format tools (pipeline converts to Zod/MCP internally)
+  let pipelineTools;
+  if (cipherMode === "learning") {
+    const rememberTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "remember");
+    const readFileTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "read_file");
+    const runCommandTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "run_command");
+    const showContentTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "show_content");
+    const hideContentTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "hide_content");
+    pipelineTools = [rememberTool, readFileTool, runCommandTool, showContentTool, hideContentTool, SWITCH_TO_JUNE_TOOL].filter(Boolean);
+  } else {
+    pipelineTools = [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS, SWITCH_TO_JUNE_TOOL];
+  }
+
+  cipherPipeline = new CipherPipeline({
+    systemPrompt: systemPromptText,
+    tools: pipelineTools,
+    handleToolCall: handleToolCall,
+  });
+
+  // Wire pipeline events
+  cipherPipeline.on("audio", (pcmBase64) => {
+    broadcastToRole("speaker", { type: "audio", data: pcmBase64 });
+  });
+
+  cipherPipeline.on("inputTranscript", (text) => {
+    extendEngagement();
+    broadcastToAll({ type: "inputTranscript", text });
+    // Log to conversation transcript
+    conversationTranscript.push({ role: "user", text });
+    if (currentConversationId) {
+      db.addConversationTurn(currentConversationId, "user", text, turnIndex++).catch(() => {});
+    }
+  });
+
+  cipherPipeline.on("outputTranscript", (text) => {
+    extendEngagement();
+    broadcastToAll({ type: "transcript", text });
+    conversationTranscript.push({ role: "cipher", text });
+    if (currentConversationId) {
+      db.addConversationTurn(currentConversationId, "cipher", text, turnIndex++).catch(() => {});
+    }
+  });
+
+  cipherPipeline.on("toolCall", ({ name, args, result }) => {
+    extendEngagement();
+    if (currentConversationId) {
+      db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }).catch(() => {});
+    }
+  });
+
+  cipherPipeline.on("listeningReady", () => {
+    broadcastToAll({ type: "listeningReady" });
+  });
+
+  cipherPipeline.on("error", (err) => {
+    console.error("[cipher] Pipeline error:", err.message);
+  });
+
+  // Start the pipeline
+  const ok = await cipherPipeline.start();
+  if (!ok) {
+    console.error("[cipher] Pipeline failed to start, falling back to Gemini");
+    cipherPipeline = null;
+    if (devices.size > 0) connectGemini();
+    return;
+  }
+
+  // Create PG conversation record
+  const connDevices = [...devices.values()].map(d => d.deviceId);
+  db.createConversation("cipher", connDevices).then(id => {
+    currentConversationId = id;
+    if (id) console.log(`[pg] Conversation ${id} started (cipher pipeline)`);
+  }).catch(err => console.error("[pg] create conversation:", err.message));
+
+  conversationTranscript = [];
+  turnIndex = 0;
+
+  // Signal ready to devices
+  broadcastToAll({ type: "ready" });
+
+  // Send intro prompt
+  const intro = `[You just took over the conversation from June. King Kazuma wanted to speak with you directly in ${cipherMode} mode. Greet him briefly — one sentence — and let him know you're ready.]`;
+  setTimeout(() => {
+    if (cipherPipeline && typeof cipherPipeline === "object") cipherPipeline.sendSystemPrompt(intro);
+  }, 500);
 }
 
 // ── Start ──
@@ -2638,8 +2912,11 @@ wss.on("connection", (ws) => {
         db.upsertDevice(deviceId, role === "speaker" ? "tv" : "tablet").catch(err =>
           console.error("[pg] upsert device:", err.message));
 
-        // Start Gemini session if not already running
-        if (!geminiWs && !geminiConnecting) {
+        // Start AI session if not already running
+        if (cipherPipeline) {
+          // Cipher pipeline already active
+          ws.send(JSON.stringify({ type: "ready" }));
+        } else if (!geminiWs && !geminiConnecting) {
           connectGemini();
         } else if (geminiReady) {
           // Session already active, tell this device
@@ -2652,12 +2929,23 @@ wss.on("connection", (ws) => {
         const info = devices.get(ws);
         if (info?.role !== "mic") return;
         audioMsgCount++;
-        sendToGeminiAudio(msg.data, ws, info.deviceId);
+        if (cipherPipeline && typeof cipherPipeline === "object") {
+          // Turn-based: only forward mic when it's user's turn
+          if (!cipherPipeline._turnReady) return;
+          const amplified = amplifyAudio(msg.data, AUDIO_GAIN);
+          cipherPipeline.sendAudio(amplified);
+        } else if (!cipherPipeline) {
+          sendToGeminiAudio(msg.data, ws, info.deviceId);
+        }
         return;
       }
 
       if (msg.type === "text") {
-        sendToGeminiText(msg.text);
+        if (cipherPipeline && typeof cipherPipeline === "object") {
+          cipherPipeline.sendText(msg.text);
+        } else if (!cipherPipeline) {
+          sendToGeminiText(msg.text);
+        }
         return;
       }
 

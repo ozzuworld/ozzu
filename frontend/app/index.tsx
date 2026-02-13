@@ -10,6 +10,7 @@ import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
 import { CameraOverlay } from "../components/CameraOverlay";
+import { ContentPanel } from "../components/ContentPanel";
 import { useKeepAwake } from "expo-keep-awake";
 
 export default function LandingScreen() {
@@ -31,6 +32,12 @@ export default function LandingScreen() {
     streamUrl: string;
     cameraName: string;
   }>({ visible: false, streamUrl: "", cameraName: "" });
+
+  const [contentPanel, setContentPanel] = useState<{
+    visible: boolean;
+    title: string;
+    content: string;
+  }>({ visible: false, title: "", content: "" });
 
   const [responseText, setResponseText] = useState("");
   const [inputTranscript, setInputTranscript] = useState("");
@@ -101,6 +108,17 @@ export default function LandingScreen() {
       },
       onHideCamera: () => {
         setCameraOverlay({ visible: false, streamUrl: "", cameraName: "" });
+      },
+      onShowContent: (title, content) => {
+        setContentPanel({ visible: true, title, content });
+      },
+      onHideContent: () => {
+        setContentPanel({ visible: false, title: "", content: "" });
+      },
+      onListeningReady: () => {
+        // Cipher finished speaking — show listening state on orb
+        setIsStreaming(false);
+        setIsListening(true);
       },
       onError: (msg) => {
         console.error("BridgeSession error:", msg);
@@ -175,6 +193,15 @@ export default function LandingScreen() {
         cameraName={cameraOverlay.cameraName}
         onClose={() =>
           setCameraOverlay({ visible: false, streamUrl: "", cameraName: "" })
+        }
+      />
+
+      <ContentPanel
+        visible={contentPanel.visible}
+        title={contentPanel.title}
+        content={contentPanel.content}
+        onClose={() =>
+          setContentPanel({ visible: false, title: "", content: "" })
         }
       />
 

@@ -6,6 +6,7 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="/home/gcp/ozzu"
 FRONTEND="$WORKDIR/frontend"
 RUNTIME_VERSION="1.0.0"
@@ -36,7 +37,6 @@ echo "Bundle: $(du -sh "$UPDATES_DIR" | cut -f1)"
 if [ "$RESTART" = true ]; then
   echo "[3/3] Restarting apps on devices..."
 
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   source "$SCRIPT_DIR/adb-discover.sh"
   PACKAGE="com.anonymous.ozzu"
   ACTIVITY=".MainActivity"
