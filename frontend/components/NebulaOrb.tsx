@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo } from "react";
-import { Animated, Easing } from "react-native";
+import { View, Animated, Easing } from "react-native";
 import { getDeviceType } from "../modules/pcm-player";
 
 type OrbMode = "idle" | "ambient" | "active";
@@ -13,7 +13,12 @@ interface NebulaOrbProps {
 interface BlobConfig {
   width: number;
   height: number;
-  color: string;
+  // RGB values (no alpha — alpha is controlled per-layer)
+  r: number;
+  g: number;
+  b: number;
+  // Base alpha for innermost layer (outer layers fade from this)
+  alpha: number;
   // Initial position offset from center
   offsetX: number;
   offsetY: number;
@@ -28,126 +33,119 @@ interface BlobConfig {
   // Scale range
   scaleMin: number;
   scaleMax: number;
-  // Opacity range
+  // Opacity range (multiplier on alpha)
   opacityMin: number;
   opacityMax: number;
   // Rotation range
   rotateStart: number;
   rotateEnd: number;
+  // Number of feather layers (more = softer edge, default 4)
+  layers?: number;
 }
 
-// ── Blob layers — organic offsets, soft colors, varied shapes ──
+// Feather layer multipliers: each layer is progressively larger and more transparent
+// This creates soft edges without needing blur
+const FEATHER_RINGS = [
+  { sizeMultiplier: 1.0, alphaMultiplier: 1.0 },
+  { sizeMultiplier: 1.35, alphaMultiplier: 0.45 },
+  { sizeMultiplier: 1.7, alphaMultiplier: 0.2 },
+  { sizeMultiplier: 2.1, alphaMultiplier: 0.08 },
+];
+
+// ── Blob layers — wide spread, organic offsets, feathered edges ──
 const BLOBS: BlobConfig[] = [
-  // 1: Large soft background wash — barely visible, sets the field
+  // 1: Huge ambient field — barely visible, sets the tone
   {
-    width: 260, height: 220, color: "rgba(6,182,212,0.04)",
-    offsetX: -15, offsetY: 10,
-    driftX: 25, driftY: 20, driftDuration: 9007, scaleDuration: 8003,
-    opacityDuration: 7001, rotateDuration: 30000,
-    scaleMin: 0.9, scaleMax: 1.1, opacityMin: 0.5, opacityMax: 1.0,
-    rotateStart: 0, rotateEnd: 360,
+    width: 350, height: 280, r: 6, g: 182, b: 212, alpha: 0.035,
+    offsetX: -20, offsetY: 15,
+    driftX: 40, driftY: 30, driftDuration: 11003, scaleDuration: 9007,
+    opacityDuration: 8501, rotateDuration: 40000,
+    scaleMin: 0.92, scaleMax: 1.08, opacityMin: 0.5, opacityMax: 1.0,
+    rotateStart: 0, rotateEnd: 360, layers: 4,
   },
-  // 2: Primary fog — offset upper-left
+  // 2: Primary fog mass — upper-left, large
   {
-    width: 180, height: 140, color: "rgba(6,182,212,0.08)",
-    offsetX: -30, offsetY: -20,
-    driftX: 35, driftY: 28, driftDuration: 7013, scaleDuration: 6007,
+    width: 200, height: 160, r: 6, g: 182, b: 212, alpha: 0.06,
+    offsetX: -55, offsetY: -40,
+    driftX: 50, driftY: 40, driftDuration: 7013, scaleDuration: 6007,
     opacityDuration: 5501, rotateDuration: 22000,
-    scaleMin: 0.85, scaleMax: 1.1, opacityMin: 0.4, opacityMax: 1.0,
-    rotateStart: 20, rotateEnd: -340,
+    scaleMin: 0.85, scaleMax: 1.12, opacityMin: 0.4, opacityMax: 1.0,
+    rotateStart: 20, rotateEnd: -340, layers: 4,
   },
-  // 3: Secondary fog — offset lower-right
+  // 3: Secondary fog mass — lower-right
   {
-    width: 160, height: 130, color: "rgba(6,182,212,0.07)",
-    offsetX: 25, offsetY: 15,
-    driftX: 30, driftY: 35, driftDuration: 8501, scaleDuration: 7499,
+    width: 180, height: 150, r: 6, g: 182, b: 212, alpha: 0.055,
+    offsetX: 50, offsetY: 35,
+    driftX: 45, driftY: 50, driftDuration: 8501, scaleDuration: 7499,
     opacityDuration: 6503, rotateDuration: 25000,
-    scaleMin: 0.88, scaleMax: 1.08, opacityMin: 0.4, opacityMax: 1.0,
-    rotateStart: 140, rotateEnd: -220,
+    scaleMin: 0.88, scaleMax: 1.1, opacityMin: 0.4, opacityMax: 1.0,
+    rotateStart: 140, rotateEnd: -220, layers: 4,
   },
-  // 4: Bright wisp — smaller, brighter, off-center
+  // 4: Bright cyan wisp — drifts through center area
   {
-    width: 110, height: 80, color: "rgba(34,211,238,0.12)",
-    offsetX: -10, offsetY: -8,
-    driftX: 30, driftY: 25, driftDuration: 5987, scaleDuration: 5003,
+    width: 120, height: 90, r: 34, g: 211, b: 238, alpha: 0.09,
+    offsetX: -15, offsetY: -12,
+    driftX: 45, driftY: 35, driftDuration: 5987, scaleDuration: 5003,
     opacityDuration: 4507, rotateDuration: 16000,
-    scaleMin: 0.8, scaleMax: 1.15, opacityMin: 0.3, opacityMax: 1.0,
-    rotateStart: 70, rotateEnd: -290,
+    scaleMin: 0.8, scaleMax: 1.18, opacityMin: 0.3, opacityMax: 1.0,
+    rotateStart: 70, rotateEnd: -290, layers: 4,
   },
-  // 5: Purple accent — high and left
+  // 5: Purple accent — far upper-left
   {
-    width: 140, height: 100, color: "rgba(139,92,246,0.05)",
-    offsetX: -35, offsetY: -25,
-    driftX: 28, driftY: 32, driftDuration: 8509, scaleDuration: 7507,
+    width: 160, height: 120, r: 139, g: 92, b: 246, alpha: 0.04,
+    offsetX: -60, offsetY: -50,
+    driftX: 35, driftY: 40, driftDuration: 8509, scaleDuration: 7507,
     opacityDuration: 6997, rotateDuration: 28000,
     scaleMin: 0.9, scaleMax: 1.1, opacityMin: 0.4, opacityMax: 1.0,
-    rotateStart: 200, rotateEnd: -160,
+    rotateStart: 200, rotateEnd: -160, layers: 3,
   },
-  // 6: Teal — low and right
+  // 6: Teal — far lower-right
   {
-    width: 130, height: 160, color: "rgba(20,184,166,0.06)",
-    offsetX: 20, offsetY: 30,
-    driftX: 25, driftY: 30, driftDuration: 6491, scaleDuration: 7993,
+    width: 150, height: 180, r: 20, g: 184, b: 166, alpha: 0.045,
+    offsetX: 45, offsetY: 55,
+    driftX: 35, driftY: 40, driftDuration: 6491, scaleDuration: 7993,
     opacityDuration: 5497, rotateDuration: 20000,
-    scaleMin: 0.85, scaleMax: 1.1, opacityMin: 0.3, opacityMax: 1.0,
-    rotateStart: 300, rotateEnd: 660,
+    scaleMin: 0.85, scaleMax: 1.12, opacityMin: 0.3, opacityMax: 1.0,
+    rotateStart: 300, rotateEnd: 660, layers: 3,
   },
-  // 7: Elongated wisp — wide, thin, drifts across
+  // 7: Wide wisp — elongated, sweeps horizontally
   {
-    width: 200, height: 50, color: "rgba(255,255,255,0.03)",
-    offsetX: 15, offsetY: -15,
-    driftX: 40, driftY: 15, driftDuration: 7499, scaleDuration: 8503,
+    width: 240, height: 55, r: 6, g: 182, b: 212, alpha: 0.04,
+    offsetX: 20, offsetY: -25,
+    driftX: 55, driftY: 18, driftDuration: 7499, scaleDuration: 8503,
     opacityDuration: 6007, rotateDuration: 14000,
     scaleMin: 0.8, scaleMax: 1.2, opacityMin: 0.3, opacityMax: 1.0,
-    rotateStart: -15, rotateEnd: 345,
+    rotateStart: -15, rotateEnd: 345, layers: 3,
   },
-  // 8: Vertical wisp — tall, thin, counter-rotates
+  // 8: Tall wisp — vertical, counter-sweeps
   {
-    width: 45, height: 180, color: "rgba(6,182,212,0.05)",
-    offsetX: -20, offsetY: 10,
-    driftX: 20, driftY: 35, driftDuration: 6503, scaleDuration: 7499,
+    width: 50, height: 220, r: 6, g: 182, b: 212, alpha: 0.04,
+    offsetX: -30, offsetY: 15,
+    driftX: 25, driftY: 45, driftDuration: 6503, scaleDuration: 7499,
     opacityDuration: 8009, rotateDuration: 18000,
-    scaleMin: 0.8, scaleMax: 1.15, opacityMin: 0.3, opacityMax: 1.0,
-    rotateStart: 10, rotateEnd: -350,
-  },
-  // 9: Indigo accent — small, deep
-  {
-    width: 90, height: 70, color: "rgba(99,102,241,0.06)",
-    offsetX: 30, offsetY: -20,
-    driftX: 22, driftY: 18, driftDuration: 9001, scaleDuration: 6011,
-    opacityDuration: 7507, rotateDuration: 32000,
-    scaleMin: 0.85, scaleMax: 1.1, opacityMin: 0.4, opacityMax: 1.0,
-    rotateStart: 250, rotateEnd: -110,
-  },
-  // 10: Extra cyan puff — fills gaps
-  {
-    width: 120, height: 110, color: "rgba(6,182,212,0.06)",
-    offsetX: 10, offsetY: -30,
-    driftX: 32, driftY: 26, driftDuration: 7703, scaleDuration: 6509,
-    opacityDuration: 5993, rotateDuration: 21000,
-    scaleMin: 0.88, scaleMax: 1.12, opacityMin: 0.3, opacityMax: 1.0,
-    rotateStart: 90, rotateEnd: 450,
+    scaleMin: 0.8, scaleMax: 1.18, opacityMin: 0.3, opacityMax: 1.0,
+    rotateStart: 10, rotateEnd: -350, layers: 3,
   },
 ];
 
 // Core luminous center — stays near middle
 const CORE: BlobConfig = {
-  width: 50, height: 50, color: "rgba(6,182,212,0.20)",
+  width: 40, height: 40, r: 6, g: 182, b: 212, alpha: 0.25,
   offsetX: 0, offsetY: 0,
-  driftX: 8, driftY: 8, driftDuration: 4001, scaleDuration: 3001,
+  driftX: 10, driftY: 10, driftDuration: 4001, scaleDuration: 3001,
   opacityDuration: 2503, rotateDuration: 30000,
   scaleMin: 0.85, scaleMax: 1.15, opacityMin: 0.5, opacityMax: 1.0,
-  rotateStart: 0, rotateEnd: 360,
+  rotateStart: 0, rotateEnd: 360, layers: 4,
 };
 
-// Inner glow around core — soft spread
+// Inner glow around core
 const CORE_GLOW: BlobConfig = {
-  width: 100, height: 100, color: "rgba(6,182,212,0.08)",
+  width: 90, height: 90, r: 6, g: 182, b: 212, alpha: 0.07,
   offsetX: 0, offsetY: 0,
-  driftX: 12, driftY: 12, driftDuration: 5003, scaleDuration: 4507,
+  driftX: 14, driftY: 14, driftDuration: 5003, scaleDuration: 4507,
   opacityDuration: 3499, rotateDuration: 25000,
   scaleMin: 0.9, scaleMax: 1.1, opacityMin: 0.4, opacityMax: 1.0,
-  rotateStart: 0, rotateEnd: -360,
+  rotateStart: 0, rotateEnd: -360, layers: 4,
 };
 
 // ── Speed multipliers per mode ──
@@ -316,18 +314,21 @@ function useContainerPulse(mode: OrbMode) {
   return pulse;
 }
 
-// ── Single blob view ──
+// ── Single blob view with feathered layers ──
+// Renders multiple concentric layers per blob to simulate soft/blurred edges
 function BlobView({ config, mode }: { config: BlobConfig; mode: OrbMode }) {
   const { translateX, translateY, scale, opacity, rotate } = useBlob(config, mode);
+  const layerCount = config.layers || 4;
+  const rings = FEATHER_RINGS.slice(0, layerCount);
 
   return (
     <Animated.View
       style={{
         position: "absolute",
-        width: config.width,
-        height: config.height,
-        borderRadius: Math.max(config.width, config.height) / 2,
-        backgroundColor: config.color,
+        width: config.width * 2.2,
+        height: config.height * 2.2,
+        alignItems: "center",
+        justifyContent: "center",
         opacity,
         transform: [
           { translateX },
@@ -336,12 +337,30 @@ function BlobView({ config, mode }: { config: BlobConfig; mode: OrbMode }) {
           { rotate },
         ],
       }}
-    />
+    >
+      {rings.map((ring, i) => {
+        const w = config.width * ring.sizeMultiplier;
+        const h = config.height * ring.sizeMultiplier;
+        const a = config.alpha * ring.alphaMultiplier;
+        return (
+          <View
+            key={i}
+            style={{
+              position: "absolute",
+              width: w,
+              height: h,
+              borderRadius: Math.max(w, h) / 2,
+              backgroundColor: `rgba(${config.r},${config.g},${config.b},${a})`,
+            }}
+          />
+        );
+      })}
+    </Animated.View>
   );
 }
 
 // ── Main component ──
-const CONTAINER_SIZE = 320;
+const CONTAINER_SIZE = 400;
 
 export function NebulaOrb({ active, ambient }: NebulaOrbProps) {
   const mode: OrbMode = active ? "active" : ambient ? "ambient" : "idle";
@@ -357,8 +376,7 @@ export function NebulaOrb({ active, ambient }: NebulaOrbProps) {
 
   const blobConfigs = useMemo(() => {
     if (isTV) {
-      // Reduced set for TV performance
-      return [BLOBS[0], BLOBS[1], BLOBS[3], BLOBS[6], BLOBS[9]];
+      return [BLOBS[0], BLOBS[1], BLOBS[3], BLOBS[6]];
     }
     return BLOBS;
   }, [isTV]);
