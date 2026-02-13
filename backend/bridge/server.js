@@ -1473,6 +1473,32 @@ const GEMINI_BRIDGE_TOOLS = [
       required: ["command"],
     },
   },
+  {
+    name: "query_history",
+    description: "Query historical data from PostgreSQL. Search directives, approvals, memories, " +
+      "status events, and directive history. Use for questions like 'what did we complete last week?', " +
+      "'show high-risk approvals', or 'what has Cipher remembered about preferences?'.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        table: {
+          type: "STRING",
+          description: "Which data to query: directives, approvals, memories, status, directive_history",
+        },
+        status: { type: "STRING", description: "Filter by status (directives: pending/planning/planned/approved/in_progress/completed)" },
+        type: { type: "STRING", description: "Filter by type (directives: quick/feature/explore)" },
+        risk: { type: "STRING", description: "Filter by risk level (approvals: low/medium/high)" },
+        resolved: { type: "BOOLEAN", description: "Filter by resolved state (approvals)" },
+        persona: { type: "STRING", description: "Filter by persona (memories/status: june/cipher)" },
+        category: { type: "STRING", description: "Filter by category (memories: preference/decision/personal/project/general)" },
+        search: { type: "STRING", description: "Full-text search (memories only)" },
+        since: { type: "STRING", description: "Only show entries after this date, e.g. '2025-01-15' or '7 days ago'" },
+        directive_id: { type: "STRING", description: "Filter by directive ID (directive_history only)" },
+        limit: { type: "NUMBER", description: "Max results to return (default 20, max 50)" },
+      },
+      required: ["table"],
+    },
+  },
 ];
 
 const SWITCH_TO_CIPHER_TOOL = {
@@ -1855,6 +1881,52 @@ async function handleToolCall(name, args) {
           const stderr = err.stderr || err.message || "Command failed";
           console.error(`[run_command] Failed: ${args.command} — ${stderr}`);
           return { success: false, message: `Command failed (exit ${err.status || "?"}): ${stderr}` };
+        }
+      }
+
+      if (name === "query_history") {
+        if (!db.isConnected()) {
+          return { success: false, message: "PostgreSQL is not connected. Historical queries unavailable." };
+        }
+        try {
+          const filters = {};
+          if (args.status) filters.status = args.status;
+          if (args.type) filters.type = args.type;
+          if (args.risk) filters.risk = args.risk;
+          if (args.resolved !== undefined) filters.resolved = args.resolved;
+          if (args.persona) filters.persona = args.persona;
+          if (args.category) filters.category = args.category;
+          if (args.search) filters.search = args.search;
+          if (args.since) filters.since = args.since;
+          if (args.directive_id) filters.directive_id = args.directive_id;
+          if (args.limit) filters.limit = args.limit;
+
+          const result = await db.queryHistory(args.table, filters);
+          if (result.error) return { success: false, message: result.error };
+          if (result.count === 0) return { success: true, message: `No ${args.table} found matching your filters.` };
+
+          const lines = result.rows.map(row => {
+            if (args.table === "memories") {
+              return `[${new Date(row.created_at).toLocaleDateString()}] (${row.category}) ${row.fact}`;
+            }
+            if (args.table === "directives") {
+              return `[${new Date(row.created_at).toLocaleDateString()}] ${row.id}: "${row.title}" [${row.type}] — ${row.status}`;
+            }
+            if (args.table === "approvals") {
+              return `[${new Date(row.created_at).toLocaleDateString()}] ${row.id}: ${row.risk} risk, ${row.tool} — ${row.description} (${row.resolved ? (row.approved ? "approved" : "denied") : "pending"})`;
+            }
+            if (args.table === "status") {
+              return `[${new Date(row.created_at).toLocaleDateString()}] ${row.event}: ${row.tool || ""} — ${row.message || ""}`;
+            }
+            if (args.table === "directive_history") {
+              return `[${new Date(row.changed_at).toLocaleDateString()}] ${row.directive_id} "${row.title || ""}": ${row.old_status || "new"} → ${row.new_status}${row.changed_by ? ` (by ${row.changed_by})` : ""}`;
+            }
+            return JSON.stringify(row);
+          });
+
+          return { success: true, message: `${result.count} result(s) from ${args.table}:\n${lines.join("\n")}` };
+        } catch (err) {
+          return { success: false, message: `Query failed: ${err.message}` };
         }
       }
 

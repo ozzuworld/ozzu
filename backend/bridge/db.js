@@ -267,6 +267,85 @@ async function completeDeployment(id, status = "completed", notes = null) {
   );
 }
 
+// ── Query History (for Gemini query_history tool) ──
+
+async function queryHistory(table, filters = {}) {
+  if (!_pgConnected) return { error: "PostgreSQL not connected" };
+
+  const limit = Math.min(filters.limit || 20, 50);
+
+  switch (table) {
+    case "directives": {
+      let sql = `SELECT id, type, title, status, created_at, updated_at FROM directives`;
+      const params = [];
+      const clauses = [];
+      if (filters.status) { params.push(filters.status); clauses.push(`status = $${params.length}`); }
+      if (filters.type) { params.push(filters.type); clauses.push(`type = $${params.length}`); }
+      if (filters.since) { params.push(filters.since); clauses.push(`created_at >= $${params.length}::timestamptz`); }
+      if (clauses.length) sql += ` WHERE ` + clauses.join(" AND ");
+      params.push(limit);
+      sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
+      const res = await query(sql, params);
+      return { count: res.rows.length, rows: res.rows };
+    }
+    case "approvals": {
+      let sql = `SELECT id, tool, description, risk, resolved, approved, created_at FROM approvals`;
+      const params = [];
+      const clauses = [];
+      if (filters.resolved !== undefined) { params.push(filters.resolved); clauses.push(`resolved = $${params.length}`); }
+      if (filters.risk) { params.push(filters.risk); clauses.push(`risk = $${params.length}`); }
+      if (filters.since) { params.push(filters.since); clauses.push(`created_at >= $${params.length}::timestamptz`); }
+      if (clauses.length) sql += ` WHERE ` + clauses.join(" AND ");
+      params.push(limit);
+      sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
+      const res = await query(sql, params);
+      return { count: res.rows.length, rows: res.rows };
+    }
+    case "memories": {
+      let sql = `SELECT id, persona, fact, category, confidence, created_at FROM memories`;
+      const params = [];
+      const clauses = [];
+      if (filters.persona) { params.push(filters.persona); clauses.push(`persona = $${params.length}`); }
+      if (filters.category) { params.push(filters.category); clauses.push(`category = $${params.length}`); }
+      if (filters.search) { params.push(filters.search); clauses.push(`search_vector @@ plainto_tsquery('english', $${params.length})`); }
+      if (filters.since) { params.push(filters.since); clauses.push(`created_at >= $${params.length}::timestamptz`); }
+      if (clauses.length) sql += ` WHERE ` + clauses.join(" AND ");
+      params.push(limit);
+      sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
+      const res = await query(sql, params);
+      return { count: res.rows.length, rows: res.rows };
+    }
+    case "status": {
+      let sql = `SELECT event, tool, message, persona, created_at FROM status_log`;
+      const params = [];
+      const clauses = [];
+      if (filters.event) { params.push(filters.event); clauses.push(`event = $${params.length}`); }
+      if (filters.persona) { params.push(filters.persona); clauses.push(`persona = $${params.length}`); }
+      if (filters.since) { params.push(filters.since); clauses.push(`created_at >= $${params.length}::timestamptz`); }
+      if (clauses.length) sql += ` WHERE ` + clauses.join(" AND ");
+      params.push(limit);
+      sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
+      const res = await query(sql, params);
+      return { count: res.rows.length, rows: res.rows };
+    }
+    case "directive_history": {
+      let sql = `SELECT dh.directive_id, d.title, dh.old_status, dh.new_status, dh.changed_by, dh.changed_at
+                 FROM directive_history dh LEFT JOIN directives d ON dh.directive_id = d.id`;
+      const params = [];
+      const clauses = [];
+      if (filters.directive_id) { params.push(filters.directive_id); clauses.push(`dh.directive_id = $${params.length}`); }
+      if (filters.since) { params.push(filters.since); clauses.push(`dh.changed_at >= $${params.length}::timestamptz`); }
+      if (clauses.length) sql += ` WHERE ` + clauses.join(" AND ");
+      params.push(limit);
+      sql += ` ORDER BY dh.changed_at DESC LIMIT $${params.length}`;
+      const res = await query(sql, params);
+      return { count: res.rows.length, rows: res.rows };
+    }
+    default:
+      return { error: `Unknown table: ${table}. Available: directives, approvals, memories, status, directive_history` };
+  }
+}
+
 // ── Health Check ──
 
 async function healthCheck() {
@@ -391,6 +470,8 @@ module.exports = {
   // Deployments
   addDeployment,
   completeDeployment,
+  // Query history
+  queryHistory,
   // Health
   healthCheck,
   // Migration
