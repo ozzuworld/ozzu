@@ -242,7 +242,7 @@ function useBlob(config: BlobConfig, mode: OrbMode) {
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
-      })
+      ])
     );
 
     const loopRotate = Animated.loop(
