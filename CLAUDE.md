@@ -8,9 +8,9 @@ GCP VM (server)          VPN Tunnel (OpenVPN)         Home LAN
                                                       |
                                                  172.168.0.0/24
                                                       |
-                                        ┌─────────────┼─────────────┐
-                                  tab-roaming     tab-lroom      tv-lroom
-                                  .53              .57             .56
+                                        ┌──────────┼──────────┼──────────┐
+                                  tab-roaming  tab-lroom   tv-lroom    dev-01
+                                  .53           .57          .56         .59
 ```
 
 - **GCP VM**: 10.128.0.8 (public cloud), 10.8.0.1 (VPN endpoint)
@@ -38,6 +38,7 @@ Naming convention: `ozzu-{type}-{location}-{number}`
 | ozzu-tab-roaming-01 | Samsung SM_P610 | 172.168.0.53 | 44847 | arm64-v8a |
 | ozzu-tab-lroom-01   | Samsung SM_P610 | 172.168.0.57 | 35897 | arm64-v8a |
 | ozzu-tv-lroom-01    | 4K Smart TV     | 172.168.0.56 | 36331 | armeabi-v7a |
+| ozzu-phone-roaming-01 | iPhone        | 172.168.0.59 (dev-01) | N/A (USB via dev-01) | arm64 |
 
 - ADB ports change on reboot — check device settings for current port
 - Connect: `adb pair <IP>:<PAIR_PORT> <PIN>` then `adb connect <IP>:<DEBUG_PORT>`
@@ -71,3 +72,15 @@ Naming convention: `ozzu-{type}-{location}-{number}`
   - ABI split: armeabi-v7a + arm64-v8a — APK is ~84MB (down from 165MB)
   - `adb reverse` does NOT work over wireless ADB/VPN — don't waste time on it
 - June talks to Bridge at `http://10.8.0.1:3333` from the devices
+
+## iOS Sideloading (via dev-01)
+
+iPhone apps are sideloaded through dev-01 (172.168.0.59) using Sideloader + self-hosted Anisette.
+
+- **First-time setup** (on dev-01): `./scripts/setup-ios-sideloading.sh`
+- **Pair iPhone** (USB required): `./scripts/pair-iphone.sh`
+- **Deploy iOS app**: `./scripts/deploy-ios.sh` (downloads CI artifact, signs + installs via dev-01)
+- **Local IPA**: `./scripts/deploy-ios.sh --local /path/to/ozzu.ipa`
+- **Trigger iOS build**: `gh workflow run build-ios.yml`
+- **Free Apple ID limits**: 3 sideloaded apps max, 7-day certificate refresh (SideStore auto-refreshes via WireGuard)
+- **Bundle ID**: `com.ozzu.app` (iOS), `com.anonymous.ozzu` (Android)
