@@ -110,6 +110,9 @@ smart_deploy() {
   fi
 }
 
+# Ensure we can spawn Claude Code (may have been started from inside a CC session)
+unset CLAUDECODE
+
 log "Cipher watcher started (polling every ${POLL_INTERVAL}s)"
 
 while true; do

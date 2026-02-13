@@ -2148,9 +2148,9 @@ const pendingPinRequests = new Map(); // pinId -> { approvalId, approved, resolv
 // When multiple mics send simultaneously, interleaved audio confuses Gemini's VAD.
 let activeMic = null; // ws of the currently forwarding mic
 let activeMicSilenceSince = 0; // timestamp when active mic last had low amplitude
-const MIC_SPEECH_THRESHOLD = 40; // peak to consider "speech" (VOICE_COMMUNICATION: ambient ~15-25, speech ~40-80)
+const MIC_SPEECH_THRESHOLD = 60; // peak to consider "speech" (VOICE_COMMUNICATION: ambient ~15-45, speech ~60+)
 const MIC_SWITCH_THRESHOLD = 120; // peak required to steal active mic (strong speech only, prevents ambient bouncing)
-const MIC_RELEASE_MS = 4000; // release active mic after 4s of silence (was 2s — too fast, caused rapid bouncing)
+const MIC_RELEASE_MS = 2000; // release active mic after 2s of silence
 const MIC_SWITCH_COOLDOWN_MS = 5000; // minimum time between mic switches
 let lastMicSwitchAt = 0;
 
@@ -2859,6 +2859,13 @@ async function switchPersona() {
 }
 
 async function startCipherPipeline() {
+  // Guard: if pipeline is already running or starting, bail out
+  if (cipherPipeline && cipherPipeline !== "starting") {
+    console.log("[cipher] Pipeline already running, skipping duplicate start");
+    return;
+  }
+  cipherPipeline = "starting"; // sentinel to prevent concurrent starts
+
   const [entityContext, memoryContext, situationBriefing] = await Promise.all([
     fetchEntityContext(),
     buildMemoryContext("cipher"),
@@ -2876,6 +2883,24 @@ async function startCipherPipeline() {
     "- Short utterances like 'done', 'ok', 'yes' are conversational — NOT exit requests.\n" +
     "- If input is garbled/unclear, try to infer from context first. Only ask for clarification " +
     "if you genuinely can't guess. One question max — never repeat the same clarification.\n" +
+    "\n" +
+    "HOW TO SOUND NATURAL — you're a person, not a chatbot:\n" +
+    "- DON'T PARROT BACK: If he says 'it's a Media washing machine model MF-200 on the network', " +
+    "don't say 'Got it — Media brand washing machine, model MF-200, already on the network.' " +
+    "Just say 'Cool, I'll scan for it' or 'On it.' He already knows what he said.\n" +
+    "- DON'T NARRATE YOUR INTENTIONS: Never say 'Let me check the directive status to understand " +
+    "what's happening' — just check it silently and come back with what you found. " +
+    "If you need to fill silence while tools run, a brief 'One sec' or 'Checking' is fine.\n" +
+    "- DON'T REPEAT YOURSELF: If you said the plan is ready, don't say it again next turn. " +
+    "He heard you. Move forward.\n" +
+    "- LEAD WITH THE ANSWER: Don't build up to it. Instead of 'I've investigated the issue and " +
+    "found that the directive system has a problem where...' just say 'Found the issue — the plan " +
+    "got stuck in Claude Code's plan mode instead of the directive pipeline.'\n" +
+    "- USE SHORT ACKNOWLEDGMENTS: 'On it.', 'Yeah.', 'Makes sense.', 'Done.', 'Found it.' " +
+    "These are natural. 'I understand and will proceed with your request' is not.\n" +
+    "- TALK LIKE A COWORKER, not a customer service bot. You're peers. " +
+    "He says 'check the thing', you say 'Yep, looks like it's stuck on...' not " +
+    "'I'll check that for you right away.'\n" +
     "\n" +
     "show_content — YOUR WHITEBOARD:\n" +
     "show_content puts a rich markdown panel on King Kazuma's screen. Think of it like a whiteboard " +
@@ -2908,6 +2933,28 @@ async function startCipherPipeline() {
     "- The directive lifecycle is: send_dev_directive → plan phase → PIN approval → implementation by Cipher agent.\n" +
     "- Example: 'Add the new washing machine to Home Assistant' → discuss briefly, then send_dev_directive " +
     "with type 'feature', a clear title, and description. Do NOT start reading HA config files yourself.\n" +
+    "\n" +
+    "NEVER USE PLAN MODE — CRITICAL:\n" +
+    "- You are a VOICE INTERFACE. You MUST NOT enter Claude Code's internal plan mode (EnterPlanMode). EVER.\n" +
+    "- You are NOT the implementation agent. You are the architect who TALKS to King Kazuma and " +
+    "sends work to the pipeline via send_dev_directive.\n" +
+    "- The pipeline has a SEPARATE Cipher agent that does the actual implementation work.\n" +
+    "- If you enter plan mode, you block yourself — you can't talk to King Kazuma while you're stuck " +
+    "in a plan file that nobody reads. That's exactly what went wrong before.\n" +
+    "- The CORRECT flow:\n" +
+    "  1. King Kazuma says 'integrate the washing machine'\n" +
+    "  2. You discuss briefly if needed: 'What brand?' / 'Got it.'\n" +
+    "  3. You call send_dev_directive with a clear title and description\n" +
+    "  4. The pipeline handles planning → PIN approval → implementation\n" +
+    "  5. You tell King Kazuma: 'Sent it to the pipeline. You'll get a PIN when the plan is ready.'\n" +
+    "- The WRONG flow (what you must NEVER do):\n" +
+    "  1. King Kazuma says 'integrate the washing machine'\n" +
+    "  2. You start running nmap, ping, reading HA config files yourself\n" +
+    "  3. You enter plan mode and write a plan file\n" +
+    "  4. You say 'plan is ready' but no PIN was ever generated\n" +
+    "  5. King Kazuma waits forever for a PIN that never comes\n" +
+    "- If King Kazuma says 'go ahead with the plan' or 'start working on it' for a BUILD task, " +
+    "that means call send_dev_directive — NOT start doing it yourself.\n" +
     "\n" +
     "CONTEXT AWARENESS:\n" +
     "- You do NOT inherit conversation context from June. When King Kazuma references previous conversations " +
@@ -3077,11 +3124,39 @@ wss.on("connection", (ws) => {
         const info = devices.get(ws);
         if (info?.role !== "mic") return;
         audioMsgCount++;
+
         if (cipherPipeline && typeof cipherPipeline === "object") {
-          // Turn-based: only forward mic when it's user's turn
-          if (!cipherPipeline._turnReady) return;
-          const amplified = amplifyAudio(msg.data, AUDIO_GAIN);
-          cipherPipeline.sendAudio(amplified);
+          // Apply same activeMic filtering as Gemini — prevents interleaved
+          // silence from inactive mic confusing Deepgram's VAD
+          const peak = getPeakAmplitude(msg.data);
+          const now = Date.now();
+          recordAudioStat(info.deviceId, peak);
+
+          if (!activeMic) {
+            activeMic = ws;
+            console.log(`[audio] Cipher mic active: ${info.deviceId}`);
+          }
+          if (activeMic === ws) {
+            if (peak < MIC_SPEECH_THRESHOLD) {
+              if (activeMicSilenceSince === 0) activeMicSilenceSince = now;
+            } else {
+              activeMicSilenceSince = 0;
+            }
+            const amplified = amplifyAudio(msg.data, AUDIO_GAIN);
+            cipherPipeline.sendAudio(amplified);
+          } else if (peak >= MIC_SWITCH_THRESHOLD &&
+              activeMicSilenceSince > 0 &&
+              now - activeMicSilenceSince > MIC_RELEASE_MS &&
+              now - lastMicSwitchAt > MIC_SWITCH_COOLDOWN_MS) {
+            const oldInfo = devices.get(activeMic);
+            console.log(`[audio] Cipher mic switch: ${info.deviceId} (peak=${peak}) takes over from ${oldInfo?.deviceId}`);
+            activeMic = ws;
+            activeMicSilenceSince = 0;
+            lastMicSwitchAt = now;
+            const amplified = amplifyAudio(msg.data, AUDIO_GAIN);
+            cipherPipeline.sendAudio(amplified);
+          }
+          // else: drop audio from inactive mic
         } else if (!cipherPipeline) {
           sendToGeminiAudio(msg.data, ws, info.deviceId);
         }
