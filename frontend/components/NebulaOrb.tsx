@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo } from "react";
-import { View, Animated, Easing } from "react-native";
+import { Animated, Easing } from "react-native";
 import { getDeviceType } from "../modules/pcm-player";
 
 type OrbMode = "idle" | "ambient" | "active";
@@ -9,23 +9,29 @@ interface NebulaOrbProps {
   ambient?: boolean;
 }
 
-// ── Blob definition ──
-interface BlobConfig {
+// ── Fog layer textures ──
+const FOG_TEXTURES = {
+  large: require("../assets/fog/fog-large.png"),
+  bright: require("../assets/fog/fog-bright.png"),
+  purple: require("../assets/fog/fog-purple.png"),
+  teal: require("../assets/fog/fog-teal.png"),
+  core: require("../assets/fog/fog-core.png"),
+  wispH: require("../assets/fog/fog-wisp-h.png"),
+  wispV: require("../assets/fog/fog-wisp-v.png"),
+};
+
+// ── Fog layer config ──
+interface FogLayerConfig {
+  texture: keyof typeof FOG_TEXTURES;
   width: number;
   height: number;
-  // RGB values (no alpha — alpha is controlled per-layer)
-  r: number;
-  g: number;
-  b: number;
-  // Base alpha for innermost layer (outer layers fade from this)
-  alpha: number;
   // Initial position offset from center
   offsetX: number;
   offsetY: number;
   // Lissajous drift amplitudes
   driftX: number;
   driftY: number;
-  // Base animation durations (ms) — use primes to avoid sync
+  // Base animation durations (ms) — primes avoid sync
   driftDuration: number;
   scaleDuration: number;
   opacityDuration: number;
@@ -33,135 +39,113 @@ interface BlobConfig {
   // Scale range
   scaleMin: number;
   scaleMax: number;
-  // Opacity range (multiplier on alpha)
+  // Opacity range
   opacityMin: number;
   opacityMax: number;
-  // Rotation range
+  // Rotation range (degrees)
   rotateStart: number;
   rotateEnd: number;
-  // Number of feather layers (more = softer edge, default 4)
-  layers?: number;
 }
 
-// Feather layer multipliers: each layer is progressively larger and more transparent
-// This creates soft edges without needing blur
-const FEATHER_RINGS = [
-  { sizeMultiplier: 1.0, alphaMultiplier: 1.0 },
-  { sizeMultiplier: 1.35, alphaMultiplier: 0.45 },
-  { sizeMultiplier: 1.7, alphaMultiplier: 0.2 },
-  { sizeMultiplier: 2.1, alphaMultiplier: 0.08 },
-];
-
-// ── Blob layers — wide spread, organic offsets, feathered edges ──
-const BLOBS: BlobConfig[] = [
-  // 1: Huge ambient field — barely visible, sets the tone
+// ── Fog layers — organic, drifting fog masses ──
+const FOG_LAYERS: FogLayerConfig[] = [
+  // 1: Huge background fog — sets the ambient tone
   {
-    width: 350, height: 280, r: 6, g: 182, b: 212, alpha: 0.035,
-    offsetX: -20, offsetY: 15,
-    driftX: 40, driftY: 30, driftDuration: 11003, scaleDuration: 9007,
-    opacityDuration: 8501, rotateDuration: 40000,
-    scaleMin: 0.92, scaleMax: 1.08, opacityMin: 0.5, opacityMax: 1.0,
-    rotateStart: 0, rotateEnd: 360, layers: 4,
+    texture: "large", width: 420, height: 420,
+    offsetX: -15, offsetY: 10,
+    driftX: 35, driftY: 28, driftDuration: 11003, scaleDuration: 9007,
+    opacityDuration: 8501, rotateDuration: 45000,
+    scaleMin: 0.9, scaleMax: 1.1, opacityMin: 0.3, opacityMax: 0.7,
+    rotateStart: 0, rotateEnd: 360,
   },
-  // 2: Primary fog mass — upper-left, large
+  // 2: Second large mass — opposite phase
   {
-    width: 200, height: 160, r: 6, g: 182, b: 212, alpha: 0.06,
-    offsetX: -55, offsetY: -40,
-    driftX: 50, driftY: 40, driftDuration: 7013, scaleDuration: 6007,
+    texture: "large", width: 380, height: 380,
+    offsetX: 20, offsetY: -15,
+    driftX: 30, driftY: 35, driftDuration: 9503, scaleDuration: 8009,
+    opacityDuration: 7499, rotateDuration: 38000,
+    scaleMin: 0.88, scaleMax: 1.12, opacityMin: 0.25, opacityMax: 0.65,
+    rotateStart: 180, rotateEnd: -180,
+  },
+  // 3: Bright cyan wisp — drifts through center
+  {
+    texture: "bright", width: 300, height: 300,
+    offsetX: -10, offsetY: -8,
+    driftX: 40, driftY: 32, driftDuration: 7013, scaleDuration: 6007,
     opacityDuration: 5501, rotateDuration: 22000,
-    scaleMin: 0.85, scaleMax: 1.12, opacityMin: 0.4, opacityMax: 1.0,
-    rotateStart: 20, rotateEnd: -340, layers: 4,
+    scaleMin: 0.82, scaleMax: 1.15, opacityMin: 0.2, opacityMax: 0.6,
+    rotateStart: 30, rotateEnd: -330,
   },
-  // 3: Secondary fog mass — lower-right
+  // 4: Purple accent — upper-left drift
   {
-    width: 180, height: 150, r: 6, g: 182, b: 212, alpha: 0.055,
-    offsetX: 50, offsetY: 35,
-    driftX: 45, driftY: 50, driftDuration: 8501, scaleDuration: 7499,
-    opacityDuration: 6503, rotateDuration: 25000,
-    scaleMin: 0.88, scaleMax: 1.1, opacityMin: 0.4, opacityMax: 1.0,
-    rotateStart: 140, rotateEnd: -220, layers: 4,
+    texture: "purple", width: 320, height: 320,
+    offsetX: -50, offsetY: -40,
+    driftX: 45, driftY: 35, driftDuration: 8509, scaleDuration: 7507,
+    opacityDuration: 6997, rotateDuration: 30000,
+    scaleMin: 0.85, scaleMax: 1.12, opacityMin: 0.15, opacityMax: 0.5,
+    rotateStart: 200, rotateEnd: -160,
   },
-  // 4: Bright cyan wisp — drifts through center area
+  // 5: Teal — lower-right drift
   {
-    width: 120, height: 90, r: 34, g: 211, b: 238, alpha: 0.09,
-    offsetX: -15, offsetY: -12,
-    driftX: 45, driftY: 35, driftDuration: 5987, scaleDuration: 5003,
-    opacityDuration: 4507, rotateDuration: 16000,
-    scaleMin: 0.8, scaleMax: 1.18, opacityMin: 0.3, opacityMax: 1.0,
-    rotateStart: 70, rotateEnd: -290, layers: 4,
+    texture: "teal", width: 300, height: 340,
+    offsetX: 40, offsetY: 45,
+    driftX: 38, driftY: 42, driftDuration: 6491, scaleDuration: 7993,
+    opacityDuration: 5497, rotateDuration: 26000,
+    scaleMin: 0.85, scaleMax: 1.1, opacityMin: 0.15, opacityMax: 0.45,
+    rotateStart: 300, rotateEnd: 660,
   },
-  // 5: Purple accent — far upper-left
+  // 6: Horizontal wisp — sweeps across
   {
-    width: 160, height: 120, r: 139, g: 92, b: 246, alpha: 0.04,
-    offsetX: -60, offsetY: -50,
-    driftX: 35, driftY: 40, driftDuration: 8509, scaleDuration: 7507,
-    opacityDuration: 6997, rotateDuration: 28000,
-    scaleMin: 0.9, scaleMax: 1.1, opacityMin: 0.4, opacityMax: 1.0,
-    rotateStart: 200, rotateEnd: -160, layers: 3,
+    texture: "wispH", width: 400, height: 150,
+    offsetX: 15, offsetY: -20,
+    driftX: 50, driftY: 15, driftDuration: 7499, scaleDuration: 8503,
+    opacityDuration: 6007, rotateDuration: 18000,
+    scaleMin: 0.8, scaleMax: 1.2, opacityMin: 0.2, opacityMax: 0.55,
+    rotateStart: -10, rotateEnd: 350,
   },
-  // 6: Teal — far lower-right
+  // 7: Vertical wisp — counter-sweeps
   {
-    width: 150, height: 180, r: 20, g: 184, b: 166, alpha: 0.045,
-    offsetX: 45, offsetY: 55,
-    driftX: 35, driftY: 40, driftDuration: 6491, scaleDuration: 7993,
-    opacityDuration: 5497, rotateDuration: 20000,
-    scaleMin: 0.85, scaleMax: 1.12, opacityMin: 0.3, opacityMax: 1.0,
-    rotateStart: 300, rotateEnd: 660, layers: 3,
+    texture: "wispV", width: 150, height: 400,
+    offsetX: -25, offsetY: 10,
+    driftX: 20, driftY: 45, driftDuration: 6503, scaleDuration: 7499,
+    opacityDuration: 8009, rotateDuration: 20000,
+    scaleMin: 0.8, scaleMax: 1.15, opacityMin: 0.15, opacityMax: 0.5,
+    rotateStart: 10, rotateEnd: -350,
   },
-  // 7: Wide wisp — elongated, sweeps horizontally
+  // 8: Bright core — stays central, brighter
   {
-    width: 240, height: 55, r: 6, g: 182, b: 212, alpha: 0.04,
-    offsetX: 20, offsetY: -25,
-    driftX: 55, driftY: 18, driftDuration: 7499, scaleDuration: 8503,
-    opacityDuration: 6007, rotateDuration: 14000,
-    scaleMin: 0.8, scaleMax: 1.2, opacityMin: 0.3, opacityMax: 1.0,
-    rotateStart: -15, rotateEnd: 345, layers: 3,
+    texture: "core", width: 180, height: 180,
+    offsetX: 0, offsetY: 0,
+    driftX: 12, driftY: 12, driftDuration: 4001, scaleDuration: 3499,
+    opacityDuration: 2503, rotateDuration: 35000,
+    scaleMin: 0.88, scaleMax: 1.12, opacityMin: 0.4, opacityMax: 0.85,
+    rotateStart: 0, rotateEnd: 360,
   },
-  // 8: Tall wisp — vertical, counter-sweeps
+  // 9: Core glow halo — just slightly larger than core
   {
-    width: 50, height: 220, r: 6, g: 182, b: 212, alpha: 0.04,
-    offsetX: -30, offsetY: 15,
-    driftX: 25, driftY: 45, driftDuration: 6503, scaleDuration: 7499,
-    opacityDuration: 8009, rotateDuration: 18000,
-    scaleMin: 0.8, scaleMax: 1.18, opacityMin: 0.3, opacityMax: 1.0,
-    rotateStart: 10, rotateEnd: -350, layers: 3,
+    texture: "core", width: 250, height: 250,
+    offsetX: 0, offsetY: 0,
+    driftX: 8, driftY: 8, driftDuration: 5003, scaleDuration: 4507,
+    opacityDuration: 3499, rotateDuration: 28000,
+    scaleMin: 0.92, scaleMax: 1.08, opacityMin: 0.15, opacityMax: 0.4,
+    rotateStart: 0, rotateEnd: -360,
   },
 ];
-
-// Core luminous center — stays near middle
-const CORE: BlobConfig = {
-  width: 40, height: 40, r: 6, g: 182, b: 212, alpha: 0.25,
-  offsetX: 0, offsetY: 0,
-  driftX: 10, driftY: 10, driftDuration: 4001, scaleDuration: 3001,
-  opacityDuration: 2503, rotateDuration: 30000,
-  scaleMin: 0.85, scaleMax: 1.15, opacityMin: 0.5, opacityMax: 1.0,
-  rotateStart: 0, rotateEnd: 360, layers: 4,
-};
-
-// Inner glow around core
-const CORE_GLOW: BlobConfig = {
-  width: 90, height: 90, r: 6, g: 182, b: 212, alpha: 0.07,
-  offsetX: 0, offsetY: 0,
-  driftX: 14, driftY: 14, driftDuration: 5003, scaleDuration: 4507,
-  opacityDuration: 3499, rotateDuration: 25000,
-  scaleMin: 0.9, scaleMax: 1.1, opacityMin: 0.4, opacityMax: 1.0,
-  rotateStart: 0, rotateEnd: -360, layers: 4,
-};
 
 // ── Speed multipliers per mode ──
 function modeMultipliers(mode: OrbMode) {
   switch (mode) {
     case "active":
-      return { speed: 3.0, opacityBoost: 0.3, scaleBoost: 0.04 };
+      return { speed: 3.0, opacityBoost: 0.2, scaleBoost: 0.04 };
     case "ambient":
-      return { speed: 1.5, opacityBoost: 0.15, scaleBoost: 0.02 };
+      return { speed: 1.5, opacityBoost: 0.1, scaleBoost: 0.02 };
     default:
       return { speed: 1.0, opacityBoost: 0, scaleBoost: 0 };
   }
 }
 
-// ── Hook: animate a single blob ──
-function useBlob(config: BlobConfig, mode: OrbMode) {
+// ── Hook: animate a single fog layer ──
+function useFogLayer(config: FogLayerConfig, mode: OrbMode) {
   const translateX = useRef(new Animated.Value(config.offsetX)).current;
   const translateY = useRef(new Animated.Value(config.offsetY)).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -269,10 +253,7 @@ function useBlob(config: BlobConfig, mode: OrbMode) {
 
   const rotateInterp = rotate.interpolate({
     inputRange: [0, 1],
-    outputRange: [
-      `${config.rotateStart}deg`,
-      `${config.rotateEnd}deg`,
-    ],
+    outputRange: [`${config.rotateStart}deg`, `${config.rotateEnd}deg`],
   });
 
   return { translateX, translateY, scale, opacity, rotate: rotateInterp };
@@ -314,21 +295,19 @@ function useContainerPulse(mode: OrbMode) {
   return pulse;
 }
 
-// ── Single blob view with feathered layers ──
-// Renders multiple concentric layers per blob to simulate soft/blurred edges
-function BlobView({ config, mode }: { config: BlobConfig; mode: OrbMode }) {
-  const { translateX, translateY, scale, opacity, rotate } = useBlob(config, mode);
-  const layerCount = config.layers || 4;
-  const rings = FEATHER_RINGS.slice(0, layerCount);
+// ── Single fog layer: animated Image ──
+function FogLayer({ config, mode }: { config: FogLayerConfig; mode: OrbMode }) {
+  const { translateX, translateY, scale, opacity, rotate } = useFogLayer(config, mode);
+  const source = FOG_TEXTURES[config.texture];
 
   return (
-    <Animated.View
+    <Animated.Image
+      source={source}
+      resizeMode="contain"
       style={{
         position: "absolute",
-        width: config.width * 2.2,
-        height: config.height * 2.2,
-        alignItems: "center",
-        justifyContent: "center",
+        width: config.width,
+        height: config.height,
         opacity,
         transform: [
           { translateX },
@@ -337,30 +316,12 @@ function BlobView({ config, mode }: { config: BlobConfig; mode: OrbMode }) {
           { rotate },
         ],
       }}
-    >
-      {rings.map((ring, i) => {
-        const w = config.width * ring.sizeMultiplier;
-        const h = config.height * ring.sizeMultiplier;
-        const a = config.alpha * ring.alphaMultiplier;
-        return (
-          <View
-            key={i}
-            style={{
-              position: "absolute",
-              width: w,
-              height: h,
-              borderRadius: Math.max(w, h) / 2,
-              backgroundColor: `rgba(${config.r},${config.g},${config.b},${a})`,
-            }}
-          />
-        );
-      })}
-    </Animated.View>
+    />
   );
 }
 
 // ── Main component ──
-const CONTAINER_SIZE = 400;
+const CONTAINER_SIZE = 420;
 
 export function NebulaOrb({ active, ambient }: NebulaOrbProps) {
   const mode: OrbMode = active ? "active" : ambient ? "ambient" : "idle";
@@ -374,11 +335,12 @@ export function NebulaOrb({ active, ambient }: NebulaOrbProps) {
     }
   }, []);
 
-  const blobConfigs = useMemo(() => {
+  // TV: fewer layers for performance
+  const layers = useMemo(() => {
     if (isTV) {
-      return [BLOBS[0], BLOBS[1], BLOBS[3], BLOBS[6]];
+      return [FOG_LAYERS[0], FOG_LAYERS[2], FOG_LAYERS[5], FOG_LAYERS[7], FOG_LAYERS[8]];
     }
-    return BLOBS;
+    return FOG_LAYERS;
   }, [isTV]);
 
   return (
@@ -389,19 +351,13 @@ export function NebulaOrb({ active, ambient }: NebulaOrbProps) {
         height: CONTAINER_SIZE,
         alignItems: "center",
         justifyContent: "center",
+        overflow: "hidden",
         transform: [{ scale: containerPulse }],
       }}
     >
-      {/* Main blobs */}
-      {blobConfigs.map((blob, i) => (
-        <BlobView key={i} config={blob} mode={mode} />
+      {layers.map((layer, i) => (
+        <FogLayer key={i} config={layer} mode={mode} />
       ))}
-
-      {/* Core glow */}
-      <BlobView config={CORE_GLOW} mode={mode} />
-
-      {/* Luminous core */}
-      <BlobView config={CORE} mode={mode} />
     </Animated.View>
   );
 }
