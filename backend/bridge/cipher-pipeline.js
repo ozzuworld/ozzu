@@ -216,8 +216,10 @@ class CipherPipeline extends EventEmitter {
         console.error("[cipher] Deepgram STT error:", err.message);
       });
 
-      this.dgSTT.on(LiveTranscriptionEvents.Close, () => {
-        console.log("[cipher] Deepgram STT closed");
+      this.dgSTT.on(LiveTranscriptionEvents.Close, (ev) => {
+        const code = ev?.code || "unknown";
+        const reason = ev?.reason || "";
+        console.log(`[cipher] Deepgram STT closed (code=${code}${reason ? `, reason=${reason}` : ""})`);
         this.dgSTT = null;
         // Auto-reconnect if pipeline is still running
         if (this.running) {

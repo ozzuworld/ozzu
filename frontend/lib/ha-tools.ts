@@ -6,6 +6,7 @@ const CONTROLLABLE_DOMAINS = new Set([
   "siren",
   "media_player",
   "number",
+  "select",
 ]);
 
 /** Entity IDs from rooms.ts that belong to controllable domains. */
@@ -77,6 +78,22 @@ export const HA_FUNCTION_DECLARATIONS = [
       required: ["entity_id"],
     },
   },
+  {
+    name: "select_option",
+    description:
+      "Select an option on a select entity (e.g. washing machine cycle)",
+    parameters: {
+      type: "OBJECT" as any,
+      properties: {
+        entity_id: entityIdParam,
+        option: {
+          type: "STRING" as const,
+          description: "The option to select",
+        },
+      },
+      required: ["entity_id", "option"],
+    },
+  },
 ];
 
 // ── Tool call resolver ──
@@ -119,6 +136,13 @@ export function resolveToolCall(
       return {
         domain: "media_player",
         service: "media_play_pause",
+        entityId,
+      };
+    case "select_option":
+      return {
+        domain: "select",
+        service: "select_option",
+        data: { option: args.option as string },
         entityId,
       };
     default:

@@ -25,10 +25,11 @@ const ITEM_SLOT_MAP: Record<string, string> = {
   security_cam: "SHIELD",
   king_kazuma: "BOOTS",
   shopping_list: "RING",
+  media_washer: "AMULET",
 };
 
 const LEFT_SLOTS = ["HELM", "WEAPON", "CHEST", "GLOVES"] as const;
-const RIGHT_SLOTS = ["SHIELD", "BOOTS", "RING"] as const;
+const RIGHT_SLOTS = ["SHIELD", "BOOTS", "RING", "AMULET"] as const;
 
 type EquippedState = Record<string, InventoryItem | null>;
 
@@ -42,6 +43,7 @@ const INITIAL_EQUIPPED: EquippedState = {
   SHIELD: null,
   BOOTS: null,
   RING: null,
+  AMULET: null,
 };
 
 function EmptyInvSlot() {

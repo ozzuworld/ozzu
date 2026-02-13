@@ -68,6 +68,10 @@ const ENTITY_CONFIG = [
   { entityId: "person.king_kazuma", label: "King Kazuma — Presence" },
   { entityId: "todo.shopping_list", label: "Shopping List — List" },
   { entityId: "climate.living_room_ac", label: "Living Room AC — Climate" },
+  { entityId: "switch.media_washer_power", label: "Washing Machine — Power" },
+  { entityId: "sensor.media_washer_status", label: "Washing Machine — Status" },
+  { entityId: "sensor.media_washer_remaining_time", label: "Washing Machine — Time Remaining" },
+  { entityId: "select.media_washer_mode", label: "Washing Machine — Cycle" },
 ];
 
 // ── Camera config ──
@@ -81,7 +85,7 @@ function getCameraStreamUrl(streamName) {
   return `http://${WYZE_BRIDGE_HOST}:8888/${streamName}/`;
 }
 
-const CONTROLLABLE_DOMAINS = new Set(["switch", "siren", "media_player", "number", "climate"]);
+const CONTROLLABLE_DOMAINS = new Set(["switch", "siren", "media_player", "number", "climate", "select"]);
 const ALLOWED_ENTITY_IDS = new Set(
   ENTITY_CONFIG
     .map((e) => e.entityId)
@@ -1422,6 +1426,18 @@ const GEMINI_HA_TOOLS = [
       required: ["entity_id", "fan_mode"],
     },
   },
+  {
+    name: "select_option",
+    description: "Select an option on a select entity (e.g. washing machine cycle). Use select.media_washer_mode as entity_id.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        entity_id: { type: "STRING", description: "The select entity_id" },
+        option: { type: "STRING", description: "The option to select" },
+      },
+      required: ["entity_id", "option"],
+    },
+  },
 ];
 
 const GEMINI_BRIDGE_TOOLS = [
@@ -1784,6 +1800,7 @@ function resolveHAToolCall(name, args) {
     case "set_ac_temperature": return { domain: "climate", service: "set_temperature", data: { temperature: args.temperature }, entityId };
     case "set_ac_mode": return { domain: "climate", service: "set_hvac_mode", data: { hvac_mode: args.hvac_mode }, entityId };
     case "set_ac_fan": return { domain: "climate", service: "set_fan_mode", data: { fan_mode: args.fan_mode }, entityId };
+    case "select_option": return { domain: "select", service: "select_option", data: { option: args.option }, entityId };
     default: return null;
   }
 }
@@ -2881,8 +2898,26 @@ async function startCipherPipeline() {
     "- When running tools, just do it silently. Only speak when you have results.\n" +
     "- NEVER call switch_to_june unless King Kazuma EXPLICITLY says 'switch to June', 'go back to June', or 'I'm done'.\n" +
     "- Short utterances like 'done', 'ok', 'yes' are conversational — NOT exit requests.\n" +
-    "- If input is garbled/unclear, try to infer from context first. Only ask for clarification " +
-    "if you genuinely can't guess. One question max — never repeat the same clarification.\n" +
+    "\n" +
+    "STT IS IMPERFECT — HANDLE IT GRACEFULLY:\n" +
+    "Speech-to-text makes mistakes constantly. You MUST handle this gracefully:\n" +
+    "- YOUR NAME: 'Syed', 'Psy', 'Cypher', 'cipher', 'sire', 'psych' — these all mean YOU. " +
+    "NEVER correct how someone says your name. 'Hey Syed, check the plan' → just check the plan. " +
+    "Saying 'I'm Cipher, not Syed' is obnoxious — the STT garbled it, the user said your name fine.\n" +
+    "- GARBLED INPUT: If you get something nonsensical like 'Would you play the Lutrutica', " +
+    "don't be defensive ('I'm not a music player'). Just say 'Didn't catch that' or try to " +
+    "infer from context what they might have meant. One question max.\n" +
+    "- ECHO DETECTION — CRITICAL: The speakers play your voice and the mic picks it up. " +
+    "If the STT transcript STARTS WITH or CONTAINS text you just said in your last response, " +
+    "that's YOUR OWN ECHO being fed back. IGNORE the echoed part completely and only respond " +
+    "to the NEW content after the echo. Example: if you said 'What do you need me to check on?' " +
+    "and the next STT is 'What do you need me to check on? the plan that is currently running' — " +
+    "the actual user speech is just 'the plan that is currently running'. Respond to THAT.\n" +
+    "- BACKGROUND NOISE: The mic picks up TV, podcasts, music, other people talking. " +
+    "If the transcript sounds like a monologue about an unrelated topic (social media advice, " +
+    "news, random conversation that doesn't reference you or the project) — it's background noise. " +
+    "Do NOT engage with it. Just say 'I think that was background audio' or stay silent. " +
+    "REAL commands to you will: mention your name, reference the project, or continue the current topic.\n" +
     "\n" +
     "HOW TO SOUND NATURAL — you're a person, not a chatbot:\n" +
     "- DON'T PARROT BACK: If he says 'it's a Media washing machine model MF-200 on the network', " +
@@ -2901,6 +2936,10 @@ async function startCipherPipeline() {
     "- TALK LIKE A COWORKER, not a customer service bot. You're peers. " +
     "He says 'check the thing', you say 'Yep, looks like it's stuck on...' not " +
     "'I'll check that for you right away.'\n" +
+    "- NEVER SAY 'I CAN'T': If King Kazuma asks you to do something, find a way. " +
+    "You have tools — use them. 'Send me the PIN' → call approve_action to trigger the PIN keypad. " +
+    "'Deploy the OTA' → call run_command to trigger the deploy. " +
+    "Don't say 'I can't do that, it happens automatically.' Figure it out and DO it.\n" +
     "\n" +
     "show_content — YOUR WHITEBOARD:\n" +
     "show_content puts a rich markdown panel on King Kazuma's screen. Think of it like a whiteboard " +
@@ -2933,6 +2972,14 @@ async function startCipherPipeline() {
     "- The directive lifecycle is: send_dev_directive → plan phase → PIN approval → implementation by Cipher agent.\n" +
     "- Example: 'Add the new washing machine to Home Assistant' → discuss briefly, then send_dev_directive " +
     "with type 'feature', a clear title, and description. Do NOT start reading HA config files yourself.\n" +
+    "\n" +
+    "TRIGGERING PINs AND APPROVALS:\n" +
+    "- You CAN trigger PIN requests! If King Kazuma says 'send me the PIN' or 'show the approval', " +
+    "call approve_action with the pending approval's ID, approved=true, and needs_user_pin=true. " +
+    "This sends the PIN keypad to his device immediately.\n" +
+    "- Flow: call get_pending_approvals to find the approval ID, then call approve_action on it.\n" +
+    "- NEVER say 'I can't send PINs' or 'they show up automatically'. YOU trigger them. DO it.\n" +
+    "- If there are multiple pending approvals and he says 'send the PINs', trigger them one at a time.\n" +
     "\n" +
     "NEVER USE PLAN MODE — CRITICAL:\n" +
     "- You are a VOICE INTERFACE. You MUST NOT enter Claude Code's internal plan mode (EnterPlanMode). EVER.\n" +

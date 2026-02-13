@@ -109,6 +109,20 @@ export const rooms: Room[] = [
           { entityId: "sensor.s_vide_remaining_time", label: "Remaining", icon: "⏳" },
         ],
       },
+      {
+        id: "media_washer",
+        name: "Washing Machine",
+        icon: "🫧",
+        rarity: "rare",
+        lore: "An enchanted basin that churns linens through cycles of cleansing water. It hums with purpose, releasing garments renewed.",
+        primaryEntityId: "switch.media_washer_power",
+        entities: [
+          { entityId: "switch.media_washer_power", label: "Power", icon: "⚡" },
+          { entityId: "sensor.media_washer_status", label: "Status", icon: "📊" },
+          { entityId: "sensor.media_washer_remaining_time", label: "Remaining", icon: "⏳" },
+          { entityId: "select.media_washer_mode", label: "Cycle", icon: "🔄" },
+        ],
+      },
     ],
   },
   {
