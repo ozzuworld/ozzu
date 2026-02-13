@@ -69,10 +69,10 @@ const ENTITY_CONFIG = [
   { entityId: "person.king_kazuma", label: "King Kazuma — Presence" },
   { entityId: "todo.shopping_list", label: "Shopping List — List" },
   { entityId: "climate.living_room_ac", label: "Living Room AC — Climate" },
-  { entityId: "switch.media_washer_power", label: "Washing Machine — Power" },
-  { entityId: "sensor.media_washer_status", label: "Washing Machine — Status" },
-  { entityId: "sensor.media_washer_remaining_time", label: "Washing Machine — Time Remaining" },
-  { entityId: "select.media_washer_mode", label: "Washing Machine — Cycle" },
+  { entityId: "switch.midea_washer_power", label: "Washing Machine — Power" },
+  { entityId: "sensor.midea_washer_status", label: "Washing Machine — Status" },
+  { entityId: "sensor.midea_washer_remaining_time", label: "Washing Machine — Time Remaining" },
+  { entityId: "select.midea_washer_mode", label: "Washing Machine — Cycle" },
 ];
 
 // ── Camera config ──
@@ -1471,7 +1471,7 @@ const GEMINI_HA_TOOLS = [
   },
   {
     name: "select_option",
-    description: "Select an option on a select entity (e.g. washing machine cycle). Use select.media_washer_mode as entity_id.",
+    description: "Select an option on a select entity (e.g. washing machine cycle). Use select.midea_washer_mode as entity_id.",
     parameters: {
       type: "OBJECT",
       properties: {

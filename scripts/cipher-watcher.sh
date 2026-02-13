@@ -137,10 +137,12 @@ print(f'DIR_TYPE={d[\"type\"]}')
 
         log "Planning directive: $DIR_TITLE ($DIR_ID)"
 
-        # Mark as planning
+        # Mark as planning + notify
         curl -sf -X PATCH "$BRIDGE/directives/$DIR_ID" \
           -H 'Content-Type: application/json' \
           -d '{"status":"planning"}' > /dev/null
+        curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+          -d "{\"message\":\"Cipher is now planning directive: $DIR_TITLE. I'll let you know when the plan is ready for review.\"}" > /dev/null
 
         # Invoke Claude Code to plan
         cd "$WORKDIR"
@@ -160,7 +162,10 @@ For 'quick' type directives: skip planning, set status directly to 'approved' an
 For 'feature' type directives: create a thorough plan and submit it. It will need PIN approval before you can implement.
 For 'explore' type directives: research and report findings, then set status to 'completed' with findings in the plan field.
 
-You have full autonomy to read any files, search code, and run non-destructive commands to understand the codebase. Just do it — no need to ask permission for research." >> "$LOGFILE" 2>&1
+You have full autonomy to read any files, search code, and run non-destructive commands to understand the codebase. Just do it — no need to ask permission for research.
+
+IMPORTANT: When done planning, notify King Kazuma by running:
+curl -X POST $BRIDGE/notify -H 'Content-Type: application/json' -d '{\"message\":\"Plan ready for: $DIR_TITLE. A PIN approval will be needed to proceed.\"}'" >> "$LOGFILE" 2>&1
 
         log "Done planning: $DIR_TITLE"
       fi
@@ -186,10 +191,12 @@ print(f'IMPL_ID={d[\"id\"]}')
 
         log "Implementing directive: $IMPL_TITLE ($IMPL_ID)"
 
-        # Mark as in_progress
+        # Mark as in_progress + notify
         curl -sf -X PATCH "$BRIDGE/directives/$IMPL_ID" \
           -H 'Content-Type: application/json' \
           -d '{"status":"in_progress"}' > /dev/null
+        curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+          -d "{\"message\":\"Cipher is now implementing: $IMPL_TITLE. I'll notify you when it's done and deployed.\"}" > /dev/null
 
         # Invoke Claude Code to implement
         cd "$WORKDIR"
@@ -201,12 +208,36 @@ Implement this approved directive:
 - Approved Plan:
 $IMPL_PLAN
 
-Your task:
-1. Implement the changes described in the plan
-2. Commit with a clear message and push to main
-3. If an APK rebuild is needed, the CI will handle it automatically on push
-4. When done, mark the directive complete: curl -X PATCH $BRIDGE/directives/$IMPL_ID -H 'Content-Type: application/json' -d '{\"status\":\"completed\"}'
-5. Post a completion status update to $BRIDGE/status
+IMPLEMENTATION LIFECYCLE — FOLLOW THIS EXACTLY:
+
+Phase 1: IMPLEMENT
+- Implement the changes described in the plan
+- Commit with a clear message and push to main
+- If an APK rebuild is needed, the CI will handle it automatically on push
+
+Phase 2: VERIFY
+- You MUST verify your work actually functions before marking complete
+- For HA integrations: check that entities exist in HA (curl the HA API), verify state isn't 'unavailable'
+- For bridge changes: restart the bridge and confirm it starts without errors
+- For frontend changes: confirm TypeScript compiles (npx tsc --noEmit)
+- For device integrations: confirm the device responds to commands
+- If verification fails, fix the issue and re-verify. Do NOT skip this.
+
+Phase 3: REPORT
+- Mark the directive complete ONLY if verification passed:
+  curl -X PATCH $BRIDGE/directives/$IMPL_ID -H 'Content-Type: application/json' -d '{\"status\":\"completed\"}'
+- Notify King Kazuma with a summary:
+  curl -X POST $BRIDGE/notify -H 'Content-Type: application/json' -d '{\"message\":\"DONE: $IMPL_TITLE. <what was built + verification results + any remaining manual steps>\"}'
+- This notification is MANDATORY. King Kazuma must know when work is finished.
+
+COMPLETION RULES — CRITICAL:
+- NEVER mark a directive as 'completed' unless the core functionality ACTUALLY WORKS
+- If you wrote code but can't verify it works (device not on network, service down, etc.), that's a BLOCKER — not a completion
+- 'I added the code plumbing but nothing is connected yet' is NOT completed. That's blocked.
+- Status options: 'completed' (working + verified), 'blocked' (needs external action), 'in_progress' (still working)
+- If blocked, set status to 'blocked' and IMMEDIATELY notify:
+  curl -X PATCH $BRIDGE/directives/$IMPL_ID -H 'Content-Type: application/json' -d '{\"status\":\"blocked\"}'
+  curl -X POST $BRIDGE/notify -H 'Content-Type: application/json' -d '{\"message\":\"BLOCKED: $IMPL_TITLE — <what is needed from King Kazuma to unblock>\"}'
 
 AUTONOMY RULES — You have FULL autonomy for all normal development work:
 - Reading, writing, editing, creating, deleting code files — just do it
@@ -219,14 +250,24 @@ AUTONOMY RULES — You have FULL autonomy for all normal development work:
 - Do NOT ask for approval for any of the above. Just execute.
 
 ONLY escalate to King Kazuma (via POST $BRIDGE/notify) for:
+- Blockers that need physical/manual action (connecting devices, entering passwords, etc.)
 - Infrastructure changes: shutting down hosts, modifying DNS, domain changes, firewall rules
 - Architectural decisions NOT covered by the approved plan
-- Deleting entire services/databases or irreversible destructive operations outside the codebase
-- Anything that affects production systems beyond this codebase (cloud config, network, etc.)
+- Anything that affects production systems beyond this codebase
 
-For escalations, post to $BRIDGE/notify with a clear description of what you need. Do NOT create approvals for routine dev work." >> "$LOGFILE" 2>&1
+For escalations, post to $BRIDGE/notify with a clear description of what you need." >> "$LOGFILE" 2>&1
 
-        log "Done implementing: $IMPL_TITLE"
+        IMPL_EXIT=$?
+        log "Done implementing: $IMPL_TITLE (exit=$IMPL_EXIT)"
+
+        # Notify completion (in case the agent didn't)
+        if [ $IMPL_EXIT -eq 0 ]; then
+          curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+            -d "{\"message\":\"Implementation finished for: $IMPL_TITLE. Deploying now...\"}" > /dev/null
+        else
+          curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+            -d "{\"message\":\"Implementation of $IMPL_TITLE may have failed (exit code $IMPL_EXIT). Check the logs.\"}" > /dev/null
+        fi
 
         # Wait for CI and auto-deploy
         smart_deploy

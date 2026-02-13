@@ -25,7 +25,7 @@ const ITEM_SLOT_MAP: Record<string, string> = {
   security_cam: "SHIELD",
   king_kazuma: "BOOTS",
   shopping_list: "RING",
-  media_washer: "AMULET",
+  midea_washer: "AMULET",
 };
 
 const LEFT_SLOTS = ["HELM", "WEAPON", "CHEST", "GLOVES"] as const;
