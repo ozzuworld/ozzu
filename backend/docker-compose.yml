@@ -47,10 +47,15 @@ services:
     volumes:
       - ./bridge:/app
       - /tmp/ozzu-bridge:/tmp/ozzu-bridge
-      - /home/gcp/ozzu:/home/gcp/ozzu:ro
+      - /home/gcp/ozzu:/home/gcp/ozzu
       - /var/run/docker.sock:/var/run/docker.sock
       - /root/.claude:/root/.claude
       - /root/.claude.json:/root/.claude.json
+      - /root/.local/share/claude:/root/.local/share/claude:ro
+      - /root/.local/bin/claude:/usr/local/bin/claude:ro
+      - /root/.config/gh:/root/.config/gh:ro
+      - /root/.gitconfig:/root/.gitconfig:ro
+      - /usr/bin/gh:/usr/local/bin/gh:ro
     environment:
       - BRIDGE_PIN=${BRIDGE_PIN:-1234}
       - HA_URL=${HA_URL:-http://localhost:8123}

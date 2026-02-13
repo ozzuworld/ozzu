@@ -10,6 +10,7 @@ const WebSocket = require("ws");
 const Redis = require("ioredis");
 const db = require("./db");
 const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
+const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents } = require("./agent-spawner");
 
 const PORT = 3333;
 const DATA_DIR = "/tmp/ozzu-bridge";
@@ -743,10 +744,21 @@ async function handleRequest(req, res) {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+    // Auto-transition quick directives straight to planning (triggers agent spawner)
+    if (data.type === "quick") {
+      directive.status = "planning";
+    }
+
     const directives = getDirectives();
     directives.push(directive);
     while (directives.length > MAX_DIRECTIVES) directives.shift();
     saveDirectives(directives, directive, null);
+
+    // Spawn planning agent for quick directives (already in planning status)
+    if (directive.status === "planning") {
+      spawnPlanningAgent(directive);
+    }
+
     sendJSON(res, 200, { ok: true, directive });
     return;
   }
@@ -759,6 +771,25 @@ async function handleRequest(req, res) {
       directives = directives.filter((d) => d.status === statusFilter);
     }
     sendJSON(res, 200, directives);
+    return;
+  }
+
+  // GET /agents — List running agent subprocesses
+  if (req.method === "GET" && pathname === "/agents") {
+    sendJSON(res, 200, getRunningAgents());
+    return;
+  }
+
+  // DELETE /agents/:directiveId — Kill a running agent
+  const agentDeleteMatch = pathname.match(/^\/agents\/([^/]+)$/);
+  if (req.method === "DELETE" && agentDeleteMatch) {
+    const directiveId = agentDeleteMatch[1];
+    const killed = killAgent(directiveId);
+    if (killed) {
+      sendJSON(res, 200, { ok: true, message: `Agent for ${directiveId} killed` });
+    } else {
+      sendJSON(res, 404, { error: `No running agent for ${directiveId}` });
+    }
     return;
   }
 
@@ -859,6 +890,17 @@ async function handleRequest(req, res) {
     }
 
     saveDirectives(directives, directive, prevStatus);
+
+    // ── Agent spawner hooks ──
+    // Auto-spawn planning agent when directive enters "planning"
+    if (directive.status === "planning" && prevStatus !== "planning") {
+      spawnPlanningAgent(directive);
+    }
+    // Auto-spawn implementation agent when directive is approved (with a plan or quick type)
+    if (directive.status === "approved" && prevStatus !== "approved") {
+      spawnImplementationAgent(directive);
+    }
+
     sendJSON(res, 200, { ok: true, directive });
     return;
   }
@@ -1330,7 +1372,8 @@ const INFRA_MAP =
   "- Devices: tab-roaming (172.168.0.53), tab-lroom (172.168.0.57), tv-lroom (172.168.0.56)\n" +
   "- dev-01 (172.168.0.59): runs wyze-bridge for camera streams\n\n" +
   "Bridge HTTP API (localhost:3333): POST /status, GET /status, POST /notify, " +
-  "POST /approvals, GET /approvals, POST /directives, GET /directives, PATCH /directives/:id\n\n" +
+  "POST /approvals, GET /approvals, POST /directives, GET /directives, PATCH /directives/:id, " +
+  "GET /agents, DELETE /agents/:directiveId\n\n" +
   "Common operations with run_command:\n" +
   "- Container health: docker ps, docker stats --no-stream, docker logs <name> --tail N\n" +
   "- Container management: docker restart <name>, docker compose -f /home/gcp/ozzu/backend/docker-compose.yml up -d <service>\n" +
@@ -1649,6 +1692,11 @@ function syncDirectiveFromApproval(approvalId, approved) {
   directive.updatedAt = Date.now();
   saveDirectives(directives, directive, prevStatus);
   console.log(`[directive] ${directive.id} → ${directive.status} (approval ${approvalId} ${approved ? "approved" : "denied"})`);
+
+  // Auto-spawn implementation agent when directive is approved via PIN
+  if (directive.status === "approved" && prevStatus !== "approved") {
+    spawnImplementationAgent(directive);
+  }
 }
 
 // ── HA REST API helper ──
@@ -1978,14 +2026,18 @@ async function handleToolCall(name, args) {
 
         const directive = {
           id: `dir_${Date.now()}`, type, title: title || "",
-          description, status: "pending", plan: null,
+          description, status: type === "quick" ? "planning" : "pending", plan: null,
           directiveApprovalId: null, createdAt: Date.now(), updatedAt: Date.now(),
         };
         const directives = getDirectives();
         directives.push(directive);
         while (directives.length > MAX_DIRECTIVES) directives.shift();
         saveDirectives(directives, directive, null);
-        return { success: true, message: `Directive created: ${directive.id} [${type}] "${title}" — status: pending` };
+        // Auto-spawn planning agent for quick directives
+        if (directive.status === "planning") {
+          spawnPlanningAgent(directive);
+        }
+        return { success: true, message: `Directive created: ${directive.id} [${type}] "${title}" — status: ${directive.status}` };
       }
 
       if (name === "show_camera") {
@@ -3291,5 +3343,18 @@ wss.on("connection", (ws) => {
     console.log(`[ozzu-bridge] listening on :${PORT}`);
     console.log(`[ozzu-bridge] data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);
     console.log(`[ozzu-bridge] HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
+    console.log(`[ozzu-bridge] agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
   });
 })();
+
+// Graceful shutdown: kill any running agent subprocesses
+process.on("SIGTERM", () => {
+  console.log("[ozzu-bridge] SIGTERM received, killing agent subprocesses...");
+  killAllAgents();
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  console.log("[ozzu-bridge] SIGINT received, killing agent subprocesses...");
+  killAllAgents();
+  process.exit(0);
+});
