@@ -24,6 +24,8 @@ GCP VM (server)          VPN Tunnel (OpenVPN)         Home LAN
 |-----------------|-------|------------------------------------|
 | Home Assistant  | 8123  | Proxied via nginx at home.ozzu.world |
 | Bridge server   | 3333  | Command bridge (Claude Code <-> June) |
+| PostgreSQL      | 5432  | Structured data: memories, conversations, directives, entity snapshots |
+| Redis           | 6379  | Ephemeral state: session cache, audio stats |
 | Nginx           | 80/443| SSL via Let's Encrypt + Cloudflare DNS |
 | OpenVPN         | 1194  | UDP, connects home ER605 router    |
 

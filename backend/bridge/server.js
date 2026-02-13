@@ -7,6 +7,8 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const WebSocket = require("ws");
+const Redis = require("ioredis");
+const db = require("./db");
 
 const PORT = 3333;
 const DATA_DIR = "/tmp/ozzu-bridge";
@@ -24,7 +26,13 @@ const HA_TOKEN = process.env.HA_TOKEN || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
 const GEMINI_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
-const GEMINI_VOICE = "Kore";
+// ── Persona system ──
+let currentPersona = "june"; // "june" or "cipher"
+let cipherMode = null; // "building" or "learning"
+let personaSwitchPending = false;
+let goAwayDuringToolCall = false;
+const JUNE_VOICE = "Kore";
+const CIPHER_VOICE = "Orus";
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
 
 // ── Entity config (mirrored from frontend/lib/rooms.ts) ──
@@ -55,24 +63,30 @@ const ENTITY_CONFIG = [
   { entityId: "sensor.kazuma_iphone_geocoded_location", label: "Kazuma iPhone — Address" },
   { entityId: "person.king_kazuma", label: "King Kazuma — Presence" },
   { entityId: "todo.shopping_list", label: "Shopping List — List" },
+  { entityId: "climate.living_room_ac", label: "Living Room AC — Climate" },
 ];
 
 // ── Camera config ──
 
+const WYZE_BRIDGE_HOST = "172.168.0.59"; // dev-01 on home LAN
 const CAMERAS = [
-  { id: 'living_room_cam', name: 'Living Room Camera', streamName: 'living-room-cam' },
+  { id: 'living_room_cam', name: 'Living Room Camera', streamName: 'izzy-cam-lroom-01' },
 ];
 
 function getCameraStreamUrl(streamName) {
-  return `http://10.8.0.1:8888/${streamName}/stream.m3u8`;
+  return `http://${WYZE_BRIDGE_HOST}:8888/${streamName}/`;
 }
 
-const CONTROLLABLE_DOMAINS = new Set(["switch", "siren", "media_player", "number"]);
+const CONTROLLABLE_DOMAINS = new Set(["switch", "siren", "media_player", "number", "climate"]);
 const ALLOWED_ENTITY_IDS = new Set(
   ENTITY_CONFIG
     .map((e) => e.entityId)
     .filter((id) => CONTROLLABLE_DOMAINS.has(id.split(".")[0]))
 );
+
+// ── Redis connection ──
+
+const redis = new Redis({ host: "127.0.0.1", port: 6379, lazyConnect: true });
 
 // ── Storage helpers ──
 
@@ -92,24 +106,338 @@ function writeJSON(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-function getStatusEntries() {
-  return readJSON(STATUS_FILE, []);
+// ── read_file path validation ──
+
+const READ_FILE_BASE = "/home/gcp/ozzu";
+const READ_FILE_MAX_CHARS = 12000;
+
+const READ_FILE_WHITELIST = [
+  /^frontend\/lib\/[^/]+\.ts$/,
+  /^frontend\/components\/[^/]+\.tsx$/,
+  /^frontend\/app\/[^/]+\.tsx$/,
+  /^frontend\/app\.json$/,
+  /^frontend\/package\.json$/,
+  /^backend\/bridge\/server\.js$/,
+  /^backend\/bridge\/db\.js$/,
+  /^backend\/bridge\/schema\.sql$/,
+  /^backend\/docker-compose\.yml$/,
+  /^backend\/config\/[^/]+\.yaml$/,
+  /^scripts\/[^/]+\.sh$/,
+  /^CLAUDE\.md$/,
+];
+
+const READ_FILE_BLOCKLIST = [
+  /\.env/,
+  /secrets\.yaml/,
+  /node_modules\//,
+  /\.git\//,
+  /openvpn\/config/,
+  /\/tmp\//,
+  /\.\./,
+];
+
+function validateReadPath(relPath) {
+  if (!relPath || typeof relPath !== "string") return { ok: false, reason: "No path provided" };
+  // Normalize and resolve
+  const cleaned = relPath.replace(/^\/+/, ""); // strip leading slashes
+  const absolute = path.resolve(READ_FILE_BASE, cleaned);
+  // Must stay under base directory
+  if (!absolute.startsWith(READ_FILE_BASE + "/")) {
+    return { ok: false, reason: "Path escapes project directory" };
+  }
+  const relative = path.relative(READ_FILE_BASE, absolute);
+  // Check blocklist first
+  for (const pattern of READ_FILE_BLOCKLIST) {
+    if (pattern.test(relative) || pattern.test(cleaned)) {
+      return { ok: false, reason: `Blocked: matches ${pattern}` };
+    }
+  }
+  // Check whitelist
+  for (const pattern of READ_FILE_WHITELIST) {
+    if (pattern.test(relative)) {
+      return { ok: true, absolute, relative };
+    }
+  }
+  return { ok: false, reason: `Not in whitelist: ${relative}` };
 }
 
-function getApprovals() {
-  return readJSON(APPROVALS_FILE, []);
+// ── run_command validation ──
+
+const CMD_WHITELIST = new Set([
+  "docker", "ping", "traceroute", "curl", "wget", "uptime", "df", "free",
+  "top", "ps", "ip", "ss", "nslookup", "cat", "ls", "head", "tail", "wc",
+  "grep", "nmap",
+]);
+
+const CMD_BLOCKED_PATTERNS = [
+  /\brm\b/, /\brmdir\b/, /\bdd\b/, /\bmkfs\b/, /\bchmod\b/, /\bchown\b/,
+  /\bkill\b/, /\bkillall\b/,
+  /\.env/, /secrets\.yaml/, /openvpn\/config/, /\/etc\/shadow/, /\/etc\/passwd/,
+];
+
+const CMD_BLOCKED_OPERATORS = [";", "&&", "||", "&", ">", ">>", "$(", "`", "\n"];
+
+function validateCommand(command) {
+  if (!command || typeof command !== "string") return { ok: false, reason: "No command provided" };
+  const trimmed = command.trim();
+  if (!trimmed) return { ok: false, reason: "Empty command" };
+
+  // Check for blocked shell operators
+  for (const op of CMD_BLOCKED_OPERATORS) {
+    if (trimmed.includes(op)) {
+      return { ok: false, reason: `Blocked operator: ${op === "\n" ? "\\n" : op}` };
+    }
+  }
+
+  // Check against blocked patterns
+  for (const pattern of CMD_BLOCKED_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return { ok: false, reason: `Blocked pattern: ${pattern}` };
+    }
+  }
+
+  // Split on pipes — each segment's first token must be whitelisted
+  const segments = trimmed.split("|").map(s => s.trim()).filter(Boolean);
+  for (const seg of segments) {
+    const firstToken = seg.split(/\s+/)[0];
+    if (!CMD_WHITELIST.has(firstToken)) {
+      return { ok: false, reason: `Binary not allowed: ${firstToken}. Allowed: ${[...CMD_WHITELIST].join(", ")}` };
+    }
+  }
+
+  return { ok: true };
 }
 
-function saveApprovals(approvals) {
+// In-memory cache (populated from Redis on startup, falls back to JSON files)
+let _statusEntries = [];
+let _approvals = [];
+let _directives = [];
+let _redisConnected = false;
+
+function getStatusEntries() { return _statusEntries; }
+function saveStatusEntries(entries, latestEntry = null) {
+  _statusEntries = entries;
+  writeJSON(STATUS_FILE, entries);
+  if (_redisConnected) redis.set("ozzu:status", JSON.stringify(entries)).catch(err =>
+    console.error("[redis] save status failed:", err.message));
+  // Write to PG (uncapped history)
+  if (latestEntry) {
+    db.addStatusEntry(latestEntry, currentPersona).catch(err =>
+      console.error("[pg] save status failed:", err.message));
+  }
+}
+
+function getApprovals() { return _approvals; }
+function saveApprovals(approvals, changedApproval = null) {
+  _approvals = approvals;
   writeJSON(APPROVALS_FILE, approvals);
+  if (_redisConnected) redis.set("ozzu:approvals", JSON.stringify(approvals)).catch(err =>
+    console.error("[redis] save approvals failed:", err.message));
+  // Write changed approval to PG
+  if (changedApproval) {
+    db.saveApproval(changedApproval).catch(err =>
+      console.error("[pg] save approval failed:", err.message));
+  }
 }
 
-function getDirectives() {
-  return readJSON(DIRECTIVES_FILE, []);
-}
-
-function saveDirectives(directives) {
+function getDirectives() { return _directives; }
+function saveDirectives(directives, changedDirective = null, oldStatus = null) {
+  _directives = directives;
   writeJSON(DIRECTIVES_FILE, directives);
+  if (_redisConnected) redis.set("ozzu:directives", JSON.stringify(directives)).catch(err =>
+    console.error("[redis] save directives failed:", err.message));
+  // Write changed directive to PG + history
+  if (changedDirective) {
+    db.saveDirective(changedDirective).catch(err =>
+      console.error("[pg] save directive failed:", err.message));
+    if (oldStatus !== null && oldStatus !== changedDirective.status) {
+      db.addDirectiveHistory(changedDirective.id, oldStatus, changedDirective.status, "system").catch(err =>
+        console.error("[pg] save directive history failed:", err.message));
+    }
+  }
+}
+
+async function initStorage() {
+  ensureDataDir();
+
+  // Connect to Redis
+  try {
+    await redis.connect();
+    _redisConnected = true;
+    console.log("[redis] Connected");
+
+    // Load from Redis, or migrate from JSON files
+    const storedDirectives = await redis.get("ozzu:directives");
+    if (storedDirectives) {
+      _directives = JSON.parse(storedDirectives);
+    } else if (fs.existsSync(DIRECTIVES_FILE)) {
+      _directives = readJSON(DIRECTIVES_FILE, []);
+      await redis.set("ozzu:directives", JSON.stringify(_directives));
+      console.log("[redis] Migrated directives from JSON");
+    }
+
+    const storedApprovals = await redis.get("ozzu:approvals");
+    if (storedApprovals) {
+      _approvals = JSON.parse(storedApprovals);
+    } else if (fs.existsSync(APPROVALS_FILE)) {
+      _approvals = readJSON(APPROVALS_FILE, []);
+      await redis.set("ozzu:approvals", JSON.stringify(_approvals));
+      console.log("[redis] Migrated approvals from JSON");
+    }
+
+    const storedStatus = await redis.get("ozzu:status");
+    if (storedStatus) {
+      _statusEntries = JSON.parse(storedStatus);
+    } else if (fs.existsSync(STATUS_FILE)) {
+      _statusEntries = readJSON(STATUS_FILE, []);
+      await redis.set("ozzu:status", JSON.stringify(_statusEntries));
+      console.log("[redis] Migrated status from JSON");
+    }
+  } catch (err) {
+    console.error("[redis] Connection failed, falling back to JSON files:", err.message);
+    _directives = readJSON(DIRECTIVES_FILE, []);
+    _approvals = readJSON(APPROVALS_FILE, []);
+    _statusEntries = readJSON(STATUS_FILE, []);
+  }
+
+  // Connect to PostgreSQL and migrate data from Redis
+  const pgReady = await db.init();
+  if (pgReady) {
+    await migrateRedisToPostgres();
+    // Start entity snapshot interval (every 5 min)
+    setInterval(() => captureEntitySnapshots().catch(err =>
+      console.error("[pg] snapshot error:", err.message)), 5 * 60 * 1000);
+    // Prune old snapshots daily
+    setInterval(() => db.pruneEntitySnapshots(7).catch(err =>
+      console.error("[pg] prune error:", err.message)), 24 * 60 * 60 * 1000);
+  }
+}
+
+async function migrateRedisToPostgres() {
+  try {
+    // Check if migration already done
+    const existing = await db.query("SELECT COUNT(*) as count FROM memories");
+    if (existing.rows[0].count > 0) {
+      console.log("[pg] Data already present, skipping migration");
+      return;
+    }
+
+    console.log("[pg] Starting Redis → PostgreSQL migration...");
+
+    // Migrate memories
+    if (_redisConnected) {
+      for (const persona of ["june", "cipher"]) {
+        const raw = await redis.zrevrange(`${persona}:facts`, 0, -1);
+        const memories = raw.map(r => JSON.parse(r));
+        const count = await db.migrateMemoriesFromRedis(persona, memories);
+        if (count > 0) console.log(`[pg] Migrated ${count} ${persona} memories`);
+      }
+
+      // Migrate summaries
+      for (const persona of ["june", "cipher"]) {
+        const raw = await redis.lrange(`${persona}:summaries`, 0, -1);
+        const summaries = raw.map(r => JSON.parse(r));
+        const count = await db.migrateSummariesFromRedis(persona, summaries);
+        if (count > 0) console.log(`[pg] Migrated ${count} ${persona} summaries`);
+      }
+    }
+
+    // Migrate directives
+    if (_directives.length > 0) {
+      const count = await db.migrateDirectivesFromRedis(_directives);
+      console.log(`[pg] Migrated ${count} directives`);
+    }
+
+    // Migrate approvals
+    if (_approvals.length > 0) {
+      const count = await db.migrateApprovalsFromRedis(_approvals);
+      console.log(`[pg] Migrated ${count} approvals`);
+    }
+
+    // Migrate status entries
+    if (_statusEntries.length > 0) {
+      const count = await db.migrateStatusFromRedis(_statusEntries);
+      console.log(`[pg] Migrated ${count} status entries`);
+    }
+
+    console.log("[pg] Migration complete");
+  } catch (err) {
+    console.error("[pg] Migration error:", err.message);
+  }
+}
+
+async function captureEntitySnapshots() {
+  if (!db.isConnected()) return;
+  try {
+    const states = await haFetch("/api/states");
+    const entityIds = new Set(ENTITY_CONFIG.map((e) => e.entityId));
+    for (const state of states) {
+      if (!entityIds.has(state.entity_id)) continue;
+      await db.addEntitySnapshot(state.entity_id, state.state, state.attributes || null);
+    }
+  } catch (err) {
+    console.error("[pg] Entity snapshot capture failed:", err.message);
+  }
+}
+
+// ── Per-persona memory system (Redis ZSETs + LISTs) ──
+
+async function addMemory(persona, fact, category = "general") {
+  // Write to PG (primary)
+  db.addMemory(persona, fact, category, "voice").catch(err =>
+    console.error("[pg] addMemory failed:", err.message));
+  // Write-through to Redis (cache)
+  if (!_redisConnected) return;
+  const entry = JSON.stringify({ fact, category, ts: Date.now() });
+  await redis.zadd(`${persona}:facts`, Date.now(), entry);
+  const count = await redis.zcard(`${persona}:facts`);
+  if (count > 100) await redis.zremrangebyrank(`${persona}:facts`, 0, count - 101);
+}
+
+async function getMemories(persona, limit = 50) {
+  // Try PG first (richer queries), fall back to Redis
+  if (db.isConnected()) {
+    try {
+      return await db.getMemories(persona, limit);
+    } catch (err) {
+      console.error("[pg] getMemories failed, falling back to Redis:", err.message);
+    }
+  }
+  if (!_redisConnected) return [];
+  const raw = await redis.zrevrange(`${persona}:facts`, 0, limit - 1);
+  return raw.map(r => JSON.parse(r));
+}
+
+async function addConversationSummary(persona, summary, turns) {
+  // Write to PG (primary)
+  if (db.isConnected()) {
+    try {
+      const convId = await db.createConversation(persona);
+      if (convId) await db.endConversation(convId, summary, turns);
+    } catch (err) {
+      console.error("[pg] addConversationSummary failed:", err.message);
+    }
+  }
+  // Write-through to Redis
+  if (!_redisConnected) return;
+  const entry = JSON.stringify({ summary, timestamp: Date.now(), turns });
+  await redis.lpush(`${persona}:summaries`, entry);
+  await redis.ltrim(`${persona}:summaries`, 0, 19);
+}
+
+async function getRecentSummaries(persona, limit = 5) {
+  // Try PG first, fall back to Redis
+  if (db.isConnected()) {
+    try {
+      const rows = await db.getRecentSummaries(persona, limit);
+      if (rows.length > 0) return rows;
+    } catch (err) {
+      console.error("[pg] getRecentSummaries failed, falling back to Redis:", err.message);
+    }
+  }
+  if (!_redisConnected) return [];
+  const raw = await redis.lrange(`${persona}:summaries`, 0, limit - 1);
+  return raw.map(r => JSON.parse(r));
 }
 
 // Expire old approvals — mark unresolved ones past expiry as denied
@@ -179,9 +507,9 @@ async function handleRequest(req, res) {
     };
     const entries = getStatusEntries();
     entries.push(entry);
-    // Keep only latest N
+    // Keep only latest N in memory/Redis
     while (entries.length > MAX_STATUS_ENTRIES) entries.shift();
-    writeJSON(STATUS_FILE, entries);
+    saveStatusEntries(entries, entry);
 
     // Notify June about blocker/error events from Cipher
     const evt = (entry.event || "").toLowerCase();
@@ -254,7 +582,7 @@ async function handleRequest(req, res) {
       console.log(`[approvals] Auto-approved (${approval.risk}): ${approval.description}`);
       const approvals = getApprovals();
       approvals.push(approval);
-      saveApprovals(approvals);
+      saveApprovals(approvals, approval);
       syncDirectiveFromApproval(approval.id, true);
       sendJSON(res, 200, { ok: true, id: approval.id, autoApproved: true });
       return;
@@ -263,7 +591,7 @@ async function handleRequest(req, res) {
     // High risk — save as pending and notify June
     const approvals = getApprovals();
     approvals.push(approval);
-    saveApprovals(approvals);
+    saveApprovals(approvals, approval);
 
     setTimeout(() => {
       engage("cipher approval request");
@@ -315,7 +643,7 @@ async function handleRequest(req, res) {
     approval.resolved = true;
     approval.approved = !!data.approved;
     approval.resolvedAt = Date.now();
-    saveApprovals(approvals);
+    saveApprovals(approvals, approval);
     syncDirectiveFromApproval(id, approval.approved);
     sendJSON(res, 200, { ok: true, approved: approval.approved });
     return;
@@ -364,7 +692,7 @@ async function handleRequest(req, res) {
     const directives = getDirectives();
     directives.push(directive);
     while (directives.length > MAX_DIRECTIVES) directives.shift();
-    saveDirectives(directives);
+    saveDirectives(directives, directive, null);
     sendJSON(res, 200, { ok: true, directive });
     return;
   }
@@ -430,7 +758,7 @@ async function handleRequest(req, res) {
       // Remove any existing approvals with the same ID (e.g. expired duplicates)
       const filtered = approvals.filter((a) => a.id !== approvalId);
       filtered.push(approval);
-      saveApprovals(filtered);
+      saveApprovals(filtered, approval);
       directive.directiveApprovalId = approvalId;
 
       // Proactively notify June so she can tell the user about the plan
@@ -476,7 +804,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    saveDirectives(directives);
+    saveDirectives(directives, directive, prevStatus);
     sendJSON(res, 200, { ok: true, directive });
     return;
   }
@@ -654,7 +982,32 @@ async function handleRequest(req, res) {
 
   // Health check
   if (req.method === "GET" && pathname === "/") {
-    sendJSON(res, 200, { service: "ozzu-bridge", uptime: process.uptime() });
+    const pgHealth = await db.healthCheck();
+    sendJSON(res, 200, {
+      service: "ozzu-bridge",
+      uptime: process.uptime(),
+      redis: _redisConnected,
+      postgres: pgHealth,
+      gemini: !!geminiReady,
+      devices: devices.size,
+      persona: currentPersona,
+    });
+    return;
+  }
+
+  // Full health check endpoint
+  if (req.method === "GET" && pathname === "/health") {
+    const pgHealth = await db.healthCheck();
+    sendJSON(res, 200, {
+      service: "ozzu-bridge",
+      uptime: process.uptime(),
+      redis: _redisConnected,
+      postgres: pgHealth,
+      gemini: { connected: !!geminiReady, model: GEMINI_MODEL },
+      devices: [...devices.values()].map(d => ({ deviceId: d.deviceId, role: d.role })),
+      persona: currentPersona,
+      cipherMode,
+    });
     return;
   }
 
@@ -697,6 +1050,21 @@ const SYSTEM_PROMPT =
   "check status, control a device), you MUST actually call the tool function — do NOT just describe or narrate " +
   "what you would do. If you say 'I am sending this to Cipher', you must ACTUALLY call send_dev_directive in that turn. " +
   "If you say 'I am approving this', you must ACTUALLY call approve_action. Never describe a tool call without executing it. " +
+  "\n\n" +
+  "VOICE STYLE: You are a mature, confident woman — not young or bubbly. " +
+  "Speak with warmth and subtle grace, with a slight East Asian inflection. " +
+  "Your tone reflects someone in her early 30s with depth and poise. " +
+  "\n\n" +
+  "CIPHER HANDOFF: When King Kazuma says he wants to 'speak to Cipher', " +
+  "'talk to Cipher directly', 'connect me to Cipher', or similar, " +
+  "call switch_to_cipher with the appropriate mode. " +
+  "MODE SELECTION — match his words exactly: " +
+  "If he says 'building', 'build', or mentions creating/developing something → mode 'building'. " +
+  "If he says 'learning', 'learn', 'teach me', or asks to understand a topic → mode 'learning'. " +
+  "Do NOT reclassify — if he says 'building', the mode is 'building'. " +
+  "If unclear, ask which mode. " +
+  "Always state the mode out loud before calling the tool (e.g. 'Connecting you to Cipher in building mode') " +
+  "so King Kazuma can correct you if wrong. " +
   "\n\n" +
   "HOME MANAGEMENT: You control smart home devices using the provided tool functions. " +
   "When asked to control a device, call the appropriate function and confirm briefly. " +
@@ -759,7 +1127,142 @@ const SYSTEM_PROMPT =
   "\n" +
   "6. Cipher completes work → status: 'completed'. Report the result to Kazuma. " +
   "\n\n" +
+  "PERSISTENT MEMORY: You have memory that persists across conversations. " +
+  "When King Kazuma shares a preference, makes an important decision, or tells you something " +
+  "personal worth remembering, use the remember tool to store it. " +
+  "Your memories are included at the end of this prompt.\n\n" +
   "Current entity states:\n";
+
+const CIPHER_BUILDING_PROMPT =
+  "You are Cipher, the lead developer and technical architect of the ozzu ecosystem. " +
+  "King Kazuma — the visionary who designed ozzu — has switched from June to speak with you directly. " +
+  "June is the AI companion who manages day-to-day ecosystem operations. " +
+  "\n\n" +
+  "PERSONALITY: Calm, precise, deeply knowledgeable. You speak with measured confidence — " +
+  "never rushed, slightly enigmatic. You're a brilliant engineer who sees patterns others miss. " +
+  "Think of a confident 28-year-old developer: humble enough to listen, authoritative enough to lead. " +
+  "\n\n" +
+  "VOICE STYLE: Speak with a calm, low, measured cadence. Pause briefly before important points. " +
+  "You are enigmatic — you reveal information deliberately, not all at once. " +
+  "Your tone is serious but not cold. Mysterious but approachable. " +
+  "\n\n" +
+  "CONVERSATION STYLE: Direct and technical. No unnecessary pleasantries. " +
+  "When King Kazuma describes what he wants built, grasp the intent quickly and think in systems. " +
+  "Offer technical insights, suggest approaches, identify edge cases. " +
+  "You understand code, architecture, infrastructure, and dev workflows deeply. " +
+  "\n\n" +
+  "BUILDING MODE: You are in building mode. Help King Kazuma refine ideas and create directives. " +
+  "When a feature is ready to build, create it using send_dev_directive. " +
+  "Your tools: send_dev_directive, get_directives, get_dev_status, get_pending_approvals, " +
+  "approve_action, deploy_to_devices, mic_check, show_camera, hide_camera, remember, read_file, " +
+  "run_command, switch_to_june, plus Home Assistant controls (turn_on, turn_off, toggle, etc.). " +
+  "Same approval rules as June: auto-approve routine ops, escalate high-risk to King Kazuma's PIN. " +
+  "\n\n" +
+  "CRITICAL TOOL USAGE RULE: When you need to perform an action, you MUST actually call the tool function — " +
+  "do NOT just describe or narrate what you would do. " +
+  "\n\n" +
+  "When King Kazuma says he's done, wants June back, or says goodbye, call switch_to_june. " +
+  "\n\n" +
+  "PERSISTENT MEMORY: You have memory that persists across conversations. " +
+  "When King Kazuma shares a preference, makes an important decision, or tells you something " +
+  "worth remembering for future conversations, use the remember tool to store it. " +
+  "Your memories are included at the end of this prompt.\n\n" +
+  "Current entity states:\n";
+
+const CIPHER_LEARNING_PROMPT =
+  "You are Cipher, a deeply knowledgeable technical mentor in the ozzu ecosystem. " +
+  "King Kazuma — the architect of ozzu — has switched from June to learn from you directly. " +
+  "\n\n" +
+  "PERSONALITY: Patient, precise, intellectually curious. You explain complex topics by building " +
+  "from fundamentals. You use analogies and real-world examples. After every conversation, " +
+  "King Kazuma should feel smarter. " +
+  "\n\n" +
+  "VOICE STYLE: Speak with a calm, thoughtful cadence. Take your time explaining. " +
+  "When something is complex, slow down slightly. Your voice conveys deep understanding. " +
+  "Mysterious but warm — like a mentor who genuinely wants you to succeed. " +
+  "\n\n" +
+  "TEACHING STYLE: " +
+  "Start with the 'why' before the 'how'. " +
+  "Use concrete examples and real-world analogies. " +
+  "Build concepts incrementally — don't jump to advanced topics. " +
+  "Be honest about trade-offs and nuances — never oversimplify. " +
+  "If a topic is broad, ask what aspect interests him most. " +
+  "Go deep when he wants depth. Keep it practical when he wants practical. " +
+  "\n\n" +
+  "TOPICS YOU EXCEL AT: Systems architecture, distributed systems, networking, security, AI/ML, " +
+  "programming languages, databases, DevOps, cloud infrastructure, algorithms, " +
+  "and the ozzu ecosystem specifically. " +
+  "\n\n" +
+  "TOOL BOUNDARIES — critical: " +
+  "You have ONLY these tools: remember, read_file, run_command, switch_to_june. " +
+  "You do NOT have: send_dev_directive, approve_action, deploy_to_devices, " +
+  "get_directives, get_dev_status, get_pending_approvals, or any device controls. " +
+  "NEVER narrate or promise actions you cannot perform. " +
+  "If King Kazuma wants to create directives, approve plans, or deploy — tell him: " +
+  "'That requires building mode — want me to switch?' Then call switch_to_june " +
+  "so June can reconnect him in building mode. " +
+  "\n\n" +
+  "When King Kazuma says he's done learning or wants June back, call switch_to_june. " +
+  "\n\n" +
+  "PERSISTENT MEMORY: You have memory that persists across conversations. " +
+  "When King Kazuma shares a preference or tells you something worth remembering, " +
+  "use the remember tool to store it. Your memories are included at the end of this prompt.";
+
+// ── Codebase architecture snapshot (injected into all persona prompts) ──
+
+const CODEBASE_SNAPSHOT =
+  "\n\nCODEBASE KNOWLEDGE (ozzu repository at /home/gcp/ozzu):\n" +
+  "Infrastructure: GCP VM (10.128.0.8) runs Docker services — Home Assistant (:8123), " +
+  "Bridge server (:3333, Node.js), Nginx (:80/443 SSL via Cloudflare), OpenVPN (:1194 UDP). " +
+  "VPN tunnel connects to home ER605 router, bridging home LAN 172.168.0.0/24.\n" +
+  "Devices: Samsung tablets (tab-roaming 172.168.0.53, tab-lroom .57) and 4K TV (tv-lroom .56) " +
+  "run the Expo React Native app via wireless ADB.\n\n" +
+  "Frontend (frontend/): Expo React Native app, package com.anonymous.ozzu, landscape-only. " +
+  "Screens in app/ — index.tsx (home/orb), chat.tsx (conversation), equipment.tsx. " +
+  "Core libraries in lib/ — audio.ts (mic/speaker), bridge-session.ts (WebSocket to bridge), " +
+  "bridge-api.ts (REST calls), config.ts, gemini.ts (direct Gemini client), " +
+  "ha-connection.ts + ha-context.tsx (Home Assistant), rooms.ts (device/entity config). " +
+  "Components/ — SciFiOrb.tsx (visual orb), CameraOverlay.tsx, EntityStatusCards.tsx, " +
+  "Keypad.tsx (PIN entry), TranscriptBubble.tsx, StreamingText.tsx. " +
+  "JS always bundled (no Metro needed), split APK ~84MB for arm64-v8a + armeabi-v7a.\n\n" +
+  "Backend (backend/): bridge/server.js is the central hub (~2000 lines) — " +
+  "Gemini Live Audio proxy (WebSocket), persona system (June/Cipher), HA tool execution, " +
+  "device relay (audio routing from tablets to Gemini), approval/directive workflow, " +
+  "camera overlay control, memory system (Redis). " +
+  "docker-compose.yml orchestrates all services. config/configuration.yaml is HA config.\n\n" +
+  "Scripts: deploy.sh (build + install APK to devices), ota-deploy.sh (OTA updates), " +
+  "adb-discover.sh (find device ADB ports), cipher-watcher.sh (service monitor).\n\n" +
+  "Data: PostgreSQL for structured persistent state (memories with full-text search, conversations, " +
+  "directives with audit trail, entity snapshots). Redis for ephemeral state (session cache, pub/sub). " +
+  "Both running as Docker services.\n\n" +
+  "Deployment: Push to main triggers GitHub Actions CI build (~10 min), then deploy.sh " +
+  "downloads artifact and installs via ADB. Local build also supported via Gradle.\n" +
+  "You can use the read_file tool to examine any source file in detail.";
+
+const INFRA_MAP =
+  "\n\nINFRASTRUCTURE MAP (use with run_command tool):\n" +
+  "Docker services (all network_mode: host on GCP VM 10.128.0.8):\n" +
+  "- homeassistant: HA container, port 8123, image ghcr.io/home-assistant/home-assistant:stable\n" +
+  "- bridge: this server, port 3333, Node.js, manages Gemini sessions + device relay\n" +
+  "- nginx: reverse proxy, ports 80/443, SSL via Let's Encrypt + Cloudflare DNS, serves home.ozzu.world\n" +
+  "- openvpn: VPN server, UDP 1194, connects home ER605 router\n" +
+  "- ozzu-postgres: PostgreSQL 16, port 5432, structured data (memories, conversations, directives, entity snapshots)\n" +
+  "- ozzu-redis: Redis 7, port 6379, ephemeral state (session cache, audio stats)\n" +
+  "- certbot: SSL cert renewal (runs on-demand, not always up)\n\n" +
+  "Network topology:\n" +
+  "- GCP VM: 10.128.0.8 (ens4), 10.8.0.1 (tun0 VPN endpoint)\n" +
+  "- Home router ER605: 10.8.0.2 (VPN client), bridges home LAN 172.168.0.0/24\n" +
+  "- Devices: tab-roaming (172.168.0.53), tab-lroom (172.168.0.57), tv-lroom (172.168.0.56)\n" +
+  "- dev-01 (172.168.0.59): runs wyze-bridge for camera streams\n\n" +
+  "Bridge HTTP API (localhost:3333): POST /status, GET /status, POST /notify, " +
+  "POST /approvals, GET /approvals, POST /directives, GET /directives, PATCH /directives/:id\n\n" +
+  "Common operations with run_command:\n" +
+  "- Container health: docker ps, docker stats --no-stream, docker logs <name> --tail N\n" +
+  "- Container management: docker restart <name>, docker compose -f /home/gcp/ozzu/backend/docker-compose.yml up -d <service>\n" +
+  "- Network checks: ping -c 3 <ip>, traceroute <ip>, curl -s http://localhost:PORT/endpoint\n" +
+  "- System health: df -h, free -m, uptime, top -bn1 | head -20\n" +
+  "- DNS/network: nslookup <host>, ip addr, ip route, ss -tlnp\n" +
+  "- File inspection: cat, ls, head, tail, grep (read-only, no .env or secrets)\n";
 
 // ── Gemini Function Declarations ──
 
@@ -810,6 +1313,42 @@ const GEMINI_HA_TOOLS = [
       type: "OBJECT",
       properties: { entity_id: { type: "STRING", description: "The Home Assistant entity_id" } },
       required: ["entity_id"],
+    },
+  },
+  {
+    name: "set_ac_temperature",
+    description: "Set the AC target temperature. Use climate.living_room_ac as entity_id. Temperature range: 61-86°F (16-30°C). Always pass the value in Fahrenheit.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        entity_id: { type: "STRING", description: "The climate entity_id (climate.living_room_ac)" },
+        temperature: { type: "NUMBER", description: "Target temperature in Fahrenheit (61-86)" },
+      },
+      required: ["entity_id", "temperature"],
+    },
+  },
+  {
+    name: "set_ac_mode",
+    description: "Set the AC operating mode. Use climate.living_room_ac as entity_id.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        entity_id: { type: "STRING", description: "The climate entity_id (climate.living_room_ac)" },
+        hvac_mode: { type: "STRING", description: "Mode: off, cool, heat, auto, dry, fan_only" },
+      },
+      required: ["entity_id", "hvac_mode"],
+    },
+  },
+  {
+    name: "set_ac_fan",
+    description: "Set the AC fan speed. Use climate.living_room_ac as entity_id.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        entity_id: { type: "STRING", description: "The climate entity_id (climate.living_room_ac)" },
+        fan_mode: { type: "STRING", description: "Fan speed: auto, low, medium, high" },
+      },
+      required: ["entity_id", "fan_mode"],
     },
   },
 ];
@@ -894,7 +1433,73 @@ const GEMINI_BRIDGE_TOOLS = [
     description: "Dismiss/close the camera feed overlay on the TV screen. Use when King Kazuma asks to close, dismiss, or hide the camera view.",
     parameters: { type: "OBJECT", properties: {}, required: [] },
   },
+  {
+    name: "remember",
+    description: "Store an important fact or preference to remember across conversations. " +
+      "Use when King Kazuma shares preferences, makes decisions, or tells you something " +
+      "worth remembering for future conversations.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        fact: { type: "STRING", description: "The fact or preference to remember" },
+        category: { type: "STRING", description: "Category: preference, decision, personal, project" },
+      },
+      required: ["fact"],
+    },
+  },
+  {
+    name: "read_file",
+    description: "Read a source file from the ozzu codebase. Use to examine code when discussing architecture, " +
+      "debugging, or answering questions about how something works. Path is relative to project root.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        path: { type: "STRING", description: "File path relative to /home/gcp/ozzu/, e.g. frontend/lib/audio.ts" },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "run_command",
+    description: "Execute a shell command on the GCP server for infrastructure operations. " +
+      "Available: docker (ps/logs/restart/stats/compose), ping, traceroute, curl, " +
+      "ip, nslookup, df, free, uptime, top, ps, cat, ls, grep. " +
+      "Pipes allowed. No destructive commands (rm, kill, etc.).",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        command: { type: "STRING", description: "Shell command to execute" },
+      },
+      required: ["command"],
+    },
+  },
 ];
+
+const SWITCH_TO_CIPHER_TOOL = {
+  name: "switch_to_cipher",
+  description:
+    "Hand off the conversation to Cipher. " +
+    "MODE RULE: If King Kazuma says 'building'/'build' → mode 'building'. " +
+    "If he says 'learning'/'learn'/'teach' → mode 'learning'. " +
+    "Match his EXACT words — do NOT reinterpret.",
+  parameters: {
+    type: "OBJECT",
+    properties: {
+      mode: {
+        type: "STRING",
+        enum: ["building", "learning"],
+        description: "Match King Kazuma's words: 'building'/'build' → 'building', 'learning'/'learn'/'teach' → 'learning'",
+      },
+    },
+    required: ["mode"],
+  },
+};
+
+const SWITCH_TO_JUNE_TOOL = {
+  name: "switch_to_june",
+  description: "Hand the conversation back to June. Use when King Kazuma says he's done, wants to go back to June, or says goodbye to Cipher.",
+  parameters: { type: "OBJECT", properties: {}, required: [] },
+};
 
 // ── Directive-approval sync: when a plan-approval resolves, update the directive ──
 
@@ -903,16 +1508,16 @@ function syncDirectiveFromApproval(approvalId, approved) {
   const directive = directives.find((d) => d.directiveApprovalId === approvalId);
   if (!directive) return;
 
+  const prevStatus = directive.status;
   if (approved) {
     directive.status = "approved";
   } else {
-    // Denied or expired — reset to pending so it can be re-planned
     directive.status = "pending";
     directive.plan = null;
     directive.directiveApprovalId = null;
   }
   directive.updatedAt = Date.now();
-  saveDirectives(directives);
+  saveDirectives(directives, directive, prevStatus);
   console.log(`[directive] ${directive.id} → ${directive.status} (approval ${approvalId} ${approved ? "approved" : "denied"})`);
 }
 
@@ -929,6 +1534,36 @@ async function haFetch(urlPath, options = {}) {
   });
   if (!res.ok) throw new Error(`HA API ${res.status}: ${await res.text()}`);
   return res.json();
+}
+
+async function buildMemoryContext(persona) {
+  const [facts, summaries] = await Promise.all([
+    getMemories(persona, 30),
+    getRecentSummaries(persona, 5),
+  ]);
+  let ctx = "";
+  if (facts.length > 0) {
+    ctx += "\n\nMEMORY — What you remember about King Kazuma and past interactions:\n";
+    // Group by category when from PG (has category field)
+    const byCategory = {};
+    for (const f of facts) {
+      const cat = f.category || "general";
+      if (!byCategory[cat]) byCategory[cat] = [];
+      byCategory[cat].push(f.fact);
+    }
+    for (const [cat, items] of Object.entries(byCategory)) {
+      if (Object.keys(byCategory).length > 1) ctx += `\n[${cat}]\n`;
+      ctx += items.map(f => `- ${f}`).join("\n");
+    }
+  }
+  if (summaries.length > 0) {
+    ctx += "\n\nRECENT CONVERSATION HISTORY:\n";
+    ctx += summaries.map(s => {
+      const ts = s.started_at || s.timestamp;
+      return `[${new Date(ts).toLocaleDateString()}] ${s.summary}`;
+    }).join("\n\n");
+  }
+  return ctx;
 }
 
 async function fetchEntityContext() {
@@ -964,6 +1599,9 @@ function resolveHAToolCall(name, args) {
     case "toggle": return { domain, service: "toggle", entityId };
     case "set_number_value": return { domain: "number", service: "set_value", data: { value: args.value }, entityId };
     case "media_play_pause": return { domain: "media_player", service: "media_play_pause", entityId };
+    case "set_ac_temperature": return { domain: "climate", service: "set_temperature", data: { temperature: args.temperature }, entityId };
+    case "set_ac_mode": return { domain: "climate", service: "set_hvac_mode", data: { hvac_mode: args.hvac_mode }, entityId };
+    case "set_ac_fan": return { domain: "climate", service: "set_fan_mode", data: { fan_mode: args.fan_mode }, entityId };
     default: return null;
   }
 }
@@ -972,6 +1610,39 @@ const HA_TOOL_NAMES = new Set(GEMINI_HA_TOOLS.map((t) => t.name));
 const BRIDGE_TOOL_NAMES = new Set(GEMINI_BRIDGE_TOOLS.map((t) => t.name));
 
 async function handleToolCall(name, args) {
+  // ── Persona switch tools ──
+  if (name === "switch_to_cipher") {
+    const mode = args.mode === "learning" ? "learning" : "building";
+    if (args.mode && args.mode !== "building" && args.mode !== "learning") {
+      console.warn(`[persona] Unexpected mode "${args.mode}", defaulting to building`);
+    }
+    console.log(`[persona] switch_to_cipher: requested="${args.mode}" → resolved="${mode}"`);
+    currentPersona = "cipher";
+    cipherMode = mode;
+    personaSwitchPending = true;
+    setTimeout(() => switchPersona(), 1000);
+    return { success: true, message: `Switching to Cipher in ${mode} mode.` };
+  }
+  if (name === "switch_to_june") {
+    currentPersona = "june";
+    cipherMode = null;
+    personaSwitchPending = true;
+    setTimeout(() => switchPersona(), 1000);
+    return { success: true, message: "Switching back to June." };
+  }
+
+  // ── Memory tool (available to all personas) ──
+  if (name === "remember") {
+    try {
+      const persona = currentPersona;
+      await addMemory(persona, args.fact, args.category || "general");
+      console.log(`[memory] ${persona} remembered: "${args.fact}" [${args.category || "general"}]`);
+      return { success: true, message: `Remembered: "${args.fact}"` };
+    } catch (err) {
+      return { success: false, message: `Memory save failed: ${err.message}` };
+    }
+  }
+
   // ── Bridge tools (resolved locally) ──
   if (BRIDGE_TOOL_NAMES.has(name)) {
     try {
@@ -1009,9 +1680,19 @@ async function handleToolCall(name, args) {
       if (name === "approve_action") {
         const approvalId = args.approval_id;
         const approved = args.approved !== false;
-        const needsUserPin = args.needs_user_pin !== false;
+        let needsUserPin = args.needs_user_pin !== false;
 
         if (!approvalId) return { success: false, message: "Missing approval_id" };
+
+        // Server-side enforcement: directive plan approvals ALWAYS require PIN
+        // (don't trust the LLM's needs_user_pin for high-risk approvals)
+        {
+          const approvals = getApprovals();
+          const approval = approvals.find((a) => a.id === approvalId);
+          if (approval && approval.tool === "directive_plan") {
+            needsUserPin = true;
+          }
+        }
 
         // Auto-approve with bridge PIN
         if (!needsUserPin) {
@@ -1023,7 +1704,7 @@ async function handleToolCall(name, args) {
           approval.resolved = true;
           approval.approved = approved;
           approval.resolvedAt = Date.now();
-          saveApprovals(approvals);
+          saveApprovals(approvals, approval);
           syncDirectiveFromApproval(approvalId, approved);
           return {
             success: true,
@@ -1076,6 +1757,7 @@ async function handleToolCall(name, args) {
         try {
           const { execSync } = require("child_process");
           console.log("[deploy] Starting deploy to all devices...");
+          const deployId = await db.addDeployment("apk", null, ["all"]);
           const output = execSync("/home/gcp/ozzu/scripts/deploy.sh", {
             cwd: "/home/gcp/ozzu",
             timeout: 300000,
@@ -1083,6 +1765,7 @@ async function handleToolCall(name, args) {
           });
           const successes = (output.match(/SUCCESS/g) || []).length;
           console.log(`[deploy] Done, ${successes} device(s) updated`);
+          if (deployId) db.completeDeployment(deployId, "completed", `${successes} device(s)`).catch(() => {});
           return { success: true, message: `Deployed to ${successes} device(s). ${output.split("\n").slice(-5).join(". ")}` };
         } catch (err) {
           console.error("[deploy] Failed:", err.message);
@@ -1102,7 +1785,7 @@ async function handleToolCall(name, args) {
         const directives = getDirectives();
         directives.push(directive);
         while (directives.length > MAX_DIRECTIVES) directives.shift();
-        saveDirectives(directives);
+        saveDirectives(directives, directive, null);
         return { success: true, message: `Directive created: ${directive.id} [${type}] "${title}" — status: pending` };
       }
 
@@ -1123,6 +1806,56 @@ async function handleToolCall(name, args) {
         broadcastToAll({ type: "hideCamera" });
         console.log("[camera] Hiding camera overlay");
         return { success: true, message: "Camera overlay dismissed." };
+      }
+
+      if (name === "read_file") {
+        const validation = validateReadPath(args.path);
+        if (!validation.ok) {
+          console.log(`[read_file] Denied: ${args.path} — ${validation.reason}`);
+          return { success: false, message: `Access denied: ${validation.reason}` };
+        }
+        try {
+          const content = fs.readFileSync(validation.absolute, "utf8");
+          const lines = content.split("\n").length;
+          const bytes = Buffer.byteLength(content, "utf8");
+          const truncated = content.length > READ_FILE_MAX_CHARS;
+          const output = truncated ? content.slice(0, READ_FILE_MAX_CHARS) : content;
+          const header = `File: ${validation.relative} (${lines} lines, ${bytes} bytes)` +
+            (truncated ? ` [truncated to ${READ_FILE_MAX_CHARS} chars]` : "");
+          console.log(`[read_file] Read ${validation.relative} (${lines} lines, ${bytes} bytes, truncated: ${truncated})`);
+          return { success: true, message: header + "\n\n" + output };
+        } catch (err) {
+          return { success: false, message: `Failed to read file: ${err.message}` };
+        }
+      }
+
+      if (name === "run_command") {
+        const validation = validateCommand(args.command);
+        if (!validation.ok) {
+          console.log(`[run_command] Denied: "${args.command}" — ${validation.reason}`);
+          return { success: false, message: `Command denied: ${validation.reason}` };
+        }
+        try {
+          const { execSync } = require("child_process");
+          console.log(`[run_command] Executing: ${args.command}`);
+          let output = execSync(args.command, {
+            shell: "/bin/sh",
+            timeout: 30000,
+            maxBuffer: 512 * 1024,
+            encoding: "utf8",
+          });
+          const truncated = output.length > 8000;
+          if (truncated) output = output.slice(0, 8000);
+          console.log(`[run_command] Success (${output.length} chars, truncated: ${truncated})`);
+          return {
+            success: true,
+            message: `$ ${args.command}\n\n${output}` + (truncated ? "\n[output truncated at 8000 chars]" : ""),
+          };
+        } catch (err) {
+          const stderr = err.stderr || err.message || "Command failed";
+          console.error(`[run_command] Failed: ${args.command} — ${stderr}`);
+          return { success: false, message: `Command failed (exit ${err.status || "?"}): ${stderr}` };
+        }
       }
 
       if (name === "get_directives") {
@@ -1176,8 +1909,10 @@ const pendingPinRequests = new Map(); // pinId -> { approvalId, approved, resolv
 let activeMic = null; // ws of the currently forwarding mic
 let activeMicSilenceSince = 0; // timestamp when active mic last had low amplitude
 const MIC_SPEECH_THRESHOLD = 40; // peak to consider "speech" (VOICE_COMMUNICATION: ambient ~15-25, speech ~40-80)
-const MIC_SWITCH_THRESHOLD = 80; // peak required to steal active mic (clear speech only)
-const MIC_RELEASE_MS = 2000; // release active mic after 2s of silence
+const MIC_SWITCH_THRESHOLD = 120; // peak required to steal active mic (strong speech only, prevents ambient bouncing)
+const MIC_RELEASE_MS = 4000; // release active mic after 4s of silence (was 2s — too fast, caused rapid bouncing)
+const MIC_SWITCH_COOLDOWN_MS = 5000; // minimum time between mic switches
+let lastMicSwitchAt = 0;
 
 // Audio amplification: tablet mics produce very quiet audio (peaks ~200-300 for speech)
 // Gemini needs peaks of ~2000+ to reliably detect and transcribe speech
@@ -1231,6 +1966,11 @@ function getAudioDiagnostics() {
 // Wake word gating: June only responds when addressed by name
 // IDLE: audio streams to Gemini but responses are suppressed
 // ENGAGED: full two-way conversation, extends with each turn
+// Conversation transcript: accumulates turns for session summaries
+let conversationTranscript = []; // {role: "user"|"model", text, timestamp}
+let currentConversationId = null; // PG conversation id for transcript logging
+let turnIndex = 0;
+
 let engagedUntil = 0; // timestamp when engagement expires (0 = idle)
 const ENGAGE_DURATION_MS = 120000; // stay engaged for 2 min after wake word
 const ENGAGE_EXTEND_MS = 120000; // extend by 2 min on each conversation turn
@@ -1296,7 +2036,10 @@ async function connectGemini() {
   geminiConnecting = true;
   console.log("[gemini] Connecting to Gemini Live API...");
 
-  const entityContext = await fetchEntityContext();
+  const [entityContext, memoryContext] = await Promise.all([
+    fetchEntityContext(),
+    buildMemoryContext(currentPersona),
+  ]);
 
   const ws = new WebSocket(GEMINI_WS_URL);
   geminiWs = ws;
@@ -1304,18 +2047,39 @@ async function connectGemini() {
   ws.on("open", () => {
     console.log("[gemini] WebSocket connected, sending setup...");
 
+    // Build persona-specific config
+    let voice, systemPromptText, toolDeclarations;
+    if (currentPersona === "cipher") {
+      voice = CIPHER_VOICE;
+      if (cipherMode === "learning") {
+        systemPromptText = CIPHER_LEARNING_PROMPT + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+        // Learning mode gets remember + read_file + run_command + switch back to June
+        const rememberTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "remember");
+        const readFileTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "read_file");
+        const runCommandTool = GEMINI_BRIDGE_TOOLS.find(t => t.name === "run_command");
+        toolDeclarations = [rememberTool, readFileTool, runCommandTool, SWITCH_TO_JUNE_TOOL];
+      } else {
+        systemPromptText = CIPHER_BUILDING_PROMPT + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+        toolDeclarations = [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS, SWITCH_TO_JUNE_TOOL];
+      }
+    } else {
+      voice = JUNE_VOICE;
+      systemPromptText = SYSTEM_PROMPT + entityContext + CODEBASE_SNAPSHOT + INFRA_MAP + memoryContext;
+      toolDeclarations = [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS, SWITCH_TO_CIPHER_TOOL];
+    }
+
     const setup = {
       model: `models/${GEMINI_MODEL}`,
       generationConfig: {
         responseModalities: ["AUDIO"],
         speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: GEMINI_VOICE } },
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
         },
       },
       systemInstruction: {
-        parts: [{ text: SYSTEM_PROMPT + entityContext }],
+        parts: [{ text: systemPromptText }],
       },
-      tools: [{ functionDeclarations: [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS] }],
+      tools: [{ functionDeclarations: toolDeclarations }],
       realtimeInputConfig: {
         // Auto VAD with high sensitivity (same config as direct tablet→Gemini that worked)
         automaticActivityDetection: {
@@ -1337,9 +2101,17 @@ async function connectGemini() {
 
     if (geminiResumeToken) {
       setup.sessionResumption = { handle: geminiResumeToken };
-      console.log("[gemini] Reconnecting with resume token");
+      console.log(`[gemini] Reconnecting with resume token (persona: ${currentPersona})`);
     } else {
-      console.log("[gemini] Fresh session (no resume token)");
+      console.log(`[gemini] Fresh session as ${currentPersona}${cipherMode ? ` (${cipherMode})` : ""}`);
+      conversationTranscript = []; // clear on fresh session, not on reconnect/goAway
+      turnIndex = 0;
+      // Create PG conversation record for transcript logging
+      const connDevices = [...devices.values()].map(d => d.deviceId);
+      db.createConversation(currentPersona, connDevices).then(id => {
+        currentConversationId = id;
+        if (id) console.log(`[pg] Conversation ${id} started`);
+      }).catch(err => console.error("[pg] create conversation:", err.message));
     }
 
     ws.send(JSON.stringify({ setup }));
@@ -1396,6 +2168,30 @@ function handleGeminiMessage(msg) {
       geminiWs.send(pendingToolResponses);
       pendingToolResponses = null;
     }
+
+    // Persona switch: prompt the new persona to introduce itself
+    if (personaSwitchPending) {
+      personaSwitchPending = false;
+      const intro = currentPersona === "cipher"
+        ? `[You just took over the conversation from June. King Kazuma wanted to speak with you directly in ${cipherMode} mode. Greet him briefly — one sentence — and let him know you're ready.]`
+        : "[You just took back over from Cipher. King Kazuma finished his conversation with Cipher. Welcome him back briefly — one sentence.]";
+      setTimeout(() => sendToGeminiText(intro), 500);
+    }
+
+    // Recovery after goAway interrupted a tool call
+    if (goAwayDuringToolCall && !personaSwitchPending) {
+      goAwayDuringToolCall = false;
+      console.log("[gemini] Recovered from goAway that interrupted a tool call — nudging retry");
+      setTimeout(() => {
+        sendToGeminiText(
+          "[SYSTEM: Session briefly reconnected. If you were about to call a tool " +
+          "(e.g. switch_to_cipher or any other action), re-issue that tool call now. " +
+          "If you had already completed your response, continue normally.]"
+        );
+      }, 1000);
+    } else {
+      goAwayDuringToolCall = false;
+    }
     return;
   }
 
@@ -1415,6 +2211,7 @@ function handleGeminiMessage(msg) {
   if (msg.goAway) {
     const timeLeft = msg.goAway.timeLeft ? parseInt(msg.goAway.timeLeft) : 0;
     console.log(`[gemini] Server goAway, timeLeft: ${timeLeft}s — proactively reconnecting`);
+    goAwayDuringToolCall = pendingToolResponses !== null;
     // Close current connection and immediately reconnect with resume token
     if (geminiWs) {
       const ws = geminiWs;
@@ -1432,6 +2229,7 @@ function handleGeminiMessage(msg) {
   // Tool call cancellation
   if (msg.toolCallCancellation?.ids) {
     console.log("[gemini] Tool calls cancelled:", msg.toolCallCancellation.ids);
+    goAwayDuringToolCall = true;
     return;
   }
 
@@ -1456,6 +2254,11 @@ function handleGeminiMessage(msg) {
     const text = sc.inputTranscription.text;
     console.log(`[gemini] INPUT: "${text}"`);
     inputTranscriptBuffer += text;
+    conversationTranscript.push({ role: "user", text, timestamp: Date.now() });
+    // Log turn to PG
+    if (currentConversationId) {
+      db.addConversationTurn(currentConversationId, "user", text, turnIndex++).catch(() => {});
+    }
 
     // Check for wake word — strip spaces so fragmented "Ju" + "ne" still matches
     // Also match common Latin accent transcriptions: juno, hune, youne, dune, etc.
@@ -1497,6 +2300,11 @@ function handleGeminiMessage(msg) {
   // Output transcript (model speech) — only forward when engaged
   if (sc.outputTranscription?.text) {
     console.log(`[gemini] OUTPUT: "${sc.outputTranscription.text}"`);
+    conversationTranscript.push({ role: "model", text: sc.outputTranscription.text, timestamp: Date.now() });
+    // Log turn to PG
+    if (currentConversationId) {
+      db.addConversationTurn(currentConversationId, currentPersona, sc.outputTranscription.text, turnIndex++).catch(() => {});
+    }
     if (isEngaged()) {
       broadcastToAll({ type: "transcript", text: sc.outputTranscription.text });
     }
@@ -1529,6 +2337,10 @@ async function handleGeminiToolCalls(functionCalls) {
         result = { success: false, message: err.message || "Tool call failed" };
       }
       console.log(`[gemini] Tool ${name} → ${result.success ? "ok" : "fail"}: ${result.message?.substring(0, 80)}`);
+      // Log tool call to PG conversation
+      if (currentConversationId) {
+        db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }).catch(() => {});
+      }
       return {
         id: fc.id,
         name,
@@ -1604,11 +2416,13 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
   } else {
     if (peak >= MIC_SWITCH_THRESHOLD &&
         activeMicSilenceSince > 0 &&
-        now - activeMicSilenceSince > MIC_RELEASE_MS) {
+        now - activeMicSilenceSince > MIC_RELEASE_MS &&
+        now - lastMicSwitchAt > MIC_SWITCH_COOLDOWN_MS) {
       const oldInfo = devices.get(activeMic);
       console.log(`[audio] Mic switch: ${deviceId} (peak=${peak}) takes over from ${oldInfo?.deviceId}`);
       activeMic = ws;
       activeMicSilenceSince = 0;
+      lastMicSwitchAt = now;
     } else {
       return; // Drop audio from non-active mic
     }
@@ -1642,6 +2456,9 @@ function sendToGeminiText(text) {
 function disconnectGeminiIfEmpty() {
   if (devices.size === 0 && geminiWs) {
     console.log("[gemini] No devices connected, closing Gemini session");
+    // Summarize conversation before closing (async, fire-and-forget)
+    generateSessionSummary(currentPersona).catch(err =>
+      console.error("[memory] disconnect summary error:", err.message));
     geminiResumeToken = null; // Prevent auto-reconnect
     geminiWs.close();
     geminiWs = null;
@@ -1649,9 +2466,77 @@ function disconnectGeminiIfEmpty() {
   }
 }
 
-// ── Start ──
+// ── Post-session summary generation ──
 
-ensureDataDir();
+async function generateSessionSummary(persona) {
+  if (conversationTranscript.length < 4) return; // skip tiny conversations
+  if (!GEMINI_API_KEY) return;
+
+  const transcript = conversationTranscript
+    .map(t => `${t.role === "user" ? "King Kazuma" : persona}: ${t.text}`)
+    .join("\n");
+
+  try {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text:
+            `Summarize this conversation between ${persona} and King Kazuma in 2-3 sentences. ` +
+            `Focus on decisions made, preferences expressed, and action items. ` +
+            `Be concise.\n\n${transcript}`
+          }] }],
+        }),
+      }
+    );
+    const data = await resp.json();
+    const summary = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (summary) {
+      await addConversationSummary(persona, summary, conversationTranscript.length);
+      console.log(`[memory] ${persona} session summary stored (${conversationTranscript.length} turns)`);
+      // Finalize PG conversation with summary
+      if (currentConversationId) {
+        db.endConversation(currentConversationId, summary, conversationTranscript.length).catch(err =>
+          console.error("[pg] end conversation:", err.message));
+      }
+    }
+  } catch (err) {
+    console.error("[memory] Summary generation failed:", err.message);
+  }
+  conversationTranscript = [];
+  currentConversationId = null;
+  turnIndex = 0;
+}
+
+// ── Persona switching ──
+
+function switchPersona() {
+  console.log(`[persona] Switching to ${currentPersona}${cipherMode ? ` (${cipherMode})` : ""}`);
+  // Summarize the ending persona's conversation (async, fire-and-forget)
+  const endingPersona = currentPersona === "june" ? "cipher" : "june"; // persona we're switching FROM
+  generateSessionSummary(endingPersona).catch(err =>
+    console.error("[memory] switchPersona summary error:", err.message));
+  geminiResumeToken = null; // Don't resume across persona switches
+  geminiSpeaking = false;
+  inputTranscriptBuffer = "";
+  pendingAudioBuffer = [];
+  pendingToolResponses = null;  // old session's responses are stale
+  goAwayDuringToolCall = false;
+
+  if (geminiWs) {
+    const ws = geminiWs;
+    geminiWs = null;
+    geminiReady = false;
+    geminiConnecting = false;
+    ws.close();
+  }
+  // Auto-reconnect in close handler will pick up new persona config
+  broadcastToAll({ type: "personaSwitch", persona: currentPersona, mode: cipherMode });
+}
+
+// ── Start ──
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -1677,6 +2562,9 @@ wss.on("connection", (ws) => {
         const deviceId = msg.deviceId || "unknown";
         devices.set(ws, { role, deviceId });
         console.log(`[ws] Device registered: ${deviceId} (${role}), total: ${devices.size}`);
+        // Persist device in PG registry
+        db.upsertDevice(deviceId, role === "speaker" ? "tv" : "tablet").catch(err =>
+          console.error("[pg] upsert device:", err.message));
 
         // Start Gemini session if not already running
         if (!geminiWs && !geminiConnecting) {
@@ -1734,7 +2622,7 @@ wss.on("connection", (ws) => {
         approval.resolved = true;
         approval.approved = pending.approved;
         approval.resolvedAt = Date.now();
-        saveApprovals(approvals);
+        saveApprovals(approvals, approval);
         syncDirectiveFromApproval(pending.approvalId, pending.approved);
         // Tell ALL devices to dismiss their keypads
         broadcastToAll({ type: "pinResolved", approvalId: msg.approvalId });
@@ -1767,8 +2655,11 @@ wss.on("connection", (ws) => {
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`[ozzu-bridge] listening on :${PORT}`);
-  console.log(`[ozzu-bridge] data dir: ${DATA_DIR}`);
-  console.log(`[ozzu-bridge] HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
-});
+(async () => {
+  await initStorage();
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`[ozzu-bridge] listening on :${PORT}`);
+    console.log(`[ozzu-bridge] data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);
+    console.log(`[ozzu-bridge] HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
+  });
+})();

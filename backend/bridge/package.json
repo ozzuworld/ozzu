@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "ioredis": "^5.4.1",
+    "pg": "^8.18.0",
     "ws": "^8.18.0"
   }
 }
