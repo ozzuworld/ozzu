@@ -154,6 +154,23 @@ const ALLOWED_ENTITY_IDS = new Set(
 
 const redis = new Redis({ host: "127.0.0.1", port: 6379, lazyConnect: true });
 
+// Redis runtime disconnect handling — update _redisConnected so JSON fallback kicks in
+redis.on("error", (err) => {
+  if (_redisConnected) log.redis.error("Connection error:", err.message);
+  _redisConnected = false;
+});
+redis.on("close", () => {
+  if (_redisConnected) log.redis.warn("Connection closed, falling back to JSON");
+  _redisConnected = false;
+});
+redis.on("reconnecting", () => {
+  log.redis.info("Reconnecting...");
+});
+redis.on("ready", () => {
+  if (!_redisConnected) log.redis.info("Reconnected");
+  _redisConnected = true;
+});
+
 // ── Storage helpers ──
 
 function ensureDataDir() {
@@ -2551,6 +2568,10 @@ function submitDirective(e) {
       redis: { connected: redisHealthy },
       postgres: pgHealth,
       gemini: { connected: !!geminiReady, model: GEMINI_MODEL },
+      voice: {
+        deepgram: { configured: !!(process.env.DEEPGRAM_API_KEY && process.env.DEEPGRAM_API_KEY.trim()) },
+        cartesia: { configured: !!(process.env.CARTESIA_API_KEY && process.env.CARTESIA_API_KEY.trim()) },
+      },
       devices: [...devices.values()].map(d => ({ deviceId: d.deviceId, role: d.role })),
       persona: currentPersona,
       cipherMode,
@@ -5264,6 +5285,16 @@ wss.on("connection", (ws) => {
     }
   });
 })();
+
+// Global error handlers — prevent silent crashes
+process.on("unhandledRejection", (reason, promise) => {
+  log.bridge.error("Unhandled Promise Rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  log.bridge.error("Uncaught Exception:", err.message, err.stack);
+  killAllAgents();
+  process.exit(1);
+});
 
 // Graceful shutdown: kill any running agent subprocesses
 process.on("SIGTERM", () => {
