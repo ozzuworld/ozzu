@@ -1005,6 +1005,17 @@ async function handleRequest(req, res) {
     directive.updatedAt = Date.now();
     directive.lastActivity = Date.now(); // Track when agent last touched this directive
 
+    // Track execution timing
+    if (data.status && (data.status === "planning" || data.status === "in_progress") && !directive.startedAt) {
+      directive.startedAt = Date.now();
+    }
+    if (data.status === "completed" && !directive.completedAt) {
+      directive.completedAt = Date.now();
+      if (directive.startedAt) {
+        directive.duration = directive.completedAt - directive.startedAt;
+      }
+    }
+
     // Auto-create plan-approval when a feature directive reaches "planned" with a plan
     if (directive.type === "feature" && directive.status === "planned" && directive.plan) {
       const approvalId = `apr_plan_${directive.id}`;
@@ -1188,6 +1199,37 @@ async function handleRequest(req, res) {
     saveDirectives(directives, directive, prevStatus);
     log.bridge.info(`Directive cancelled: ${id} "${directive.title}" (was ${prevStatus}, agent killed: ${agentKilled})`);
     sendJSON(res, 200, { ok: true, directive, agentKilled });
+    return;
+  }
+
+  // POST /directives/:id/retry — Retry a failed/stale/cancelled directive
+  const directiveRetryMatch = pathname.match(/^\/directives\/([^/]+)\/retry$/);
+  if (req.method === "POST" && directiveRetryMatch) {
+    const id = directiveRetryMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    const activeStatuses = ["planning", "in_progress", "approved"];
+    if (activeStatuses.includes(directive.status)) {
+      sendJSON(res, 409, { error: `Directive is "${directive.status}" — already active, cannot retry` });
+      return;
+    }
+    const retryableStatuses = ["failed", "stale", "cancelled"];
+    if (!retryableStatuses.includes(directive.status)) {
+      sendJSON(res, 409, { error: `Directive is "${directive.status}" — cannot retry from this state` });
+      return;
+    }
+    const prevStatus = directive.status;
+    directive.status = "approved";
+    directive.retryCount = (directive.retryCount || 0) + 1;
+    directive.failureReason = null;
+    directive.updatedAt = Date.now();
+    saveDirectives(directives, directive, prevStatus);
+    log.bridge.info(`Directive retried: ${id} "${directive.title}" (${prevStatus} → approved, retry #${directive.retryCount})`);
+    sendJSON(res, 200, { ok: true, directive });
     return;
   }
 
@@ -1425,6 +1467,30 @@ async function handleRequest(req, res) {
     const priorityLabels = { 1: "critical", 2: "high", 3: "normal", 4: "low" };
     const priorityColors = { 1: "#ef4444", 2: "#f97316", 3: "#6b7280", 4: "#9ca3af" };
 
+    function formatDuration(ms) {
+      if (!ms && ms !== 0) return "-";
+      const totalSec = Math.floor(ms / 1000);
+      if (totalSec < 60) return `${totalSec}s`;
+      const mins = Math.floor(totalSec / 60);
+      const secs = totalSec % 60;
+      if (mins < 60) return `${mins}m ${secs}s`;
+      const hrs = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      return `${hrs}h ${remMins}m`;
+    }
+
+    // Summary stats
+    const completedDirectives = directives.filter(d => d.status === "completed");
+    const failedDirectives = directives.filter(d => d.status === "failed");
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const completedToday = completedDirectives.filter(d => d.completedAt && d.completedAt >= todayStart.getTime()).length;
+    const completedWithDuration = completedDirectives.filter(d => d.duration);
+    const avgDuration = completedWithDuration.length > 0
+      ? Math.round(completedWithDuration.reduce((sum, d) => sum + d.duration, 0) / completedWithDuration.length)
+      : null;
+    const totalFinished = completedDirectives.length + failedDirectives.length;
+    const successRate = totalFinished > 0 ? Math.round((completedDirectives.length / totalFinished) * 100) : null;
+
     const directiveRows = [...directives].reverse().map(d => {
       const color = statusColors[d.status] || "#6b7280";
       const pri = d.priority || 3;
@@ -1448,7 +1514,8 @@ async function handleRequest(req, res) {
         <td style="font-size:12px;">${depsHtml}</td>
         <td style="font-size:12px;color:#9ca3af;" data-ts="${d.createdAt}">${escapeHtml(d.createdAt)}</td>
         <td style="font-size:12px;color:#9ca3af;" data-ts="${d.updatedAt}">${escapeHtml(d.updatedAt)}</td>
-        <td>${!["completed","failed","cancelled"].includes(d.status) ? `<button onclick="cancelDirective('${d.id}')" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Cancel directive">&times;</button>` : ""}</td>
+        <td style="font-size:12px;color:#9ca3af;">${formatDuration(d.duration)}</td>
+        <td>${!["completed","failed","cancelled"].includes(d.status) ? `<button onclick="cancelDirective('${d.id}')" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Cancel directive">&times;</button>` : ""}${["failed","stale","cancelled"].includes(d.status) ? ` <button onclick="retryDirective('${d.id}')" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Retry directive">&#8635;</button>` : ""}</td>
       </tr>`;
     }).join("");
 
@@ -1629,6 +1696,16 @@ setInterval(function() {
 function cancelDirective(id) {
   if (!confirm("Cancel this directive?")) return;
   fetch("/directives/" + id + "/cancel", { method: "POST" })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) { refreshNow(); } else { alert("Error: " + (data.error || "Unknown")); }
+    })
+    .catch(function(err) { alert("Network error: " + err.message); });
+}
+
+function retryDirective(id) {
+  if (!confirm("Retry this directive?")) return;
+  fetch("/directives/" + id + "/retry", { method: "POST" })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok) { refreshNow(); } else { alert("Error: " + (data.error || "Unknown")); }
