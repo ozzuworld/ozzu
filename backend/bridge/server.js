@@ -1408,7 +1408,12 @@ async function handleRequest(req, res) {
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0f172a; color: #e2e8f0; font-family: "SF Mono", "Fira Code", monospace; padding: 24px; }
   h1 { font-size: 22px; margin-bottom: 4px; }
-  .subtitle { color: #64748b; font-size: 13px; margin-bottom: 24px; }
+  .subtitle { color: #64748b; font-size: 13px; margin-bottom: 8px; }
+  .refresh-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .refresh-bar .countdown { color: #64748b; font-size: 12px; }
+  .refresh-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 6px 14px; font-size: 12px; font-family: inherit; cursor: pointer; transition: background 0.2s; }
+  .refresh-btn:hover { background: #475569; }
+  .refresh-btn:active { background: #1e293b; }
   .cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
   .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px 20px; min-width: 160px; }
   .card .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
@@ -1423,11 +1428,30 @@ async function handleRequest(req, res) {
   th { color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
   tr:hover { background: #1e293b; }
   .empty { color: #475569; font-style: italic; padding: 12px; }
+  .new-directive { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 20px; }
+  .new-directive h2 { border-color: #475569; }
+  .new-directive label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; margin-top: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .new-directive input, .new-directive textarea, .new-directive select { width: 100%; background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 8px 12px; font-family: inherit; font-size: 14px; }
+  .new-directive textarea { min-height: 80px; resize: vertical; }
+  .new-directive select { appearance: auto; }
+  .new-directive .submit-btn { margin-top: 16px; background: #3b82f6; color: #fff; border: none; border-radius: 6px; padding: 10px 20px; font-size: 14px; font-family: inherit; cursor: pointer; transition: background 0.2s; }
+  .new-directive .submit-btn:hover { background: #2563eb; }
+  .new-directive .submit-btn:disabled { background: #475569; cursor: not-allowed; }
+  .new-directive .form-msg { margin-top: 10px; font-size: 13px; padding: 8px 12px; border-radius: 6px; }
+  .new-directive .form-msg.ok { background: #064e3b; color: #6ee7b7; }
+  .new-directive .form-msg.err { background: #450a0a; color: #fca5a5; }
+  .updating { opacity: 0.6; transition: opacity 0.15s; }
 </style>
 </head><body>
 <h1>Ozzu Pipeline Dashboard</h1>
-<p class="subtitle">Bridge server on 10.128.0.8:3333 &mdash; refreshed ${new Date().toLocaleString("en-US", { timeZone: "America/New_York" })}</p>
+<p class="subtitle">Bridge server on 10.128.0.8:3333 &mdash; refreshed <span id="refreshed-at">${new Date().toLocaleString("en-US", { timeZone: "America/New_York" })}</span></p>
 
+<div class="refresh-bar">
+  <button class="refresh-btn" onclick="refreshNow()">Refresh Now</button>
+  <span class="countdown" id="countdown">Next refresh in 10s</span>
+</div>
+
+<div id="dashboard-content">
 <div class="cards">
   <div class="card"><div class="label">Uptime</div><div class="value">${uptimeStr}</div></div>
   <div class="card"><div class="label">PostgreSQL</div><div class="value ${pgHealth.connected ? "ok" : "bad"}">${pgHealth.connected ? "Connected" : "Down"}</div></div>
@@ -1451,6 +1475,133 @@ ${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th>
 <h2>Recent Failures</h2>
 ${failures.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Reason</th><th>Retries</th></tr>${failureRows}</table>` : `<p class="empty">No failures. All clear.</p>`}
 </section>
+</div>
+
+<section class="new-directive">
+<h2>New Quick Directive</h2>
+<form id="directive-form" onsubmit="return submitDirective(event)">
+  <label for="d-title">Title</label>
+  <input type="text" id="d-title" name="title" placeholder="Short description of the task" required>
+  <label for="d-desc">Description</label>
+  <textarea id="d-desc" name="description" placeholder="Detailed description of what needs to be done..."></textarea>
+  <label for="d-type">Type</label>
+  <select id="d-type" name="type">
+    <option value="quick">Quick</option>
+    <option value="feature">Feature</option>
+    <option value="explore">Explore</option>
+  </select>
+  <button type="submit" class="submit-btn" id="submit-btn">Submit Directive</button>
+  <div id="form-msg"></div>
+</form>
+</section>
+
+<script>
+// Relative time conversion
+function timeAgo(dateStr) {
+  if (!dateStr) return "-";
+  var d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  var now = Date.now();
+  var diff = Math.floor((now - d.getTime()) / 1000);
+  if (diff < 5) return "just now";
+  if (diff < 60) return diff + "s ago";
+  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+  return Math.floor(diff / 86400) + "d ago";
+}
+
+// Convert all timestamps on load
+function convertTimestamps() {
+  document.querySelectorAll("td[data-ts]").forEach(function(el) {
+    var ts = el.getAttribute("data-ts");
+    if (ts) {
+      el.textContent = timeAgo(ts);
+      el.title = ts;
+    }
+  });
+}
+convertTimestamps();
+
+// Auto-refresh via fetch (no full reload)
+var refreshInterval = 10;
+var countdown = refreshInterval;
+var countdownEl = document.getElementById("countdown");
+var contentEl = document.getElementById("dashboard-content");
+var refreshedEl = document.getElementById("refreshed-at");
+
+function refreshNow() {
+  countdown = refreshInterval;
+  contentEl.classList.add("updating");
+  fetch("/dashboard")
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(html, "text/html");
+      var newContent = doc.getElementById("dashboard-content");
+      var newRefreshed = doc.getElementById("refreshed-at");
+      if (newContent) contentEl.innerHTML = newContent.innerHTML;
+      if (newRefreshed) refreshedEl.textContent = newRefreshed.textContent;
+      convertTimestamps();
+      contentEl.classList.remove("updating");
+    })
+    .catch(function() { contentEl.classList.remove("updating"); });
+}
+
+setInterval(function() {
+  countdown--;
+  if (countdown <= 0) {
+    refreshNow();
+  } else {
+    countdownEl.textContent = "Next refresh in " + countdown + "s";
+  }
+}, 1000);
+
+// Submit directive form
+function submitDirective(e) {
+  e.preventDefault();
+  var title = document.getElementById("d-title").value.trim();
+  var desc = document.getElementById("d-desc").value.trim();
+  var type = document.getElementById("d-type").value;
+  var msgEl = document.getElementById("form-msg");
+  var btn = document.getElementById("submit-btn");
+
+  if (!title) { msgEl.className = "form-msg err"; msgEl.textContent = "Title is required."; return false; }
+
+  btn.disabled = true;
+  btn.textContent = "Submitting...";
+  msgEl.textContent = "";
+  msgEl.className = "form-msg";
+
+  fetch("/directives", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: type, title: title, description: desc || title })
+  })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+    .then(function(res) {
+      if (res.ok) {
+        msgEl.className = "form-msg ok";
+        msgEl.textContent = "Directive created: " + (res.data.id || "success");
+        document.getElementById("d-title").value = "";
+        document.getElementById("d-desc").value = "";
+        setTimeout(refreshNow, 1000);
+      } else {
+        msgEl.className = "form-msg err";
+        msgEl.textContent = "Error: " + (res.data.error || "Unknown error");
+      }
+    })
+    .catch(function(err) {
+      msgEl.className = "form-msg err";
+      msgEl.textContent = "Network error: " + err.message;
+    })
+    .finally(function() {
+      btn.disabled = false;
+      btn.textContent = "Submit Directive";
+    });
+
+  return false;
+}
+</script>
 
 </body></html>`;
 
