@@ -831,6 +831,17 @@ async function handleRequest(req, res) {
       sendJSON(res, 409, { error: `Similar directive already exists: "${existing.title}" [${existing.status}] (${existing.id})` });
       return;
     }
+    // Validate dependsOn if provided
+    const dependsOn = Array.isArray(data.dependsOn) ? data.dependsOn : [];
+    if (dependsOn.length > 0) {
+      const existingDirectives = getDirectives();
+      const invalidIds = dependsOn.filter(id => !existingDirectives.find(d => d.id === id));
+      if (invalidIds.length > 0) {
+        sendJSON(res, 400, { error: `Unknown dependency IDs: ${invalidIds.join(", ")}` });
+        return;
+      }
+    }
+
     const directive = {
       id: `dir_${Date.now()}`,
       type: data.type,
@@ -841,11 +852,20 @@ async function handleRequest(req, res) {
       directiveApprovalId: null,
       retryCount: 0,
       failureReason: null,
+      dependsOn: dependsOn.length > 0 ? dependsOn : null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+
+    // Check if all dependencies are completed
+    const depsResolved = !directive.dependsOn || directive.dependsOn.every(depId => {
+      const dep = getDirectives().find(d => d.id === depId);
+      return dep && dep.status === "completed";
+    });
+
     // Auto-transition quick directives straight to planning (triggers agent spawner)
-    if (data.type === "quick") {
+    // But only if dependencies are resolved
+    if (data.type === "quick" && depsResolved) {
       directive.status = "planning";
     }
 
@@ -859,7 +879,7 @@ async function handleRequest(req, res) {
       spawnPlanningAgent(directive);
     }
 
-    sendJSON(res, 200, { ok: true, directive });
+    sendJSON(res, 200, { ok: true, directive, blockedByDeps: !depsResolved && directive.dependsOn ? true : undefined });
     return;
   }
 
@@ -1021,6 +1041,30 @@ async function handleRequest(req, res) {
 
     saveDirectives(directives, directive, prevStatus);
 
+    // ── Dependency resolution ──
+    // When a directive completes, unblock any pending directives that depended on it
+    const unblockedDirectives = [];
+    if (directive.status === "completed" && prevStatus !== "completed") {
+      for (const d of directives) {
+        if (d.status !== "pending" || !d.dependsOn || !d.dependsOn.includes(directive.id)) continue;
+        // Check if ALL dependencies are now completed
+        const allResolved = d.dependsOn.every(depId => {
+          const dep = directives.find(dd => dd.id === depId);
+          return dep && dep.status === "completed";
+        });
+        if (allResolved) {
+          const prevDStatus = d.status;
+          d.status = "planning";
+          d.updatedAt = Date.now();
+          unblockedDirectives.push(d);
+          log.bridge.info(`Dependency resolved: ${d.id} "${d.title}" unblocked — all deps completed`);
+        }
+      }
+      if (unblockedDirectives.length > 0) {
+        saveDirectives(directives, null, null);
+      }
+    }
+
     // ── Agent spawner hooks ──
     // Auto-spawn planning agent when directive enters "planning"
     if (directive.status === "planning" && prevStatus !== "planning") {
@@ -1030,8 +1074,41 @@ async function handleRequest(req, res) {
     if (directive.status === "approved" && prevStatus !== "approved") {
       spawnImplementationAgent(directive);
     }
+    // Spawn planning agents for any newly unblocked directives
+    for (const d of unblockedDirectives) {
+      spawnPlanningAgent(d);
+    }
 
-    sendJSON(res, 200, { ok: true, directive });
+    sendJSON(res, 200, { ok: true, directive, unblocked: unblockedDirectives.length > 0 ? unblockedDirectives.map(d => d.id) : undefined });
+    return;
+  }
+
+  // POST /directives/:id/unblock — Force-skip dependency check (manual override)
+  const directiveUnblockMatch = pathname.match(/^\/directives\/([^/]+)\/unblock$/);
+  if (req.method === "POST" && directiveUnblockMatch) {
+    const id = directiveUnblockMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    if (directive.status !== "pending") {
+      sendJSON(res, 400, { error: `Directive is "${directive.status}", not pending — nothing to unblock` });
+      return;
+    }
+    if (!directive.dependsOn) {
+      sendJSON(res, 400, { error: "Directive has no dependencies — nothing to unblock" });
+      return;
+    }
+    // Clear dependencies and transition to planning
+    log.bridge.info(`Manual unblock: ${directive.id} "${directive.title}" — skipping deps: ${directive.dependsOn.join(", ")}`);
+    directive.dependsOn = null;
+    directive.status = "planning";
+    directive.updatedAt = Date.now();
+    saveDirectives(directives, directive, "pending");
+    spawnPlanningAgent(directive);
+    sendJSON(res, 200, { ok: true, directive, message: "Directive unblocked and moved to planning" });
     return;
   }
 
@@ -1247,10 +1324,21 @@ async function handleRequest(req, res) {
       const color = statusColors[d.status] || "#6b7280";
       const created = new Date(d.createdAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
       const updated = new Date(d.updatedAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      let depsHtml = "-";
+      if (d.dependsOn && d.dependsOn.length > 0) {
+        depsHtml = d.dependsOn.map(depId => {
+          const dep = directives.find(dd => dd.id === depId);
+          const depColor = dep ? (dep.status === "completed" ? "#10b981" : "#f59e0b") : "#6b7280";
+          const depLabel = dep ? (dep.title || depId) : depId;
+          const checkmark = dep && dep.status === "completed" ? "&#10003; " : "&#9679; ";
+          return `<span style="color:${depColor};font-size:11px;" title="${escapeHtml(depId)}">${checkmark}${escapeHtml(depLabel)}</span>`;
+        }).join("<br>");
+      }
       return `<tr>
         <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
         <td>${escapeHtml(d.title || d.id)}</td>
         <td style="font-size:12px;color:#9ca3af;">${escapeHtml(d.type || "-")}</td>
+        <td style="font-size:12px;">${depsHtml}</td>
         <td style="font-size:12px;color:#9ca3af;">${created}</td>
         <td style="font-size:12px;color:#9ca3af;">${updated}</td>
       </tr>`;
@@ -1310,7 +1398,7 @@ ${agents.length > 0 ? `<table><tr><th>Directive</th><th>Type</th><th>PID</th><th
 
 <section>
 <h2>Directives</h2>
-${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Created</th><th>Last Activity</th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
+${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Deps</th><th>Created</th><th>Last Activity</th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
 </section>
 
 <section>
@@ -1640,7 +1728,7 @@ const INFRA_MAP =
   "- dev-01 (172.168.0.59): runs wyze-bridge for camera streams\n\n" +
   "Bridge HTTP API (localhost:3333): POST /status, GET /status, POST /notify, " +
   "POST /approvals, GET /approvals, POST /directives, GET /directives, PATCH /directives/:id, " +
-  "GET /agents, DELETE /agents/:directiveId\n\n" +
+  "POST /directives/:id/unblock, GET /agents, DELETE /agents/:directiveId\n\n" +
   "Common operations with run_command:\n" +
   "- Container health: docker ps, docker stats --no-stream, docker logs <name> --tail N\n" +
   "- Container management: docker restart <name>, docker compose -f /home/gcp/ozzu/backend/docker-compose.yml up -d <service>\n" +
@@ -1827,13 +1915,14 @@ const GEMINI_BRIDGE_TOOLS = [
   },
   {
     name: "send_dev_directive",
-    description: "Send a development directive to Cipher.",
+    description: "Send a development directive to Cipher. Optionally pass dependsOn to block it until other directives complete.",
     parameters: {
       type: "OBJECT",
       properties: {
         type: { type: "STRING", description: "quick, feature, or explore" },
         title: { type: "STRING", description: "Short title" },
         description: { type: "STRING", description: "Detailed description" },
+        dependsOn: { type: "ARRAY", items: { type: "STRING" }, description: "Optional array of directive IDs this depends on. Will stay pending until all are completed." },
       },
       required: ["type", "title", "description"],
     },
@@ -2445,10 +2534,19 @@ async function handleToolCall(name, args) {
 
       if (name === "send_dev_directive") {
         const { type, title, description } = args;
+        const dependsOn = Array.isArray(args.dependsOn) ? args.dependsOn : [];
         if (!type || !description) return { success: false, message: "Missing required fields" };
         const VALID_TYPES = ["quick", "feature", "explore"];
         if (!VALID_TYPES.includes(type)) {
           return { success: false, message: `Invalid directive type '${type}'. Must be one of: ${VALID_TYPES.join(", ")}` };
+        }
+        // Validate dependsOn IDs
+        if (dependsOn.length > 0) {
+          const existingDirectives = getDirectives();
+          const invalidIds = dependsOn.filter(id => !existingDirectives.find(d => d.id === id));
+          if (invalidIds.length > 0) {
+            return { success: false, message: `Unknown dependency IDs: ${invalidIds.join(", ")}` };
+          }
         }
         // Duplicate detection
         const existing = findSimilarDirective(title);
@@ -2456,10 +2554,18 @@ async function handleToolCall(name, args) {
           return { success: false, message: `Duplicate: similar directive already exists — "${existing.title}" [${existing.status}] (${existing.id}). Check /directives before creating new ones.` };
         }
 
+        // Check if all dependencies are completed
+        const depsResolved = dependsOn.length === 0 || dependsOn.every(depId => {
+          const dep = getDirectives().find(d => d.id === depId);
+          return dep && dep.status === "completed";
+        });
+
         const directive = {
           id: `dir_${Date.now()}`, type, title: title || "",
-          description, status: type === "quick" ? "planning" : "pending", plan: null,
-          directiveApprovalId: null, createdAt: Date.now(), updatedAt: Date.now(),
+          description, status: (type === "quick" && depsResolved) ? "planning" : "pending",
+          plan: null, directiveApprovalId: null,
+          dependsOn: dependsOn.length > 0 ? dependsOn : null,
+          createdAt: Date.now(), updatedAt: Date.now(),
         };
         const directives = getDirectives();
         directives.push(directive);
@@ -2469,7 +2575,8 @@ async function handleToolCall(name, args) {
         if (directive.status === "planning") {
           spawnPlanningAgent(directive);
         }
-        return { success: true, message: `Directive created: ${directive.id} [${type}] "${title}" — status: ${directive.status}` };
+        const depsMsg = !depsResolved ? ` (blocked — waiting on: ${dependsOn.join(", ")})` : "";
+        return { success: true, message: `Directive created: ${directive.id} [${type}] "${title}" — status: ${directive.status}${depsMsg}` };
       }
 
       if (name === "show_camera") {
