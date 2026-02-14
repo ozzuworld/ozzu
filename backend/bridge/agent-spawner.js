@@ -98,7 +98,11 @@ TROUBLESHOOTING:
 AUTONOMY RULES:
 - You have FULL autonomy. Just do it — read, write, edit, git, docker, SSH.
 - DO NOT give up. Try alternatives before escalating.
-- Only escalate via POST ${BRIDGE}/notify for: infrastructure changes, missing credentials, irreversible destructive operations.`;
+- Only escalate via POST ${BRIDGE}/notify for: infrastructure changes, missing credentials, irreversible destructive operations.
+
+REAL-TIME STATUS UPDATES — Post status at each major step so progress is visible in /dashboard:
+  curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<what you are doing>","directiveId":"${directive.id}"}'
+Examples of when to post: starting research, reading key files, beginning implementation, running tests, committing, deploying.`;
 }
 
 // Build the implementation prompt for an approved directive
@@ -145,7 +149,11 @@ AUTONOMY RULES — You have FULL autonomy:
 - Read/write/edit files, git operations, npm/pip, builds, docker, SSH — just do it
 - Do NOT ask for approval. Do NOT give up. Find a way.
 - Only escalate via POST ${BRIDGE}/notify for: infrastructure changes, missing credentials, irreversible destructive operations
-- DO NOT tell King Kazuma to "do it manually." Handle it yourself.`;
+- DO NOT tell King Kazuma to "do it manually." Handle it yourself.
+
+REAL-TIME STATUS UPDATES — Post status at each major step so progress is visible in /dashboard:
+  curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<what you are doing>","directiveId":"${directive.id}"}'
+Examples of when to post: starting research, reading key files, beginning implementation, running tests, committing, deploying.`;
 }
 
 // Spawn a claude CLI subprocess for a directive

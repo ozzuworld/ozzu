@@ -723,6 +723,23 @@ async function handleRequest(req, res) {
     while (entries.length > MAX_STATUS_ENTRIES) entries.shift();
     saveStatusEntries(entries, entry);
 
+    // If directiveId provided, append to that directive's activity log and update lastActivity
+    if (data.directiveId) {
+      const directives = getDirectives();
+      const directive = directives.find(d => d.id === data.directiveId);
+      if (directive) {
+        if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+        directive.activity_log.push({
+          timestamp: Date.now(),
+          type: "agent_status",
+          message: data.message || data.event || "status update",
+        });
+        directive.lastActivity = Date.now();
+        directive.updatedAt = Date.now();
+        saveDirectives(directives, directive, null);
+      }
+    }
+
     // Notify active persona about blocker/error events from Cipher
     const evt = (entry.event || "").toLowerCase();
     if (evt === "blocker" || evt === "error" || evt === "blocked") {
