@@ -77,7 +77,7 @@ Naming convention: `ozzu-{type}-{location}-{number}`
 
 ## iOS Sideloading (via dev-01)
 
-iPhone apps are sideloaded through dev-01 (172.168.0.61, SSH alias `dev-01`) using Sideloader CLI.
+iPhone apps are sideloaded through dev-01 (172.168.0.61, SSH alias `dev-01`) using AltServer-Linux (`~/bin/AltServer`).
 Anisette v3 server runs on GCP VM (Docker, port 6969), reachable from dev-01 at `http://10.8.0.1:6969`.
 dev-01 has no DNS — all downloads must go through GCP VM and be SCPed over.
 
@@ -89,3 +89,13 @@ dev-01 has no DNS — all downloads must go through GCP VM and be SCPed over.
 - **Free Apple ID limits**: 3 sideloaded apps max, 7-day certificate refresh (SideStore auto-refreshes via WireGuard)
 - **Bundle ID**: `com.ozzu.app` (iOS), `com.anonymous.ozzu` (Android)
 - **SSH to dev-01**: Uses `~/.ssh/config` alias `dev-01` → `hadmin@172.168.0.61` with `~/.ssh/dev01_key`
+
+### iOS Deploy Troubleshooting
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| "AltServer could not find the device" | iPhone not connected or not trusted | Ask King Kazuma to connect iPhone via USB to dev-01, then retry. If first time: run `./scripts/pair-iphone.sh` to trust. |
+| "Could not install" / auth errors | Apple ID session expired or bad password | Check `APPLE_PASSWORD` in `backend/.env`. If missing, script reads from `~/install-ozzu.sh` on dev-01. |
+| Anisette errors / 502 | Anisette container down on GCP VM | `docker compose restart anisette` then retry. |
+| "AltServer not found" | AltServer-Linux not installed on dev-01 | Run `./scripts/setup-ios-sideloading.sh` from GCP VM. |
+| Build artifact not found | iOS CI hasn't run or failed | Trigger: `gh workflow run build-ios.yml`, then wait ~20 min. Check: `gh run list --workflow=build-ios.yml -R ozzuworld/ozzu --limit 3` |
