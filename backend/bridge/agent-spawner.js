@@ -8,9 +8,23 @@ const path = require("path");
 const BRIDGE = "http://localhost:3333";
 const WORKDIR = "/home/gcp/ozzu";
 const LOG_DIR = "/tmp/ozzu-bridge";
-const AGENT_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const SIGKILL_GRACE_MS = 5000; // 5s grace after SIGTERM before SIGKILL
-const MAX_CONCURRENT_AGENTS = 2; // Max simultaneous agent processes (~500MB-1GB each)
+
+// ── Runtime-configurable settings (mutable via GET/PATCH /config) ──
+const _config = {
+  MAX_CONCURRENT_AGENTS: 2,     // Max simultaneous agent processes (~500MB-1GB each)
+  AGENT_TIMEOUT_MS: 60 * 60 * 1000, // 1 hour
+  WATCHDOG_INTERVAL_MS: 5 * 60 * 1000, // 5 minutes
+  STALL_THRESHOLD_MS: 15 * 60 * 1000,  // 15 minutes without directive activity = stalled
+  LOG_LEVEL: process.env.LOG_LEVEL || "debug",
+};
+
+function getConfig() { return { ..._config }; }
+function setConfig(key, value) {
+  if (!(key in _config)) return false;
+  _config[key] = value;
+  return true;
+}
 
 // Running agents: directiveId → { process, type, startedAt, pid, timeout, logFile }
 const runningAgents = new Map();
@@ -143,8 +157,8 @@ function spawnAgent(directive, type) {
   }
 
   // Guard: concurrency limit — directive stays in current state, picked up when a slot opens
-  if (runningAgents.size >= MAX_CONCURRENT_AGENTS) {
-    log(`QUEUED: Concurrency limit reached (${runningAgents.size}/${MAX_CONCURRENT_AGENTS}), deferring ${directive.id} "${directive.title}"`);
+  if (runningAgents.size >= _config.MAX_CONCURRENT_AGENTS) {
+    log(`QUEUED: Concurrency limit reached (${runningAgents.size}/${_config.MAX_CONCURRENT_AGENTS}), deferring ${directive.id} "${directive.title}"`);
     return null;
   }
 
@@ -182,11 +196,12 @@ function spawnAgent(directive, type) {
   child.stderr.pipe(logStream, { end: false });
 
   // Set timeout
+  const agentTimeout = _config.AGENT_TIMEOUT_MS;
   const timeoutHandle = setTimeout(() => {
-    log(`TIMEOUT: Killing ${type} agent for ${directive.id} (exceeded ${AGENT_TIMEOUT_MS / 60000}min)`);
-    logStream.write(`\n=== TIMEOUT: Agent killed after ${AGENT_TIMEOUT_MS / 60000} minutes ===\n`);
+    log(`TIMEOUT: Killing ${type} agent for ${directive.id} (exceeded ${agentTimeout / 60000}min)`);
+    logStream.write(`\n=== TIMEOUT: Agent killed after ${agentTimeout / 60000} minutes ===\n`);
     const info = runningAgents.get(directive.id);
-    if (info) info.killReason = `timeout: exceeded ${AGENT_TIMEOUT_MS / 60000}min`;
+    if (info) info.killReason = `timeout: exceeded ${agentTimeout / 60000}min`;
     child.kill("SIGTERM");
 
     // SIGKILL fallback if SIGTERM doesn't work
@@ -199,7 +214,7 @@ function spawnAgent(directive, type) {
         log(`SIGKILL sent to ${type} agent for ${directive.id}`);
       } catch (e) { /* process already gone (ESRCH) or no permission */ }
     }, SIGKILL_GRACE_MS);
-  }, AGENT_TIMEOUT_MS);
+  }, agentTimeout);
 
   const agentInfo = {
     process: child,
@@ -316,7 +331,7 @@ function spawnAgent(directive, type) {
 
 // After an agent exits and a slot opens, look for pending/approved directives to spawn
 function drainQueue() {
-  if (runningAgents.size >= MAX_CONCURRENT_AGENTS) return;
+  if (runningAgents.size >= _config.MAX_CONCURRENT_AGENTS) return;
 
   const http = require("http");
   http.get(`${BRIDGE}/directives`, (res) => {
@@ -329,7 +344,7 @@ function drainQueue() {
         directives.sort((a, b) => (a.priority || 3) - (b.priority || 3));
 
         for (const d of directives) {
-          if (runningAgents.size >= MAX_CONCURRENT_AGENTS) break;
+          if (runningAgents.size >= _config.MAX_CONCURRENT_AGENTS) break;
           if (runningAgents.has(d.id)) continue;
 
           if (d.status === "planning") {
@@ -544,11 +559,8 @@ function smartDeploy(directive) {
 
 // ── Watchdog: periodic liveness check for running agents ──
 
-const WATCHDOG_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const STALL_THRESHOLD_MS = 15 * 60 * 1000;  // 15 minutes without directive activity = stalled
-
 function startWatchdog() {
-  log("Watchdog started (interval: 5min, stall threshold: 15min)");
+  log(`Watchdog started (interval: ${_config.WATCHDOG_INTERVAL_MS / 60000}min, stall threshold: ${_config.STALL_THRESHOLD_MS / 60000}min)`);
   setInterval(() => {
     for (const [directiveId, info] of runningAgents) {
       try {
@@ -567,7 +579,7 @@ function startWatchdog() {
               const d = directives.find(x => x.id === directiveId);
               if (!d || !d.lastActivity) return;
               const idleMs = Date.now() - d.lastActivity;
-              if (idleMs > STALL_THRESHOLD_MS) {
+              if (idleMs > _config.STALL_THRESHOLD_MS) {
                 const stallMin = Math.round(idleMs / 60000);
                 log(`Watchdog: ${directiveId} STALLED — pid ${info.pid} alive but no activity for ${stallMin}min, killing`);
                 info.killReason = `watchdog: stalled for ${stallMin}min`;
@@ -608,7 +620,7 @@ function startWatchdog() {
         }
       }
     }
-  }, WATCHDOG_INTERVAL_MS);
+  }, _config.WATCHDOG_INTERVAL_MS);
 }
 
 module.exports = {
@@ -619,5 +631,6 @@ module.exports = {
   killAllAgents,
   startWatchdog,
   setBroadcast,
-  MAX_CONCURRENT_AGENTS,
+  getConfig,
+  setConfig,
 };
