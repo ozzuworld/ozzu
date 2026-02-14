@@ -1101,7 +1101,14 @@ async function handleRequest(req, res) {
       res.end("Directive not found");
       return;
     }
-    const logPath = `${DATA_DIR}/agent-${id}.log`;
+    // Path traversal protection: sanitize id and verify resolved path stays within DATA_DIR
+    const sanitizedId = path.basename(id);
+    const logPath = path.resolve(DATA_DIR, `agent-${sanitizedId}.log`);
+    if (!logPath.startsWith(DATA_DIR + path.sep) && logPath !== DATA_DIR) {
+      res.writeHead(400, { "Content-Type": "text/plain", ...CORS_HEADERS });
+      res.end("Invalid directive ID");
+      return;
+    }
     if (!fs.existsSync(logPath)) {
       res.writeHead(404, { "Content-Type": "text/plain", ...CORS_HEADERS });
       res.end("Log file not found");
