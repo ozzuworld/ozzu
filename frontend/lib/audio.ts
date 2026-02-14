@@ -55,13 +55,16 @@ export class MicRecorder {
   start(onChunk: (pcmBase64: string) => void) {
     if (this.active) return;
     try {
+      // Start recording first — if this throws, no subscription to leak
+      startRecording();
       this.subscription = onMicData((event) => {
         onChunk(event.data);
       });
-      startRecording();
       this.active = true;
     } catch (err) {
       console.error("[MicRecorder] startRecording failed:", err);
+      // Clean up: stop recording if it started but subscription failed
+      try { stopRecording(); } catch {}
       this.subscription?.remove();
       this.subscription = null;
     }

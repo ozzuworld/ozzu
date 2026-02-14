@@ -87,6 +87,8 @@ class CipherPipeline extends EventEmitter {
     this._audioFlushTimer = null;
     // 24kHz * 2 bytes * 0.1s = 4800 bytes per 100ms of audio
     this._audioBufferTarget = 4800;
+    // Max buffer: 1 second of audio (48000 bytes) — prevents OOM if TTS floods
+    this._audioBufferMax = 48000;
   }
 
   async start() {
@@ -114,7 +116,11 @@ class CipherPipeline extends EventEmitter {
       console.warn("[cipher] No DEEPGRAM_API_KEY — STT disabled, text input only");
       return;
     }
-    if (this.dgSTT) return; // already connected
+    // Clean up old listeners before creating new connection
+    if (this.dgSTT) {
+      try { this.dgSTT.removeAllListeners(); } catch {}
+      this.dgSTT = null;
+    }
 
     try {
       this.dgSTT = this.deepgramClient.listen.live({
@@ -244,7 +250,11 @@ class CipherPipeline extends EventEmitter {
       console.warn("[cipher] No DEEPGRAM_API_KEY — TTS disabled, text output only");
       return;
     }
-    if (this.dgTTS) return; // already connected
+    // Clean up old listeners before creating new connection
+    if (this.dgTTS) {
+      try { this.dgTTS.removeAllListeners(); } catch {}
+      this.dgTTS = null;
+    }
 
     try {
       this._ttsStreamId++;
@@ -290,7 +300,10 @@ class CipherPipeline extends EventEmitter {
         this._audioBuffer.push(buf);
         this._audioBufferBytes += buf.length;
 
-        if (this._audioBufferBytes >= this._audioBufferTarget) {
+        // Force flush if buffer exceeds max (prevents OOM during TTS flood)
+        if (this._audioBufferBytes >= this._audioBufferMax) {
+          this._emitBufferedAudio();
+        } else if (this._audioBufferBytes >= this._audioBufferTarget) {
           this._emitBufferedAudio();
         } else if (!this._audioFlushTimer) {
           // Flush after 80ms even if buffer isn't full (keeps latency low)
@@ -412,10 +425,12 @@ class CipherPipeline extends EventEmitter {
 
     this._stopSTTKeepAlive();
     if (this.dgSTT) {
+      try { this.dgSTT.removeAllListeners(); } catch {}
       try { this.dgSTT.requestClose(); } catch {}
       this.dgSTT = null;
     }
     if (this.dgTTS) {
+      try { this.dgTTS.removeAllListeners(); } catch {}
       try { this.dgTTS.requestClose(); } catch {}
       this.dgTTS = null;
     }
@@ -554,7 +569,14 @@ class CipherPipeline extends EventEmitter {
         async (args) => {
           let result;
           try {
-            result = await self.handleToolCall(geminiTool.name, args);
+            const TOOL_TIMEOUT_MS = 60000; // 60s max per tool call
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Tool "${geminiTool.name}" timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS)
+            );
+            result = await Promise.race([
+              self.handleToolCall(geminiTool.name, args),
+              timeoutPromise,
+            ]);
           } catch (err) {
             result = { success: false, message: err.message };
           }

@@ -1707,7 +1707,7 @@ async function handleRequest(req, res) {
 
     let metadata, metaRaw;
     try {
-      metaRaw = fs.readFileSync(metadataPath, "utf8");
+      metaRaw = await fs.promises.readFile(metadataPath, "utf8");
       metadata = JSON.parse(metaRaw);
     } catch (err) {
       log.bridge.error(`OTA metadata parse failed: ${err.message}`);
@@ -3569,23 +3569,31 @@ async function ensureWasherConnected() {
     if (state.state !== "unavailable") return state.state; // Already connected
   } catch (_) {}
 
+  // Set flag BEFORE ping check to prevent concurrent callers from also entering
   if (washerReconnectInProgress) {
     await new Promise(r => setTimeout(r, 6000)); // Wait for in-progress reconnect
-    const state = await haFetch(`/api/states/switch.${WASHER_DEVICE_ID}_power`);
-    return state.state;
+    try {
+      const state = await haFetch(`/api/states/switch.${WASHER_DEVICE_ID}_power`);
+      return state.state;
+    } catch (_) {
+      return "unavailable";
+    }
   }
+  washerReconnectInProgress = true;
 
   // Try ping
   try {
-    const { execSync } = require("child_process");
-    execSync(`ping -c 1 -W 2 ${WASHER_IP}`, { timeout: 5000 });
+    const { execFile } = require("child_process");
+    const { promisify } = require("util");
+    const execFileAsync = promisify(execFile);
+    await execFileAsync("ping", ["-c", "1", "-W", "2", WASHER_IP], { timeout: 5000 });
   } catch (_) {
+    washerReconnectInProgress = false;
     return "unavailable"; // Not reachable
   }
 
   // Pingable — reload integration
   log.bridge.info("Device pingable but HA shows unavailable — reloading integration...");
-  washerReconnectInProgress = true;
   try {
     await haFetch(`/api/config/config_entries/entry/${WASHER_CONFIG_ENTRY_ID}/reload`, { method: "POST" });
     await new Promise(r => setTimeout(r, 5000));
@@ -5560,6 +5568,10 @@ wss.on("connection", (ws) => {
     if (ws === activeMic) {
       activeMic = null;
       activeMicSilenceSince = 0;
+    }
+    // Clean up audio stats for disconnected device
+    if (info?.deviceId) {
+      audioStats.delete(info.deviceId);
     }
     log.ws.info(`Device disconnected: ${info?.deviceId || "unknown"}, remaining: ${devices.size}`);
     disconnectGeminiIfEmpty();

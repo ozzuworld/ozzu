@@ -38,6 +38,7 @@ export class BridgeSession {
   private static readonly RECONNECT_BASE_MS = 1000;
   private static readonly RECONNECT_MAX_MS = 30000;
   private static readonly RECONNECT_MAX_ATTEMPTS = 50;
+  private static readonly MAX_PENDING_MESSAGES = 20;
 
   get role(): "mic" | "speaker" {
     return this._role;
@@ -132,56 +133,60 @@ export class BridgeSession {
   }
 
   private handleMessage(msg: any): void {
-    switch (msg.type) {
-      case "ready":
-        this.callbacks?.onReady();
-        // Flush any messages queued during reconnection
-        if (this.pendingMessages.length > 0) {
-          for (const msg of this.pendingMessages) {
-            this.ws?.send(msg);
+    try {
+      switch (msg.type) {
+        case "ready":
+          this.callbacks?.onReady();
+          // Flush any messages queued during reconnection
+          if (this.pendingMessages.length > 0) {
+            for (const queued of this.pendingMessages) {
+              this.ws?.send(queued);
+            }
+            this.pendingMessages = [];
           }
-          this.pendingMessages = [];
-        }
-        break;
-      case "audio":
-        this.callbacks?.onAudioChunk(msg.data);
-        break;
-      case "transcript":
-        this.callbacks?.onTranscript(msg.text);
-        break;
-      case "inputTranscript":
-        this.callbacks?.onInputTranscript(msg.text);
-        break;
-      case "turnComplete":
-        this.callbacks?.onTurnComplete();
-        break;
-      case "interrupted":
-        this.callbacks?.onInterrupted();
-        break;
-      case "pinRequest":
-        this.callbacks?.onPinRequest(msg.approvalId, msg.description);
-        break;
-      case "pinResolved":
-        this.callbacks?.onPinResolved();
-        break;
-      case "showCamera":
-        this.callbacks?.onShowCamera(msg.cameraId, msg.streamUrl, msg.cameraName);
-        break;
-      case "hideCamera":
-        this.callbacks?.onHideCamera();
-        break;
-      case "showContent":
-        this.callbacks?.onShowContent(msg.title, msg.content);
-        break;
-      case "hideContent":
-        this.callbacks?.onHideContent();
-        break;
-      case "listeningReady":
-        this.callbacks?.onListeningReady();
-        break;
-      case "error":
-        this.callbacks?.onError(msg.message);
-        break;
+          break;
+        case "audio":
+          this.callbacks?.onAudioChunk(msg.data);
+          break;
+        case "transcript":
+          this.callbacks?.onTranscript(msg.text);
+          break;
+        case "inputTranscript":
+          this.callbacks?.onInputTranscript(msg.text);
+          break;
+        case "turnComplete":
+          this.callbacks?.onTurnComplete();
+          break;
+        case "interrupted":
+          this.callbacks?.onInterrupted();
+          break;
+        case "pinRequest":
+          this.callbacks?.onPinRequest(msg.approvalId, msg.description);
+          break;
+        case "pinResolved":
+          this.callbacks?.onPinResolved();
+          break;
+        case "showCamera":
+          this.callbacks?.onShowCamera(msg.cameraId, msg.streamUrl, msg.cameraName);
+          break;
+        case "hideCamera":
+          this.callbacks?.onHideCamera();
+          break;
+        case "showContent":
+          this.callbacks?.onShowContent(msg.title, msg.content);
+          break;
+        case "hideContent":
+          this.callbacks?.onHideContent();
+          break;
+        case "listeningReady":
+          this.callbacks?.onListeningReady();
+          break;
+        case "error":
+          this.callbacks?.onError(msg.message);
+          break;
+      }
+    } catch (err) {
+      console.error("[BridgeSession] handleMessage error:", err);
     }
   }
 
@@ -191,12 +196,19 @@ export class BridgeSession {
     }
   }
 
+  private _queueMessage(msg: string): void {
+    if (this.pendingMessages.length >= BridgeSession.MAX_PENDING_MESSAGES) {
+      this.pendingMessages.shift(); // drop oldest
+    }
+    this.pendingMessages.push(msg);
+  }
+
   sendText(text: string): void {
     const msg = JSON.stringify({ type: "text", text });
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(msg);
     } else if (!this.intentionallyClosed) {
-      this.pendingMessages.push(msg); // queue for reconnection
+      this._queueMessage(msg);
     }
   }
 
@@ -205,7 +217,7 @@ export class BridgeSession {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(msg);
     } else if (!this.intentionallyClosed) {
-      this.pendingMessages.push(msg); // queue for reconnection
+      this._queueMessage(msg);
     }
   }
 

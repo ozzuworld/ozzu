@@ -245,69 +245,73 @@ export class LiveChat {
     _n: number,
     onSetupComplete?: (value: void) => void
   ) {
-    // Setup complete
-    if (msg.setupComplete !== undefined) {
-      onSetupComplete?.();
-      return;
-    }
+    try {
+      // Setup complete
+      if (msg.setupComplete !== undefined) {
+        onSetupComplete?.();
+        return;
+      }
 
-    // Session resumption token — store for reconnection
-    if (msg.sessionResumptionUpdate?.resumable && msg.sessionResumptionUpdate?.handle) {
-      this.resumeToken = msg.sessionResumptionUpdate.handle;
-      return;
-    }
+      // Session resumption token — store for reconnection
+      if (msg.sessionResumptionUpdate?.resumable && msg.sessionResumptionUpdate?.handle) {
+        this.resumeToken = msg.sessionResumptionUpdate.handle;
+        return;
+      }
 
-    // Go away — server is about to disconnect
-    if (msg.goAway) {
-      console.log("LiveChat: server goAway, timeLeft:", msg.goAway.timeLeft);
-      return;
-    }
+      // Go away — server is about to disconnect
+      if (msg.goAway) {
+        console.log("LiveChat: server goAway, timeLeft:", msg.goAway.timeLeft);
+        return;
+      }
 
-    // Tool call cancellation — user interrupted during tool execution
-    if (msg.toolCallCancellation?.ids) {
-      console.log("LiveChat: tool calls cancelled:", msg.toolCallCancellation.ids);
-      return;
-    }
+      // Tool call cancellation — user interrupted during tool execution
+      if (msg.toolCallCancellation?.ids) {
+        console.log("LiveChat: tool calls cancelled:", msg.toolCallCancellation.ids);
+        return;
+      }
 
-    // Tool calls
-    if (msg.toolCall?.functionCalls) {
-      this.handleToolCalls(msg.toolCall.functionCalls);
-      return;
-    }
+      // Tool calls
+      if (msg.toolCall?.functionCalls) {
+        this.handleToolCalls(msg.toolCall.functionCalls);
+        return;
+      }
 
-    // Server content
-    const sc = msg.serverContent;
-    if (!sc) return;
+      // Server content
+      const sc = msg.serverContent;
+      if (!sc) return;
 
-    // Interruption — user barged in, flush audio immediately
-    if (sc.interrupted) {
-      this.callbacks?.onInterrupted?.();
-      return;
-    }
+      // Interruption — user barged in, flush audio immediately
+      if (sc.interrupted) {
+        this.callbacks?.onInterrupted?.();
+        return;
+      }
 
-    // Audio chunks
-    const parts = sc.modelTurn?.parts;
-    if (parts) {
-      for (const part of parts) {
-        if (part.inlineData?.data) {
-          this.callbacks?.onAudioChunk(part.inlineData.data);
+      // Audio chunks
+      const parts = sc.modelTurn?.parts;
+      if (parts) {
+        for (const part of parts) {
+          if (part.inlineData?.data) {
+            this.callbacks?.onAudioChunk(part.inlineData.data);
+          }
         }
       }
-    }
 
-    // Output transcript (model speech)
-    if (sc.outputTranscription?.text) {
-      this.callbacks?.onTranscript(sc.outputTranscription.text);
-    }
+      // Output transcript (model speech)
+      if (sc.outputTranscription?.text) {
+        this.callbacks?.onTranscript(sc.outputTranscription.text);
+      }
 
-    // Input transcript (user speech)
-    if (sc.inputTranscription?.text) {
-      this.callbacks?.onInputTranscript?.(sc.inputTranscription.text);
-    }
+      // Input transcript (user speech)
+      if (sc.inputTranscription?.text) {
+        this.callbacks?.onInputTranscript?.(sc.inputTranscription.text);
+      }
 
-    // Turn complete
-    if (sc.turnComplete) {
-      this.callbacks?.onTurnComplete();
+      // Turn complete
+      if (sc.turnComplete) {
+        this.callbacks?.onTurnComplete();
+      }
+    } catch (err) {
+      console.error("LiveChat: handleParsedMessage error:", err);
     }
   }
 
@@ -351,15 +355,16 @@ export class LiveChat {
   }
 
   private async handleToolCalls(functionCalls: FunctionCall[]) {
+    const cb = this.callbacks; // snapshot to avoid null during async
     const responses = await Promise.all(
       functionCalls.map(async (fc) => {
         const name = fc.name ?? "unknown";
         const args = (fc.args as Record<string, unknown>) ?? {};
         let result: ToolCallResult;
 
-        if (this.callbacks?.onToolCall) {
+        if (cb?.onToolCall) {
           try {
-            result = await this.callbacks.onToolCall(name, args);
+            result = await cb.onToolCall(name, args);
           } catch (err: any) {
             result = { success: false, message: err?.message ?? "Tool call failed" };
           }
@@ -375,8 +380,11 @@ export class LiveChat {
       })
     );
 
-    this.ws?.send(
-      JSON.stringify({ toolResponse: { functionResponses: responses } })
-    );
+    // Guard: only send if WebSocket is still open (may have closed during tool execution)
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(
+        JSON.stringify({ toolResponse: { functionResponses: responses } })
+      );
+    }
   }
 }

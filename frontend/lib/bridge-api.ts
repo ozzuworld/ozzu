@@ -2,6 +2,13 @@
 
 const BRIDGE_URL =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "http://localhost:3333";
+const FETCH_TIMEOUT_MS = 15000; // 15s timeout for all bridge HTTP calls
+
+function fetchWithTimeout(url: string, opts?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 export interface StatusEntry {
   event: string;
@@ -33,7 +40,7 @@ export interface Directive {
 }
 
 export async function fetchDevStatus(): Promise<StatusEntry[]> {
-  const res = await fetch(`${BRIDGE_URL}/status`, {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/status`, {
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Bridge status error: ${res.status}`);
@@ -41,7 +48,7 @@ export async function fetchDevStatus(): Promise<StatusEntry[]> {
 }
 
 export async function fetchPendingApprovals(): Promise<ApprovalRequest[]> {
-  const res = await fetch(`${BRIDGE_URL}/approvals`, {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/approvals`, {
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Bridge approvals error: ${res.status}`);
@@ -53,7 +60,7 @@ export async function resolveApproval(
   approved: boolean,
   pin: string
 ): Promise<{ ok: boolean; approved?: boolean; error?: string }> {
-  const res = await fetch(`${BRIDGE_URL}/approvals/${id}/resolve`, {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/approvals/${id}/resolve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ approved, pin }),
@@ -64,7 +71,7 @@ export async function resolveApproval(
 
 export async function fetchDirectives(status?: string): Promise<Directive[]> {
   const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-  const res = await fetch(`${BRIDGE_URL}/directives${qs}`, {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives${qs}`, {
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Bridge directives error: ${res.status}`);
@@ -76,7 +83,7 @@ export async function sendDirective(
   title: string,
   description: string
 ): Promise<{ ok: boolean; directive: Directive }> {
-  const res = await fetch(`${BRIDGE_URL}/directives`, {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type, title, description }),
@@ -89,7 +96,7 @@ export async function updateDirective(
   id: string,
   updates: { status?: string; plan?: string; title?: string }
 ): Promise<{ ok: boolean; directive: Directive }> {
-  const res = await fetch(`${BRIDGE_URL}/directives/${id}`, {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
