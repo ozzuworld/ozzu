@@ -1506,7 +1506,7 @@ async function handleRequest(req, res) {
           return `<span style="color:${depColor};font-size:11px;" title="${escapeHtml(depId)}">${checkmark}${escapeHtml(depLabel)}</span>`;
         }).join("<br>");
       }
-      return `<tr>
+      return `<tr class="directive-row" data-status="${escapeHtml(d.status)}" data-title="${escapeHtml((d.title || d.id).toLowerCase())}">
         <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
         <td>${escapeHtml(d.title || d.id)}</td>
         <td style="font-size:12px;color:#9ca3af;">${escapeHtml(d.type || "-")}</td>
@@ -1570,6 +1570,16 @@ async function handleRequest(req, res) {
   .new-directive .form-msg.ok { background: #064e3b; color: #6ee7b7; }
   .new-directive .form-msg.err { background: #450a0a; color: #fca5a5; }
   .updating { opacity: 0.6; transition: opacity 0.15s; }
+  .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .filter-bar input[type="text"] { background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 6px 12px; font-family: inherit; font-size: 13px; width: 240px; }
+  .filter-bar input[type="text"]::placeholder { color: #475569; }
+  .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filter-pill { background: #334155; color: #94a3b8; border: 1px solid #475569; border-radius: 16px; padding: 4px 12px; font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.15s; }
+  .filter-pill:hover { background: #475569; color: #e2e8f0; }
+  .filter-pill.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+  .load-more-wrap { text-align: center; padding: 12px 0; }
+  .load-more-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-family: inherit; cursor: pointer; transition: background 0.2s; }
+  .load-more-btn:hover { background: #475569; }
 </style>
 </head><body>
 <h1>Ozzu Pipeline Dashboard</h1>
@@ -1603,7 +1613,16 @@ ${agents.length > 0 ? `<table><tr><th>Directive</th><th>Type</th><th>PID</th><th
 
 <section>
 <h2>Directives</h2>
-${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Priority</th><th>Deps</th><th>Created</th><th>Last Activity</th><th>Duration</th><th></th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
+<div class="filter-bar">
+  <input type="text" id="directive-search" placeholder="Search directives..." oninput="applyFilters()">
+  <div class="filter-pills">
+    <button class="filter-pill active" data-filter="all" onclick="setStatusFilter('all',this)">All</button>
+    <button class="filter-pill" data-filter="active" onclick="setStatusFilter('active',this)">Active</button>
+    <button class="filter-pill" data-filter="completed" onclick="setStatusFilter('completed',this)">Completed</button>
+    <button class="filter-pill" data-filter="failed" onclick="setStatusFilter('failed',this)">Failed</button>
+  </div>
+</div>
+${directives.length > 0 ? `<table id="directives-table"><tr><th>Status</th><th>Title</th><th>Type</th><th>Priority</th><th>Deps</th><th>Created</th><th>Last Activity</th><th>Duration</th><th></th></tr>${directiveRows}</table><div class="load-more-wrap" id="load-more-wrap"><button class="load-more-btn" id="load-more-btn" onclick="loadMore()">Load More</button><span id="load-more-count" style="color:#64748b;font-size:12px;margin-left:8px;"></span></div>` : `<p class="empty">No directives.</p>`}
 </section>
 
 <section>
@@ -1664,6 +1683,77 @@ function convertTimestamps() {
 }
 convertTimestamps();
 
+// Directive search, filter, pagination
+var currentStatusFilter = "all";
+var pageSize = 20;
+var visibleCount = pageSize;
+
+var activeStatuses = ["pending", "planning", "planned", "approved", "in_progress"];
+var failedStatuses = ["failed", "stale"];
+
+function applyFilters() {
+  var searchEl = document.getElementById("directive-search");
+  var query = searchEl ? searchEl.value.toLowerCase().trim() : "";
+  var rows = document.querySelectorAll(".directive-row");
+  var matchCount = 0;
+  var shownCount = 0;
+
+  rows.forEach(function(row) {
+    var status = row.getAttribute("data-status");
+    var title = row.getAttribute("data-title") || "";
+
+    // Status filter
+    var statusMatch = false;
+    if (currentStatusFilter === "all") statusMatch = true;
+    else if (currentStatusFilter === "active") statusMatch = activeStatuses.indexOf(status) !== -1;
+    else if (currentStatusFilter === "completed") statusMatch = status === "completed";
+    else if (currentStatusFilter === "failed") statusMatch = failedStatuses.indexOf(status) !== -1;
+
+    // Search filter
+    var searchMatch = !query || title.indexOf(query) !== -1;
+
+    if (statusMatch && searchMatch) {
+      matchCount++;
+      if (matchCount <= visibleCount) {
+        row.style.display = "";
+        shownCount++;
+      } else {
+        row.style.display = "none";
+      }
+    } else {
+      row.style.display = "none";
+    }
+  });
+
+  // Update load more button
+  var wrap = document.getElementById("load-more-wrap");
+  var countEl = document.getElementById("load-more-count");
+  if (wrap) {
+    if (matchCount > shownCount) {
+      wrap.style.display = "";
+      if (countEl) countEl.textContent = "Showing " + shownCount + " of " + matchCount;
+    } else {
+      wrap.style.display = "none";
+    }
+  }
+}
+
+function setStatusFilter(filter, btn) {
+  currentStatusFilter = filter;
+  visibleCount = pageSize;
+  document.querySelectorAll(".filter-pill").forEach(function(p) { p.classList.remove("active"); });
+  if (btn) btn.classList.add("active");
+  applyFilters();
+}
+
+function loadMore() {
+  visibleCount += pageSize;
+  applyFilters();
+}
+
+// Initial filter application
+applyFilters();
+
 // Auto-refresh via fetch (no full reload)
 var refreshInterval = 10;
 var countdown = refreshInterval;
@@ -1681,9 +1771,22 @@ function refreshNow() {
       var doc = parser.parseFromString(html, "text/html");
       var newContent = doc.getElementById("dashboard-content");
       var newRefreshed = doc.getElementById("refreshed-at");
+      // Preserve search/filter state across refresh
+      var searchVal = "";
+      var searchEl = document.getElementById("directive-search");
+      if (searchEl) searchVal = searchEl.value;
       if (newContent) contentEl.innerHTML = newContent.innerHTML;
       if (newRefreshed) refreshedEl.textContent = newRefreshed.textContent;
+      // Restore search value
+      var newSearchEl = document.getElementById("directive-search");
+      if (newSearchEl) newSearchEl.value = searchVal;
+      // Restore active filter pill
+      document.querySelectorAll(".filter-pill").forEach(function(p) {
+        p.classList.remove("active");
+        if (p.getAttribute("data-filter") === currentStatusFilter) p.classList.add("active");
+      });
       convertTimestamps();
+      applyFilters();
       contentEl.classList.remove("updating");
     })
     .catch(function() { contentEl.classList.remove("updating"); });
