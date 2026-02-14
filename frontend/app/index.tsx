@@ -131,6 +131,7 @@ export default function LandingScreen() {
   useEffect(() => {
     const bridge = bridgeRef.current;
     let cancelled = false;
+    let clearTranscriptTimer: ReturnType<typeof setTimeout> | null = null;
 
     const requestMicAndStart = async () => {
       if (Platform.OS === "android") {
@@ -169,9 +170,13 @@ export default function LandingScreen() {
       onTurnComplete: () => {
         setIsStreaming(false);
         // Clear transcripts for next turn after delay so user sees final text
-        setTimeout(() => {
-          setResponseText("");
-          setInputTranscript("");
+        if (clearTranscriptTimer) clearTimeout(clearTranscriptTimer);
+        clearTranscriptTimer = setTimeout(() => {
+          if (!cancelled) {
+            setResponseText("");
+            setInputTranscript("");
+          }
+          clearTranscriptTimer = null;
         }, 5000);
       },
       onInterrupted: () => {
@@ -215,6 +220,7 @@ export default function LandingScreen() {
 
     return () => {
       cancelled = true;
+      if (clearTranscriptTimer) clearTimeout(clearTranscriptTimer);
       bridge.close();
       playerRef.current.stop();
       micRef.current.stop();

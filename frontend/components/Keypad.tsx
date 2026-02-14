@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { View, Text, Modal, Pressable } from "react-native";
 
 interface KeypadProps {
@@ -17,6 +17,11 @@ const KEYS = [
 
 export function Keypad({ visible, title, onSubmit, onCancel }: KeypadProps) {
   const [pin, setPin] = useState("");
+
+  // Clear PIN whenever keypad becomes visible (fresh start each time)
+  useEffect(() => {
+    if (visible) setPin("");
+  }, [visible]);
 
   const handleKey = useCallback(
     (key: string) => {

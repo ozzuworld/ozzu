@@ -17,8 +17,12 @@ export class StreamingPlayer {
 
   start() {
     if (this.started) return;
-    startPlayback();
-    this.started = true;
+    try {
+      startPlayback();
+      this.started = true;
+    } catch (err) {
+      console.error("[StreamingPlayer] startPlayback failed:", err);
+    }
   }
 
   addChunk(pcmBase64: string) {
@@ -31,9 +35,13 @@ export class StreamingPlayer {
     flushPlayback();
   }
 
-  async stop() {
+  stop() {
     if (!this.started) return;
-    stopPlayback();
+    try {
+      stopPlayback();
+    } catch (err) {
+      console.error("[StreamingPlayer] stopPlayback failed:", err);
+    }
     this.started = false;
   }
 }
@@ -46,16 +54,26 @@ export class MicRecorder {
 
   start(onChunk: (pcmBase64: string) => void) {
     if (this.active) return;
-    this.subscription = onMicData((event) => {
-      onChunk(event.data);
-    });
-    startRecording();
-    this.active = true;
+    try {
+      this.subscription = onMicData((event) => {
+        onChunk(event.data);
+      });
+      startRecording();
+      this.active = true;
+    } catch (err) {
+      console.error("[MicRecorder] startRecording failed:", err);
+      this.subscription?.remove();
+      this.subscription = null;
+    }
   }
 
   stop() {
     if (!this.active) return;
-    stopRecording();
+    try {
+      stopRecording();
+    } catch (err) {
+      console.error("[MicRecorder] stopRecording failed:", err);
+    }
     this.subscription?.remove();
     this.subscription = null;
     this.active = false;
