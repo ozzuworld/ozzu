@@ -7,6 +7,7 @@ const PANEL_WIDTH = 200;
 
 const menuItems = [
   { icon: "⚔️", label: "INVENTORY", route: "/equipment" as const },
+  { icon: "📤", label: "UPLOAD", route: "/upload" as const },
 ];
 
 export function HamburgerMenu() {

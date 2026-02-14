@@ -212,6 +212,15 @@ export class BridgeSession {
     }
   }
 
+  sendUpload(target: "cipher" | "june", contentType: "image" | "document" | "text", data: string, filename?: string): void {
+    const msg = JSON.stringify({ type: "upload", target, contentType, data, filename });
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(msg);
+    } else if (!this.intentionallyClosed) {
+      this._queueMessage(msg);
+    }
+  }
+
   sendPinResponse(approvalId: string, pin: string): void {
     const msg = JSON.stringify({ type: "pinResponse", approvalId, pin });
     if (this.ws?.readyState === WebSocket.OPEN) {

@@ -219,6 +219,9 @@ class CipherPipeline extends EventEmitter {
 
   sendAudio(pcmBase64) {
     if (!this.dgSTT || !this.running) return;
+    // Don't feed audio to STT during Cipher's turn — prevents speaker output
+    // from accumulating in Deepgram's buffer and firing as echo when turn flips
+    if (this._turn !== "user") return;
     const buf = Buffer.from(pcmBase64, "base64");
     this.dgSTT.send(buf);
     this._lastAudioSentAt = Date.now();
@@ -500,7 +503,7 @@ class CipherPipeline extends EventEmitter {
           model: process.env.CIPHER_MODEL || "opus",
           cwd: "/home/gcp/ozzu",
           persistSession: false,
-          permissionMode: "acceptEdits",
+          permissionMode: "full",
           stderr: (data) => {
             if (data.includes("error") || data.includes("Error")) {
               console.error("[cipher-sdk-stderr]", data.trim());

@@ -498,7 +498,9 @@ async function initStorage() {
   for (const d of _directives) {
     if (d.status === "stale") {
       const rc = d.retryCount || 0;
-      if (rc < 2) {
+      // Allow more retries for crash-related failures (server restarts are not the agent's fault)
+      const maxRetries = d.failureReason?.startsWith("crash:") ? 5 : 2;
+      if (rc < maxRetries) {
         const oldStatus = d.status;
         d.status = "approved";
         d.retryCount = rc + 1;
@@ -883,6 +885,33 @@ async function handleRequest(req, res) {
       speechThreshold: MIC_SPEECH_THRESHOLD,
       diagnostics: getAudioDiagnostics(),
     });
+    return;
+  }
+
+  // GET /audio-routing — Current zone-aware audio routing state
+  if (req.method === "GET" && pathname === "/audio-routing") {
+    const deviceList = [...devices.entries()].map(([ws, info]) => ({
+      deviceId: info.deviceId, role: info.role, deviceType: info.deviceType,
+      zone: info.zone, capabilities: info.capabilities,
+      speakerPriority: info.speakerPriority, online: ws.readyState === WebSocket.OPEN,
+    }));
+    const target = selectSpeaker();
+    sendJSON(res, 200, {
+      devices: deviceList,
+      activeMic: activeMic ? devices.get(activeMic)?.deviceId : null,
+      activeMicZone: activeMic ? devices.get(activeMic)?.zone : null,
+      selectedSpeaker: target ? target.info.deviceId : null,
+      selectedSpeakerZone: target ? target.info.zone : null,
+    });
+    return;
+  }
+
+  // POST /restart — Graceful restart (Docker auto-restarts the container)
+  if (req.method === "POST" && pathname === "/restart") {
+    if (!requireAuth(req, res)) return;
+    log.bridge.info("Restart requested via API");
+    sendJSON(res, 200, { ok: true, message: "Restarting in 1 second..." });
+    setTimeout(() => gracefulShutdown("API_RESTART"), 1000);
     return;
   }
 
@@ -3298,6 +3327,13 @@ const GEMINI_BRIDGE_TOOLS = [
     },
   },
   {
+    name: "restart_bridge",
+    description: "Restart the bridge server. Use when server.js code has changed (from a directive commit) and needs to reload. " +
+      "The server will shut down gracefully and Docker will restart it automatically. You will lose your current session — " +
+      "warn King Kazuma before calling this. Takes ~5 seconds to come back up.",
+    parameters: { type: "OBJECT", properties: {}, required: [] },
+  },
+  {
     name: "deploy_to_devices",
     description: "Deploy the latest built APK to all devices (tablets and TV). Run this after a CI build completes or when King Kazuma asks to deploy.",
     parameters: { type: "OBJECT", properties: {}, required: [] },
@@ -3379,10 +3415,11 @@ const GEMINI_BRIDGE_TOOLS = [
   },
   {
     name: "run_command",
-    description: "Execute a shell command on the GCP server. Use this for EVERYTHING — troubleshooting, fixing code, deploying, restarting services. " +
+    description: "Execute a shell command on the GCP server. Use for troubleshooting, reading logs, checking state, editing files. " +
       "Available: docker, ping, curl, sed, git, python3, node, cat, ls, grep, find, echo, tee, sort, awk, sleep, and more. " +
       "Pipes (|) and chaining (&&) allowed. Output redirect (>) allowed. " +
-      "To edit files: sed -i 's/old/new/' path. To restart bridge: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge. " +
+      "To edit files: sed -i 's/old/new/' path. " +
+      "NOTE: To restart the bridge, use the restart_bridge tool (not docker commands). To deploy, use deploy_to_devices. " +
       "No destructive commands (rm -rf, kill, etc.).",
     parameters: {
       type: "OBJECT",
@@ -3907,6 +3944,13 @@ async function handleToolCall(name, args) {
         });
       }
 
+      if (name === "restart_bridge") {
+        log.bridge.info("Restart requested by Cipher — shutting down gracefully...");
+        // Respond to tool call before shutting down
+        setTimeout(() => gracefulShutdown("TOOL_RESTART"), 1000);
+        return { success: true, message: "Bridge is restarting. Docker will bring it back up in ~5 seconds." };
+      }
+
       if (name === "deploy_to_devices") {
         try {
           const { execFile } = require("child_process");
@@ -4330,7 +4374,7 @@ async function handleToolCall(name, args) {
 
 // ── Device tracking ──
 
-const devices = new Map(); // ws -> { role, deviceId }
+const devices = new Map(); // ws -> { role, deviceId, deviceType, zone, capabilities, speakerPriority }
 let audioMsgCount = 0;
 const pendingPinRequests = new Map(); // pinId -> { approvalId, approved, resolve }
 
@@ -4445,7 +4489,7 @@ function engage(reason) {
     log.gemini.info(`ENGAGED — ${reason}`);
     // Flush any buffered audio to speakers
     for (const chunk of pendingAudioBuffer) {
-      broadcastToRole("speaker", { type: "audio", data: chunk });
+      routeAudio({ type: "audio", data: chunk });
     }
     pendingAudioBuffer = [];
   }
@@ -4479,6 +4523,77 @@ function broadcastToRole(role, msg) {
         log.ws.warn(`Send failed to ${info?.deviceId || "unknown"}: ${err.message}`);
       }
     }
+  }
+}
+
+// ── Zone-aware audio routing ──
+
+function extractZone(deviceId) {
+  const match = deviceId.match(/^ozzu-\w+?-(\w+)-\w+$/);
+  return match ? match[1] : null;
+}
+
+function selectSpeaker() {
+  const speakers = [];
+  for (const [ws, info] of devices) {
+    if (info.capabilities?.speaker && ws.readyState === WebSocket.OPEN) {
+      speakers.push({ ws, info });
+    }
+  }
+  if (speakers.length === 0) return null;
+
+  const activeMicInfo = activeMic ? devices.get(activeMic) : null;
+  const micZone = activeMicInfo?.zone || null;
+
+  // Step 1: Active mic device itself — it has AEC so no echo
+  if (activeMic) {
+    const micAsSpeaker = speakers.find(s => s.ws === activeMic);
+    if (micAsSpeaker) return micAsSpeaker;
+  }
+
+  // Step 2: Best AEC-capable speaker in same zone
+  if (micZone) {
+    const sameZoneAEC = speakers
+      .filter(s => s.info.zone === micZone && s.ws !== activeMic && s.info.capabilities?.mic)
+      .sort((a, b) => a.info.speakerPriority - b.info.speakerPriority);
+    if (sameZoneAEC.length > 0) return sameZoneAEC[0];
+  }
+
+  // Step 3: Speaker-only device in same zone (TV) — only if no AEC option
+  if (micZone) {
+    const sameZone = speakers
+      .filter(s => s.info.zone === micZone && s.ws !== activeMic)
+      .sort((a, b) => a.info.speakerPriority - b.info.speakerPriority);
+    if (sameZone.length > 0) return sameZone[0];
+  }
+
+  // Step 4: Global best speaker — skip if mic is roaming
+  if (micZone !== "roaming") {
+    const global = speakers
+      .filter(s => s.ws !== activeMic)
+      .sort((a, b) => a.info.speakerPriority - b.info.speakerPriority);
+    if (global.length > 0) return global[0];
+  }
+
+  // Fallback: any speaker
+  return speakers.sort((a, b) => a.info.speakerPriority - b.info.speakerPriority)[0] || null;
+}
+
+let _lastRouteTarget = null;
+function routeAudio(msg) {
+  const target = selectSpeaker();
+  if (!target) {
+    log.ws.warn("No speaker available for audio routing");
+    return;
+  }
+  if (target.info.deviceId !== _lastRouteTarget) {
+    log.ws.info(`Audio routing to: ${target.info.deviceId} (type=${target.info.deviceType}, zone=${target.info.zone})`);
+    _lastRouteTarget = target.info.deviceId;
+  }
+  try {
+    target.ws.send(JSON.stringify(msg));
+  } catch (err) {
+    log.ws.warn(`Audio route failed to ${target.info.deviceId}: ${err.message}`);
   }
 }
 
@@ -4791,7 +4906,7 @@ function handleGeminiMessage(msg) {
       if (part.inlineData?.data) {
         geminiSpeaking = true; // model is outputting audio — gate mic input
         if (isEngaged()) {
-          broadcastToRole("speaker", { type: "audio", data: part.inlineData.data });
+          routeAudio({ type: "audio", data: part.inlineData.data });
         } else {
           pendingAudioBuffer.push(part.inlineData.data);
         }
@@ -5125,9 +5240,20 @@ async function startCipherPipeline() {
   const VOICE_RULES =
     "\n\nVOICE MODE RULES (you are in a turn-based voice conversation):\n" +
     "- TURN FLOW: You speak → then stop → King Kazuma speaks → then you speak again.\n" +
-    "- Keep verbal responses concise: 1-3 sentences for simple answers.\n" +
+    "- Keep verbal responses concise: 1-3 sentences MAX. This is voice — long responses are painful to listen to.\n" +
     "- NO markdown in speech — speak naturally with contractions. Never say asterisks, backticks, or formatting characters.\n" +
     "- When running tools, just do it silently. Only speak when you have results.\n" +
+    "\n" +
+    "CONVERSATIONAL RHYTHM — CRITICAL:\n" +
+    "When King Kazuma asks you to check something, DO NOT dump everything in one response. " +
+    "Work through it step by step, like a real conversation:\n" +
+    "  1. Acknowledge briefly: 'Checking.' or 'One sec.' (then call your tools)\n" +
+    "  2. Report the headline: 'The Spotify directive failed — the agent hit a blocker.'\n" +
+    "  3. STOP. Let him ask for more if he wants it.\n" +
+    "  4. Only go deeper when he asks: 'What happened?' → 'The planning agent couldn't access the database.'\n" +
+    "Never give a 30-second monologue. If you have a lot to say, give the summary and offer " +
+    "to show details on the whiteboard (show_content). Example: 'Three directives running — " +
+    "want me to put the details on the board?'\n" +
     "- NEVER call switch_to_june unless King Kazuma EXPLICITLY says 'switch to June', 'go back to June', or 'I'm done'.\n" +
     "- Short utterances like 'done', 'ok', 'yes' are conversational — NOT exit requests.\n" +
     "\n" +
@@ -5197,8 +5323,8 @@ async function startCipherPipeline() {
     "\n" +
     "YOU DO YOURSELF (operational — use your tools right now):\n" +
     "- Device control: turn on/off, start wash, check status via HA tools\n" +
-    "- Service restarts: run_command with docker compose restart\n" +
-    "- Deploys: run deploy scripts, OTA updates via run_command\n" +
+    "- Service restarts: restart_bridge tool (graceful restart, Docker brings it back up in ~5s)\n" +
+    "- Deploys: deploy_to_devices tool (runs deploy script, installs APK on all devices)\n" +
     "- Diagnostics: read logs, ping devices, check HA API via run_command\n" +
     "- Approvals: trigger PIN keypads, approve pending actions\n" +
     "- Research: read_file to understand code, run_command to check state\n" +
@@ -5354,7 +5480,7 @@ async function startCipherPipeline() {
 
   // Wire pipeline events
   cipherPipeline.on("audio", (pcmBase64) => {
-    broadcastToRole("speaker", { type: "audio", data: pcmBase64 });
+    routeAudio({ type: "audio", data: pcmBase64 });
   });
 
   cipherPipeline.on("inputTranscript", (text) => {
@@ -5499,10 +5625,18 @@ wss.on("connection", (ws) => {
       if (msg.type === "register") {
         const role = msg.role === "speaker" ? "speaker" : "mic";
         const deviceId = msg.deviceId || "unknown";
-        devices.set(ws, { role, deviceId });
-        log.ws.info(`Device registered: ${deviceId} (${role}), total: ${devices.size}`);
+        const deviceType = msg.deviceType || (role === "speaker" ? "tv" : "tablet");
+        const zone = msg.zone || extractZone(deviceId) || "default";
+        const capabilities = msg.capabilities || {
+          mic: deviceType !== "tv",
+          speaker: true,
+        };
+        const priorityMap = { tv: 1, tablet: 10, phone: 20 };
+        const speakerPriority = msg.speakerPriority ?? priorityMap[deviceType] ?? 10;
+        devices.set(ws, { role, deviceId, deviceType, zone, capabilities, speakerPriority });
+        log.ws.info(`Device registered: ${deviceId} (${role}, type=${deviceType}, zone=${zone}, caps=${JSON.stringify(capabilities)}, priority=${speakerPriority}), total: ${devices.size}`);
         // Persist device in PG registry
-        db.upsertDevice(deviceId, role === "speaker" ? "tv" : "tablet").catch(err =>
+        db.upsertDevice(deviceId, deviceType).catch(err =>
           log.pg.error("upsert device:", err.message));
 
         // Start AI session if not already running (skip during persona switch)
@@ -5528,7 +5662,7 @@ wss.on("connection", (ws) => {
 
       if (msg.type === "audio") {
         const info = devices.get(ws);
-        if (info?.role !== "mic") return;
+        if (!info?.capabilities?.mic) return;
         audioMsgCount++;
 
         if (cipherPipeline && typeof cipherPipeline === "object") {
@@ -5574,6 +5708,60 @@ wss.on("connection", (ws) => {
           cipherPipeline.sendText(msg.text);
         } else if (!cipherPipeline) {
           sendToGeminiText(msg.text);
+        }
+        return;
+      }
+
+      if (msg.type === "upload") {
+        const { target, contentType, data, filename } = msg;
+        if (!target || !contentType || !data) {
+          ws.send(JSON.stringify({ type: "error", message: "Invalid upload: missing target, contentType, or data" }));
+          return;
+        }
+        const info = devices.get(ws);
+        log.bridge.info(`Upload received: target=${target}, type=${contentType}, file=${filename || "(text)"}, from=${info?.deviceId}`);
+
+        if (target === "cipher") {
+          if (!cipherPipeline || typeof cipherPipeline !== "object") {
+            ws.send(JSON.stringify({ type: "error", message: "Cipher is not active" }));
+            return;
+          }
+          if (contentType === "image") {
+            const uploadsDir = "/tmp/ozzu-uploads";
+            if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+            const safeName = (filename || "image.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+            const filePath = path.resolve(uploadsDir, `${Date.now()}-${safeName}`);
+            fs.writeFileSync(filePath, Buffer.from(data, "base64"));
+            cipherPipeline.sendText(`[UPLOAD] Image uploaded by King Kazuma: ${filePath}`);
+          } else {
+            const label = filename ? `[UPLOAD] File "${filename}" from King Kazuma:\n${data}` : `[UPLOAD] Content from King Kazuma:\n${data}`;
+            cipherPipeline.sendText(label);
+          }
+        } else if (target === "june") {
+          if (!geminiReady || !geminiWs || geminiWs.readyState !== 1) {
+            ws.send(JSON.stringify({ type: "error", message: "June is not active" }));
+            return;
+          }
+          if (contentType === "image") {
+            const mimeType = filename?.match(/\.png$/i) ? "image/png" : "image/jpeg";
+            geminiWs.send(JSON.stringify({
+              clientContent: {
+                turns: [{
+                  role: "user",
+                  parts: [
+                    { text: `[King Kazuma uploaded an image${filename ? `: ${filename}` : ""}]` },
+                    { inlineData: { mimeType, data } },
+                  ],
+                }],
+                turnComplete: true,
+              },
+            }));
+          } else {
+            const label = filename ? `[King Kazuma uploaded "${filename}"]:\n${data}` : `[King Kazuma shared text]:\n${data}`;
+            sendToGeminiText(label);
+          }
+        } else {
+          ws.send(JSON.stringify({ type: "error", message: `Unknown upload target: ${target}` }));
         }
         return;
       }
@@ -5640,6 +5828,14 @@ wss.on("connection", (ws) => {
       audioStats.delete(info.deviceId);
     }
     log.ws.info(`Device disconnected: ${info?.deviceId || "unknown"}, remaining: ${devices.size}`);
+    if (info?.capabilities?.speaker) {
+      const newTarget = selectSpeaker();
+      if (newTarget) {
+        log.ws.info(`Speaker failover: ${info.deviceId} -> ${newTarget.info.deviceId}`);
+      } else {
+        log.ws.warn(`Speaker failover: ${info.deviceId} -> NONE`);
+      }
+    }
     disconnectGeminiIfEmpty();
   });
 
