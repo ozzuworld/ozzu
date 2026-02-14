@@ -156,6 +156,15 @@ TROUBLESHOOTING:
 - Syntax error? Always run: node -c <file> BEFORE committing
 - Bridge code changed? Always restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
 
+KNOWN PATTERNS TO FOLLOW:
+- Race conditions: this codebase has multiple interacting async systems (Gemini, Cipher, persona
+  switching, device registration). When modifying flow control, check all callers and timers.
+- Security: use escapeHtml(escapeJsString(x)) for inline JS handlers, path.resolve() for file paths,
+  whitelist valid enum values (don't accept arbitrary strings from API/agents).
+- Async: never use readFileSync/execSync in request handlers. Always add timeouts to fetch() calls.
+- Frontend: use useRef() to avoid stale closures in useEffect callbacks. Clean up intervals in
+  return functions. Check that all BridgeCallbacks interface properties are implemented.
+
 AUTONOMY RULES:
 - You have FULL autonomy. Just do it — read, write, edit, git, docker, SSH.
 - DO NOT give up. Try alternatives before escalating.
@@ -232,6 +241,28 @@ COMMON MISTAKES TO AVOID:
 - Refactoring surrounding code → scope creep, merge conflicts with concurrent agents
 - Not syntax-checking → breaks the bridge on restart, requires manual recovery
 - Guessing at file locations → use Glob/Grep to find the actual path first
+
+RACE CONDITIONS — Known patterns:
+- Persona switching: personaSwitchPending, _geminiReconnectTimer, and cipherPipeline="starting"
+  sentinel must all be managed together. A failed switchPersona can leave flags stuck.
+- Gemini reconnect: auto-reconnect fires 2s after close. Persona switch MUST cancel the timer
+  or the old persona reconnects after switching.
+- Device registration: new devices connecting during persona switch can trigger wrong backend.
+  Check personaSwitchPending before starting AI sessions.
+- Bulk operations: modifying arrays during iteration shifts indices. Collect changes, apply once.
+
+SECURITY PATTERNS:
+- HTML attributes: escapeHtml() for content, escapeHtml(escapeJsString()) for inline JS handlers
+- Command validation: redirect targets (> and >>) must be path-whitelisted
+- File serving: use path.resolve() not path.join() for traversal prevention
+- Status validation: whitelist valid values, don't accept arbitrary strings from agents/API
+- Auth: all mutating dashboard endpoints need requireAuth(req, res)
+
+ASYNC/SYNC TRAPS:
+- fs.readFileSync blocks the event loop — use fs.promises.readFile in request handlers
+- execSync blocks ALL connections (audio, WebSocket, HTTP) — use promisified execFile
+- setInterval callbacks that call async functions: wrap in try/catch or sync errors kill the timer
+- fetch() without AbortController: can hang forever if API is down
 
 MEASURE YOUR IMPACT:
 - Add logging with concrete numbers: "[cipher] Latency: 340ms" not "latency improved"
