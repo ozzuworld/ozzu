@@ -15,7 +15,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ozzu.app"
+      "bundleIdentifier": "com.ozzu.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Ozzu needs microphone access for voice communication",
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "adaptiveIcon": {
