@@ -823,9 +823,9 @@ function smartDeploy(directive) {
 
   const native = detectNativeChanges();
   if (native.any) {
-    const platforms = [native.android && "Android", native.ios && "iOS"].filter(Boolean).join(" + ");
-    log(`Native changes detected (${platforms}) — triggering CI builds`);
-    notify(`Native changes detected (${platforms}) — CI builds started, ~10 minutes.`);
+    const platforms = [native.android && "Android (native)", native.ios && "iOS (native)"].filter(Boolean).join(" + ") || "Android";
+    log(`Native changes detected (${platforms}) — triggering CI builds for all platforms`);
+    notify(`Native changes detected (${platforms}) — CI builds started for Android + iOS, ~10 minutes.`);
 
     // Android APK build + deploy (with artifact verification)
     if (native.android) {
@@ -858,8 +858,9 @@ function smartDeploy(directive) {
       });
     }
 
-    // iOS IPA build + deploy via dev-01 (with artifact verification)
-    if (native.ios) {
+    // iOS IPA build + deploy via dev-01 — ALWAYS build iOS alongside Android
+    // iPhone can't do OTA, so every frontend change needs a full rebuild to keep in sync
+    {
       const iosCmd = [
         `cd ${WORKDIR}`,
         `gh workflow run build-ios.yml`,
@@ -890,9 +891,10 @@ function smartDeploy(directive) {
       });
     }
   } else {
-    log("JS-only changes — deploying via OTA");
-    notify("JS-only changes — deploying instantly via OTA update...");
+    log("JS-only changes — deploying via OTA (Android) + CI build (iOS)");
+    notify("JS-only changes — OTA for Android (instant), iOS build started (~10 min).");
 
+    // Android: instant OTA deploy
     exec(`cd ${WORKDIR} && ./scripts/ota-deploy.sh --restart`, {
       cwd: WORKDIR,
       timeout: 5 * 60 * 1000, // 5 min max
@@ -902,7 +904,36 @@ function smartDeploy(directive) {
         notify("OTA deploy failed. May need a full APK rebuild.");
       } else {
         log("OTA deploy complete");
-        notify("OTA update deployed! All devices are restarting with the new version now.");
+        notify("OTA update deployed! Android devices restarting with new version.");
+      }
+    });
+
+    // iOS: always needs a full rebuild (no OTA for sideloaded apps)
+    const iosCmd = [
+      `cd ${WORKDIR}`,
+      `gh workflow run build-ios.yml`,
+      `sleep 20`,
+      `RUN_ID=$(gh run list --workflow=build-ios.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
+      `gh run watch "$RUN_ID" --exit-status`,
+      `rm -rf /tmp/ozzu-ios-verify`,
+      `gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ios-verify -R ozzuworld/ozzu`,
+      `test -f /tmp/ozzu-ios-verify/ozzu.ipa || { echo "ERROR: IPA artifact not found"; exit 1; }`,
+      `IPA_SIZE=$(stat -c%s /tmp/ozzu-ios-verify/ozzu.ipa 2>/dev/null || echo 0)`,
+      `test "$IPA_SIZE" -gt 1000000 || { echo "ERROR: IPA too small ($IPA_SIZE bytes)"; exit 1; }`,
+      `rm -rf /tmp/ozzu-ios-verify`,
+      `./scripts/deploy-ios.sh`,
+    ].join(" && ");
+
+    exec(iosCmd, {
+      cwd: WORKDIR,
+      timeout: 30 * 60 * 1000,
+    }, (err) => {
+      if (err) {
+        log(`iOS deploy failed: ${err.message}`);
+        notify(`iOS build/deploy failed: ${err.message}`);
+      } else {
+        log("iOS IPA deployed successfully");
+        notify("iOS app updated! iPhone now matches Android version.");
       }
     });
   }
