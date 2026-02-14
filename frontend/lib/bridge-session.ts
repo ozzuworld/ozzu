@@ -34,6 +34,7 @@ export class BridgeSession {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyClosed = false;
   private reconnectAttempt = 0;
+  private pendingMessages: string[] = []; // queued during reconnection
   private static readonly RECONNECT_BASE_MS = 1000;
   private static readonly RECONNECT_MAX_MS = 30000;
   private static readonly RECONNECT_MAX_ATTEMPTS = 50;
@@ -134,6 +135,13 @@ export class BridgeSession {
     switch (msg.type) {
       case "ready":
         this.callbacks?.onReady();
+        // Flush any messages queued during reconnection
+        if (this.pendingMessages.length > 0) {
+          for (const msg of this.pendingMessages) {
+            this.ws?.send(msg);
+          }
+          this.pendingMessages = [];
+        }
         break;
       case "audio":
         this.callbacks?.onAudioChunk(msg.data);
@@ -184,21 +192,26 @@ export class BridgeSession {
   }
 
   sendText(text: string): void {
+    const msg = JSON.stringify({ type: "text", text });
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: "text", text }));
+      this.ws.send(msg);
+    } else if (!this.intentionallyClosed) {
+      this.pendingMessages.push(msg); // queue for reconnection
     }
   }
 
   sendPinResponse(approvalId: string, pin: string): void {
+    const msg = JSON.stringify({ type: "pinResponse", approvalId, pin });
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(
-        JSON.stringify({ type: "pinResponse", approvalId, pin })
-      );
+      this.ws.send(msg);
+    } else if (!this.intentionallyClosed) {
+      this.pendingMessages.push(msg); // queue for reconnection
     }
   }
 
   close(): void {
     this.intentionallyClosed = true;
+    this.pendingMessages = [];
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

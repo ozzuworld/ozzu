@@ -10,6 +10,7 @@ const pool = new Pool({
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+  statement_timeout: 30000, // kill queries running longer than 30s
 });
 
 let _pgConnected = false;

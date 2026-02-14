@@ -103,6 +103,10 @@ export class LiveChat {
   private resumeToken: string | null = null;
   private lastEntityContext: string = "";
   private reconnecting = false;
+  private reconnectAttempt = 0;
+  private static readonly RECONNECT_MAX_ATTEMPTS = 5;
+  private static readonly RECONNECT_BASE_MS = 1000;
+  private static readonly RECONNECT_MAX_MS = 15000;
 
   async connect(
     entityContext: string,
@@ -126,6 +130,7 @@ export class LiveChat {
 
       ws.onopen = () => {
         console.log("LiveChat WS opened, sending setup...");
+        this.reconnectAttempt = 0; // reset on successful connection
         const setup: any = {
           model: `models/${MODEL}`,
           generationConfig: {
@@ -203,20 +208,33 @@ export class LiveChat {
         const wasConnected = this.ws !== null;
         this.ws = null;
 
-        // Auto-reconnect if we have a resume token and didn't close intentionally
+        // Auto-reconnect with backoff if we have a resume token and didn't close intentionally
         if (wasConnected && this.resumeToken && !this.reconnecting) {
+          if (this.reconnectAttempt >= LiveChat.RECONNECT_MAX_ATTEMPTS) {
+            console.log("LiveChat: max reconnect attempts reached, giving up");
+            this.callbacks?.onError("Session lost — max reconnect attempts exceeded");
+            return;
+          }
           this.reconnecting = true;
-          console.log("LiveChat: attempting reconnection with resume token...");
-          this._connect(this.lastEntityContext, this.resumeToken)
-            .then(() => {
-              this.reconnecting = false;
-              console.log("LiveChat: reconnected successfully");
-            })
-            .catch((err) => {
-              this.reconnecting = false;
-              console.error("LiveChat: reconnection failed:", err);
-              this.callbacks?.onError("Session lost — reconnection failed");
-            });
+          const delay = Math.min(
+            LiveChat.RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempt),
+            LiveChat.RECONNECT_MAX_MS
+          );
+          this.reconnectAttempt++;
+          console.log(`LiveChat: reconnecting in ${delay / 1000}s (attempt ${this.reconnectAttempt}/${LiveChat.RECONNECT_MAX_ATTEMPTS})...`);
+          setTimeout(() => {
+            this._connect(this.lastEntityContext, this.resumeToken!)
+              .then(() => {
+                this.reconnecting = false;
+                this.reconnectAttempt = 0; // reset on success
+                console.log("LiveChat: reconnected successfully");
+              })
+              .catch((err) => {
+                this.reconnecting = false;
+                console.error("LiveChat: reconnection failed:", err);
+                // Will retry on next onclose if attempts remain
+              });
+          }, delay);
         }
       };
     });

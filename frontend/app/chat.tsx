@@ -35,6 +35,7 @@ export default function ChatScreen() {
   const [customInput, setCustomInput] = useState("");
   const [showInput, setShowInput] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const sessionReadyRef = useRef(false);
   const [connectError, setConnectError] = useState("");
   const inputRef = useRef<TextInput>(null);
 
@@ -64,6 +65,7 @@ export default function ChatScreen() {
     const callbacks: BridgeCallbacks = {
       onReady: () => {
         if (cancelled) return;
+        sessionReadyRef.current = true;
         setSessionReady(true);
         setConnectError("");
 
@@ -97,9 +99,16 @@ export default function ChatScreen() {
         setShowKeypad(false);
         pendingPinRef.current = null;
       },
+      onShowCamera: () => {},
+      onHideCamera: () => {},
+      onShowContent: () => {},
+      onHideContent: () => {},
+      onListeningReady: () => {
+        setIsStreaming(false);
+      },
       onError: (msg) => {
         console.error("BridgeSession error:", msg);
-        if (!sessionReady) {
+        if (!sessionReadyRef.current) {
           setConnectError(msg);
         }
         setResponseText((prev) => prev + `\n[Error: ${msg}]`);
@@ -134,9 +143,8 @@ export default function ChatScreen() {
     (message: string) => {
       if (!message.trim() || !sessionReady) return;
 
-      // Reset player for new response
-      playerRef.current.stop();
-      playerRef.current = new StreamingPlayer();
+      // Reset player for new response (reuse to avoid native AudioTrack race)
+      playerRef.current.flush();
 
       setIsStreaming(true);
       setResponseText("");

@@ -284,9 +284,19 @@ function validateCommand(command) {
   }
 
   // Split on && and | — each segment's first real command must be whitelisted
-  // Also handle > and >> (output redirects) by stripping redirect targets
+  // Also handle > and >> (output redirects) by validating redirect targets
+  const REDIRECT_ALLOWED_PREFIXES = ["/home/gcp/ozzu/", "/tmp/ozzu-bridge/", "/tmp/"];
   const segments = trimmed.split(/\s*(?:&&|\|\|?)\s*/).map(s => s.trim()).filter(Boolean);
   for (const seg of segments) {
+    // Check redirect target path is within allowed directories
+    const redirectMatch = seg.match(/\s*>>?\s*(.+)$/);
+    if (redirectMatch) {
+      const target = redirectMatch[1].trim().replace(/^["']|["']$/g, "");
+      const resolvedTarget = path.resolve(target);
+      if (!REDIRECT_ALLOWED_PREFIXES.some(p => resolvedTarget.startsWith(p))) {
+        return { ok: false, reason: `Redirect target not allowed: ${target}. Must be under ${REDIRECT_ALLOWED_PREFIXES.join(" or ")}` };
+      }
+    }
     // Strip redirect suffix: "echo foo > file" → "echo foo"
     const beforeRedirect = seg.split(/\s*>>?\s/)[0].trim();
     if (!beforeRedirect) continue;
@@ -531,8 +541,7 @@ async function initStorage() {
     });
   }
 
-  // Clean up expired approvals (older than 1 hour and still pending)
-  const APPROVAL_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
+  // Clean up expired approvals (older than APPROVAL_EXPIRY_MS and still pending)
   const freshApprovals = _approvals.filter(a => {
     if (a.status !== "pending") return true;
     const age = now - new Date(a.createdAt || 0).getTime();
@@ -1054,7 +1063,13 @@ async function handleRequest(req, res) {
 
     const directives = getDirectives();
     directives.push(directive);
-    while (directives.length > MAX_DIRECTIVES) directives.shift();
+    // Evict oldest terminal directives first (never evict active ones)
+    const ACTIVE_STATUSES = new Set(["planning", "planned", "approved", "in_progress", "pending"]);
+    while (directives.length > MAX_DIRECTIVES) {
+      const evictIdx = directives.findIndex(d => !ACTIVE_STATUSES.has(d.status));
+      if (evictIdx === -1) break; // all active — allow overflow rather than lose work
+      directives.splice(evictIdx, 1);
+    }
     saveDirectives(directives, directive, null);
     _directiveCreationTimestamps.push(Date.now());
 
@@ -1237,8 +1252,15 @@ async function handleRequest(req, res) {
     }
 
     // Apply updates
+    const VALID_STATUSES = new Set(["pending", "planning", "planned", "approved", "in_progress", "completed", "failed", "stale", "cancelled"]);
     const prevStatus = directive.status;
-    if (data.status) directive.status = data.status;
+    if (data.status) {
+      if (!VALID_STATUSES.has(data.status)) {
+        sendJSON(res, 400, { error: `Invalid status: "${data.status}". Valid: ${[...VALID_STATUSES].join(", ")}` });
+        return;
+      }
+      directive.status = data.status;
+    }
     if (data.plan !== undefined) directive.plan = data.plan;
     if (data.title) directive.title = data.title;
     if (data.type) directive.type = data.type;
@@ -1413,6 +1435,7 @@ async function handleRequest(req, res) {
   // POST /directives/:id/comment — Add a manual comment to a directive's activity log
   const directiveCommentMatch = pathname.match(/^\/directives\/([^/]+)\/comment$/);
   if (req.method === "POST" && directiveCommentMatch) {
+    if (!requireAuth(req, res)) return;
     const id = directiveCommentMatch[1];
     const data = await parseBody(req);
     if (!data.message || !data.message.trim()) {
@@ -1437,6 +1460,7 @@ async function handleRequest(req, res) {
   // POST /directives/:id/unblock — Force-skip dependency check (manual override)
   const directiveUnblockMatch = pathname.match(/^\/directives\/([^/]+)\/unblock$/);
   if (req.method === "POST" && directiveUnblockMatch) {
+    if (!requireAuth(req, res)) return;
     const id = directiveUnblockMatch[1];
     const directives = getDirectives();
     const directive = directives.find((d) => d.id === id);
@@ -1562,6 +1586,7 @@ async function handleRequest(req, res) {
     const directives = getDirectives();
     const succeeded = [];
     const failed = [];
+    const deletePending = [];
 
     for (const id of data.ids) {
       const directive = directives.find((d) => d.id === id);
@@ -1608,12 +1633,19 @@ async function handleRequest(req, res) {
           failed.push({ id, error: `Directive is "${directive.status}" — cancel it first before deleting` });
           continue;
         }
-        const idx = directives.indexOf(directive);
-        directives.splice(idx, 1);
-        saveDirectives(directives, null, null);
+        deletePending.push(id);
         log.bridge.info(`Bulk delete: ${id} "${directive.title}"`);
         succeeded.push(id);
       }
+    }
+
+    // Batch-apply deletes in a single pass (avoids index shifting and redundant saves)
+    if (deletePending.length > 0) {
+      const deleteSet = new Set(deletePending);
+      const filtered = directives.filter(d => !deleteSet.has(d.id));
+      directives.length = 0;
+      directives.push(...filtered);
+      saveDirectives(directives, null, null);
     }
 
     log.bridge.info(`Bulk ${data.action}: ${succeeded.length} succeeded, ${failed.length} failed`);
@@ -2564,7 +2596,7 @@ function submitDirective(e) {
       return;
     }
 
-    log.bridge(`Config updated: ${JSON.stringify(updated)}`);
+    log.bridge.info(`Config updated: ${JSON.stringify(updated)}`);
     sendJSON(res, 200, { updated, config: { ...getConfig(), persona: currentPersona } });
     return;
   }
@@ -3779,10 +3811,12 @@ async function handleToolCall(name, args) {
 
       if (name === "deploy_to_devices") {
         try {
-          const { execSync } = require("child_process");
+          const { execFile } = require("child_process");
+          const util = require("util");
+          const execFileAsync = util.promisify(execFile);
           log.bridge.info("Starting deploy to all devices...");
           const deployId = await db.addDeployment("apk", null, ["all"]);
-          const output = execSync("/home/gcp/ozzu/scripts/deploy.sh", {
+          const { stdout: output } = await execFileAsync("/home/gcp/ozzu/scripts/deploy.sh", [], {
             cwd: "/home/gcp/ozzu",
             timeout: 300000,
             encoding: "utf8",
@@ -3883,7 +3917,7 @@ async function handleToolCall(name, args) {
           return { success: false, message: `Access denied: ${validation.reason}` };
         }
         try {
-          const content = fs.readFileSync(validation.absolute, "utf8");
+          const content = await fs.promises.readFile(validation.absolute, "utf8");
           const lines = content.split("\n").length;
           const bytes = Buffer.byteLength(content, "utf8");
           const truncated = content.length > READ_FILE_MAX_CHARS;
@@ -4283,6 +4317,13 @@ function getAudioDiagnostics() {
 // ENGAGED: full two-way conversation, extends with each turn
 // Conversation transcript: accumulates turns for session summaries
 let conversationTranscript = []; // {role: "user"|"model", text, timestamp}
+const MAX_TRANSCRIPT_TURNS = 200; // cap to prevent unbounded memory growth
+function pushTranscript(entry) {
+  conversationTranscript.push(entry);
+  if (conversationTranscript.length > MAX_TRANSCRIPT_TURNS) {
+    conversationTranscript.splice(0, conversationTranscript.length - MAX_TRANSCRIPT_TURNS);
+  }
+}
 let currentConversationId = null; // PG conversation id for transcript logging
 let turnIndex = 0;
 
@@ -4606,7 +4647,7 @@ function handleGeminiMessage(msg) {
     const text = sc.inputTranscription.text;
     log.gemini.info(`INPUT: "${text}"`);
     inputTranscriptBuffer += text;
-    conversationTranscript.push({ role: "user", text, timestamp: Date.now() });
+    pushTranscript({ role: "user", text, timestamp: Date.now() });
     // Log turn to PG
     if (currentConversationId) {
       db.addConversationTurn(currentConversationId, "user", text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
@@ -4653,7 +4694,7 @@ function handleGeminiMessage(msg) {
   if (sc.outputTranscription?.text) {
     log.gemini.info(`OUTPUT: "${sc.outputTranscription.text}"`);
     goAwayPartialOutput += sc.outputTranscription.text; // track for goAway recovery
-    conversationTranscript.push({ role: "model", text: sc.outputTranscription.text, timestamp: Date.now() });
+    pushTranscript({ role: "model", text: sc.outputTranscription.text, timestamp: Date.now() });
     // Log turn to PG
     if (currentConversationId) {
       db.addConversationTurn(currentConversationId, currentPersona, sc.outputTranscription.text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
@@ -4848,11 +4889,14 @@ async function generateSessionSummary(persona) {
     .join("\n");
 
   try {
+    const summaryController = new AbortController();
+    const summaryTimeout = setTimeout(() => summaryController.abort(), 15000);
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: summaryController.signal,
         body: JSON.stringify({
           contents: [{ parts: [{ text:
             `Summarize this conversation between ${persona} and King Kazuma in 2-3 sentences. ` +
@@ -4862,6 +4906,7 @@ async function generateSessionSummary(persona) {
         }),
       }
     );
+    clearTimeout(summaryTimeout);
     const data = await resp.json();
     const summary = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (summary) {
@@ -5208,7 +5253,7 @@ async function startCipherPipeline() {
   cipherPipeline.on("outputTranscript", (text) => {
     extendEngagement();
     broadcastToAll({ type: "transcript", text });
-    conversationTranscript.push({ role: "cipher", text });
+    pushTranscript({ role: "cipher", text });
     if (currentConversationId) {
       db.addConversationTurn(currentConversationId, "cipher", text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
     }

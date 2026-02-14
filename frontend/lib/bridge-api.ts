@@ -58,6 +58,7 @@ export async function resolveApproval(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ approved, pin }),
   });
+  if (!res.ok) throw new Error(`Bridge resolve approval error: ${res.status}`);
   return res.json();
 }
 

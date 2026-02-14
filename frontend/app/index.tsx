@@ -161,12 +161,18 @@ export default function LandingScreen() {
       },
       onTranscript: (text) => {
         setResponseText((prev) => prev + text);
+        setIsStreaming(true);
       },
       onInputTranscript: (text) => {
         setInputTranscript((prev) => prev + text);
       },
       onTurnComplete: () => {
         setIsStreaming(false);
+        // Clear transcripts for next turn after delay so user sees final text
+        setTimeout(() => {
+          setResponseText("");
+          setInputTranscript("");
+        }, 5000);
       },
       onInterrupted: () => {
         playerRef.current.flush();

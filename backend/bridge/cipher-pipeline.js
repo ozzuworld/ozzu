@@ -221,7 +221,14 @@ class CipherPipeline extends EventEmitter {
   _scheduleSTTReconnect() {
     if (!this.running) return;
     if (this._sttReconnectAttempt >= 20) {
-      console.error("[cipher] STT reconnect: max attempts (20) reached, giving up");
+      // After max attempts, wait 5 minutes then reset counter and try again
+      console.error("[cipher] STT reconnect: max attempts (20) reached, will retry in 5min");
+      setTimeout(() => {
+        if (this.running && !this.dgSTT) {
+          this._sttReconnectAttempt = 0;
+          this._connectSTT();
+        }
+      }, 300000);
       return;
     }
     const delay = Math.min(1000 * Math.pow(2, this._sttReconnectAttempt), 30000);
@@ -497,6 +504,23 @@ class CipherPipeline extends EventEmitter {
       console.error("[cipher] Agent SDK error:", err.message);
       this.emit("error", err);
     }
+
+    // Auto-reconnect if still running (session ended unexpectedly)
+    if (this.running) {
+      this._sdkReconnectAttempt = (this._sdkReconnectAttempt || 0) + 1;
+      if (this._sdkReconnectAttempt > 5) {
+        console.error("[cipher] SDK reconnect: max attempts (5) reached, stopping pipeline");
+        this.emit("dead", "SDK reconnect exhausted");
+        return;
+      }
+      const delay = Math.min(2000 * Math.pow(2, this._sdkReconnectAttempt - 1), 30000);
+      console.log("[cipher] SDK reconnecting in %dms (attempt %d/5)...", delay, this._sdkReconnectAttempt);
+      await new Promise(r => setTimeout(r, delay));
+      if (this.running) {
+        this._sdkReconnectAttempt = 0; // reset on successful start of new session
+        this._startClaudeSession();
+      }
+    }
   }
 
   _createBridgeMcpServer(toolFn, createSdkMcpServer) {
@@ -514,6 +538,7 @@ class CipherPipeline extends EventEmitter {
           case "NUMBER": zodType = z.number(); break;
           case "INTEGER": zodType = z.number().int(); break;
           case "BOOLEAN": zodType = z.boolean(); break;
+          case "ARRAY": zodType = z.array(z.string()); break;
           default: zodType = z.string();
         }
         if (val.enum) zodType = z.enum(val.enum);
