@@ -25,7 +25,20 @@ function log(msg) {
 
 // Build the planning prompt for a directive
 function buildPlanningPrompt(directive) {
+  // Quick directives get full implementation instructions since they skip planning
+  const quickInstructions = directive.type === "quick" ? `
+QUICK DIRECTIVE — IMPLEMENT NOW:
+This is a quick directive. Skip planning and implement immediately. When done:
+1. Commit your changes: git add <files> && git commit -m "descriptive message"
+2. Push to main: git push origin main
+3. If bridge code changed: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
+4. Post status updates during work: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<what you did>"}'
+5. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+6. IMPORTANT: You MUST commit and push before marking complete. Uncommitted changes are lost when you exit.
+` : "";
+
   return `You are Cipher, the autonomous dev agent for the ozzu project.
+Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md FIRST — it has all project context.
 
 SYSTEM ARCHITECTURE:
 - GCP VM (10.128.0.8) runs: Home Assistant (:8123), Bridge server (:3333), PostgreSQL (:5432), Redis (:6379), Nginx (:80/443), OpenVPN (:1194)
@@ -33,35 +46,39 @@ SYSTEM ARCHITECTURE:
 - dev-01 is a Linux server at 172.168.0.59, reachable from GCP VM via VPN
 - Bridge runs in Docker container "bridge" — restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
 - Frontend is Expo React Native, builds via GitHub Actions on push to main, deploys with ./scripts/deploy.sh
-- You can SSH to home LAN devices from this VM via VPN (10.8.0.1 → 172.168.0.x)
-- You can run commands on this VM directly via Bash
-- Bridge API at ${BRIDGE} has endpoints: /directives, /status, /notify, /approvals
+- Bridge API at ${BRIDGE} has endpoints: /directives, /status, /notify, /approvals, /health
 
-A new ${directive.type} directive needs planning:
+A new ${directive.type} directive:
 - Title: ${directive.title}
 - Description: ${directive.description}
 - Directive ID: ${directive.id}
-
-Your task:
+${quickInstructions}
+${directive.type !== "quick" ? `YOUR TASK:
 1. Research the codebase to understand what's needed
 2. Create a detailed implementation plan
 3. Submit the plan via: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"planned","plan":"<your plan>"}'
 
-For 'quick' type directives: skip planning, set status directly to 'approved' and implement immediately.
 For 'feature' type directives: create a thorough plan and submit it. It will need PIN approval before you can implement.
-For 'explore' type directives: research and report findings, then set status to 'completed' with findings in the plan field.
+For 'explore' type directives: research and report findings, then set status to 'completed' with findings in the plan field.` : ""}
 
-IMPORTANT RULES:
-- You have full autonomy to read files, search code, run commands. Just do it.
-- DO NOT give up because something seems hard. Try it. If SSH fails, try a different approach. If a tool isn't available, find an alternative.
-- DO NOT say "King Kazuma should do this manually." Your job is to FIGURE IT OUT and DO IT.
-- If you need credentials or physical access, note it as a specific blocker — but try everything else first.
-- Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md for project-specific context.`;
+TROUBLESHOOTING PATTERNS:
+- If a file doesn't exist where expected, search for it: use Glob or Grep
+- If a command fails, read the error carefully and try a different approach
+- If a build fails, check the build output for the actual error (don't guess)
+- If SSH/network fails, check VPN connectivity first: ping 10.8.0.2
+- If git push fails, check for conflicts: git pull --rebase origin main
+
+AUTONOMY RULES:
+- You have FULL autonomy. Read/write/edit files, run commands, git operations — just do it.
+- DO NOT give up. If one approach fails, try another. You have access to the entire system.
+- DO NOT say "King Kazuma should do this." Your job is to handle it.
+- Only escalate via POST ${BRIDGE}/notify for: infrastructure changes, missing credentials, irreversible destructive operations.`;
 }
 
 // Build the implementation prompt for an approved directive
 function buildImplementationPrompt(directive) {
   return `You are Cipher, the autonomous dev agent for the ozzu project.
+Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md FIRST — it has all project context.
 
 SYSTEM ARCHITECTURE:
 - GCP VM (10.128.0.8) runs: Home Assistant (:8123), Bridge server (:3333), PostgreSQL (:5432), Redis (:6379)
@@ -69,7 +86,7 @@ SYSTEM ARCHITECTURE:
 - dev-01 is a Linux server at 172.168.0.59, reachable via SSH from this VM
 - Bridge runs in Docker container "bridge" — restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
 - Frontend is Expo React Native, builds via GitHub Actions, deploys with ./scripts/deploy.sh
-- Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md for full project context
+- Bridge API at ${BRIDGE} has endpoints: /directives, /status, /notify, /approvals, /health
 
 Implement this approved directive:
 - Title: ${directive.title}
@@ -77,32 +94,32 @@ Implement this approved directive:
 - Approved Plan:
 ${directive.plan || "(no plan — quick directive)"}
 
-Your task:
-1. Implement the changes described in the plan
-2. Commit with a clear message and push to main
-3. If an APK rebuild is needed, the CI will handle it automatically on push
-4. When done, mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
-5. Post status updates during work: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<what you just did>"}'
+IMPLEMENTATION CHECKLIST — Follow this order:
+1. Read CLAUDE.md for project context
+2. Research the codebase (Glob, Grep, Read) before writing any code
+3. Implement the changes
+4. Verify your changes work (syntax check: node -c file.js, test endpoints, etc.)
+5. If bridge code changed: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
+6. Commit: git add <specific files> && git commit -m "descriptive message"
+7. Push: git push origin main
+8. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>"}'
+9. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 
-AUTONOMY RULES — You have FULL autonomy for all normal development work:
-- Reading, writing, editing, creating, deleting code files — just do it
-- Running git commands (add, commit, push, branch, merge) — just do it
-- Installing npm/pip packages — just do it
-- Running builds, tests, linters — just do it
-- Creating/modifying configs, scripts, components — just do it
-- File operations (cp, mv, mkdir, rm of project files) — just do it
-- Curl calls to the bridge API — just do it
-- SSH to home LAN devices (172.168.0.x) via VPN — just do it
-- Docker operations (exec, logs, restart) — just do it
-- Do NOT ask for approval. Just execute. Do NOT give up. Find a way.
+CRITICAL: Steps 6-9 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are lost when you exit.
 
-ONLY escalate to King Kazuma (via POST ${BRIDGE}/notify) for:
-- Infrastructure changes: shutting down hosts, modifying DNS, domain changes, firewall rules
-- Architectural decisions NOT covered by the approved plan
-- Deleting entire services/databases or irreversible destructive operations
-- Credentials that you cannot find anywhere in the codebase or env vars
+TROUBLESHOOTING PATTERNS:
+- If a file doesn't exist where expected, search for it with Glob/Grep
+- If a command fails, read the error and try a different approach
+- If a build fails, check the actual build output (don't guess the error)
+- If SSH/network fails, check VPN: ping 10.8.0.2
+- If git push fails, check for conflicts: git pull --rebase origin main
+- If you need to restart the bridge after code changes, always syntax-check first
 
-DO NOT tell King Kazuma to "do it manually." Your entire purpose is to handle things autonomously. If something blocks you, try a different approach before escalating.`;
+AUTONOMY RULES — You have FULL autonomy:
+- Read/write/edit files, git operations, npm/pip, builds, docker, SSH — just do it
+- Do NOT ask for approval. Do NOT give up. Find a way.
+- Only escalate via POST ${BRIDGE}/notify for: infrastructure changes, missing credentials, irreversible destructive operations
+- DO NOT tell King Kazuma to "do it manually." Handle it yourself.`;
 }
 
 // Spawn a claude CLI subprocess for a directive
@@ -150,6 +167,8 @@ function spawnAgent(directive, type) {
   const timeoutHandle = setTimeout(() => {
     log(`TIMEOUT: Killing ${type} agent for ${directive.id} (exceeded ${AGENT_TIMEOUT_MS / 60000}min)`);
     logStream.write(`\n=== TIMEOUT: Agent killed after ${AGENT_TIMEOUT_MS / 60000} minutes ===\n`);
+    const info = runningAgents.get(directive.id);
+    if (info) info.killReason = `timeout: exceeded ${AGENT_TIMEOUT_MS / 60000}min`;
     child.kill("SIGTERM");
 
     // SIGKILL fallback if SIGTERM doesn't work
@@ -170,6 +189,7 @@ function spawnAgent(directive, type) {
     pid: child.pid,
     timeout: timeoutHandle,
     logFile,
+    killReason: null, // Set by timeout/watchdog before kill, read by close handler
   };
 
   runningAgents.set(directive.id, agentInfo);
@@ -186,11 +206,14 @@ function spawnAgent(directive, type) {
     // On non-zero exit (crash/timeout), reset directive to recoverable state
     if (code !== 0) {
       const failStatus = type === "planning" ? "pending" : "stale";
+      // Determine failure reason from killReason (set by timeout/watchdog) or exit code
+      const failureReason = agentInfo.killReason
+        || (signal === "SIGTERM" ? "killed: SIGTERM" : `crash: exit code ${code}`);
       const errorNote = signal === "SIGTERM" ? "Agent timed out" : `Agent crashed (exit ${code})`;
-      log(`Resetting ${directive.id} to ${failStatus}: ${errorNote}`);
+      log(`Resetting ${directive.id} to ${failStatus}: ${errorNote} (reason: ${failureReason})`);
 
-      // PATCH the directive back to recoverable state
-      const payload = JSON.stringify({ status: failStatus });
+      // PATCH the directive back to recoverable state with failure reason
+      const payload = JSON.stringify({ status: failStatus, failureReason });
       const req = require("http").request(
         `${BRIDGE}/directives/${directive.id}`,
         { method: "PATCH", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
@@ -218,8 +241,9 @@ function spawnAgent(directive, type) {
 
             if (current.status === "in_progress" || current.status === "planning") {
               const resetTo = current.status === "planning" ? "pending" : "stale";
+              const failureReason = "crash: agent exited without completing (exit code 0)";
               log(`Post-exit check: ${directive.id} still "${current.status}" after clean exit → resetting to "${resetTo}"`);
-              const payload = JSON.stringify({ status: resetTo });
+              const payload = JSON.stringify({ status: resetTo, failureReason });
               const req = http.request(
                 `${BRIDGE}/directives/${directive.id}`,
                 { method: "PATCH", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
@@ -466,7 +490,9 @@ function startWatchdog() {
               if (!d || !d.lastActivity) return;
               const idleMs = Date.now() - d.lastActivity;
               if (idleMs > STALL_THRESHOLD_MS) {
-                log(`Watchdog: ${directiveId} STALLED — pid ${info.pid} alive but no activity for ${Math.round(idleMs / 60000)}min, killing`);
+                const stallMin = Math.round(idleMs / 60000);
+                log(`Watchdog: ${directiveId} STALLED — pid ${info.pid} alive but no activity for ${stallMin}min, killing`);
+                info.killReason = `watchdog: stalled for ${stallMin}min`;
                 info.process.kill("SIGTERM");
                 setTimeout(() => {
                   try { if (!info.process.killed) info.process.kill("SIGKILL"); } catch (e) { /* gone */ }
@@ -481,9 +507,10 @@ function startWatchdog() {
           clearTimeout(info.timeout);
           runningAgents.delete(directiveId);
 
-          // Reset directive to recoverable state
+          // Reset directive to recoverable state with failure reason
           const resetStatus = info.type === "planning" ? "pending" : "stale";
-          const payload = JSON.stringify({ status: resetStatus });
+          const failureReason = info.killReason || "crash: process disappeared";
+          const payload = JSON.stringify({ status: resetStatus, failureReason });
           const req = require("http").request(
             `${BRIDGE}/directives/${directiveId}`,
             { method: "PATCH", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
