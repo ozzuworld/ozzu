@@ -111,8 +111,14 @@ echo ""
 echo "Installing via AltServer on dev-01..."
 echo "(iPhone must be connected via USB or previously paired)"
 echo ""
-ssh "$DEV01" "ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL \$HOME/bin/AltServer -u $IPHONE_UDID -a $APPLE_ID -p '$APPLE_PASSWORD' $REMOTE_IPA_DIR/ozzu.ipa" 2>&1
+INSTALL_OUTPUT=$(ssh "$DEV01" "ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL \$HOME/bin/AltServer -u $IPHONE_UDID -a $APPLE_ID -p '$APPLE_PASSWORD' $REMOTE_IPA_DIR/ozzu.ipa" 2>&1)
 INSTALL_EXIT=$?
+echo "$INSTALL_OUTPUT"
+
+# AltServer may exit 0 even on failure — check output for errors
+if echo "$INSTALL_OUTPUT" | grep -qi "could not \(install\|find\)\|error:"; then
+  INSTALL_EXIT=1
+fi
 
 # ── Step 6: Cleanup ──
 [ -d "$IPA_DIR" ] && rm -rf "$IPA_DIR"
@@ -122,7 +128,7 @@ echo ""
 if [ $INSTALL_EXIT -eq 0 ]; then
   echo "iOS app installed successfully! Open ozzu on iPhone to verify."
 else
-  echo "AltServer install exited with code $INSTALL_EXIT"
+  echo "AltServer install failed."
   echo "Check: is the iPhone connected via USB to dev-01?"
-  exit $INSTALL_EXIT
+  exit 1
 fi
