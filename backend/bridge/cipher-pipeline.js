@@ -503,7 +503,7 @@ class CipherPipeline extends EventEmitter {
           model: process.env.CIPHER_MODEL || "opus",
           cwd: "/home/gcp/ozzu",
           persistSession: false,
-          permissionMode: "full",
+          permissionMode: "bypassPermissions",
           stderr: (data) => {
             if (data.includes("error") || data.includes("Error")) {
               console.error("[cipher-sdk-stderr]", data.trim());
