@@ -5148,8 +5148,30 @@ async function startCipherPipeline() {
     }
   });
 
+  cipherPipeline.on("turnComplete", () => {
+    broadcastToAll({ type: "turnComplete" });
+  });
+
   cipherPipeline.on("listeningReady", () => {
     broadcastToAll({ type: "listeningReady" });
+  });
+
+  cipherPipeline.on("latency", ({ total, thinking, tts }) => {
+    log.cipher.info(`Voice latency: ${total}ms total (thinking: ${thinking}ms, TTS: ${tts}ms)`);
+  });
+
+  cipherPipeline.on("sessionExhausted", (turnCount) => {
+    log.cipher.info(`Session exhausted after ${turnCount} turns — rotating pipeline`);
+    // Graceful restart: stop current pipeline, then start fresh
+    const oldPipeline = cipherPipeline;
+    cipherPipeline = null;
+    oldPipeline.stop().then(() => {
+      log.cipher.info("Old pipeline stopped, starting fresh session");
+      startCipherPipeline();
+    }).catch(err => {
+      log.cipher.error("Pipeline stop error during rotation:", err.message);
+      startCipherPipeline();
+    });
   });
 
   cipherPipeline.on("error", (err) => {
@@ -5202,8 +5224,27 @@ const server = http.createServer(async (req, res) => {
 
 const wss = new WebSocket.Server({ server, path: "/ws" });
 
+// Ping/pong keepalive — detect dead connections over VPN
+const WS_PING_INTERVAL_MS = 30000; // 30s ping
+const WS_PONG_TIMEOUT_MS = 10000;  // 10s to respond
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws._pongPending) {
+      // Missed previous pong — connection is dead
+      const info = devices.get(ws);
+      log.ws.warn(`Ping timeout, terminating: ${info?.deviceId || "unregistered"}`);
+      ws.terminate();
+      continue;
+    }
+    ws._pongPending = true;
+    ws.ping();
+  }
+}, WS_PING_INTERVAL_MS);
+
 wss.on("connection", (ws) => {
   log.ws.info("New device connection");
+  ws._pongPending = false;
+  ws.on("pong", () => { ws._pongPending = false; });
 
   ws.on("message", (raw) => {
     try {

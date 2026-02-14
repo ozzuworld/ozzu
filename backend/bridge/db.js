@@ -127,6 +127,8 @@ async function addConversationTurn(conversationId, role, content, turnIndex, too
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,
     [conversationId, role, content, turnIndex, toolCalls ? JSON.stringify(toolCalls) : null]
   );
+  // Increment turn_count on the conversation so it stays accurate even if session drops
+  query(`UPDATE conversations SET turn_count = turn_count + 1 WHERE id = $1`, [conversationId]).catch(() => {});
   return res.rows[0]?.id;
 }
 
