@@ -9,6 +9,8 @@ const BRIDGE = "http://localhost:3333";
 const WORKDIR = "/home/gcp/ozzu";
 const LOG_DIR = "/tmp/ozzu-bridge";
 const SIGKILL_GRACE_MS = 5000; // 5s grace after SIGTERM before SIGKILL
+const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5MB — rotate log files exceeding this
+const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — delete older log files
 
 // ── Runtime-configurable settings (mutable via GET/PATCH /config) ──
 const _config = {
@@ -34,7 +36,26 @@ let _broadcastToAll = null;
 function setBroadcast(fn) { _broadcastToAll = fn; }
 
 function ensureLogDir() {
-  if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+  if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    return; // Fresh directory, nothing to clean
+  }
+
+  // Clean up log files older than 7 days
+  try {
+    const now = Date.now();
+    for (const file of fs.readdirSync(LOG_DIR)) {
+      if (!file.startsWith("agent-")) continue;
+      const filePath = path.join(LOG_DIR, file);
+      const stat = fs.statSync(filePath);
+      if (now - stat.mtimeMs > LOG_MAX_AGE_MS) {
+        fs.unlinkSync(filePath);
+        log(`Cleaned up old log: ${file}`);
+      }
+    }
+  } catch (err) {
+    log(`Log cleanup error: ${err.message}`);
+  }
 }
 
 function log(msg) {
@@ -158,7 +179,7 @@ Examples of when to post: starting research, reading key files, beginning implem
 
 // Spawn a claude CLI subprocess for a directive
 function spawnAgent(directive, type) {
-  // Guard: don't double-spawn
+  // Guard: don't double-spawn (optimistic lock — placeholder set immediately to prevent races)
   if (runningAgents.has(directive.id)) {
     log(`SKIP: Agent already running for ${directive.id} (${runningAgents.get(directive.id).type})`);
     return null;
@@ -170,8 +191,27 @@ function spawnAgent(directive, type) {
     return null;
   }
 
+  // Optimistic lock: claim the slot immediately to prevent double-spawn between
+  // the guard check above and the actual runningAgents.set() below
+  runningAgents.set(directive.id, { type, startedAt: new Date().toISOString(), pid: null, placeholder: true });
+
   ensureLogDir();
   const logFile = path.join(LOG_DIR, `agent-${directive.id}.log`);
+
+  // Rotate log if it exceeds MAX_LOG_SIZE
+  try {
+    if (fs.existsSync(logFile)) {
+      const stat = fs.statSync(logFile);
+      if (stat.size > MAX_LOG_SIZE) {
+        const oldFile = logFile + ".old";
+        fs.renameSync(logFile, oldFile);
+        log(`Rotated log for ${directive.id} (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
+      }
+    }
+  } catch (err) {
+    log(`Log rotation error for ${directive.id}: ${err.message}`);
+  }
+
   const logStream = fs.createWriteStream(logFile, { flags: "a" });
 
   const prompt = type === "planning"
@@ -193,10 +233,24 @@ function spawnAgent(directive, type) {
   const env = { ...process.env };
   delete env.CLAUDECODE;
 
-  const child = spawn("claude", args, {
-    cwd: WORKDIR,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
+  let child;
+  try {
+    child = spawn("claude", args, {
+      cwd: WORKDIR,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    log(`SPAWN FAILED for ${directive.id}: ${err.message}`);
+    runningAgents.delete(directive.id); // Release optimistic lock
+    logStream.end();
+    return null;
+  }
+
+  // Handle spawn errors (e.g., ENOENT, EACCES)
+  child.on("error", (err) => {
+    log(`SPAWN ERROR for ${directive.id}: ${err.message}`);
+    logStream.write(`\n=== Spawn error: ${err.message} ===\n`);
   });
 
   // Pipe output to log file
@@ -354,6 +408,17 @@ function drainQueue() {
         for (const d of directives) {
           if (runningAgents.size >= _config.MAX_CONCURRENT_AGENTS) break;
           if (runningAgents.has(d.id)) continue;
+
+          // Enforce dependency chain — skip directives whose deps aren't completed
+          if (Array.isArray(d.dependsOn) && d.dependsOn.length > 0) {
+            const unmetDeps = d.dependsOn.filter(depId => {
+              const dep = directives.find(dd => dd.id === depId);
+              return !dep || dep.status !== "completed";
+            });
+            if (unmetDeps.length > 0) {
+              continue; // Skip — dependencies not yet satisfied
+            }
+          }
 
           if (d.status === "planning") {
             log(`Drain: picking up deferred planning directive ${d.id} "${d.title}"`);
