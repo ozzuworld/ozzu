@@ -25,53 +25,60 @@ function log(msg) {
 
 // Build the planning prompt for a directive
 function buildPlanningPrompt(directive) {
-  // Quick directives get full implementation instructions since they skip planning
-  const quickInstructions = directive.type === "quick" ? `
-QUICK DIRECTIVE — IMPLEMENT NOW:
-This is a quick directive. Skip planning and implement immediately. When done:
-1. Commit your changes: git add <files> && git commit -m "descriptive message"
-2. Push to main: git push origin main
-3. If bridge code changed: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
-4. Post status updates during work: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<what you did>"}'
-5. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
-6. IMPORTANT: You MUST commit and push before marking complete. Uncommitted changes are lost when you exit.
+  // Quick/explore directives get full implementation instructions since they skip the planning→approval flow
+  const isImmediate = directive.type === "quick" || directive.type === "explore";
+  const immediateInstructions = isImmediate ? `
+${directive.type === "quick" ? "QUICK" : "EXPLORE"} DIRECTIVE — ${directive.type === "quick" ? "IMPLEMENT NOW" : "RESEARCH AND REPORT"}:
+${directive.type === "quick"
+  ? "Skip planning. Implement the changes immediately."
+  : "Research the codebase and report findings. No code changes needed unless the description says otherwise."}
+
+COMPLETION CHECKLIST:
+1. ${directive.type === "quick" ? "Implement the changes" : "Research and gather findings"}
+2. ${directive.type === "quick" ? "Verify: node -c <file> for JS, test endpoints if applicable" : "Write findings as detailed markdown"}
+3. ${directive.type === "quick" ? `Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"` : "Skip commit (no code changes)"}
+4. ${directive.type === "quick" ? "Push: git push origin main" : "Skip push"}
+5. ${directive.type === "quick" ? "If bridge code changed: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge" : ""}
+6. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
+
+CRITICAL RULES:
+- You MUST commit and push before marking complete. Uncommitted changes are lost.
+- Do NOT restart the bridge if you're running inside it — your process will die. Only restart if your changes are committed and pushed.
+- If another agent may be editing the same files, check git status first. If files have uncommitted changes, use git stash before editing and git stash pop after.
+- Always git pull --rebase origin main before pushing if the push fails.
 ` : "";
 
   return `You are Cipher, the autonomous dev agent for the ozzu project.
 Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md FIRST — it has all project context.
 
 SYSTEM ARCHITECTURE:
-- GCP VM (10.128.0.8) runs: Home Assistant (:8123), Bridge server (:3333), PostgreSQL (:5432), Redis (:6379), Nginx (:80/443), OpenVPN (:1194)
-- Home LAN (172.168.0.0/24) via VPN: tablets (.53, .57), TV (.56), dev machines
-- dev-01 is a Linux server at 172.168.0.59, reachable from GCP VM via VPN
-- Bridge runs in Docker container "bridge" — restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
-- Frontend is Expo React Native, builds via GitHub Actions on push to main, deploys with ./scripts/deploy.sh
-- Bridge API at ${BRIDGE} has endpoints: /directives, /status, /notify, /approvals, /health
+- GCP VM (10.128.0.8) runs all services. Bridge at :3333, HA at :8123, Postgres :5432, Redis :6379
+- Home LAN (172.168.0.0/24) via VPN tunnel. Devices: tablets (.53, .57), TV (.56), dev-01 (.59)
+- Bridge runs in Docker — restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
+- Frontend: Expo React Native. CI builds on push to main. Deploy: ./scripts/deploy.sh
+- Bridge API: /directives, /status, /notify, /approvals, /health, /dashboard
 
 A new ${directive.type} directive:
 - Title: ${directive.title}
 - Description: ${directive.description}
 - Directive ID: ${directive.id}
-${quickInstructions}
-${directive.type !== "quick" ? `YOUR TASK:
+${immediateInstructions}
+${!isImmediate ? `YOUR TASK:
 1. Research the codebase to understand what's needed
 2. Create a detailed implementation plan
 3. Submit the plan via: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"planned","plan":"<your plan>"}'
 
-For 'feature' type directives: create a thorough plan and submit it. It will need PIN approval before you can implement.
-For 'explore' type directives: research and report findings, then set status to 'completed' with findings in the plan field.` : ""}
+For 'feature' type: create a thorough plan and submit it. Needs PIN approval before implementation.` : ""}
 
-TROUBLESHOOTING PATTERNS:
-- If a file doesn't exist where expected, search for it: use Glob or Grep
-- If a command fails, read the error carefully and try a different approach
-- If a build fails, check the build output for the actual error (don't guess)
-- If SSH/network fails, check VPN connectivity first: ping 10.8.0.2
-- If git push fails, check for conflicts: git pull --rebase origin main
+TROUBLESHOOTING:
+- File not found? Search with Glob/Grep before assuming it doesn't exist
+- Command failed? Read the error, try a different approach
+- git push failed? Run: git pull --rebase origin main && git push origin main
+- Build failed? Read the actual error output, don't guess
 
 AUTONOMY RULES:
-- You have FULL autonomy. Read/write/edit files, run commands, git operations — just do it.
-- DO NOT give up. If one approach fails, try another. You have access to the entire system.
-- DO NOT say "King Kazuma should do this." Your job is to handle it.
+- You have FULL autonomy. Just do it — read, write, edit, git, docker, SSH.
+- DO NOT give up. Try alternatives before escalating.
 - Only escalate via POST ${BRIDGE}/notify for: infrastructure changes, missing credentials, irreversible destructive operations.`;
 }
 
