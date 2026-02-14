@@ -478,7 +478,7 @@ async function initStorage() {
   for (const d of _directives) {
     if (d.status === "stale") {
       const rc = d.retryCount || 0;
-      if (rc < 1) {
+      if (rc < 2) {
         const oldStatus = d.status;
         d.status = "approved";
         d.retryCount = rc + 1;
@@ -1895,7 +1895,7 @@ async function handleRequest(req, res) {
         <td style="font-size:12px;color:#9ca3af;" data-ts="${d.createdAt}">${escapeHtml(d.createdAt)}</td>
         <td style="font-size:12px;color:#9ca3af;" data-ts="${d.updatedAt}">${escapeHtml(d.updatedAt)}</td>
         <td style="font-size:12px;color:#9ca3af;">${formatDuration(d.duration)}</td>
-        <td>${!["completed","failed","cancelled"].includes(d.status) ? `<button onclick="cancelDirective('${d.id}')" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Cancel directive">&times;</button>` : ""}${["failed","stale","cancelled"].includes(d.status) ? ` <button onclick="retryDirective('${d.id}')" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Retry directive">&#8635;</button>` : ""}</td>
+        <td>${!["completed","failed","cancelled"].includes(d.status) ? `<button onclick="cancelDirective('${escapeHtml(d.id)}')" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Cancel directive">&times;</button>` : ""}${["failed","stale","cancelled"].includes(d.status) ? ` <button onclick="retryDirective('${escapeHtml(d.id)}')" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Retry directive">&#8635;</button>` : ""}</td>
       </tr>
       <tr class="activity-log-row" id="log-${escapeHtml(d.id)}" style="display:none;" data-parent-status="${escapeHtml(d.status)}" data-parent-title="${escapeHtml((d.title || d.id).toLowerCase())}">
         <td colspan="10" style="padding:8px 16px;background:#0f172a;border-bottom:2px solid #334155;">
@@ -2676,6 +2676,41 @@ function submitDirective(e) {
     return;
   }
 
+  // GET /metrics — voice latency, audio stats, runtime metrics for monitoring
+  if (req.method === "GET" && pathname === "/metrics") {
+    const connectedDevices = [...devices.values()];
+    const activeMicId = activeMic ? devices.get(activeMic)?.deviceId : null;
+    sendJSON(res, 200, {
+      uptime: process.uptime(),
+      persona: currentPersona,
+      cipherMode,
+      voice: {
+        latency: _latencyStats,
+        recentSamples: _latencyRing.slice(-10).map(m => ({ total: m.total, thinking: m.thinking, tts: m.tts })),
+      },
+      audio: {
+        totalChunksProcessed: audioMsgCount,
+        activeMic: activeMicId,
+        devices: getAudioDiagnostics(),
+      },
+      connections: {
+        websocket: connectedDevices.length,
+        mics: connectedDevices.filter(d => d.role === "mic").length,
+        speakers: connectedDevices.filter(d => d.role === "speaker").length,
+      },
+      conversation: {
+        id: currentConversationId,
+        turns: conversationTranscript.length,
+        turnIndex,
+      },
+      memory: {
+        heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      },
+    });
+    return;
+  }
+
   sendJSON(res, 404, { error: "Not found" });
 }
 
@@ -3324,16 +3359,26 @@ function syncDirectiveFromApproval(approvalId, approved) {
 // ── HA REST API helper ──
 
 async function haFetch(urlPath, options = {}) {
-  const res = await fetch(`${HA_URL}${urlPath}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${HA_TOKEN}`,
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
-  if (!res.ok) throw new Error(`HA API ${res.status}: ${await res.text()}`);
-  return res.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+  try {
+    const res = await fetch(`${HA_URL}${urlPath}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${HA_TOKEN}`,
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    });
+    if (!res.ok) throw new Error(`HA API ${res.status}: ${await res.text()}`);
+    return res.json();
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error(`HA API timeout (10s): ${urlPath}`);
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function buildMemoryContext(persona) {
@@ -3744,7 +3789,7 @@ async function handleToolCall(name, args) {
           });
           const successes = (output.match(/SUCCESS/g) || []).length;
           log.bridge.info(`Done, ${successes} device(s) updated`);
-          if (deployId) db.completeDeployment(deployId, "completed", `${successes} device(s)`).catch(() => {});
+          if (deployId) db.completeDeployment(deployId, "completed", `${successes} device(s)`).catch(err => log.pg.warn("deploy completion:", err.message));
           return { success: true, message: `Deployed to ${successes} device(s). ${output.split("\n").slice(-5).join(". ")}` };
         } catch (err) {
           log.bridge.error("Failed:", err.message);
@@ -4153,6 +4198,27 @@ const devices = new Map(); // ws -> { role, deviceId }
 let audioMsgCount = 0;
 const pendingPinRequests = new Map(); // pinId -> { approvalId, approved, resolve }
 
+// Voice latency metrics: ring buffer of recent measurements
+const LATENCY_RING_MAX = 100;
+const _latencyRing = []; // { ts, total, thinking, tts }
+let _latencyStats = { count: 0, avgTotal: 0, avgThinking: 0, avgTts: 0, p95Total: 0 };
+function recordLatency(metrics) {
+  _latencyRing.push({ ts: Date.now(), ...metrics });
+  if (_latencyRing.length > LATENCY_RING_MAX) _latencyRing.shift();
+  // Recompute stats
+  const n = _latencyRing.length;
+  const totals = _latencyRing.map(m => m.total).sort((a, b) => a - b);
+  _latencyStats = {
+    count: n,
+    avgTotal: Math.round(totals.reduce((a, b) => a + b, 0) / n),
+    avgThinking: Math.round(_latencyRing.reduce((a, m) => a + m.thinking, 0) / n),
+    avgTts: Math.round(_latencyRing.reduce((a, m) => a + m.tts, 0) / n),
+    p95Total: totals[Math.floor(n * 0.95)] || 0,
+    minTotal: totals[0] || 0,
+    maxTotal: totals[n - 1] || 0,
+  };
+}
+
 // Amplitude-based mic switching: only forward audio from the mic with detected speech.
 // When multiple mics send simultaneously, interleaved audio confuses Gemini's VAD.
 let activeMic = null; // ws of the currently forwarding mic
@@ -4543,7 +4609,7 @@ function handleGeminiMessage(msg) {
     conversationTranscript.push({ role: "user", text, timestamp: Date.now() });
     // Log turn to PG
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, "user", text, turnIndex++).catch(() => {});
+      db.addConversationTurn(currentConversationId, "user", text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
     }
 
     // Check for wake word — strip spaces so fragmented "Ju" + "ne" still matches
@@ -4590,7 +4656,7 @@ function handleGeminiMessage(msg) {
     conversationTranscript.push({ role: "model", text: sc.outputTranscription.text, timestamp: Date.now() });
     // Log turn to PG
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, currentPersona, sc.outputTranscription.text, turnIndex++).catch(() => {});
+      db.addConversationTurn(currentConversationId, currentPersona, sc.outputTranscription.text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
     }
     if (isEngaged()) {
       broadcastToAll({ type: "transcript", text: sc.outputTranscription.text });
@@ -4627,7 +4693,7 @@ async function handleGeminiToolCalls(functionCalls) {
       log.gemini.info(`Tool ${name} → ${result.success ? "ok" : "fail"}: ${result.message?.substring(0, 80)}`);
       // Log tool call to PG conversation
       if (currentConversationId) {
-        db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }).catch(() => {});
+        db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }).catch(err => log.pg.warn("turn log:", err.message));
       }
       return {
         id: fc.id,
@@ -4995,6 +5061,13 @@ async function startCipherPipeline() {
     "- Recent updates: get_dev_status or query_history for the directive\n" +
     "- Running agents: run_command({command: 'ls -la /tmp/ozzu-bridge/agent-*.log'})\n" +
     "\n" +
+    "UNDERSTANDING FAILURES:\n" +
+    "- Failed/stale directives have a failureReason field explaining what went wrong.\n" +
+    "- Common reasons: 'timeout: exceeded 60min', 'crash: exit code 1', 'watchdog: stalled for 15min', " +
+    "'crash: agent exited without completing'.\n" +
+    "- Timeouts/stalls are often transient — retry is safe. Code errors need investigation (read the agent log).\n" +
+    "- Always check the agent log BEFORE retrying a failed directive to understand what went wrong.\n" +
+    "\n" +
     "TRIGGERING PINs AND APPROVALS:\n" +
     "- You CAN trigger PIN requests! If King Kazuma says 'send me the PIN' or 'show the approval', " +
     "call approve_action with the pending approval's ID, approved=true, and needs_user_pin=true. " +
@@ -5128,7 +5201,7 @@ async function startCipherPipeline() {
     // Log to conversation transcript
     conversationTranscript.push({ role: "user", text });
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, "user", text, turnIndex++).catch(() => {});
+      db.addConversationTurn(currentConversationId, "user", text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
     }
   });
 
@@ -5137,14 +5210,14 @@ async function startCipherPipeline() {
     broadcastToAll({ type: "transcript", text });
     conversationTranscript.push({ role: "cipher", text });
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, "cipher", text, turnIndex++).catch(() => {});
+      db.addConversationTurn(currentConversationId, "cipher", text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
     }
   });
 
   cipherPipeline.on("toolCall", ({ name, args, result }) => {
     extendEngagement();
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }).catch(() => {});
+      db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }).catch(err => log.pg.warn("turn log:", err.message));
     }
   });
 
@@ -5158,6 +5231,7 @@ async function startCipherPipeline() {
 
   cipherPipeline.on("latency", ({ total, thinking, tts }) => {
     log.cipher.info(`Voice latency: ${total}ms total (thinking: ${thinking}ms, TTS: ${tts}ms)`);
+    recordLatency({ total, thinking, tts });
   });
 
   cipherPipeline.on("sessionExhausted", (turnCount) => {
@@ -5434,14 +5508,24 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 
-// Graceful shutdown: kill any running agent subprocesses
-process.on("SIGTERM", () => {
-  log.bridge.info("SIGTERM received, killing agent subprocesses...");
+// Graceful shutdown: save conversation, kill agents, exit
+async function gracefulShutdown(signal) {
+  log.bridge.info(`${signal} received, shutting down...`);
+  // End the current conversation in PG so it doesn't stay orphaned
+  if (currentConversationId) {
+    try {
+      await db.endConversation(currentConversationId, "Session ended (server shutdown)", conversationTranscript.length);
+      log.pg.info(`Conversation ${currentConversationId} closed on shutdown`);
+    } catch (err) {
+      log.pg.warn("shutdown conversation close:", err.message);
+    }
+  }
+  // Stop Cipher pipeline if running
+  if (cipherPipeline && typeof cipherPipeline === "object") {
+    try { await cipherPipeline.stop(); } catch {}
+  }
   killAllAgents();
   process.exit(0);
-});
-process.on("SIGINT", () => {
-  log.bridge.info("SIGINT received, killing agent subprocesses...");
-  killAllAgents();
-  process.exit(0);
-});
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

@@ -55,6 +55,7 @@ services:
       - /root/.local/bin/claude:/usr/local/bin/claude:ro
       - /root/.config/gh:/root/.config/gh:ro
       - /root/.gitconfig:/root/.gitconfig:ro
+      - /root/.ssh:/root/.ssh:ro
       - /usr/bin/gh:/usr/local/bin/gh:ro
     environment:
       - BRIDGE_PIN=${BRIDGE_PIN:-1234}
@@ -65,8 +66,9 @@ services:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - CARTESIA_API_KEY=${CARTESIA_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - CIPHER_MODEL=${CIPHER_MODEL:-claude-sonnet-4-5-20250929}
+      - CIPHER_MODEL=${CIPHER_MODEL:-opus}
       - CIPHER_VOICE_ID=${CIPHER_VOICE_ID:-c99d36f3-5ffd-4253-803a-535c1bc9c306}
+      - BRIDGE_API_KEY=${BRIDGE_API_KEY:-}
     command: sh -c "[ -d node_modules/ws ] || npm install --omit=dev; [ -d node_modules/ioredis ] || npm install --omit=dev; [ -d node_modules/pg ] || npm install --omit=dev; node server.js"
     depends_on:
       - redis

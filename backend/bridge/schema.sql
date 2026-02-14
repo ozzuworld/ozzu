@@ -32,6 +32,7 @@ CREATE TABLE conversations (
   metadata      JSONB DEFAULT '{}'
 );
 CREATE INDEX idx_conversations_persona ON conversations(persona, started_at DESC);
+CREATE INDEX idx_conversations_persona_summary ON conversations(persona, started_at DESC) WHERE summary IS NOT NULL;
 
 -- Full conversation transcript (turns)
 CREATE TABLE conversation_turns (
@@ -106,6 +107,7 @@ CREATE TABLE entity_snapshots (
   captured_at     TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_entity_snapshots_entity ON entity_snapshots(entity_id, captured_at DESC);
+CREATE INDEX idx_entity_snapshots_captured ON entity_snapshots(captured_at DESC);
 
 -- Status log (replaces Redis/JSON status entries)
 CREATE TABLE status_log (

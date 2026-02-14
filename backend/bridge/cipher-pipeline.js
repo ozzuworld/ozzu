@@ -416,10 +416,22 @@ class CipherPipeline extends EventEmitter {
       try { this._query.close(); } catch {}
       this._query = null;
     }
+    // Clean up all timers to prevent orphaned callbacks after restart
+    if (this._micOpenTimer) {
+      clearTimeout(this._micOpenTimer);
+      this._micOpenTimer = null;
+    }
+    if (this._audioFlushTimer) {
+      clearTimeout(this._audioFlushTimer);
+      this._audioFlushTimer = null;
+    }
+    this._audioBuffer = [];
+    this._audioBufferBytes = 0;
     if (this._messageResolve) {
       this._messageResolve(null);
       this._messageResolve = null;
     }
+    this._messageQueue = [];
 
     console.log("[cipher] Pipeline stopped");
   }
@@ -744,11 +756,18 @@ class CipherPipeline extends EventEmitter {
 
   _stripMarkdownForTTS(text) {
     return text
-      .replace(/\*+/g, "")           // bold/italic markers → "star star"
-      .replace(/`+/g, "")            // code markers
+      .replace(/```[\s\S]*?```/g, "") // fenced code blocks
+      .replace(/\*+/g, "")           // bold/italic markers
+      .replace(/`+/g, "")            // inline code markers
       .replace(/^#+\s*/gm, "")       // header markers
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [links](url) → just text
-      .replace(/\s{2,}/g, " ");      // collapse extra whitespace
+      .replace(/^([-_*])\s*\1\s*\1[\s\-_*]*$/gm, "") // horizontal rules (---, ***, ___)
+      .replace(/^>\s+/gm, "")        // blockquote markers
+      .replace(/\|/g, ",")           // table pipes → commas (reads more naturally)
+      .replace(/^[-:]+$/gm, "")      // table separator rows (|---|---|)
+      .replace(/\\([*_`\\])/g, "$1") // escaped chars → literal
+      .replace(/\s{2,}/g, " ")       // collapse extra whitespace
+      .trim();
   }
 
   _sendToTTS(text) {
