@@ -557,6 +557,16 @@ async function initStorage() {
     // Prune old snapshots daily
     setInterval(() => db.pruneEntitySnapshots(7).catch(err =>
       log.pg.error("prune error:", err.message)), 24 * 60 * 60 * 1000);
+    // Close stale conversations every hour (open >2h with no recent turns)
+    setInterval(async () => {
+      try {
+        const res = await db.query(`
+          UPDATE conversations SET ended_at = NOW(), summary = 'Session ended (auto-closed)'
+          WHERE ended_at IS NULL AND started_at < NOW() - INTERVAL '2 hours'
+          RETURNING id`);
+        if (res.rowCount > 0) log.pg.info(`Auto-closed ${res.rowCount} stale conversation(s)`);
+      } catch (err) { log.pg.error("conversation cleanup:", err.message); }
+    }, 60 * 60 * 1000);
   }
 }
 
@@ -613,15 +623,26 @@ async function migrateRedisToPostgres() {
   }
 }
 
+// Cache last known state per entity to avoid storing duplicate snapshots
+const _lastEntityState = new Map();
+
 async function captureEntitySnapshots() {
   if (!db.isConnected()) return;
   try {
     const states = await haFetch("/api/states");
     const entityIds = new Set(ENTITY_CONFIG.map((e) => e.entityId));
+    let stored = 0;
     for (const state of states) {
       if (!entityIds.has(state.entity_id)) continue;
-      await db.addEntitySnapshot(state.entity_id, state.state, state.attributes || null);
+      // Delta check — only store if state or key attributes changed
+      const attrs = state.attributes || null;
+      const fingerprint = state.state + "|" + JSON.stringify(attrs);
+      if (_lastEntityState.get(state.entity_id) === fingerprint) continue;
+      _lastEntityState.set(state.entity_id, fingerprint);
+      await db.addEntitySnapshot(state.entity_id, state.state, attrs);
+      stored++;
     }
+    if (stored > 0) log.pg.debug(`Entity snapshots: ${stored} changed out of ${entityIds.size} entities`);
   } catch (err) {
     log.pg.error("Entity snapshot capture failed:", err.message);
   }
@@ -2598,6 +2619,24 @@ function submitDirective(e) {
       persona: currentPersona,
       cipherMode,
     });
+    return;
+  }
+
+  // GET /conversations/recent — last 10 conversation summaries across all personas
+  if (req.method === "GET" && pathname === "/conversations/recent") {
+    const limit = parseInt(url.searchParams.get("limit") || "10", 10);
+    const { rows, total } = await db.getRecentConversations(Math.min(limit, 50));
+    const conversations = rows.map(r => ({
+      id: r.id,
+      persona: r.persona,
+      summary: r.summary,
+      turn_count: r.turn_count,
+      topics: r.topics || [],
+      started_at: r.started_at,
+      ended_at: r.ended_at,
+      duration_minutes: r.duration_minutes != null ? Math.round(r.duration_minutes * 10) / 10 : null,
+    }));
+    sendJSON(res, 200, { total, conversations });
     return;
   }
 

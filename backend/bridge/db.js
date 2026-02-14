@@ -141,6 +141,21 @@ async function getRecentSummaries(persona, limit = 5) {
   return res.rows;
 }
 
+async function getRecentConversations(limit = 10) {
+  if (!_pgConnected) return { rows: [], total: 0 };
+  const [dataRes, countRes] = await Promise.all([
+    query(
+      `SELECT id, persona, summary, turn_count, topics, started_at, ended_at,
+              EXTRACT(EPOCH FROM (ended_at - started_at)) / 60 AS duration_minutes
+       FROM conversations WHERE summary IS NOT NULL
+       ORDER BY started_at DESC LIMIT $1`,
+      [limit]
+    ),
+    query(`SELECT COUNT(*) AS total FROM conversations WHERE summary IS NOT NULL`),
+  ]);
+  return { rows: dataRes.rows, total: parseInt(countRes.rows[0].total, 10) };
+}
+
 // ── Directives ──
 
 async function saveDirective(directive) {
@@ -481,6 +496,7 @@ module.exports = {
   endConversation,
   addConversationTurn,
   getRecentSummaries,
+  getRecentConversations,
   // Directives
   saveDirective,
   addDirectiveHistory,
