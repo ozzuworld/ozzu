@@ -1246,11 +1246,16 @@ async function handleRequest(req, res) {
       return;
     }
     const limit = parseInt(url.searchParams.get("limit")) || 200;
-    const content = fs.readFileSync(logPath, "utf-8");
-    const lines = content.split("\n");
-    const output = lines.slice(-limit).join("\n");
-    res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
-    res.end(output);
+    try {
+      const content = await fs.promises.readFile(logPath, "utf-8");
+      const lines = content.split("\n");
+      const output = lines.slice(-limit).join("\n");
+      res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
+      res.end(output);
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "text/plain", ...CORS_HEADERS });
+      res.end(`Error reading log: ${err.message}`);
+    }
     return;
   }
 
@@ -1739,9 +1744,9 @@ async function handleRequest(req, res) {
       return;
     }
 
-    // Build launch asset info
+    // Build launch asset info (async to avoid blocking event loop)
     const bundlePath = path.join(updateDir, platformMeta.bundle);
-    const bundleData = fs.readFileSync(bundlePath);
+    const bundleData = await fs.promises.readFile(bundlePath);
     const bundleHash = crypto.createHash("sha256").update(bundleData).digest("base64url");
     const bundleKey = crypto.createHash("md5").update(bundleData).digest("hex");
 
@@ -1755,10 +1760,10 @@ async function handleRequest(req, res) {
       url: `${baseUrl}&asset=${encodeURIComponent(platformMeta.bundle)}`,
     };
 
-    // Build assets list
-    const assets = (platformMeta.assets || []).map((a) => {
+    // Build assets list (async — parallel reads)
+    const assets = await Promise.all((platformMeta.assets || []).map(async (a) => {
       const assetPath = path.join(updateDir, a.path);
-      const assetData = fs.readFileSync(assetPath);
+      const assetData = await fs.promises.readFile(assetPath);
       return {
         hash: crypto.createHash("sha256").update(assetData).digest("base64url"),
         key: crypto.createHash("md5").update(assetData).digest("hex"),
@@ -1766,13 +1771,15 @@ async function handleRequest(req, res) {
         contentType: a.ext === "png" ? "image/png" : a.ext === "jpg" ? "image/jpeg" : "application/octet-stream",
         url: `${baseUrl}&asset=${encodeURIComponent(a.path)}`,
       };
-    });
+    }));
 
     // Load expoConfig if available
     const expoConfigPath = path.join(updateDir, "expoConfig.json");
-    const expoClient = fs.existsSync(expoConfigPath) ? JSON.parse(fs.readFileSync(expoConfigPath, "utf8")) : {};
+    let expoClient = {};
+    try { expoClient = JSON.parse(await fs.promises.readFile(expoConfigPath, "utf8")); } catch {}
 
-    const createdAt = fs.statSync(metadataPath).mtime.toISOString();
+    const stat = await fs.promises.stat(metadataPath);
+    const createdAt = stat.mtime.toISOString();
 
     const manifest = {
       id: updateId,
