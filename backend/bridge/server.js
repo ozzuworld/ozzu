@@ -10,7 +10,7 @@ const WebSocket = require("ws");
 const Redis = require("ioredis");
 const db = require("./db");
 const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
-const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents, startWatchdog, MAX_CONCURRENT_AGENTS } = require("./agent-spawner");
+const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, MAX_CONCURRENT_AGENTS } = require("./agent-spawner");
 const createLogger = require("./logger");
 
 const log = {
@@ -3617,6 +3617,9 @@ function broadcastToAll(msg) {
     }
   }
 }
+
+// Wire up broadcast function for agent-spawner to emit agentUpdate events
+setBroadcast(broadcastToAll);
 
 function broadcastToRole(role, msg) {
   const data = JSON.stringify(msg);

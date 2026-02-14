@@ -15,6 +15,10 @@ const MAX_CONCURRENT_AGENTS = 2; // Max simultaneous agent processes (~500MB-1GB
 // Running agents: directiveId → { process, type, startedAt, pid, timeout, logFile }
 const runningAgents = new Map();
 
+// WebSocket broadcast function — injected by server.js via setBroadcast()
+let _broadcastToAll = null;
+function setBroadcast(fn) { _broadcastToAll = fn; }
+
 function ensureLogDir() {
   if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 }
@@ -209,6 +213,16 @@ function spawnAgent(directive, type) {
 
   runningAgents.set(directive.id, agentInfo);
 
+  // Broadcast agent spawn event
+  if (_broadcastToAll) {
+    _broadcastToAll({
+      type: "agentUpdate",
+      directiveId: directive.id,
+      event: "spawned",
+      pid: child.pid,
+    });
+  }
+
   // Handle process exit
   child.on("close", (code, signal) => {
     clearTimeout(timeoutHandle);
@@ -217,6 +231,16 @@ function spawnAgent(directive, type) {
     logStream.end();
 
     log(`Agent exited for ${directive.id}: code=${code} signal=${signal}`);
+
+    // Broadcast agent exit event
+    if (_broadcastToAll) {
+      _broadcastToAll({
+        type: "agentUpdate",
+        directiveId: directive.id,
+        event: "exited",
+        pid: agentInfo.pid,
+      });
+    }
 
     // Slot opened — check for deferred directives after a short delay
     // (delay lets the directive status reset complete first)
@@ -594,5 +618,6 @@ module.exports = {
   killAgent,
   killAllAgents,
   startWatchdog,
+  setBroadcast,
   MAX_CONCURRENT_AGENTS,
 };
