@@ -159,11 +159,17 @@ TROUBLESHOOTING:
 KNOWN PATTERNS TO FOLLOW:
 - Race conditions: this codebase has multiple interacting async systems (Gemini, Cipher, persona
   switching, device registration). When modifying flow control, check all callers and timers.
+  Set mutex flags BEFORE async operations, not after (see ensureWasherConnected pattern).
 - Security: use escapeHtml(escapeJsString(x)) for inline JS handlers, path.resolve() for file paths,
   whitelist valid enum values (don't accept arbitrary strings from API/agents).
-- Async: never use readFileSync/execSync in request handlers. Always add timeouts to fetch() calls.
-- Frontend: use useRef() to avoid stale closures in useEffect callbacks. Clean up intervals in
-  return functions. Check that all BridgeCallbacks interface properties are implemented.
+- Async: never use readFileSync/existsSync/execSync in request handlers. Use fs.promises and
+  promisified exec. Always add timeouts (AbortController) to fetch() calls.
+- Memory: clean up Map entries on disconnect, removeAllListeners() before reconnect,
+  cap buffers and queues, store setInterval IDs for shutdown cleanup.
+- Frontend: use useRef() to avoid stale closures in useEffect callbacks. Clean up animations
+  (return () => anim.stop()). Hooks must be called BEFORE early returns (Rules of Hooks).
+  Check that all BridgeCallbacks interface properties are implemented.
+- Wrap WebSocket message handlers in try-catch to prevent callback errors from crashing.
 
 AUTONOMY RULES:
 - You have FULL autonomy. Just do it — read, write, edit, git, docker, SSH.
@@ -250,6 +256,8 @@ RACE CONDITIONS — Known patterns:
 - Device registration: new devices connecting during persona switch can trigger wrong backend.
   Check personaSwitchPending before starting AI sessions.
 - Bulk operations: modifying arrays during iteration shifts indices. Collect changes, apply once.
+- Washer reconnect: set washerReconnectInProgress BEFORE the async ping check, not after.
+  Multiple callers can enter between check and flag-set if flag is set late.
 
 SECURITY PATTERNS:
 - HTML attributes: escapeHtml() for content, escapeHtml(escapeJsString()) for inline JS handlers
@@ -259,10 +267,26 @@ SECURITY PATTERNS:
 - Auth: all mutating dashboard endpoints need requireAuth(req, res)
 
 ASYNC/SYNC TRAPS:
-- fs.readFileSync blocks the event loop — use fs.promises.readFile in request handlers
-- execSync blocks ALL connections (audio, WebSocket, HTTP) — use promisified execFile
+- fs.readFileSync/existsSync block the event loop — use fs.promises.readFile/access in request handlers
+- execSync blocks ALL connections (audio, WebSocket, HTTP) — use promisified exec/execFile
 - setInterval callbacks that call async functions: wrap in try/catch or sync errors kill the timer
 - fetch() without AbortController: can hang forever if API is down
+- Tool calls from Claude SDK have no built-in timeout — wrap in Promise.race with timeout
+
+MEMORY LEAK PATTERNS:
+- Maps tracking per-device state (audioStats, devices): must be cleaned up in ws.on("close")
+- Event listeners on Deepgram STT/TTS: removeAllListeners() before creating new connection
+- Audio buffers: enforce maximum size (48KB = 1s of audio) to prevent OOM during TTS flood
+- setInterval: always store return value in _intervals array so graceful shutdown can clear them
+- Pending message queues (frontend): cap at max size (20) and drop oldest when full
+
+REACT PATTERNS:
+- Rules of Hooks: useWindowDimensions() must be called BEFORE any early return statement.
+  if (!visible) return null AFTER the hook call, not before.
+- Animation cleanup: store Animated.parallel/sequence result, return () => anim.stop() from useEffect
+- Stale closures: use useRef() to shadow state values captured in useEffect([], [])
+- Frontend fetch: add AbortController timeout to all bridge-api calls (15s)
+- WebSocket callbacks: wrap in try-catch to prevent handler crash on callback error
 
 MEASURE YOUR IMPACT:
 - Add logging with concrete numbers: "[cipher] Latency: 340ms" not "latency improved"
