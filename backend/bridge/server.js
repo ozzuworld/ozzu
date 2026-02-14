@@ -36,6 +36,14 @@ const MAX_STATUS_ENTRIES = 20;
 const MAX_DIRECTIVES = 20;
 const APPROVAL_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours (plan reviews need time)
 
+const DIRECTIVE_TEMPLATES = [
+  { name: "Bug Fix", type: "quick", titleTemplate: "Fix: {description}", descriptionTemplate: "Fix the bug described above." },
+  { name: "New Feature", type: "feature", titleTemplate: "{feature name}", descriptionTemplate: "Implement the new feature described above." },
+  { name: "Code Review", type: "explore", titleTemplate: "Review {component}", descriptionTemplate: "Review the specified component for issues and improvements." },
+  { name: "Infrastructure", type: "quick", titleTemplate: "{change}", descriptionTemplate: "Apply the infrastructure change described above." },
+  { name: "Deploy", type: "quick", titleTemplate: "Deploy {target}", descriptionTemplate: "Deploy to the specified target." },
+];
+
 const BRIDGE_PIN = process.env.BRIDGE_PIN || "1234";
 const HA_URL = process.env.HA_URL || "http://localhost:8123";
 const HA_TOKEN = process.env.HA_TOKEN || "";
@@ -911,6 +919,12 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /templates — List directive templates
+  if (req.method === "GET" && pathname === "/templates") {
+    sendJSON(res, 200, DIRECTIVE_TEMPLATES);
+    return;
+  }
+
   // GET /directives — List directives (optional ?status= filter)
   if (req.method === "GET" && pathname === "/directives") {
     const statusFilter = url.searchParams.get("status");
@@ -1634,6 +1648,11 @@ ${failures.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Reason</th>
 <section class="new-directive">
 <h2>New Quick Directive</h2>
 <form id="directive-form" onsubmit="return submitDirective(event)">
+  <label for="d-template">Template</label>
+  <select id="d-template" onchange="applyTemplate(this.value)">
+    <option value="">— None —</option>
+${DIRECTIVE_TEMPLATES.map((t, i) => `    <option value="${i}">${escapeHtml(t.name)} (${escapeHtml(t.type)})</option>`).join("\n")}
+  </select>
   <label for="d-title">Title</label>
   <input type="text" id="d-title" name="title" placeholder="Short description of the task" required>
   <label for="d-desc">Description</label>
@@ -1822,6 +1841,17 @@ function retryDirective(id) {
     .catch(function(err) { alert("Network error: " + err.message); });
 }
 
+// Template pre-fill
+var directiveTemplates = ${JSON.stringify(DIRECTIVE_TEMPLATES)};
+function applyTemplate(idx) {
+  if (idx === "") return;
+  var t = directiveTemplates[parseInt(idx, 10)];
+  if (!t) return;
+  document.getElementById("d-title").value = t.titleTemplate;
+  document.getElementById("d-desc").value = t.descriptionTemplate;
+  document.getElementById("d-type").value = t.type;
+}
+
 // Submit directive form
 function submitDirective(e) {
   e.preventDefault();
@@ -1851,6 +1881,7 @@ function submitDirective(e) {
         msgEl.textContent = "Directive created: " + (res.data.id || "success");
         document.getElementById("d-title").value = "";
         document.getElementById("d-desc").value = "";
+        document.getElementById("d-template").value = "";
         setTimeout(refreshNow, 1000);
       } else {
         msgEl.className = "form-msg err";
@@ -2191,7 +2222,7 @@ const INFRA_MAP =
   "- Devices: tab-roaming (172.168.0.53), tab-lroom (172.168.0.57), tv-lroom (172.168.0.56)\n" +
   "- dev-01 (172.168.0.59): runs wyze-bridge for camera streams\n\n" +
   "Bridge HTTP API (localhost:3333): POST /status, GET /status, POST /notify, " +
-  "POST /approvals, GET /approvals, POST /directives, GET /directives, PATCH /directives/:id, " +
+  "POST /approvals, GET /approvals, POST /directives, GET /directives, GET /templates, PATCH /directives/:id, " +
   "POST /directives/:id/unblock, GET /agents, DELETE /agents/:directiveId\n\n" +
   "Common operations with run_command:\n" +
   "- Container health: docker ps, docker stats --no-stream, docker logs <name> --tail N\n" +
