@@ -36,6 +36,29 @@ const MAX_STATUS_ENTRIES = 20;
 const MAX_DIRECTIVES = 20;
 const APPROVAL_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours (plan reviews need time)
 
+// ── Log ring buffer — captures recent console output for GET /logs ──
+const LOG_RING_MAX = 500;
+const _logRing = [];
+const _origStdoutWrite = process.stdout.write.bind(process.stdout);
+const _origStderrWrite = process.stderr.write.bind(process.stderr);
+function _captureLog(chunk) {
+  const str = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+  const lines = str.split("\n");
+  for (const line of lines) {
+    if (line.length === 0) continue;
+    _logRing.push({ ts: new Date().toISOString(), line });
+    if (_logRing.length > LOG_RING_MAX) _logRing.shift();
+  }
+}
+process.stdout.write = function (chunk, encoding, cb) {
+  _captureLog(chunk);
+  return _origStdoutWrite(chunk, encoding, cb);
+};
+process.stderr.write = function (chunk, encoding, cb) {
+  _captureLog(chunk);
+  return _origStderrWrite(chunk, encoding, cb);
+};
+
 const DIRECTIVE_TEMPLATES = [
   { name: "Bug Fix", type: "quick", titleTemplate: "Fix: {description}", descriptionTemplate: "Fix the bug described above." },
   { name: "New Feature", type: "feature", titleTemplate: "{feature name}", descriptionTemplate: "Implement the new feature described above." },
@@ -1355,6 +1378,80 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // POST /directives/bulk — Perform the same action on multiple directives
+  if (req.method === "POST" && pathname === "/directives/bulk") {
+    const data = await parseBody(req);
+    const validActions = ["cancel", "retry", "delete"];
+    if (!data.action || !validActions.includes(data.action)) {
+      sendJSON(res, 400, { error: "action must be one of: cancel, retry, delete" });
+      return;
+    }
+    if (!Array.isArray(data.ids) || data.ids.length === 0) {
+      sendJSON(res, 400, { error: "ids must be a non-empty array of directive IDs" });
+      return;
+    }
+    const directives = getDirectives();
+    const succeeded = [];
+    const failed = [];
+
+    for (const id of data.ids) {
+      const directive = directives.find((d) => d.id === id);
+      if (!directive) {
+        failed.push({ id, error: "Directive not found" });
+        continue;
+      }
+
+      if (data.action === "cancel") {
+        const terminalStatuses = ["completed", "failed", "cancelled"];
+        if (terminalStatuses.includes(directive.status)) {
+          failed.push({ id, error: `Directive is already "${directive.status}" — cannot cancel` });
+          continue;
+        }
+        const agentKilled = killAgent(id);
+        const prevStatus = directive.status;
+        directive.status = "cancelled";
+        directive.updatedAt = Date.now();
+        saveDirectives(directives, directive, prevStatus);
+        log.bridge.info(`Bulk cancel: ${id} "${directive.title}" (was ${prevStatus}, agent killed: ${agentKilled})`);
+        succeeded.push(id);
+      } else if (data.action === "retry") {
+        const activeStatuses = ["planning", "in_progress", "approved"];
+        if (activeStatuses.includes(directive.status)) {
+          failed.push({ id, error: `Directive is "${directive.status}" — already active, cannot retry` });
+          continue;
+        }
+        const retryableStatuses = ["failed", "stale", "cancelled"];
+        if (!retryableStatuses.includes(directive.status)) {
+          failed.push({ id, error: `Directive is "${directive.status}" — cannot retry from this state` });
+          continue;
+        }
+        const prevStatus = directive.status;
+        directive.status = "approved";
+        directive.retryCount = (directive.retryCount || 0) + 1;
+        directive.failureReason = null;
+        directive.updatedAt = Date.now();
+        saveDirectives(directives, directive, prevStatus);
+        log.bridge.info(`Bulk retry: ${id} "${directive.title}" (${prevStatus} → approved, retry #${directive.retryCount})`);
+        succeeded.push(id);
+      } else if (data.action === "delete") {
+        const terminalStatuses = ["completed", "failed", "cancelled"];
+        if (!terminalStatuses.includes(directive.status)) {
+          failed.push({ id, error: `Directive is "${directive.status}" — cancel it first before deleting` });
+          continue;
+        }
+        const idx = directives.indexOf(directive);
+        directives.splice(idx, 1);
+        saveDirectives(directives, null, null);
+        log.bridge.info(`Bulk delete: ${id} "${directive.title}"`);
+        succeeded.push(id);
+      }
+    }
+
+    log.bridge.info(`Bulk ${data.action}: ${succeeded.length} succeeded, ${failed.length} failed`);
+    sendJSON(res, 200, { ok: true, action: data.action, succeeded, failed });
+    return;
+  }
+
   // ── OTA Update endpoints ──
 
   // GET /api/manifest — Expo Updates protocol v1
@@ -1686,6 +1783,7 @@ async function handleRequest(req, res) {
 
 <div class="refresh-bar">
   <button class="refresh-btn" onclick="refreshNow()">Refresh Now</button>
+  <a href="/logs" target="_blank" class="refresh-btn" style="text-decoration:none;">View Logs</a>
   <span class="countdown" id="countdown">Next refresh in 10s</span>
 </div>
 
@@ -1990,6 +2088,27 @@ function submitDirective(e) {
 
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
+    return;
+  }
+
+  // GET /logs — serve recent bridge logs from in-memory ring buffer
+  if (req.method === "GET" && pathname === "/logs") {
+    const lines = Math.min(Math.max(parseInt(params.get("lines")) || 100, 1), 500);
+    const sinceParam = params.get("since"); // e.g. "1h", "30m", "5s"
+    let filtered = _logRing;
+    if (sinceParam) {
+      const match = sinceParam.match(/^(\d+)([hms])$/);
+      if (match) {
+        const amount = parseInt(match[1]);
+        const unit = match[2];
+        const ms = unit === "h" ? amount * 3600000 : unit === "m" ? amount * 60000 : amount * 1000;
+        const cutoff = new Date(Date.now() - ms).toISOString();
+        filtered = filtered.filter(e => e.ts >= cutoff);
+      }
+    }
+    const result = filtered.slice(-lines).map(e => `[${e.ts}] ${e.line}`).join("\n");
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(result || "(no logs captured yet)\n");
     return;
   }
 
