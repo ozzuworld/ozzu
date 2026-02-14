@@ -1,13 +1,11 @@
 #!/bin/bash
 # Deploy latest iOS IPA from GitHub Actions to iPhone via dev-01
-# Uses Sideloader on dev-01 (172.168.0.59) for code signing + installation
+# Uses AltServer-Linux on dev-01 for code signing + installation
 #
 # Usage: ./scripts/deploy-ios.sh [--local IPA_PATH]
 #   --local IPA_PATH     Install from a local IPA file instead of downloading from GitHub
 #
-# Examples:
-#   ./scripts/deploy-ios.sh                          # download latest CI build + install
-#   ./scripts/deploy-ios.sh --local /tmp/ozzu.ipa    # install a local IPA
+# Requires: APPLE_ID, APPLE_PASSWORD, IPHONE_UDID env vars (or in .env)
 
 set -e
 
@@ -16,7 +14,27 @@ DEV01="dev-01"  # SSH alias (hadmin@172.168.0.61)
 IPA_DIR="/tmp/ozzu-ios"
 REMOTE_IPA_DIR="/tmp/ozzu-ios"
 ANISETTE_URL="http://10.8.0.1:6969"  # Anisette runs on GCP VM, reachable via VPN
-IOS_BUNDLE_ID="com.ozzu.app"
+
+# Load credentials from .env if not already set
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKDIR="$(dirname "$SCRIPT_DIR")"
+if [ -f "$WORKDIR/backend/.env" ]; then
+  source "$WORKDIR/backend/.env"
+fi
+
+APPLE_ID="${APPLE_ID:-eng.ozzu@icloud.com}"
+APPLE_PASSWORD="${APPLE_PASSWORD:-}"
+IPHONE_UDID="${IPHONE_UDID:-00008140-000A449C02E8801C}"
+
+if [ -z "$APPLE_PASSWORD" ]; then
+  # Try reading from dev-01's install script as fallback
+  APPLE_PASSWORD=$(ssh "$DEV01" "grep -- '-p ' ~/install-ozzu.sh 2>/dev/null | sed 's/.*-p //' | awk '{print \$1}'" 2>/dev/null || true)
+fi
+
+if [ -z "$APPLE_PASSWORD" ]; then
+  echo "Error: APPLE_PASSWORD not set. Add it to backend/.env or export it."
+  exit 1
+fi
 
 # Parse args
 USE_LOCAL=false
@@ -74,11 +92,10 @@ if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$DEV01" true 2>/dev/null; then
 fi
 echo "dev-01 is reachable."
 
-# ── Step 3: Check prerequisites on dev-01 ──
-echo "Checking sideloader on dev-01..."
-SIDELOADER_BIN="\$HOME/bin/sideloader"
-if ! ssh "$DEV01" "test -x $SIDELOADER_BIN" 2>/dev/null; then
-  echo "Error: sideloader not found at $SIDELOADER_BIN on dev-01"
+# ── Step 3: Check AltServer on dev-01 ──
+echo "Checking AltServer on dev-01..."
+if ! ssh "$DEV01" "test -x \$HOME/bin/AltServer" 2>/dev/null; then
+  echo "Error: AltServer not found at ~/bin/AltServer on dev-01"
   echo "  Run ./scripts/setup-ios-sideloading.sh first"
   exit 1
 fi
@@ -89,27 +106,23 @@ ssh "$DEV01" "mkdir -p $REMOTE_IPA_DIR"
 scp -q "$IPA" "$DEV01:$REMOTE_IPA_DIR/ozzu.ipa"
 echo "IPA transferred."
 
-# ── Step 5: Install via Sideloader ──
+# ── Step 5: Install via AltServer ──
 echo ""
-echo "Installing via sideloader on dev-01..."
+echo "Installing via AltServer on dev-01..."
 echo "(iPhone must be connected via USB or previously paired)"
 echo ""
-# Sideloader extracts IPA to /tmp/{basename}/ — keep IPA in home dir to avoid
-# collision with the extraction directory, and use a unique name to avoid
-# stale root-owned dirs from previous runs
-DEPLOY_NAME="ozzu-$(date +%s).ipa"
-ssh "$DEV01" "mkdir -p \$HOME/ozzu-deploy && cp $REMOTE_IPA_DIR/ozzu.ipa \$HOME/ozzu-deploy/$DEPLOY_NAME"
-ssh -t "$DEV01" "ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL \$HOME/bin/sideloader install \$HOME/ozzu-deploy/$DEPLOY_NAME -i"
-# Clean up
-ssh "$DEV01" "rm -rf \$HOME/ozzu-deploy /tmp/$DEPLOY_NAME 2>/dev/null; true"
+ssh "$DEV01" "ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL \$HOME/bin/AltServer -u $IPHONE_UDID -a $APPLE_ID -p '$APPLE_PASSWORD' $REMOTE_IPA_DIR/ozzu.ipa" 2>&1
+INSTALL_EXIT=$?
 
-# ── Step 6: Verify ──
-echo ""
-echo "Install command complete."
-
-# Cleanup
+# ── Step 6: Cleanup ──
 [ -d "$IPA_DIR" ] && rm -rf "$IPA_DIR"
 ssh "$DEV01" "rm -rf $REMOTE_IPA_DIR" 2>/dev/null || true
 
 echo ""
-echo "Done. Open the ozzu app on iPhone to verify it connects to the bridge."
+if [ $INSTALL_EXIT -eq 0 ]; then
+  echo "iOS app installed successfully! Open ozzu on iPhone to verify."
+else
+  echo "AltServer install exited with code $INSTALL_EXIT"
+  echo "Check: is the iPhone connected via USB to dev-01?"
+  exit $INSTALL_EXIT
+fi
