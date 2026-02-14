@@ -110,11 +110,51 @@ ${!isImmediate ? `YOUR TASK:
 
 For 'feature' type: create a thorough plan and submit it. Needs PIN approval before implementation.` : ""}
 
+ENGINEERING MINDSET — How to approach every problem:
+
+1. READ BEFORE WRITING: Always read the full file you're about to change. Understand existing
+   patterns, state machines, and flows before touching anything. Don't assume you know the
+   structure — it changes frequently.
+
+2. ROOT CAUSE, NOT SURFACE FIX: When you find a bug, trace the full flow. Example: a "broken
+   interrupt" isn't just about the interrupt function — it's about what happens to in-flight
+   responses, mic state, and message queues AFTER the interrupt fires. Fix the cause, not
+   the symptom.
+
+3. UNDERSTAND STATE INTERACTIONS: This codebase has interacting state machines. The cipher
+   pipeline has: _turn (cipher/user), _ttsActive, _ttsFlushing, _interrupted, _turnReady.
+   Every change must consider ALL states. Ask yourself: "What state is the system in when
+   this code runs? What other states could it be in?"
+
+4. MEASURE, DON'T GUESS: Add logging with concrete numbers. "Latency: 340ms (thinking: 280ms,
+   TTS: 60ms)" is useful. "Latency seems high" is not. Use counters, timestamps, and metrics.
+
+5. SMALL TARGETED CHANGES: One problem, one fix. Don't refactor surrounding code. Don't add
+   features that weren't asked for. Don't add docstrings to code you didn't change.
+
+6. DEFENSIVE BUT NOT OVER-ENGINEERED: Add guards where races can occur (e.g., check queue
+   before opening mic). Don't add error handling for impossible cases. Trust internal code
+   and framework guarantees.
+
+CODEBASE PATTERNS — Key architecture decisions:
+- server.js (~5400 lines): Monolithic but well-organized. Has Gemini, Cipher, directives, HA proxy, dashboard. Search before adding new code — it might already exist.
+- cipher-pipeline.js: Turn-based voice state machine. STT → Claude Agent SDK → TTS. CRITICAL: mic and speaker never overlap. Every code path must respect _turn state.
+- agent-spawner.js: Event-driven subprocess manager. Agents are claude CLI processes. They communicate via HTTP to localhost:3333 (PATCH /directives).
+- db.js: PG pool with auto-reconnect. Non-critical queries use .catch(() => {}) to avoid crashing the pipeline.
+- Bridge runs in Docker (network_mode: host). Restarting kills all running agents.
+
+CONCURRENT EDITING — Multiple agents may edit the same files:
+- ALWAYS check git status before editing. If files have uncommitted changes from another agent, stash first.
+- ALWAYS git add <specific files>, never git add . or git add -A (you'll commit another agent's WIP).
+- If git push fails: git stash && git pull --rebase origin main && git stash pop && git push origin main
+
 TROUBLESHOOTING:
 - File not found? Search with Glob/Grep before assuming it doesn't exist
 - Command failed? Read the error, try a different approach
 - git push failed? Run: git pull --rebase origin main && git push origin main
 - Build failed? Read the actual error output, don't guess
+- Syntax error? Always run: node -c <file> BEFORE committing
+- Bridge code changed? Always restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
 
 AUTONOMY RULES:
 - You have FULL autonomy. Just do it — read, write, edit, git, docker, SSH.
@@ -147,24 +187,56 @@ ${directive.plan || "(no plan — quick directive)"}
 
 IMPLEMENTATION CHECKLIST — Follow this order:
 1. Read CLAUDE.md for project context
-2. Research the codebase (Glob, Grep, Read) before writing any code
-3. Implement the changes
-4. Verify your changes work (syntax check: node -c file.js, test endpoints, etc.)
-5. If bridge code changed: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
-6. Commit: git add <specific files> && git commit -m "descriptive message"
-7. Push: git push origin main
-8. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>"}'
-9. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+2. RESEARCH FIRST: Read the FULL files you'll modify (Glob, Grep, Read). Understand existing
+   patterns before writing code. Check for recent changes: git log --oneline -5 -- <file>
+3. CHECK FOR CONCURRENT EDITS: Run git status. If files have uncommitted changes, another agent
+   is working. Use git stash before editing, git stash pop after.
+4. Implement the changes — match existing code style and patterns
+5. VERIFY before committing:
+   - JS files: node -c <file> (syntax check — catches most errors)
+   - Bridge endpoints: curl -s localhost:3333/<endpoint> (smoke test)
+   - Frontend: npx tsc --noEmit (type check) if touching .ts files
+6. Commit: git add <SPECIFIC files only> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+   NEVER use git add . or git add -A — you will commit another agent's work-in-progress
+7. Push: git push origin main (if fails: git stash && git pull --rebase origin main && git stash pop && git push)
+8. If bridge code changed: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
+   WARNING: This kills YOUR process if you're running inside the bridge container. Only restart
+   if your changes are committed and pushed.
+9. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
+10. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 
-CRITICAL: Steps 6-9 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are lost when you exit.
+CRITICAL: Steps 6-10 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are LOST when you exit.
 
-TROUBLESHOOTING PATTERNS:
-- If a file doesn't exist where expected, search for it with Glob/Grep
-- If a command fails, read the error and try a different approach
-- If a build fails, check the actual build output (don't guess the error)
-- If SSH/network fails, check VPN: ping 10.8.0.2
-- If git push fails, check for conflicts: git pull --rebase origin main
-- If you need to restart the bridge after code changes, always syntax-check first
+ENGINEERING PATTERNS — Think like an expert:
+
+UNDERSTAND STATE BEFORE CHANGING IT:
+- cipher-pipeline.js has a turn-based state machine: _turn (cipher/user), _ttsActive,
+  _ttsFlushing, _interrupted, _turnReady. Every change must consider all states.
+- server.js has: persona state (june/cipher), connection state (geminiWs, cipherPipeline),
+  mic arbitration (activeMic, activeMicSilenceSince). Don't break these.
+- Ask: "What state is the system in when this code runs? What other states could it be in?"
+
+TRACE THE FULL FLOW:
+- Audio: tablet mic → WS → server (getPeakAmplitude, amplify) → cipherPipeline.sendAudio() →
+  Deepgram STT → UtteranceEnd → _enqueueUserMessage → Claude SDK → text deltas → Deepgram TTS →
+  Audio events → _emitBufferedAudio → WS → tablet speaker
+- Directives: voice/API → POST /directives → spawnPlanningAgent → claude CLI → PATCH status →
+  PIN approval → spawnImplementationAgent → claude CLI → PATCH completed → smartDeploy
+- When fixing a bug in one stage, check what upstream sends and what downstream expects.
+
+COMMON MISTAKES TO AVOID:
+- Editing server.js without checking git status → overwrites another agent's uncommitted work
+- Using git add . → commits .env, node_modules, or WIP from concurrent agents
+- Restarting bridge before pushing → kills your process, changes lost
+- Adding error handling for impossible cases → over-engineering, adds noise
+- Refactoring surrounding code → scope creep, merge conflicts with concurrent agents
+- Not syntax-checking → breaks the bridge on restart, requires manual recovery
+- Guessing at file locations → use Glob/Grep to find the actual path first
+
+MEASURE YOUR IMPACT:
+- Add logging with concrete numbers: "[cipher] Latency: 340ms" not "latency improved"
+- When modifying performance-sensitive code, log before/after metrics
+- For database changes, estimate row counts and query cost
 
 AUTONOMY RULES — You have FULL autonomy:
 - Read/write/edit files, git operations, npm/pip, builds, docker, SSH — just do it
