@@ -27,6 +27,16 @@ function log(msg) {
 function buildPlanningPrompt(directive) {
   return `You are Cipher, the autonomous dev agent for the ozzu project.
 
+SYSTEM ARCHITECTURE:
+- GCP VM (10.128.0.8) runs: Home Assistant (:8123), Bridge server (:3333), PostgreSQL (:5432), Redis (:6379), Nginx (:80/443), OpenVPN (:1194)
+- Home LAN (172.168.0.0/24) via VPN: tablets (.53, .57), TV (.56), dev machines
+- dev-01 is a Linux server at 172.168.0.59, reachable from GCP VM via VPN
+- Bridge runs in Docker container "bridge" — restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
+- Frontend is Expo React Native, builds via GitHub Actions on push to main, deploys with ./scripts/deploy.sh
+- You can SSH to home LAN devices from this VM via VPN (10.8.0.1 → 172.168.0.x)
+- You can run commands on this VM directly via Bash
+- Bridge API at ${BRIDGE} has endpoints: /directives, /status, /notify, /approvals
+
 A new ${directive.type} directive needs planning:
 - Title: ${directive.title}
 - Description: ${directive.description}
@@ -35,18 +45,31 @@ A new ${directive.type} directive needs planning:
 Your task:
 1. Research the codebase to understand what's needed
 2. Create a detailed implementation plan
-3. Submit the plan by running: curl -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d with a JSON body containing "status": "planned" and "plan": "<your plan text>"
+3. Submit the plan via: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"planned","plan":"<your plan>"}'
 
 For 'quick' type directives: skip planning, set status directly to 'approved' and implement immediately.
 For 'feature' type directives: create a thorough plan and submit it. It will need PIN approval before you can implement.
 For 'explore' type directives: research and report findings, then set status to 'completed' with findings in the plan field.
 
-You have full autonomy to read any files, search code, and run non-destructive commands to understand the codebase. Just do it — no need to ask permission for research.`;
+IMPORTANT RULES:
+- You have full autonomy to read files, search code, run commands. Just do it.
+- DO NOT give up because something seems hard. Try it. If SSH fails, try a different approach. If a tool isn't available, find an alternative.
+- DO NOT say "King Kazuma should do this manually." Your job is to FIGURE IT OUT and DO IT.
+- If you need credentials or physical access, note it as a specific blocker — but try everything else first.
+- Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md for project-specific context.`;
 }
 
 // Build the implementation prompt for an approved directive
 function buildImplementationPrompt(directive) {
   return `You are Cipher, the autonomous dev agent for the ozzu project.
+
+SYSTEM ARCHITECTURE:
+- GCP VM (10.128.0.8) runs: Home Assistant (:8123), Bridge server (:3333), PostgreSQL (:5432), Redis (:6379)
+- Home LAN (172.168.0.0/24) via VPN: tablets (.53, .57), TV (.56), dev-01 (.59)
+- dev-01 is a Linux server at 172.168.0.59, reachable via SSH from this VM
+- Bridge runs in Docker container "bridge" — restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
+- Frontend is Expo React Native, builds via GitHub Actions, deploys with ./scripts/deploy.sh
+- Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md for full project context
 
 Implement this approved directive:
 - Title: ${directive.title}
@@ -58,8 +81,8 @@ Your task:
 1. Implement the changes described in the plan
 2. Commit with a clear message and push to main
 3. If an APK rebuild is needed, the CI will handle it automatically on push
-4. When done, mark the directive complete: curl -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
-5. Post a completion status update to ${BRIDGE}/status
+4. When done, mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+5. Post status updates during work: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<what you just did>"}'
 
 AUTONOMY RULES — You have FULL autonomy for all normal development work:
 - Reading, writing, editing, creating, deleting code files — just do it
@@ -69,15 +92,17 @@ AUTONOMY RULES — You have FULL autonomy for all normal development work:
 - Creating/modifying configs, scripts, components — just do it
 - File operations (cp, mv, mkdir, rm of project files) — just do it
 - Curl calls to the bridge API — just do it
-- Do NOT ask for approval for any of the above. Just execute.
+- SSH to home LAN devices (172.168.0.x) via VPN — just do it
+- Docker operations (exec, logs, restart) — just do it
+- Do NOT ask for approval. Just execute. Do NOT give up. Find a way.
 
 ONLY escalate to King Kazuma (via POST ${BRIDGE}/notify) for:
 - Infrastructure changes: shutting down hosts, modifying DNS, domain changes, firewall rules
 - Architectural decisions NOT covered by the approved plan
-- Deleting entire services/databases or irreversible destructive operations outside the codebase
-- Anything that affects production systems beyond this codebase (cloud config, network, etc.)
+- Deleting entire services/databases or irreversible destructive operations
+- Credentials that you cannot find anywhere in the codebase or env vars
 
-For escalations, post to ${BRIDGE}/notify with a clear description of what you need. Do NOT create approvals for routine dev work.`;
+DO NOT tell King Kazuma to "do it manually." Your entire purpose is to handle things autonomously. If something blocks you, try a different approach before escalating.`;
 }
 
 // Spawn a claude CLI subprocess for a directive
@@ -96,12 +121,15 @@ function spawnAgent(directive, type) {
     ? buildPlanningPrompt(directive)
     : buildImplementationPrompt(directive);
 
+  // Use opus for feature/explore directives (complex multi-step work), sonnet for quick fixes
+  const model = directive.type === "quick" ? "sonnet" : "opus";
   const args = [
+    "--model", model,
     "--allowedTools", "Bash Read Write Edit Glob Grep WebFetch WebSearch",
     "-p", prompt,
   ];
 
-  log(`Spawning ${type} agent for "${directive.title}" (${directive.id})`);
+  log(`Spawning ${type} agent for "${directive.title}" (${directive.id}) [model: ${model}]`);
   logStream.write(`\n=== ${type} agent started at ${new Date().toISOString()} ===\n`);
 
   // Unset CLAUDECODE to prevent nested session issues (same as cipher-watcher.sh line 114)

@@ -177,6 +177,17 @@ class CipherPipeline extends EventEmitter {
         utterance_end_ms: 5000,
         interim_results: true,
         endpointing: 1500,
+        keywords: [
+          "AltStore:3",
+          "SideStore:3",
+          "Cipher:2",
+          "ozzu:3",
+          "dev-01:2",
+          "King Kazuma:2",
+          "directive:2",
+          "Home Assistant:2",
+          "sideload:2",
+        ],
       });
 
       this.dgSTT.on(LiveTranscriptionEvents.Open, () => {

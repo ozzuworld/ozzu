@@ -3,7 +3,7 @@ import { View, Animated, Easing, Dimensions, PermissionsAndroid, Platform } from
 import { StatusBar } from "expo-status-bar";
 import { StatusBadge } from "../components/StatusBadge";
 import { HamburgerMenu } from "../components/HamburgerMenu";
-import { NebulaOrb } from "../components/NebulaOrb";
+import LottieView from "lottie-react-native";
 import { TranscriptBubble } from "../components/TranscriptBubble";
 import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { StreamingPlayer, MicRecorder } from "../lib/audio";
@@ -295,7 +295,7 @@ export default function LandingScreen() {
         <StatusBadge />
       </View>
 
-      {/* Center — NebulaOrb */}
+      {/* Center — Lottie talking animation */}
       <View
         style={{
           flex: 1,
@@ -303,9 +303,14 @@ export default function LandingScreen() {
           justifyContent: "center",
         }}
       >
-        <NebulaOrb
-          active={isStreaming}
-          ambient={isListening && !isStreaming}
+        <LottieView
+          source={require("../assets/talking.json")}
+          autoPlay
+          loop
+          style={{
+            width: 420,
+            height: 420,
+          }}
         />
       </View>
 

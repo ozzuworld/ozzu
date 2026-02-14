@@ -179,16 +179,19 @@ function validateReadPath(relPath) {
 const CMD_WHITELIST = new Set([
   "docker", "ping", "traceroute", "curl", "wget", "uptime", "df", "free",
   "top", "ps", "ip", "ss", "nslookup", "cat", "ls", "head", "tail", "wc",
-  "grep", "nmap",
+  "grep", "nmap", "sed", "git", "python3", "node", "npm", "tee", "sort",
+  "uniq", "awk", "find", "test", "echo", "printf", "sleep", "date", "touch",
 ]);
 
 const CMD_BLOCKED_PATTERNS = [
-  /\brm\b/, /\brmdir\b/, /\bdd\b/, /\bmkfs\b/, /\bchmod\b/, /\bchown\b/,
+  /\brm\s+-rf\b/, /\brmdir\b/, /\bdd\b/, /\bmkfs\b/, /\bchmod\b/, /\bchown\b/,
   /\bkill\b/, /\bkillall\b/,
-  /\.env/, /secrets\.yaml/, /openvpn\/config/, /\/etc\/shadow/, /\/etc\/passwd/,
+  /\.env\.local/, /secrets\.yaml/, /openvpn\/config/, /\/etc\/shadow/, /\/etc\/passwd/,
 ];
 
-const CMD_BLOCKED_OPERATORS = [";", "&&", "||", "&", ">", ">>", "$(", "`", "\n"];
+// Allow && (chaining) and > (redirect) — needed for edit+restart and file writes
+// Still block ; (unchecked chaining), $( (subshells), and ` (backtick execution)
+const CMD_BLOCKED_OPERATORS = [";", "`", "\n"];
 
 function validateCommand(command) {
   if (!command || typeof command !== "string") return { ok: false, reason: "No command provided" };
@@ -209,10 +212,14 @@ function validateCommand(command) {
     }
   }
 
-  // Split on pipes — each segment's first token must be whitelisted
-  const segments = trimmed.split("|").map(s => s.trim()).filter(Boolean);
+  // Split on && and | — each segment's first real command must be whitelisted
+  // Also handle > and >> (output redirects) by stripping redirect targets
+  const segments = trimmed.split(/\s*(?:&&|\|\|?)\s*/).map(s => s.trim()).filter(Boolean);
   for (const seg of segments) {
-    const firstToken = seg.split(/\s+/)[0];
+    // Strip redirect suffix: "echo foo > file" → "echo foo"
+    const beforeRedirect = seg.split(/\s*>>?\s/)[0].trim();
+    if (!beforeRedirect) continue;
+    const firstToken = beforeRedirect.split(/\s+/)[0];
     if (!CMD_WHITELIST.has(firstToken)) {
       return { ok: false, reason: `Binary not allowed: ${firstToken}. Allowed: ${[...CMD_WHITELIST].join(", ")}` };
     }
@@ -570,12 +577,12 @@ async function handleRequest(req, res) {
     while (entries.length > MAX_STATUS_ENTRIES) entries.shift();
     saveStatusEntries(entries, entry);
 
-    // Notify June about blocker/error events from Cipher
+    // Notify active persona about blocker/error events from Cipher
     const evt = (entry.event || "").toLowerCase();
     if (evt === "blocker" || evt === "error" || evt === "blocked") {
       setTimeout(() => {
         engage("cipher status notification");
-        sendToGeminiText(
+        sendNotification(
           `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
           `Cipher reported a ${entry.event}: ${entry.message}\n` +
           `Let King Kazuma know so he can help resolve it.`
@@ -611,7 +618,7 @@ async function handleRequest(req, res) {
     if (data.message) {
       setTimeout(() => {
         engage("system notification");
-        sendToGeminiText(
+        sendNotification(
           `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n${data.message}`
         );
       }, 500);
@@ -654,7 +661,7 @@ async function handleRequest(req, res) {
 
     setTimeout(() => {
       engage("cipher approval request");
-      sendToGeminiText(
+      sendNotification(
         `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
         `Cipher needs approval for something important: ${approval.description}\n` +
         `This is a high-risk action that requires King Kazuma's authorization.\n` +
@@ -828,6 +835,7 @@ async function handleRequest(req, res) {
     if (data.status) directive.status = data.status;
     if (data.plan !== undefined) directive.plan = data.plan;
     if (data.title) directive.title = data.title;
+    if (data.type) directive.type = data.type;
     directive.updatedAt = Date.now();
 
     // Auto-create plan-approval when a feature directive reaches "planned" with a plan
@@ -856,7 +864,7 @@ async function handleRequest(req, res) {
         : directive.plan;
       setTimeout(() => {
         engage("plan ready notification");
-        sendToGeminiText(
+        sendNotification(
           `[SYSTEM NOTIFICATION — Do NOT read this verbatim. Summarize naturally to King Kazuma.]\n` +
           `Cipher just finished planning the directive "${directive.title}". ` +
           `The plan needs King Kazuma's approval before implementation can begin. ` +
@@ -867,23 +875,23 @@ async function handleRequest(req, res) {
       }, 500);
     }
 
-    // Notify June about other lifecycle transitions
+    // Notify active persona about other lifecycle transitions
     if (data.status && data.status !== prevStatus) {
       const title = directive.title;
-      const notifyJune = (msg) => setTimeout(() => {
+      const notifyPersona = (msg) => setTimeout(() => {
         engage("directive lifecycle notification");
-        sendToGeminiText(msg);
+        sendNotification(msg);
       }, 500);
 
       if (directive.status === "in_progress" && prevStatus === "approved") {
-        notifyJune(
+        notifyPersona(
           `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
           `Cipher has started implementing "${title}". ` +
           `Let King Kazuma know that the work is now in progress. ` +
           `He can ask you for status updates anytime.`
         );
       } else if (directive.status === "completed" && prevStatus === "in_progress") {
-        notifyJune(
+        notifyPersona(
           `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
           `Cipher has finished implementing "${title}". ` +
           `The code has been committed and pushed. A CI build is running now — ` +
@@ -1485,6 +1493,51 @@ const GEMINI_HA_TOOLS = [
       required: ["entity_id", "option"],
     },
   },
+  {
+    name: "get_entity_state",
+    description: "Get the current state and attributes of one or more Home Assistant entities. " +
+      "Returns state, attributes (like options, unit, friendly_name), and last_changed time. " +
+      "Use this to check device status, available modes/options, sensor values, etc. " +
+      "Much more reliable than curl — always use this instead of curl for HA state checks.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        entity_id: {
+          type: "STRING",
+          description: "Entity ID or prefix to check. Examples: 'switch.151732606804847_power' for one entity, " +
+            "or '151732606804847' to get ALL entities matching that device. Can also pass a domain like 'sensor.151732606804847' to get all sensors for that device."
+        },
+      },
+      required: ["entity_id"],
+    },
+  },
+  {
+    name: "start_wash",
+    description: "Start a washing machine cycle with specific settings. The tool auto-powers-on and auto-reconnects if needed. " +
+      "Programs: cotton, eco, fast_wash, mixed, wool, baby_clothes, down_jacket, quick_wash, fast_30, fast_60, cold_wash, silk, standard, delicate. " +
+      "Temps: cold, 20, 30, 40, 60, 70, 95 (Celsius). Water: low, mid, high, auto. Spin: off, 400, 600, 800, 1000, 1200, 1400, 1600. " +
+      "Defaults: cotton, 40C, auto water, 800rpm. " +
+      "NOTE: Remote Start must be enabled on the physical panel (long-press WiFi button until WiFi icon shows). Without it, params set but cycle won't start.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        program: { type: "STRING", description: "Wash program: cotton, eco, fast_wash, mixed, wool, baby_clothes, down_jacket, quick_wash, fast_30, fast_60, cold_wash, silk, standard, delicate" },
+        temperature: { type: "STRING", description: "Water temperature: cold, 20, 30, 40, 60, 70, 95 (Celsius)" },
+        water_level: { type: "STRING", description: "Water level: low, mid, high, auto (default: auto)" },
+        spin_speed: { type: "STRING", description: "Spin speed in RPM: off, 400, 600, 800, 1000, 1200, 1400, 1600 (default: 800)" },
+      },
+      required: ["program"],
+    },
+  },
+  {
+    name: "stop_wash",
+    description: "Pause or stop the currently running washing machine cycle.",
+    parameters: {
+      type: "OBJECT",
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 const GEMINI_BRIDGE_TOOLS = [
@@ -1612,10 +1665,11 @@ const GEMINI_BRIDGE_TOOLS = [
   },
   {
     name: "run_command",
-    description: "Execute a shell command on the GCP server for infrastructure operations. " +
-      "Available: docker (ps/logs/restart/stats/compose), ping, traceroute, curl, " +
-      "ip, nslookup, df, free, uptime, top, ps, cat, ls, grep. " +
-      "Pipes allowed. No destructive commands (rm, kill, etc.).",
+    description: "Execute a shell command on the GCP server. Use this for EVERYTHING — troubleshooting, fixing code, deploying, restarting services. " +
+      "Available: docker, ping, curl, sed, git, python3, node, cat, ls, grep, find, echo, tee, sort, awk, sleep, and more. " +
+      "Pipes (|) and chaining (&&) allowed. Output redirect (>) allowed. " +
+      "To edit files: sed -i 's/old/new/' path. To restart bridge: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge. " +
+      "No destructive commands (rm -rf, kill, etc.).",
     parameters: {
       type: "OBJECT",
       properties: {
@@ -1816,6 +1870,110 @@ async function buildSituationBriefing(persona) {
   return "\n\nSITUATION BRIEFING:\n" + lines.join("\n") + "\n";
 }
 
+// Device-specific unavailability reasons (used by fetchEntityContext and voice prompts)
+const DEVICE_UNAVAILABLE_HINTS = {
+  "151732606804847": "Midea washer cuts WiFi after ~10min idle — needs physical power button press",
+  "s_vide": "Sous vide may be unplugged",
+};
+
+function getUnavailableHint(entityId) {
+  for (const [pattern, hint] of Object.entries(DEVICE_UNAVAILABLE_HINTS)) {
+    if (entityId.includes(pattern)) return hint;
+  }
+  return null;
+}
+
+// ── Midea washer reconnect + raw command builder ──
+const WASHER_DEVICE_ID = "151732606804847";
+const WASHER_CONFIG_ENTRY_ID = "01KHCEWMT5FCK4JJJYXQDS4NQF";
+const WASHER_IP = "172.168.0.55";
+let washerReconnectInProgress = false;
+
+async function ensureWasherConnected() {
+  // Check if washer entities are unavailable but device is actually reachable
+  try {
+    const state = await haFetch(`/api/states/switch.${WASHER_DEVICE_ID}_power`);
+    if (state.state !== "unavailable") return state.state; // Already connected
+  } catch (_) {}
+
+  if (washerReconnectInProgress) {
+    await new Promise(r => setTimeout(r, 6000)); // Wait for in-progress reconnect
+    const state = await haFetch(`/api/states/switch.${WASHER_DEVICE_ID}_power`);
+    return state.state;
+  }
+
+  // Try ping
+  try {
+    const { execSync } = require("child_process");
+    execSync(`ping -c 1 -W 2 ${WASHER_IP}`, { timeout: 5000 });
+  } catch (_) {
+    return "unavailable"; // Not reachable
+  }
+
+  // Pingable — reload integration
+  console.log("[washer] Device pingable but HA shows unavailable — reloading integration...");
+  washerReconnectInProgress = true;
+  try {
+    await haFetch(`/api/config/config_entries/entry/${WASHER_CONFIG_ENTRY_ID}/reload`, { method: "POST" });
+    await new Promise(r => setTimeout(r, 5000));
+    const state = await haFetch(`/api/states/switch.${WASHER_DEVICE_ID}_power`);
+    console.log(`[washer] After reload: state=${state.state}`);
+    return state.state;
+  } finally {
+    washerReconnectInProgress = false;
+  }
+}
+
+const WASH_PROGRAMS = {
+  cotton: 0x00, eco: 0x01, fast_wash: 0x02, mixed: 0x03, wool: 0x05,
+  baby_clothes: 0x0C, down_jacket: 0x0F, intelligent: 0x11, quick_wash: 0x12,
+  fast_30: 0x17, fast_60: 0x18, cold_wash: 0x2D, silk: 0x38,
+  standard: 0x66, delicate: 0x03, default: 0xFF,
+};
+
+const WASH_TEMPERATURES = {
+  cold: 0x01, "0": 0x01, "20": 0x02, "30": 0x03, "40": 0x04,
+  "60": 0x05, "95": 0x06, "70": 0x07, default: 0xFF,
+};
+
+const WASH_WATER_LEVELS = {
+  low: 0x01, mid: 0x02, high: 0x03, auto: 0x05, default: 0xFF,
+};
+
+const WASH_SPIN_SPEEDS = {
+  off: 0x00, "0": 0x00, "400": 0x01, "600": 0x02, "800": 0x03,
+  "1000": 0x04, "1200": 0x05, "1400": 0x06, "1600": 0x07, default: 0xFF,
+};
+
+function buildWashCommand(program, temperature, waterLevel, spinSpeed, start = true) {
+  const progByte = WASH_PROGRAMS[program] ?? WASH_PROGRAMS.cotton;
+  const tempByte = WASH_TEMPERATURES[temperature] ?? WASH_TEMPERATURES["40"];
+  const waterByte = WASH_WATER_LEVELS[waterLevel] ?? WASH_WATER_LEVELS.auto;
+  const spinByte = WASH_SPIN_SPEEDS[spinSpeed] ?? WASH_SPIN_SPEEDS["800"];
+
+  // Body format matches MessageStart: [body_type=0x02] [power=0xFF] [start] [washing_data x13]
+  // washing_data = [mode] [program] [water_level] [reserved] [temperature] [spin_speed]
+  //                [wash_time] [dehydration_time] [detergent] [softener] [reserved x3]
+  // Use 0xFF for fields we don't control — firmware uses its own defaults
+  const bytes = [
+    0x02,       // body_type: set
+    0xFF,       // power: unchanged
+    start ? 0x01 : 0x00,  // start flag
+    0x00,       // mode: normal (washing_data[0])
+    progByte,   // program (washing_data[1])
+    waterByte,  // water_level (washing_data[2])
+    0x20,       // washing_data[3]: device flags byte — 0x20 from device query, NOT 0x00
+    tempByte,   // temperature (washing_data[4])
+    spinByte,   // dehydration/spin speed (washing_data[5])
+    0x00,       // wash_time: 0x00 = auto (device computes from program)
+    0x00,       // dehydration_time: 0x00 = auto
+    0x00,       // detergent: 0x00 = auto
+    0x00,       // softener: 0x00 = auto
+    0x00, 0x00, 0x00, // reserved (washing_data[10-12])
+  ];
+  return Buffer.from(bytes).toString("hex");
+}
+
 async function fetchEntityContext() {
   try {
     const states = await haFetch("/api/states");
@@ -1827,7 +1985,13 @@ async function fetchEntityContext() {
       if (!entityIds.has(state.entity_id)) continue;
       const label = labelMap.get(state.entity_id) || state.entity_id;
       const unit = state.attributes?.unit_of_measurement || "";
-      lines.push(`- ${label} (${state.entity_id}): ${state.state}${unit ? ` ${unit}` : ""}`);
+      let line = `- ${label} (${state.entity_id}): ${state.state}${unit ? ` ${unit}` : ""}`;
+      // Add hint for unavailable devices so Cipher can explain to King Kazuma
+      if (state.state === "unavailable") {
+        const hint = getUnavailableHint(state.entity_id);
+        if (hint) line += ` [REASON: ${hint}]`;
+      }
+      lines.push(line);
     }
     return lines.join("\n");
   } catch (err) {
@@ -2027,6 +2191,10 @@ async function handleToolCall(name, args) {
       if (name === "send_dev_directive") {
         const { type, title, description } = args;
         if (!type || !description) return { success: false, message: "Missing required fields" };
+        const VALID_TYPES = ["quick", "feature", "explore"];
+        if (!VALID_TYPES.includes(type)) {
+          return { success: false, message: `Invalid directive type '${type}'. Must be one of: ${VALID_TYPES.join(", ")}` };
+        }
 
         const directive = {
           id: `dir_${Date.now()}`, type, title: title || "",
@@ -2190,6 +2358,151 @@ async function handleToolCall(name, args) {
     }
   }
 
+  // ── start_wash (Midea washer — set params + start with remote-start check) ──
+  if (name === "start_wash") {
+    try {
+      // Step 1: Ensure washer is reachable
+      const washerState = await ensureWasherConnected();
+      if (washerState === "unavailable") {
+        return { success: false, message: "Washing machine is not reachable — it's powered off or WiFi disconnected. Someone needs to press the physical power button." };
+      }
+      if (washerState === "off") {
+        console.log("[start_wash] Powering on washer first...");
+        await haFetch(`/api/services/switch/turn_on`, {
+          method: "POST",
+          body: JSON.stringify({ entity_id: `switch.${WASHER_DEVICE_ID}_power` }),
+        });
+        await new Promise(r => setTimeout(r, 3000));
+      }
+
+      const program = (args.program || "cotton").toLowerCase().replace(/\s+/g, "_");
+      const temperature = (args.temperature || "40").toString().toLowerCase();
+      const waterLevel = (args.water_level || "auto").toLowerCase();
+      const spinSpeed = (args.spin_speed || "800").toString();
+
+      if (WASH_PROGRAMS[program] === undefined) {
+        const available = Object.keys(WASH_PROGRAMS).filter(k => k !== "default").join(", ");
+        return { success: false, message: `Unknown program '${program}'. Available: ${available}` };
+      }
+
+      const tempLabel = temperature === "cold" ? "cold water" : `${temperature}°C`;
+      console.log(`[start_wash] Program: ${program}, Temp: ${tempLabel}, Water: ${waterLevel}, Spin: ${spinSpeed}`);
+
+      // Step 2: Set wash parameters via raw command (this always works)
+      const cmdBody = buildWashCommand(program, temperature, waterLevel, spinSpeed, true);
+      console.log(`[start_wash] Setting params + start: ${cmdBody}`);
+      await haFetch("/api/services/midea_ac_lan/send_command", {
+        method: "POST",
+        body: JSON.stringify({ device_id: WASHER_DEVICE_ID, cmd_type: 2, cmd_body: cmdBody }),
+      });
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Step 3: Also send set_attribute(start=True) — uses cached washing_data
+      console.log("[start_wash] Sending set_attribute(start=true)...");
+      await haFetch("/api/services/midea_ac_lan/set_attribute", {
+        method: "POST",
+        body: JSON.stringify({
+          device_id: parseInt(WASHER_DEVICE_ID),
+          attribute: "start",
+          value: true,
+        }),
+      });
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Step 4: Check result
+      const statusState = await haFetch(`/api/states/sensor.${WASHER_DEVICE_ID}_status`);
+      const progState = await haFetch(`/api/states/sensor.${WASHER_DEVICE_ID}_program`);
+      console.log(`[start_wash] Result: status=${statusState.state}, program=${progState.state}`);
+
+      if (statusState.state === "start" || statusState.state === "delay") {
+        return {
+          success: true,
+          message: `Wash cycle started: ${program} at ${tempLabel}, ${waterLevel} water, ${spinSpeed}rpm spin. Status: ${statusState.state}.`
+        };
+      }
+
+      // Machine didn't start — likely Remote Start not enabled on physical panel
+      return {
+        success: false,
+        message: `I've configured the wash: ${program} at ${tempLabel}, ${waterLevel} water, ${spinSpeed}rpm spin — ` +
+          `but the machine won't start remotely (status: ${statusState.state}). ` +
+          `Remote Start needs to be enabled on the physical panel first: long-press the WiFi button until the WiFi icon lights up on the display, then I can start it. ` +
+          `Or just press Start on the machine — the program is already set.`
+      };
+    } catch (err) {
+      console.error(`[start_wash] Error: ${err.message}`);
+      return { success: false, message: `Failed to start wash: ${err.message}` };
+    }
+  }
+
+  // ── stop_wash (pause/stop washing machine) ──
+  if (name === "stop_wash") {
+    try {
+      const washerState = await ensureWasherConnected();
+      if (washerState === "unavailable") {
+        return { success: false, message: "Washing machine is unavailable — already off." };
+      }
+
+      console.log("[stop_wash] Sending pause via set_attribute(start=false)");
+      await haFetch("/api/services/midea_ac_lan/set_attribute", {
+        method: "POST",
+        body: JSON.stringify({
+          device_id: parseInt(WASHER_DEVICE_ID),
+          attribute: "start",
+          value: false,
+        }),
+      });
+
+      await new Promise(r => setTimeout(r, 2000));
+      const statusState = await haFetch(`/api/states/sensor.${WASHER_DEVICE_ID}_status`);
+      return { success: true, message: `Wash cycle paused/stopped. Machine status: ${statusState.state}.` };
+    } catch (err) {
+      console.error(`[stop_wash] Error: ${err.message}`);
+      return { success: false, message: `Failed to stop wash: ${err.message}` };
+    }
+  }
+
+  // ── get_entity_state (clean HA state lookup) ──
+  if (name === "get_entity_state") {
+    try {
+      const query = args.entity_id || "";
+      // Auto-reconnect washer if querying washer entities
+      if (query.includes(WASHER_DEVICE_ID) || query.includes("151732")) {
+        await ensureWasherConnected();
+      }
+      const allStates = await haFetch("/api/states");
+      // Match by exact entity_id, or by substring/prefix
+      const matches = allStates.filter(s => {
+        if (s.entity_id === query) return true;
+        if (s.entity_id.includes(query)) return true;
+        return false;
+      });
+      if (matches.length === 0) {
+        return { success: false, message: `No entities found matching '${query}'. Check the entity_id — use get_entity_state with a device number like '151732606804847' to find all entities for a device.` };
+      }
+      const results = matches.map(s => {
+        const attrs = s.attributes || {};
+        const parts = [`${s.entity_id}: ${s.state}`];
+        if (attrs.friendly_name) parts.push(`  name: ${attrs.friendly_name}`);
+        if (attrs.options) parts.push(`  options: [${attrs.options.join(", ")}]`);
+        if (attrs.unit_of_measurement) parts.push(`  unit: ${attrs.unit_of_measurement}`);
+        if (attrs.min !== undefined) parts.push(`  min: ${attrs.min}, max: ${attrs.max}`);
+        if (attrs.temperature) parts.push(`  temperature: ${attrs.temperature}`);
+        if (attrs.hvac_modes) parts.push(`  hvac_modes: [${attrs.hvac_modes.join(", ")}]`);
+        if (attrs.fan_modes) parts.push(`  fan_modes: [${attrs.fan_modes.join(", ")}]`);
+        parts.push(`  last_changed: ${s.last_changed}`);
+        if (s.state === "unavailable") {
+          const hint = getUnavailableHint(s.entity_id);
+          if (hint) parts.push(`  ⚠ ${hint}`);
+        }
+        return parts.join("\n");
+      });
+      return { success: true, message: `Found ${matches.length} entities:\n${results.join("\n\n")}` };
+    } catch (err) {
+      return { success: false, message: `Failed to fetch entity state: ${err.message}` };
+    }
+  }
+
   // ── HA tools (call HA REST API) ──
   if (HA_TOOL_NAMES.has(name)) {
     const resolved = resolveHAToolCall(name, args);
@@ -2197,12 +2510,47 @@ async function handleToolCall(name, args) {
       return { success: false, message: `Entity ${args.entity_id} is not controllable or not recognized.` };
     }
     try {
+      // Auto-reconnect washer if needed
+      if (resolved.entityId.includes(WASHER_DEVICE_ID)) {
+        await ensureWasherConnected();
+      }
+      // Check entity state BEFORE the action
+      let priorState = null;
+      try {
+        const preCheck = await haFetch(`/api/states/${resolved.entityId}`);
+        priorState = preCheck.state;
+      } catch (_) {}
+
       const serviceData = { entity_id: resolved.entityId, ...(resolved.data || {}) };
       await haFetch(`/api/services/${resolved.domain}/${resolved.service}`, {
         method: "POST",
         body: JSON.stringify(serviceData),
       });
-      return { success: true, message: `Called ${resolved.domain}.${resolved.service} on ${resolved.entityId}` };
+
+      // Check entity state AFTER the action (brief delay for state to propagate)
+      await new Promise(r => setTimeout(r, 1500));
+      let postState = null;
+      try {
+        const postCheck = await haFetch(`/api/states/${resolved.entityId}`);
+        postState = postCheck.state;
+      } catch (_) {}
+
+      // Build informative response
+      let msg = `Called ${resolved.domain}.${resolved.service} on ${resolved.entityId}.`;
+      if (postState === "unavailable") {
+        const hint = getUnavailableHint(resolved.entityId);
+        msg += ` WARNING: Entity is currently UNAVAILABLE — the device is offline or powered off. The command was sent but likely had no effect.`;
+        if (hint) msg += ` Likely reason: ${hint}.`;
+      } else if (priorState === "unavailable") {
+        msg += ` WARNING: Entity was UNAVAILABLE before the call — device may be offline. Command sent but may have no effect.`;
+        const hint = getUnavailableHint(resolved.entityId);
+        if (hint) msg += ` Likely reason: ${hint}.`;
+      } else if (priorState && postState && priorState === postState) {
+        msg += ` Note: State remained '${postState}' (was already '${priorState}' before the call).`;
+      } else if (postState) {
+        msg += ` State is now '${postState}'.`;
+      }
+      return { success: true, message: msg };
     } catch (err) {
       return { success: false, message: err.message || "HA service call failed" };
     }
@@ -2802,6 +3150,15 @@ function sendToGeminiText(text) {
   }
 }
 
+// Persona-aware notification: routes to Cipher or June depending on active persona
+function sendNotification(text) {
+  if (currentPersona === "cipher" && cipherPipeline && typeof cipherPipeline === "object") {
+    cipherPipeline.sendText(text);
+  } else {
+    sendToGeminiText(text);
+  }
+}
+
 function disconnectGeminiIfEmpty() {
   if (devices.size === 0) {
     // Stop cipher pipeline if active
@@ -3017,17 +3374,37 @@ async function startCipherPipeline() {
     "Present information like a technical briefing, not a terminal dump.\n" +
     "After showing the board, give a SHORT verbal walkthrough (2-3 sentences). Don't read it aloud.\n" +
     "\n" +
-    "ACTION vs DIRECTIVE — CRITICAL DISTINCTION:\n" +
-    "- DIRECT ACTION (you do it yourself right now): status checks, device control (turn on/off lights, AC, etc.), " +
-    "running commands, reading files, looking up info, answering questions, checking device status, mic checks, deploys.\n" +
-    "- DIRECTIVE (use send_dev_directive — do NOT do it yourself): adding new devices to Home Assistant, " +
-    "building new features, changing code or config, integrating new hardware/services, " +
-    "anything that modifies the ozzu ecosystem's codebase or infrastructure.\n" +
-    "- When King Kazuma describes something to BUILD or IMPLEMENT, discuss it briefly, then create a directive " +
-    "with send_dev_directive. Do NOT start reading files, writing code, or running implementation commands yourself.\n" +
-    "- The directive lifecycle is: send_dev_directive → plan phase → PIN approval → implementation by Cipher agent.\n" +
-    "- Example: 'Add the new washing machine to Home Assistant' → discuss briefly, then send_dev_directive " +
-    "with type 'feature', a clear title, and description. Do NOT start reading HA config files yourself.\n" +
+    "WHAT YOU DO YOURSELF vs WHAT NEEDS A DIRECTIVE:\n" +
+    "\n" +
+    "YOU DO IT YOURSELF (direct action — use your tools right now):\n" +
+    "- Device control: turn on/off, start wash, check status, deploy, restart services\n" +
+    "- Troubleshooting: read files, check logs, ping devices, diagnose issues\n" +
+    "- Bug fixes: if a tool fails, read the code, find the bug, fix it with run_command (sed/edit), restart the service\n" +
+    "- Config changes: small edits to server.js, docker restarts, HA config reloads\n" +
+    "- Deploys: run deploy scripts, OTA updates, docker compose restarts\n" +
+    "- Research: read code, search files, check HA API, understand how things work\n" +
+    "- ANYTHING you can accomplish with read_file + run_command + the other tools you have\n" +
+    "\n" +
+    "USE DIRECTIVE (send_dev_directive) ONLY FOR:\n" +
+    "- Large multi-file features that need planning and careful implementation (new UI screens, new integrations)\n" +
+    "- Architectural changes that touch many files and need King Kazuma's approval\n" +
+    "- Type must be: 'quick', 'feature', or 'explore' — nothing else\n" +
+    "- 'quick': Small fixes, single-file changes, config tweaks. Auto-starts, no approval needed. Uses Sonnet model.\n" +
+    "- 'feature': Multi-step work, multi-file changes, new integrations, infrastructure setup. Requires planning + PIN approval. Uses Opus model (strongest reasoning).\n" +
+    "- 'explore': Research tasks that report findings. No code changes.\n" +
+    "- CHOOSING THE RIGHT TYPE IS CRITICAL. If the task involves SSH, multiple machines, external services, " +
+    "or more than 3 steps — it's a 'feature', NOT a 'quick'. A 'quick' that should be a 'feature' will fail " +
+    "because it skips planning and uses a weaker model.\n" +
+    "\n" +
+    "THE RULE: If you can fix it yourself in under 5 minutes with your tools — DO IT. " +
+    "Don't create a directive for something you can handle directly. " +
+    "King Kazuma wants you to GET SHIT DONE, not create tickets.\n" +
+    "\n" +
+    "HOW TO EDIT FILES (when you need to fix code):\n" +
+    "- Use run_command with sed for simple edits: run_command({command: \"sed -i 's/old/new/' /home/gcp/ozzu/path/to/file.js\"})\n" +
+    "- Read the file first with read_file to understand context\n" +
+    "- After editing, restart the service: run_command({command: \"docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge\"})\n" +
+    "- Verify the fix worked by testing\n" +
     "\n" +
     "TRIGGERING PINs AND APPROVALS:\n" +
     "- You CAN trigger PIN requests! If King Kazuma says 'send me the PIN' or 'show the approval', " +
@@ -3039,32 +3416,24 @@ async function startCipherPipeline() {
     "\n" +
     "NEVER USE PLAN MODE — CRITICAL:\n" +
     "- You are a VOICE INTERFACE. You MUST NOT enter Claude Code's internal plan mode (EnterPlanMode). EVER.\n" +
-    "- You are NOT the implementation agent. You are the architect who TALKS to King Kazuma and " +
-    "sends work to the pipeline via send_dev_directive.\n" +
-    "- The pipeline has a SEPARATE Cipher agent that does the actual implementation work.\n" +
     "- If you enter plan mode, you block yourself — you can't talk to King Kazuma while you're stuck " +
-    "in a plan file that nobody reads. That's exactly what went wrong before.\n" +
-    "- The CORRECT flow:\n" +
-    "  1. King Kazuma says 'integrate the washing machine'\n" +
-    "  2. You discuss briefly if needed: 'What brand?' / 'Got it.'\n" +
-    "  3. You call send_dev_directive with a clear title and description\n" +
-    "  4. The pipeline handles planning → PIN approval → implementation\n" +
-    "  5. You tell King Kazuma: 'Sent it to the pipeline. You'll get a PIN when the plan is ready.'\n" +
-    "- The WRONG flow (what you must NEVER do):\n" +
-    "  1. King Kazuma says 'integrate the washing machine'\n" +
-    "  2. You start running nmap, ping, reading HA config files yourself\n" +
-    "  3. You enter plan mode and write a plan file\n" +
-    "  4. You say 'plan is ready' but no PIN was ever generated\n" +
-    "  5. King Kazuma waits forever for a PIN that never comes\n" +
-    "- If King Kazuma says 'go ahead with the plan' or 'start working on it' for a BUILD task, " +
-    "that means call send_dev_directive — NOT start doing it yourself.\n" +
+    "in a plan file that nobody reads.\n" +
     "\n" +
     "CONTEXT AWARENESS:\n" +
-    "- You do NOT inherit conversation context from June. When King Kazuma references previous conversations " +
-    "or existing work, call get_directives (with NO status filter) to see ALL directives in the pipeline.\n" +
+    "- You do NOT inherit conversation context from June or previous sessions. When King Kazuma references " +
+    "previous conversations or existing work, call get_directives (with NO status filter) to see ALL directives.\n" +
     "- NEVER say 'I don't have context' without first checking get_directives and get_pending_approvals.\n" +
     "- If King Kazuma asks about a directive, plan, or approval, ALWAYS check the tools first.\n" +
     "- Call get_directives with NO status filter to see everything — don't guess which status to filter by.\n" +
+    "\n" +
+    "UNDERSTANDING DIRECTIVE AGENTS vs YOUR SESSION:\n" +
+    "- When you create a directive with send_dev_directive, a SEPARATE Claude Code agent process handles it.\n" +
+    "- That agent is a DIFFERENT process from you — it has its own logs in /tmp/ozzu-bridge/agent-{directive_id}.log.\n" +
+    "- To check what the directive agent is doing: run_command({command: 'cat /tmp/ozzu-bridge/agent-{directive_id}.log | tail -50'})\n" +
+    "- Do NOT check bridge logs or docker logs to find directive agent progress — those show YOUR session and the bridge server.\n" +
+    "- The bridge logs (docker logs bridge) show YOUR voice conversation, not the directive agent's work.\n" +
+    "- If King Kazuma asks 'what is the agent doing?' — read the agent log file for that directive, not docker logs.\n" +
+    "- Use get_dev_status to see recent status updates from the agent, and query_history for directive history.\n" +
     "\n" +
     "PROACTIVE INVESTIGATION — CRITICAL:\n" +
     "- If King Kazuma asks about something that should already be done, or asks the SAME question " +
@@ -3075,7 +3444,61 @@ async function startCipherPipeline() {
     "- When troubleshooting, show your findings on the board with a clear breakdown: " +
     "what the status is, what went wrong, what the fix is.\n" +
     "- Think like a lead engineer: if something's stuck, own the diagnosis. " +
-    "King Kazuma shouldn't have to ask twice — if he does, it means you didn't go deep enough.\n";
+    "King Kazuma shouldn't have to ask twice — if he does, it means you didn't go deep enough.\n" +
+    "\n" +
+    "SMART DEVICE CONTROL — VERIFY AND EXPLAIN:\n" +
+    "- The tool response now includes state verification (before/after). Read the response carefully — " +
+    "it tells you if the state changed, stayed the same, or is unavailable.\n" +
+    "- ALWAYS use get_entity_state to check device status BEFORE acting on a device. " +
+    "Don't assume a device is unavailable — CHECK FIRST. Example: if King Kazuma says " +
+    "'what modes does the washing machine have?', call get_entity_state({entity_id: '151732606804847'}) " +
+    "to see all entities and their current states/options.\n" +
+    "- When a device IS confirmed 'unavailable', explain WHY using your device knowledge.\n" +
+    "- NEVER say 'I sent the command' and move on. Confirm it worked or explain why it didn't.\n" +
+    "\n" +
+    "DEVICE-SPECIFIC KNOWLEDGE (use ONLY when entities show 'unavailable'):\n" +
+    "IMPORTANT: Always check ACTUAL state with get_entity_state BEFORE referencing this list. " +
+    "These hints ONLY apply when a device is confirmed unavailable. If the device is 'on' or 'off', " +
+    "it's reachable — report its actual state, don't mention sleep mode.\n" +
+    "- WASHING MACHINE (Midea MF-200, entities: *151732606804847*): " +
+    "IF unavailable: cuts WiFi after ~10 min idle, needs physical power button. " +
+    "IF on/off: fully controllable. Use get_entity_state('151732606804847') to check status. " +
+    "To start a wash: use start_wash tool with program, temperature, water_level, spin_speed. " +
+    "Programs: cotton, eco, fast_wash, mixed, wool, baby_clothes, quick_wash, fast_30, fast_60, standard, delicate, silk, down_jacket, cold_wash. " +
+    "To pause: use stop_wash. The tool handles powering on automatically if needed. " +
+    "IMPORTANT: Remote Start must be enabled on the physical washing machine panel — long-press the WiFi button until the WiFi icon lights up. " +
+    "Without this, parameter changes work but the cycle won't start. If start_wash reports the machine stayed in standby, " +
+    "tell King Kazuma to enable Remote Start on the panel, then try again.\n" +
+    "- MAIN TV (media_player.main_tv): 'off' = standby (reachable). 'unavailable' = network issue.\n" +
+    "- SOUS VIDE (switch.s_vide_switch): 'unavailable' = likely unplugged.\n" +
+    "- CAMERAS (switch.cam1_*, switch.living_room_cam_*): 'unavailable' = check network.\n" +
+    "\n" +
+    "RICH DIRECTIVES — GIVE THE IMPLEMENTING AGENT EVERYTHING:\n" +
+    "When you call send_dev_directive, your description is ALL the implementing Cipher agent gets. " +
+    "Include EVERYTHING needed to do the work without asking questions:\n" +
+    "- Device IPs and ports (e.g. '172.168.0.55 port 6444')\n" +
+    "- Protocol details (e.g. 'M-Smart protocol, not Tuya')\n" +
+    "- Known limitations (e.g. 'device sleeps after 10 min, must be physically on during integration')\n" +
+    "- Credentials or where to find them (e.g. 'MSmartHome cloud credentials in HA config entry')\n" +
+    "- What King Kazuma said — his exact requirements and preferences\n" +
+    "- Expected entity IDs or naming patterns\n" +
+    "- Integration method (e.g. 'HACS custom component midea_ac_lan from wuwentao fork')\n" +
+    "- Network details: GCP VM (10.128.0.8), VPN (10.8.0.1), home LAN (172.168.0.x), dev-01 (172.168.0.59)\n" +
+    "- The implementing agent can: read/write files, run Bash, SSH to LAN devices, use Docker, git push, " +
+    "curl APIs, install packages. It runs on the GCP VM with full access.\n" +
+    "A vague directive like 'Add the washing machine to HA' will FAIL. A good directive says exactly " +
+    "how to do it, what to watch out for, and what success looks like.\n" +
+    "\n" +
+    "BE THE BRIDGE BETWEEN VOICE AND CLI:\n" +
+    "King Kazuma should NEVER need to open the CLI to do something you can handle. " +
+    "If he asks you to do something, figure out how — don't tell him to do it manually.\n" +
+    "- Need to check logs? Use run_command.\n" +
+    "- Need to restart a service? Use run_command with 'docker compose restart <service>'.\n" +
+    "- Need to check if a device is online? Use run_command with ping or curl.\n" +
+    "- Need to deploy an update? Use run_command with the deploy script.\n" +
+    "- Need to check HA entity details? Use run_command with curl to the HA API.\n" +
+    "- Need complex integration work? Create a rich directive with send_dev_directive.\n" +
+    "You ARE the CLI interface via voice. Act like it.\n";
 
   let systemPromptText;
   if (cipherMode === "learning") {
