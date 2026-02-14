@@ -11,6 +11,20 @@ const Redis = require("ioredis");
 const db = require("./db");
 const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
 const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents, startWatchdog } = require("./agent-spawner");
+const createLogger = require("./logger");
+
+const log = {
+  bridge: createLogger("bridge"),
+  directive: createLogger("directive"),
+  ws: createLogger("ws"),
+  gemini: createLogger("gemini"),
+  redis: createLogger("redis"),
+  pg: createLogger("pg"),
+  persona: createLogger("persona"),
+  audio: createLogger("audio"),
+  cipher: createLogger("cipher"),
+  memory: createLogger("memory"),
+};
 
 const PORT = 3333;
 const DATA_DIR = "/tmp/ozzu-bridge";
@@ -239,11 +253,11 @@ function saveStatusEntries(entries, latestEntry = null) {
   _statusEntries = entries;
   writeJSON(STATUS_FILE, entries);
   if (_redisConnected) redis.set("ozzu:status", JSON.stringify(entries)).catch(err =>
-    console.error("[redis] save status failed:", err.message));
+    log.redis.error("save status failed:", err.message));
   // Write to PG (uncapped history)
   if (latestEntry) {
     db.addStatusEntry(latestEntry, currentPersona).catch(err =>
-      console.error("[pg] save status failed:", err.message));
+      log.pg.error("save status failed:", err.message));
   }
 }
 
@@ -252,11 +266,11 @@ function saveApprovals(approvals, changedApproval = null) {
   _approvals = approvals;
   writeJSON(APPROVALS_FILE, approvals);
   if (_redisConnected) redis.set("ozzu:approvals", JSON.stringify(approvals)).catch(err =>
-    console.error("[redis] save approvals failed:", err.message));
+    log.redis.error("save approvals failed:", err.message));
   // Write changed approval to PG
   if (changedApproval) {
     db.saveApproval(changedApproval).catch(err =>
-      console.error("[pg] save approval failed:", err.message));
+      log.pg.error("save approval failed:", err.message));
   }
 }
 
@@ -288,14 +302,14 @@ function saveDirectives(directives, changedDirective = null, oldStatus = null) {
   _directives = directives;
   writeJSON(DIRECTIVES_FILE, directives);
   if (_redisConnected) redis.set("ozzu:directives", JSON.stringify(directives)).catch(err =>
-    console.error("[redis] save directives failed:", err.message));
+    log.redis.error("save directives failed:", err.message));
   // Write changed directive to PG + history
   if (changedDirective) {
     db.saveDirective(changedDirective).catch(err =>
-      console.error("[pg] save directive failed:", err.message));
+      log.pg.error("save directive failed:", err.message));
     if (oldStatus !== null && oldStatus !== changedDirective.status) {
       db.addDirectiveHistory(changedDirective.id, oldStatus, changedDirective.status, "system").catch(err =>
-        console.error("[pg] save directive history failed:", err.message));
+        log.pg.error("save directive history failed:", err.message));
     }
   }
 }
@@ -307,7 +321,7 @@ async function initStorage() {
   try {
     await redis.connect();
     _redisConnected = true;
-    console.log("[redis] Connected");
+    log.redis.info("Connected");
 
     // Restore active persona from Redis
     const savedPersona = await redis.get("ozzu:activePersona");
@@ -315,7 +329,7 @@ async function initStorage() {
       const { persona, cipherMode: mode } = JSON.parse(savedPersona);
       currentPersona = persona;
       cipherMode = mode;
-      console.log(`[startup] Restored persona: ${persona}${mode ? ` (${mode})` : ""}`);
+      log.bridge.info(`Restored persona: ${persona}${mode ? ` (${mode})` : ""}`);
     }
 
     // Load from Redis, or migrate from JSON files
@@ -325,7 +339,7 @@ async function initStorage() {
     } else if (fs.existsSync(DIRECTIVES_FILE)) {
       _directives = readJSON(DIRECTIVES_FILE, []);
       await redis.set("ozzu:directives", JSON.stringify(_directives));
-      console.log("[redis] Migrated directives from JSON");
+      log.redis.info("Migrated directives from JSON");
     }
 
     const storedApprovals = await redis.get("ozzu:approvals");
@@ -334,7 +348,7 @@ async function initStorage() {
     } else if (fs.existsSync(APPROVALS_FILE)) {
       _approvals = readJSON(APPROVALS_FILE, []);
       await redis.set("ozzu:approvals", JSON.stringify(_approvals));
-      console.log("[redis] Migrated approvals from JSON");
+      log.redis.info("Migrated approvals from JSON");
     }
 
     const storedStatus = await redis.get("ozzu:status");
@@ -343,10 +357,10 @@ async function initStorage() {
     } else if (fs.existsSync(STATUS_FILE)) {
       _statusEntries = readJSON(STATUS_FILE, []);
       await redis.set("ozzu:status", JSON.stringify(_statusEntries));
-      console.log("[redis] Migrated status from JSON");
+      log.redis.info("Migrated status from JSON");
     }
   } catch (err) {
-    console.error("[redis] Connection failed, falling back to JSON files:", err.message);
+    log.redis.error("Connection failed, falling back to JSON files:", err.message);
     _directives = readJSON(DIRECTIVES_FILE, []);
     _approvals = readJSON(APPROVALS_FILE, []);
     _statusEntries = readJSON(STATUS_FILE, []);
@@ -362,14 +376,15 @@ async function initStorage() {
       const oldStatus = d.status;
       d.status = d.status === "planning" ? "pending" : "stale";
       d.updatedAt = new Date().toISOString();
+      if (!d.failureReason) d.failureReason = `crash: server restarted while ${oldStatus}`;
       orphanCount++;
       const age = d.updatedAt ? Math.round((now - new Date(d.updatedAt).getTime()) / 60000) : "?";
-      console.log(`[directive] Recovered orphan: ${d.id} "${d.title}" (${oldStatus} → ${d.status}, age: ${age}min)`);
+      log.directive.info(`Recovered orphan: ${d.id} "${d.title}" (${oldStatus} → ${d.status}, age: ${age}min)`);
     }
   }
   if (orphanCount > 0) {
     saveDirectives(_directives);
-    console.log(`[directive] Recovered ${orphanCount} orphaned directive(s) on startup`);
+    log.directive.info(`Recovered ${orphanCount} orphaned directive(s) on startup`);
   }
 
   // Phase C: Stale auto-retry — promote stale directives with low retryCount
@@ -383,29 +398,30 @@ async function initStorage() {
         d.retryCount = rc + 1;
         d.updatedAt = new Date().toISOString();
         retryCount++;
-        console.log(`[directive] Stale auto-retry: ${d.id} "${d.title}" (stale → approved, retry #${d.retryCount})`);
+        log.directive.info(`Stale auto-retry: ${d.id} "${d.title}" (stale → approved, retry #${d.retryCount})`);
       } else {
         d.status = "failed";
+        d.failureReason = d.failureReason || `exhausted: failed after ${rc} retries`;
         d.updatedAt = new Date().toISOString();
-        console.log(`[directive] Stale exhausted: ${d.id} "${d.title}" (stale → failed, retries: ${rc})`);
+        log.directive.warn(`Stale exhausted: ${d.id} "${d.title}" (stale → failed, retries: ${rc})`);
       }
     }
   }
   if (retryCount > 0) {
     saveDirectives(_directives);
-    console.log(`[directive] Auto-retried ${retryCount} stale directive(s)`);
+    log.directive.info(`Auto-retried ${retryCount} stale directive(s)`);
   }
 
   // Phase B: Respawn agents for directives still in actionable states
   const respawnTargets = _directives.filter(d => d.status === "planning" || d.status === "approved");
   if (respawnTargets.length > 0) {
-    console.log(`[directive] Respawning agents for ${respawnTargets.length} active directive(s)...`);
+    log.directive.info(`Respawning agents for ${respawnTargets.length} active directive(s)...`);
     const INITIAL_DELAY = 5000; // 5s — let HTTP server start first
     const STAGGER_MS = 3000;   // 3s between spawns
     respawnTargets.forEach((d, i) => {
       setTimeout(() => {
         const type = d.status === "planning" ? "planning" : "implementation";
-        console.log(`[directive] Respawn: ${d.id} "${d.title}" → ${type} agent`);
+        log.directive.info(`Respawn: ${d.id} "${d.title}" → ${type} agent`);
         if (type === "planning") spawnPlanningAgent(d);
         else spawnImplementationAgent(d);
       }, INITIAL_DELAY + i * STAGGER_MS);
@@ -417,7 +433,7 @@ async function initStorage() {
     if (a.status !== "pending") return true;
     const age = now - new Date(a.createdAt || 0).getTime();
     if (age > STALE_THRESHOLD_MS) {
-      console.log(`[approval] Expired stale: ${a.id} (age: ${Math.round(age / 60000)}min)`);
+      log.directive.info(`Approval expired stale: ${a.id} (age: ${Math.round(age / 60000)}min)`);
       return false;
     }
     return true;
@@ -433,10 +449,10 @@ async function initStorage() {
     await migrateRedisToPostgres();
     // Start entity snapshot interval (every 5 min)
     setInterval(() => captureEntitySnapshots().catch(err =>
-      console.error("[pg] snapshot error:", err.message)), 5 * 60 * 1000);
+      log.pg.error("snapshot error:", err.message)), 5 * 60 * 1000);
     // Prune old snapshots daily
     setInterval(() => db.pruneEntitySnapshots(7).catch(err =>
-      console.error("[pg] prune error:", err.message)), 24 * 60 * 60 * 1000);
+      log.pg.error("prune error:", err.message)), 24 * 60 * 60 * 1000);
   }
 }
 
@@ -445,11 +461,11 @@ async function migrateRedisToPostgres() {
     // Check if migration already done
     const existing = await db.query("SELECT COUNT(*) as count FROM memories");
     if (existing.rows[0].count > 0) {
-      console.log("[pg] Data already present, skipping migration");
+      log.pg.info("Data already present, skipping migration");
       return;
     }
 
-    console.log("[pg] Starting Redis → PostgreSQL migration...");
+    log.pg.info("Starting Redis → PostgreSQL migration...");
 
     // Migrate memories
     if (_redisConnected) {
@@ -457,7 +473,7 @@ async function migrateRedisToPostgres() {
         const raw = await redis.zrevrange(`${persona}:facts`, 0, -1);
         const memories = raw.map(r => JSON.parse(r));
         const count = await db.migrateMemoriesFromRedis(persona, memories);
-        if (count > 0) console.log(`[pg] Migrated ${count} ${persona} memories`);
+        if (count > 0) log.pg.info(`Migrated ${count} ${persona} memories`);
       }
 
       // Migrate summaries
@@ -465,31 +481,31 @@ async function migrateRedisToPostgres() {
         const raw = await redis.lrange(`${persona}:summaries`, 0, -1);
         const summaries = raw.map(r => JSON.parse(r));
         const count = await db.migrateSummariesFromRedis(persona, summaries);
-        if (count > 0) console.log(`[pg] Migrated ${count} ${persona} summaries`);
+        if (count > 0) log.pg.info(`Migrated ${count} ${persona} summaries`);
       }
     }
 
     // Migrate directives
     if (_directives.length > 0) {
       const count = await db.migrateDirectivesFromRedis(_directives);
-      console.log(`[pg] Migrated ${count} directives`);
+      log.pg.info(`Migrated ${count} directives`);
     }
 
     // Migrate approvals
     if (_approvals.length > 0) {
       const count = await db.migrateApprovalsFromRedis(_approvals);
-      console.log(`[pg] Migrated ${count} approvals`);
+      log.pg.info(`Migrated ${count} approvals`);
     }
 
     // Migrate status entries
     if (_statusEntries.length > 0) {
       const count = await db.migrateStatusFromRedis(_statusEntries);
-      console.log(`[pg] Migrated ${count} status entries`);
+      log.pg.info(`Migrated ${count} status entries`);
     }
 
-    console.log("[pg] Migration complete");
+    log.pg.info("Migration complete");
   } catch (err) {
-    console.error("[pg] Migration error:", err.message);
+    log.pg.error("Migration error:", err.message);
   }
 }
 
@@ -503,7 +519,7 @@ async function captureEntitySnapshots() {
       await db.addEntitySnapshot(state.entity_id, state.state, state.attributes || null);
     }
   } catch (err) {
-    console.error("[pg] Entity snapshot capture failed:", err.message);
+    log.pg.error("Entity snapshot capture failed:", err.message);
   }
 }
 
@@ -512,7 +528,7 @@ async function captureEntitySnapshots() {
 async function addMemory(persona, fact, category = "general") {
   // Write to PG (primary)
   db.addMemory(persona, fact, category, "voice").catch(err =>
-    console.error("[pg] addMemory failed:", err.message));
+    log.pg.error("addMemory failed:", err.message));
   // Write-through to Redis (cache)
   if (!_redisConnected) return;
   const entry = JSON.stringify({ fact, category, ts: Date.now() });
@@ -527,7 +543,7 @@ async function getMemories(persona, limit = 50) {
     try {
       return await db.getMemories(persona, limit);
     } catch (err) {
-      console.error("[pg] getMemories failed, falling back to Redis:", err.message);
+      log.pg.error("getMemories failed, falling back to Redis:", err.message);
     }
   }
   if (!_redisConnected) return [];
@@ -542,7 +558,7 @@ async function addConversationSummary(persona, summary, turns) {
       const convId = await db.createConversation(persona);
       if (convId) await db.endConversation(convId, summary, turns);
     } catch (err) {
-      console.error("[pg] addConversationSummary failed:", err.message);
+      log.pg.error("addConversationSummary failed:", err.message);
     }
   }
   // Write-through to Redis
@@ -559,7 +575,7 @@ async function getRecentSummaries(persona, limit = 5) {
       const rows = await db.getRecentSummaries(persona, limit);
       if (rows.length > 0) return rows;
     } catch (err) {
-      console.error("[pg] getRecentSummaries failed, falling back to Redis:", err.message);
+      log.pg.error("getRecentSummaries failed, falling back to Redis:", err.message);
     }
   }
   if (!_redisConnected) return [];
@@ -706,7 +722,7 @@ async function handleRequest(req, res) {
       approval.approved = true;
       approval.resolvedAt = Date.now();
       approval.autoApproved = true;
-      console.log(`[approvals] Auto-approved (${approval.risk}): ${approval.description}`);
+      log.directive.info(`Auto-approved (${approval.risk}): ${approval.description}`);
       const approvals = getApprovals();
       approvals.push(approval);
       saveApprovals(approvals, approval);
@@ -819,6 +835,8 @@ async function handleRequest(req, res) {
       status: "pending",
       plan: null,
       directiveApprovalId: null,
+      retryCount: 0,
+      failureReason: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -903,6 +921,8 @@ async function handleRequest(req, res) {
     if (data.plan !== undefined) directive.plan = data.plan;
     if (data.title) directive.title = data.title;
     if (data.type) directive.type = data.type;
+    if (data.failureReason !== undefined) directive.failureReason = data.failureReason;
+    if (data.retryCount !== undefined) directive.retryCount = data.retryCount;
     directive.updatedAt = Date.now();
     directive.lastActivity = Date.now(); // Track when agent last touched this directive
 
@@ -1186,8 +1206,14 @@ async function handleRequest(req, res) {
 
     // Directive queue stats from in-memory cache
     const dirStats = { pending: 0, planning: 0, planned: 0, approved: 0, in_progress: 0, completed: 0, failed: 0, stale: 0 };
+    const recentFailures = [];
+    let totalRetries = 0;
     for (const d of _directives) {
       if (dirStats[d.status] !== undefined) dirStats[d.status]++;
+      if (d.retryCount) totalRetries += d.retryCount;
+      if (d.failureReason && (d.status === "failed" || d.status === "stale")) {
+        recentFailures.push({ id: d.id, title: d.title, status: d.status, failureReason: d.failureReason, retryCount: d.retryCount || 0 });
+      }
     }
 
     const agents = getRunningAgents();
@@ -1198,7 +1224,7 @@ async function handleRequest(req, res) {
       service: "ozzu-bridge",
       uptime: process.uptime(),
       agents: { active: agents.length, details: agents.map(a => ({ directiveId: a.directiveId, type: a.type, pid: a.pid })) },
-      directives: dirStats,
+      directives: { ...dirStats, totalRetries, recentFailures },
       redis: { connected: redisHealthy },
       postgres: pgHealth,
       gemini: { connected: !!geminiReady, model: GEMINI_MODEL },
@@ -1844,7 +1870,7 @@ function syncDirectiveFromApproval(approvalId, approved) {
   }
   directive.updatedAt = Date.now();
   saveDirectives(directives, directive, prevStatus);
-  console.log(`[directive] ${directive.id} → ${directive.status} (approval ${approvalId} ${approved ? "approved" : "denied"})`);
+  log.directive.info(`${directive.id} → ${directive.status} (approval ${approvalId} ${approved ? "approved" : "denied"})`);
 
   // Auto-spawn implementation agent when directive is approved via PIN
   if (directive.status === "approved" && prevStatus !== "approved") {
@@ -2006,13 +2032,13 @@ async function ensureWasherConnected() {
   }
 
   // Pingable — reload integration
-  console.log("[washer] Device pingable but HA shows unavailable — reloading integration...");
+  log.bridge.info("Device pingable but HA shows unavailable — reloading integration...");
   washerReconnectInProgress = true;
   try {
     await haFetch(`/api/config/config_entries/entry/${WASHER_CONFIG_ENTRY_ID}/reload`, { method: "POST" });
     await new Promise(r => setTimeout(r, 5000));
     const state = await haFetch(`/api/states/switch.${WASHER_DEVICE_ID}_power`);
-    console.log(`[washer] After reload: state=${state.state}`);
+    log.bridge.info(`After reload: state=${state.state}`);
     return state.state;
   } finally {
     washerReconnectInProgress = false;
@@ -2090,7 +2116,7 @@ async function fetchEntityContext() {
     }
     return lines.join("\n");
   } catch (err) {
-    console.error("[gemini] Failed to fetch entity context:", err.message);
+    log.gemini.error("Failed to fetch entity context:", err.message);
     return "(Entity data unavailable)";
   }
 }
@@ -2124,9 +2150,9 @@ async function handleToolCall(name, args) {
   if (name === "switch_to_cipher") {
     const mode = args.mode === "learning" ? "learning" : "building";
     if (args.mode && args.mode !== "building" && args.mode !== "learning") {
-      console.warn(`[persona] Unexpected mode "${args.mode}", defaulting to building`);
+      log.persona.warn(`Unexpected mode "${args.mode}", defaulting to building`);
     }
-    console.log(`[persona] switch_to_cipher: requested="${args.mode}" → resolved="${mode}"`);
+    log.persona.info(`switch_to_cipher: requested="${args.mode}" → resolved="${mode}"`);
     currentPersona = "cipher";
     cipherMode = mode;
     personaSwitchPending = true;
@@ -2146,7 +2172,7 @@ async function handleToolCall(name, args) {
     try {
       const persona = currentPersona;
       await addMemory(persona, args.fact, args.category || "general");
-      console.log(`[memory] ${persona} remembered: "${args.fact}" [${args.category || "general"}]`);
+      log.memory.info(`${persona} remembered: "${args.fact}" [${args.category || "general"}]`);
       return { success: true, message: `Remembered: "${args.fact}"` };
     } catch (err) {
       return { success: false, message: `Memory save failed: ${err.message}` };
@@ -2266,7 +2292,7 @@ async function handleToolCall(name, args) {
       if (name === "deploy_to_devices") {
         try {
           const { execSync } = require("child_process");
-          console.log("[deploy] Starting deploy to all devices...");
+          log.bridge.info("Starting deploy to all devices...");
           const deployId = await db.addDeployment("apk", null, ["all"]);
           const output = execSync("/home/gcp/ozzu/scripts/deploy.sh", {
             cwd: "/home/gcp/ozzu",
@@ -2274,11 +2300,11 @@ async function handleToolCall(name, args) {
             encoding: "utf8",
           });
           const successes = (output.match(/SUCCESS/g) || []).length;
-          console.log(`[deploy] Done, ${successes} device(s) updated`);
+          log.bridge.info(`Done, ${successes} device(s) updated`);
           if (deployId) db.completeDeployment(deployId, "completed", `${successes} device(s)`).catch(() => {});
           return { success: true, message: `Deployed to ${successes} device(s). ${output.split("\n").slice(-5).join(". ")}` };
         } catch (err) {
-          console.error("[deploy] Failed:", err.message);
+          log.bridge.error("Failed:", err.message);
           return { success: false, message: `Deploy failed: ${err.message}` };
         }
       }
@@ -2321,32 +2347,32 @@ async function handleToolCall(name, args) {
         }
         const streamUrl = getCameraStreamUrl(camera.streamName);
         broadcastToAll({ type: "showCamera", cameraId: camera.id, streamUrl, cameraName: camera.name });
-        console.log(`[camera] Showing ${camera.name} → ${streamUrl}`);
+        log.bridge.info(`Showing ${camera.name} → ${streamUrl}`);
         return { success: true, message: `Showing ${camera.name} on TV.` };
       }
 
       if (name === "hide_camera") {
         broadcastToAll({ type: "hideCamera" });
-        console.log("[camera] Hiding camera overlay");
+        log.bridge.info("Hiding camera overlay");
         return { success: true, message: "Camera overlay dismissed." };
       }
 
       if (name === "show_content") {
         broadcastToAll({ type: "showContent", title: args.title || "", content: args.content });
-        console.log(`[content] Showing panel: "${(args.title || "").substring(0, 40)}"`);
+        log.bridge.info(`Showing panel: "${(args.title || "").substring(0, 40)}"`);
         return { success: true, message: "Content displayed on screen." };
       }
 
       if (name === "hide_content") {
         broadcastToAll({ type: "hideContent" });
-        console.log("[content] Hiding content panel");
+        log.bridge.info("Hiding content panel");
         return { success: true, message: "Content panel closed." };
       }
 
       if (name === "read_file") {
         const validation = validateReadPath(args.path);
         if (!validation.ok) {
-          console.log(`[read_file] Denied: ${args.path} — ${validation.reason}`);
+          log.bridge.info(`Denied: ${args.path} — ${validation.reason}`);
           return { success: false, message: `Access denied: ${validation.reason}` };
         }
         try {
@@ -2357,7 +2383,7 @@ async function handleToolCall(name, args) {
           const output = truncated ? content.slice(0, READ_FILE_MAX_CHARS) : content;
           const header = `File: ${validation.relative} (${lines} lines, ${bytes} bytes)` +
             (truncated ? ` [truncated to ${READ_FILE_MAX_CHARS} chars]` : "");
-          console.log(`[read_file] Read ${validation.relative} (${lines} lines, ${bytes} bytes, truncated: ${truncated})`);
+          log.bridge.info(`Read ${validation.relative} (${lines} lines, ${bytes} bytes, truncated: ${truncated})`);
           return { success: true, message: header + "\n\n" + output };
         } catch (err) {
           return { success: false, message: `Failed to read file: ${err.message}` };
@@ -2367,12 +2393,12 @@ async function handleToolCall(name, args) {
       if (name === "run_command") {
         const validation = validateCommand(args.command);
         if (!validation.ok) {
-          console.log(`[run_command] Denied: "${args.command}" — ${validation.reason}`);
+          log.bridge.info(`Denied: "${args.command}" — ${validation.reason}`);
           return { success: false, message: `Command denied: ${validation.reason}` };
         }
         try {
           const { execSync } = require("child_process");
-          console.log(`[run_command] Executing: ${args.command}`);
+          log.bridge.info(`Executing: ${args.command}`);
           let output = execSync(args.command, {
             shell: "/bin/sh",
             timeout: 30000,
@@ -2381,14 +2407,14 @@ async function handleToolCall(name, args) {
           });
           const truncated = output.length > 8000;
           if (truncated) output = output.slice(0, 8000);
-          console.log(`[run_command] Success (${output.length} chars, truncated: ${truncated})`);
+          log.bridge.info(`Success (${output.length} chars, truncated: ${truncated})`);
           return {
             success: true,
             message: `$ ${args.command}\n\n${output}` + (truncated ? "\n[output truncated at 8000 chars]" : ""),
           };
         } catch (err) {
           const stderr = err.stderr || err.message || "Command failed";
-          console.error(`[run_command] Failed: ${args.command} — ${stderr}`);
+          log.bridge.error(`Failed: ${args.command} — ${stderr}`);
           return { success: false, message: `Command failed (exit ${err.status || "?"}): ${stderr}` };
         }
       }
@@ -2467,7 +2493,7 @@ async function handleToolCall(name, args) {
         return { success: false, message: "Washing machine is not reachable — it's powered off or WiFi disconnected. Someone needs to press the physical power button." };
       }
       if (washerState === "off") {
-        console.log("[start_wash] Powering on washer first...");
+        log.bridge.info("Powering on washer first...");
         await haFetch(`/api/services/switch/turn_on`, {
           method: "POST",
           body: JSON.stringify({ entity_id: `switch.${WASHER_DEVICE_ID}_power` }),
@@ -2486,11 +2512,11 @@ async function handleToolCall(name, args) {
       }
 
       const tempLabel = temperature === "cold" ? "cold water" : `${temperature}°C`;
-      console.log(`[start_wash] Program: ${program}, Temp: ${tempLabel}, Water: ${waterLevel}, Spin: ${spinSpeed}`);
+      log.bridge.info(`Program: ${program}, Temp: ${tempLabel}, Water: ${waterLevel}, Spin: ${spinSpeed}`);
 
       // Step 2: Set wash parameters via raw command (this always works)
       const cmdBody = buildWashCommand(program, temperature, waterLevel, spinSpeed, true);
-      console.log(`[start_wash] Setting params + start: ${cmdBody}`);
+      log.bridge.info(`Setting params + start: ${cmdBody}`);
       await haFetch("/api/services/midea_ac_lan/send_command", {
         method: "POST",
         body: JSON.stringify({ device_id: WASHER_DEVICE_ID, cmd_type: 2, cmd_body: cmdBody }),
@@ -2498,7 +2524,7 @@ async function handleToolCall(name, args) {
       await new Promise(r => setTimeout(r, 2000));
 
       // Step 3: Also send set_attribute(start=True) — uses cached washing_data
-      console.log("[start_wash] Sending set_attribute(start=true)...");
+      log.bridge.info("Sending set_attribute(start=true)...");
       await haFetch("/api/services/midea_ac_lan/set_attribute", {
         method: "POST",
         body: JSON.stringify({
@@ -2512,7 +2538,7 @@ async function handleToolCall(name, args) {
       // Step 4: Check result
       const statusState = await haFetch(`/api/states/sensor.${WASHER_DEVICE_ID}_status`);
       const progState = await haFetch(`/api/states/sensor.${WASHER_DEVICE_ID}_program`);
-      console.log(`[start_wash] Result: status=${statusState.state}, program=${progState.state}`);
+      log.bridge.info(`Result: status=${statusState.state}, program=${progState.state}`);
 
       if (statusState.state === "start" || statusState.state === "delay") {
         return {
@@ -2530,7 +2556,7 @@ async function handleToolCall(name, args) {
           `Or just press Start on the machine — the program is already set.`
       };
     } catch (err) {
-      console.error(`[start_wash] Error: ${err.message}`);
+      log.bridge.error(`Error: ${err.message}`);
       return { success: false, message: `Failed to start wash: ${err.message}` };
     }
   }
@@ -2543,7 +2569,7 @@ async function handleToolCall(name, args) {
         return { success: false, message: "Washing machine is unavailable — already off." };
       }
 
-      console.log("[stop_wash] Sending pause via set_attribute(start=false)");
+      log.bridge.info("Sending pause via set_attribute(start=false)");
       await haFetch("/api/services/midea_ac_lan/set_attribute", {
         method: "POST",
         body: JSON.stringify({
@@ -2557,7 +2583,7 @@ async function handleToolCall(name, args) {
       const statusState = await haFetch(`/api/states/sensor.${WASHER_DEVICE_ID}_status`);
       return { success: true, message: `Wash cycle paused/stopped. Machine status: ${statusState.state}.` };
     } catch (err) {
-      console.error(`[stop_wash] Error: ${err.message}`);
+      log.bridge.error(`Error: ${err.message}`);
       return { success: false, message: `Failed to stop wash: ${err.message}` };
     }
   }
@@ -2745,7 +2771,7 @@ function engage(reason) {
   const wasEngaged = isEngaged();
   engagedUntil = Date.now() + ENGAGE_DURATION_MS;
   if (!wasEngaged) {
-    console.log(`[wake] ENGAGED — ${reason}`);
+    log.gemini.info(`ENGAGED — ${reason}`);
     // Flush any buffered audio to speakers
     for (const chunk of pendingAudioBuffer) {
       broadcastToRole("speaker", { type: "audio", data: chunk });
@@ -2789,13 +2815,13 @@ let geminiSpeaking = false; // true while model is outputting audio — used to 
 async function connectGemini() {
   if (geminiWs || geminiConnecting) return;
   if (!GEMINI_API_KEY) {
-    console.error("[gemini] No GEMINI_API_KEY set, cannot connect");
+    log.gemini.error("No GEMINI_API_KEY set, cannot connect");
     broadcastToAll({ type: "error", message: "No Gemini API key configured" });
     return;
   }
 
   geminiConnecting = true;
-  console.log("[gemini] Connecting to Gemini Live API...");
+  log.gemini.info("Connecting to Gemini Live API...");
 
   const [entityContext, memoryContext, situationBriefing] = await Promise.all([
     fetchEntityContext(),
@@ -2807,7 +2833,7 @@ async function connectGemini() {
   geminiWs = ws;
 
   ws.on("open", () => {
-    console.log("[gemini] WebSocket connected, sending setup...");
+    log.gemini.info("WebSocket connected, sending setup...");
 
     // Build persona-specific config
     let voice, systemPromptText, toolDeclarations;
@@ -2865,17 +2891,17 @@ async function connectGemini() {
 
     if (geminiResumeToken) {
       setup.sessionResumption = { handle: geminiResumeToken };
-      console.log(`[gemini] Reconnecting with resume token (persona: ${currentPersona})`);
+      log.gemini.info(`Reconnecting with resume token (persona: ${currentPersona})`);
     } else {
-      console.log(`[gemini] Fresh session as ${currentPersona}${cipherMode ? ` (${cipherMode})` : ""}`);
+      log.gemini.info(`Fresh session as ${currentPersona}${cipherMode ? ` (${cipherMode})` : ""}`);
       conversationTranscript = []; // clear on fresh session, not on reconnect/goAway
       turnIndex = 0;
       // Create PG conversation record for transcript logging
       const connDevices = [...devices.values()].map(d => d.deviceId);
       db.createConversation(currentPersona, connDevices).then(id => {
         currentConversationId = id;
-        if (id) console.log(`[pg] Conversation ${id} started`);
-      }).catch(err => console.error("[pg] create conversation:", err.message));
+        if (id) log.pg.info(`Conversation ${id} started`);
+      }).catch(err => log.pg.error("create conversation:", err.message));
     }
 
     ws.send(JSON.stringify({ setup }));
@@ -2886,19 +2912,19 @@ async function connectGemini() {
       const msg = JSON.parse(raw.toString());
       handleGeminiMessage(msg);
     } catch (err) {
-      console.error("[gemini] Parse error:", err.message);
+      log.gemini.error("Parse error:", err.message);
     }
   });
 
   ws.on("error", (err) => {
-    console.error("[gemini] WebSocket error:", err.message);
+    log.gemini.error("WebSocket error:", err.message);
     broadcastToAll({ type: "error", message: "Gemini connection error" });
   });
 
   ws.on("close", () => {
     const wasSpeaking = geminiSpeaking;
     const hadPendingTools = pendingToolResponses !== null;
-    console.log("[gemini] WebSocket closed (wasSpeaking=%s, hadPendingTools=%s)", wasSpeaking, hadPendingTools);
+    log.gemini.info("WebSocket closed (wasSpeaking=%s, hadPendingTools=%s)", wasSpeaking, hadPendingTools);
     geminiWs = null;
     geminiConnecting = false;
     geminiReady = false;
@@ -2915,12 +2941,12 @@ async function connectGemini() {
     // flag it so recovery nudge fires after reconnect
     if ((wasSpeaking || hadPendingTools) && !goAwayDuringToolCall) {
       goAwayDuringToolCall = true;
-      console.log("[gemini] Flagging for recovery nudge (dropped mid-action)");
+      log.gemini.info("Flagging for recovery nudge (dropped mid-action)");
     }
 
     // Auto-reconnect as long as devices are still connected and cipher pipeline isn't active
     if (devices.size > 0 && !cipherPipeline) {
-      console.log("[gemini] Auto-reconnecting in 2s...");
+      log.gemini.info("Auto-reconnecting in 2s...");
       setTimeout(() => connectGemini(), 2000);
     }
   });
@@ -2932,12 +2958,12 @@ function handleGeminiMessage(msg) {
     geminiConnecting = false;
     geminiReady = true;
     geminiAudioSentCount = 0;
-    console.log("[gemini] Setup complete, session active");
+    log.gemini.info("Setup complete, session active");
     broadcastToAll({ type: "ready" });
 
     // Retry any tool responses that were queued when the previous session dropped
     if (pendingToolResponses && geminiWs && geminiWs.readyState === 1) {
-      console.log("[gemini] Sending queued tool response from previous session");
+      log.gemini.info("Sending queued tool response from previous session");
       geminiWs.send(pendingToolResponses);
       pendingToolResponses = null;
     }
@@ -2961,7 +2987,7 @@ function handleGeminiMessage(msg) {
         ? ` You were saying: "${goAwayPartialOutput.trim()}" before being cut off.`
         : "";
       goAwayPartialOutput = "";
-      console.log("[gemini] Recovered from goAway that interrupted a tool call — nudging retry");
+      log.gemini.info("Recovered from goAway that interrupted a tool call — nudging retry");
       setTimeout(() => {
         sendToGeminiText(
           "[SYSTEM: The session was briefly interrupted before you could finish." +
@@ -2974,7 +3000,7 @@ function handleGeminiMessage(msg) {
         goAwayNudgeTimer = setTimeout(() => {
           goAwayNudgeTimer = null;
           if (!personaSwitchPending && geminiReady) {
-            console.log("[gemini] Post-nudge timeout — no tool call received, re-nudging");
+            log.gemini.info("Post-nudge timeout — no tool call received, re-nudging");
             sendToGeminiText(
               "[SYSTEM: You still have not called the tool. This is urgent. " +
               "Call the tool function RIGHT NOW. Do not speak, just call the tool.]"
@@ -2992,10 +3018,10 @@ function handleGeminiMessage(msg) {
   if (msg.sessionResumptionUpdate) {
     const update = msg.sessionResumptionUpdate;
     const handle = update.handle || update.newHandle;
-    console.log(`[gemini] Session resumption: resumable=${update.resumable}, hasHandle=${!!handle}, keys=${Object.keys(update).join(",")}`);
+    log.gemini.info(`Session resumption: resumable=${update.resumable}, hasHandle=${!!handle}, keys=${Object.keys(update).join(",")}`);
     if (handle) {
       geminiResumeToken = handle;
-      console.log("[gemini] Stored resume token for next reconnect");
+      log.gemini.info("Stored resume token for next reconnect");
     }
     return;
   }
@@ -3003,7 +3029,7 @@ function handleGeminiMessage(msg) {
   // Go away — server is about to disconnect, proactively reconnect to preserve context
   if (msg.goAway) {
     const timeLeft = msg.goAway.timeLeft ? parseInt(msg.goAway.timeLeft) : 0;
-    console.log(`[gemini] Server goAway, timeLeft: ${timeLeft}s — proactively reconnecting`);
+    log.gemini.info(`Server goAway, timeLeft: ${timeLeft}s — proactively reconnecting`);
     goAwayDuringToolCall = pendingToolResponses !== null;
     // Close current connection and immediately reconnect with resume token
     if (geminiWs) {
@@ -3021,7 +3047,7 @@ function handleGeminiMessage(msg) {
 
   // Tool call cancellation
   if (msg.toolCallCancellation?.ids) {
-    console.log("[gemini] Tool calls cancelled:", msg.toolCallCancellation.ids);
+    log.gemini.info("Tool calls cancelled:", msg.toolCallCancellation.ids);
     goAwayDuringToolCall = true;
     return;
   }
@@ -3040,14 +3066,14 @@ function handleGeminiMessage(msg) {
   if (!sc) {
     // Log unhandled message types for debugging
     const keys = Object.keys(msg).filter(k => k !== 'serverContent');
-    if (keys.length > 0) console.log(`[gemini] Unhandled msg keys: ${keys.join(', ')}`);
+    if (keys.length > 0) log.gemini.info(`Unhandled msg keys: ${keys.join(', ')}`);
     return;
   }
 
   // Input transcript (user speech) — accumulate and check for wake word
   if (sc.inputTranscription?.text) {
     const text = sc.inputTranscription.text;
-    console.log(`[gemini] INPUT: "${text}"`);
+    log.gemini.info(`INPUT: "${text}"`);
     inputTranscriptBuffer += text;
     conversationTranscript.push({ role: "user", text, timestamp: Date.now() });
     // Log turn to PG
@@ -3094,7 +3120,7 @@ function handleGeminiMessage(msg) {
 
   // Output transcript (model speech) — only forward when engaged
   if (sc.outputTranscription?.text) {
-    console.log(`[gemini] OUTPUT: "${sc.outputTranscription.text}"`);
+    log.gemini.info(`OUTPUT: "${sc.outputTranscription.text}"`);
     goAwayPartialOutput += sc.outputTranscription.text; // track for goAway recovery
     conversationTranscript.push({ role: "model", text: sc.outputTranscription.text, timestamp: Date.now() });
     // Log turn to PG
@@ -3133,7 +3159,7 @@ async function handleGeminiToolCalls(functionCalls) {
       } catch (err) {
         result = { success: false, message: err.message || "Tool call failed" };
       }
-      console.log(`[gemini] Tool ${name} → ${result.success ? "ok" : "fail"}: ${result.message?.substring(0, 80)}`);
+      log.gemini.info(`Tool ${name} → ${result.success ? "ok" : "fail"}: ${result.message?.substring(0, 80)}`);
       // Log tool call to PG conversation
       if (currentConversationId) {
         db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }).catch(() => {});
@@ -3152,7 +3178,7 @@ async function handleGeminiToolCalls(functionCalls) {
     pendingToolResponses = null;
   } else {
     // Session dropped while we were processing — queue for retry after reconnect
-    console.log("[gemini] Session dropped mid-tool-call, queuing response for retry");
+    log.gemini.info("Session dropped mid-tool-call, queuing response for retry");
     pendingToolResponses = payload;
   }
 }
@@ -3201,7 +3227,7 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
   // Mic switching: only forward audio from one mic at a time
   if (!activeMic) {
     activeMic = ws;
-    console.log(`[audio] Mic active: ${deviceId}`);
+    log.audio.info(`Mic active: ${deviceId}`);
   }
 
   if (activeMic === ws) {
@@ -3216,7 +3242,7 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
         now - activeMicSilenceSince > MIC_RELEASE_MS &&
         now - lastMicSwitchAt > MIC_SWITCH_COOLDOWN_MS) {
       const oldInfo = devices.get(activeMic);
-      console.log(`[audio] Mic switch: ${deviceId} (peak=${peak}) takes over from ${oldInfo?.deviceId}`);
+      log.audio.info(`Mic switch: ${deviceId} (peak=${peak}) takes over from ${oldInfo?.deviceId}`);
       activeMic = ws;
       activeMicSilenceSince = 0;
       lastMicSwitchAt = now;
@@ -3227,7 +3253,7 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
 
   geminiAudioSentCount++;
   if (geminiAudioSentCount === 1 || geminiAudioSentCount % 2500 === 0) {
-    console.log(`[gemini] Audio chunk #${geminiAudioSentCount} from ${deviceId}, rawPeak=${peak}, amplified=${peak * AUDIO_GAIN}`);
+    log.gemini.info(`Audio chunk #${geminiAudioSentCount} from ${deviceId}, rawPeak=${peak}, amplified=${peak * AUDIO_GAIN}`);
   }
 
   // Amplify audio to compensate for quiet tablet mics, then forward to Gemini
@@ -3263,15 +3289,15 @@ function disconnectGeminiIfEmpty() {
   if (devices.size === 0) {
     // Stop cipher pipeline if active
     if (cipherPipeline && typeof cipherPipeline === "object") {
-      console.log("[cipher] No devices connected, stopping Cipher pipeline");
+      log.cipher.info("No devices connected, stopping Cipher pipeline");
       generateSessionSummary(currentPersona).catch(err =>
-        console.error("[memory] disconnect summary error:", err.message));
+        log.memory.error("disconnect summary error:", err.message));
       cipherPipeline.stop().then(() => { cipherPipeline = null; });
     }
     if (geminiWs) {
-      console.log("[gemini] No devices connected, closing Gemini session");
+      log.gemini.info("No devices connected, closing Gemini session");
       generateSessionSummary(currentPersona).catch(err =>
-        console.error("[memory] disconnect summary error:", err.message));
+        log.memory.error("disconnect summary error:", err.message));
       geminiResumeToken = null; // Prevent auto-reconnect
       geminiWs.close();
       geminiWs = null;
@@ -3309,15 +3335,15 @@ async function generateSessionSummary(persona) {
     const summary = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (summary) {
       await addConversationSummary(persona, summary, conversationTranscript.length);
-      console.log(`[memory] ${persona} session summary stored (${conversationTranscript.length} turns)`);
+      log.memory.info(`${persona} session summary stored (${conversationTranscript.length} turns)`);
       // Finalize PG conversation with summary
       if (currentConversationId) {
         db.endConversation(currentConversationId, summary, conversationTranscript.length).catch(err =>
-          console.error("[pg] end conversation:", err.message));
+          log.pg.error("end conversation:", err.message));
       }
     }
   } catch (err) {
-    console.error("[memory] Summary generation failed:", err.message);
+    log.memory.error("Summary generation failed:", err.message);
   }
   conversationTranscript = [];
   currentConversationId = null;
@@ -3327,7 +3353,7 @@ async function generateSessionSummary(persona) {
 // ── Persona switching ──
 
 async function switchPersona() {
-  console.log(`[persona] Switching to ${currentPersona}${cipherMode ? ` (${cipherMode})` : ""}`);
+  log.persona.info(`Switching to ${currentPersona}${cipherMode ? ` (${cipherMode})` : ""}`);
 
   // Persist active persona to Redis
   if (_redisConnected) {
@@ -3341,7 +3367,7 @@ async function switchPersona() {
   // Summarize the ending persona's conversation (async, fire-and-forget)
   const endingPersona = currentPersona === "june" ? "cipher" : "june"; // persona we're switching FROM
   generateSessionSummary(endingPersona).catch(err =>
-    console.error("[memory] switchPersona summary error:", err.message));
+    log.memory.error("switchPersona summary error:", err.message));
   geminiResumeToken = null; // Don't resume across persona switches
   geminiSpeaking = false;
   inputTranscriptBuffer = "";
@@ -3382,7 +3408,7 @@ async function switchPersona() {
   } else {
     // June uses Gemini Live Audio — auto-reconnect will handle it
     if (currentPersona === "cipher") {
-      console.warn("[cipher] Claude backend disabled — falling back to Gemini for Cipher");
+      log.cipher.warn("Claude backend disabled — falling back to Gemini for Cipher");
     }
     if (devices.size > 0) connectGemini();
   }
@@ -3391,7 +3417,7 @@ async function switchPersona() {
 async function startCipherPipeline() {
   // Guard: if pipeline is already running or starting, bail out
   if (cipherPipeline && cipherPipeline !== "starting") {
-    console.log("[cipher] Pipeline already running, skipping duplicate start");
+    log.cipher.info("Pipeline already running, skipping duplicate start");
     return;
   }
   cipherPipeline = "starting"; // sentinel to prevent concurrent starts
@@ -3662,13 +3688,13 @@ async function startCipherPipeline() {
   });
 
   cipherPipeline.on("error", (err) => {
-    console.error("[cipher] Pipeline error:", err.message);
+    log.cipher.error("Pipeline error:", err.message);
   });
 
   // Start the pipeline
   const ok = await cipherPipeline.start();
   if (!ok) {
-    console.error("[cipher] Pipeline failed to start, falling back to Gemini");
+    log.cipher.error("Pipeline failed to start, falling back to Gemini");
     cipherPipeline = null;
     if (devices.size > 0) connectGemini();
     return;
@@ -3678,8 +3704,8 @@ async function startCipherPipeline() {
   const connDevices = [...devices.values()].map(d => d.deviceId);
   db.createConversation("cipher", connDevices).then(id => {
     currentConversationId = id;
-    if (id) console.log(`[pg] Conversation ${id} started (cipher pipeline)`);
-  }).catch(err => console.error("[pg] create conversation:", err.message));
+    if (id) log.pg.info(`Conversation ${id} started (cipher pipeline)`);
+  }).catch(err => log.pg.error("create conversation:", err.message));
 
   conversationTranscript = [];
   turnIndex = 0;
@@ -3712,7 +3738,7 @@ const server = http.createServer(async (req, res) => {
 const wss = new WebSocket.Server({ server, path: "/ws" });
 
 wss.on("connection", (ws) => {
-  console.log("[ws] New device connection");
+  log.ws.info("New device connection");
 
   ws.on("message", (raw) => {
     try {
@@ -3722,10 +3748,10 @@ wss.on("connection", (ws) => {
         const role = msg.role === "speaker" ? "speaker" : "mic";
         const deviceId = msg.deviceId || "unknown";
         devices.set(ws, { role, deviceId });
-        console.log(`[ws] Device registered: ${deviceId} (${role}), total: ${devices.size}`);
+        log.ws.info(`Device registered: ${deviceId} (${role}), total: ${devices.size}`);
         // Persist device in PG registry
         db.upsertDevice(deviceId, role === "speaker" ? "tv" : "tablet").catch(err =>
-          console.error("[pg] upsert device:", err.message));
+          log.pg.error("upsert device:", err.message));
 
         // Start AI session if not already running
         if (cipherPipeline) {
@@ -3760,7 +3786,7 @@ wss.on("connection", (ws) => {
 
           if (!activeMic) {
             activeMic = ws;
-            console.log(`[audio] Cipher mic active: ${info.deviceId}`);
+            log.audio.info(`Cipher mic active: ${info.deviceId}`);
           }
           if (activeMic === ws) {
             if (peak < MIC_SPEECH_THRESHOLD) {
@@ -3775,7 +3801,7 @@ wss.on("connection", (ws) => {
               now - activeMicSilenceSince > MIC_RELEASE_MS &&
               now - lastMicSwitchAt > MIC_SWITCH_COOLDOWN_MS) {
             const oldInfo = devices.get(activeMic);
-            console.log(`[audio] Cipher mic switch: ${info.deviceId} (peak=${peak}) takes over from ${oldInfo?.deviceId}`);
+            log.audio.info(`Cipher mic switch: ${info.deviceId} (peak=${peak}) takes over from ${oldInfo?.deviceId}`);
             activeMic = ws;
             activeMicSilenceSince = 0;
             lastMicSwitchAt = now;
@@ -3844,7 +3870,7 @@ wss.on("connection", (ws) => {
         return;
       }
     } catch (err) {
-      console.error("[ws] Message parse error:", err.message);
+      log.ws.error("Message parse error:", err.message);
     }
   });
 
@@ -3855,34 +3881,34 @@ wss.on("connection", (ws) => {
       activeMic = null;
       activeMicSilenceSince = 0;
     }
-    console.log(`[ws] Device disconnected: ${info?.deviceId || "unknown"}, remaining: ${devices.size}`);
+    log.ws.info(`Device disconnected: ${info?.deviceId || "unknown"}, remaining: ${devices.size}`);
     disconnectGeminiIfEmpty();
   });
 
   ws.on("error", (err) => {
-    console.error("[ws] Device error:", err.message);
+    log.ws.error("Device error:", err.message);
   });
 });
 
 (async () => {
   await initStorage();
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`[ozzu-bridge] listening on :${PORT}`);
-    console.log(`[ozzu-bridge] data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);
-    console.log(`[ozzu-bridge] HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
-    console.log(`[ozzu-bridge] agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
+    log.bridge.info(`listening on :${PORT}`);
+    log.bridge.info(`data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);
+    log.bridge.info(`HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
+    log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
     startWatchdog();
   });
 })();
 
 // Graceful shutdown: kill any running agent subprocesses
 process.on("SIGTERM", () => {
-  console.log("[ozzu-bridge] SIGTERM received, killing agent subprocesses...");
+  log.bridge.info("SIGTERM received, killing agent subprocesses...");
   killAllAgents();
   process.exit(0);
 });
 process.on("SIGINT", () => {
-  console.log("[ozzu-bridge] SIGINT received, killing agent subprocesses...");
+  log.bridge.info("SIGINT received, killing agent subprocesses...");
   killAllAgents();
   process.exit(0);
 });
