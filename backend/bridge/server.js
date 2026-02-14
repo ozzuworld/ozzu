@@ -429,8 +429,9 @@ async function initStorage() {
     if (failedCount > 0) log.directive.info(`Failed ${failedCount} exhausted directive(s)`);
   }
 
-  // Phase B: Respawn agents for directives still in actionable states
-  const respawnTargets = _directives.filter(d => d.status === "planning" || d.status === "approved");
+  // Phase B: Respawn agents for directives still in actionable states (higher priority first)
+  const respawnTargets = _directives.filter(d => d.status === "planning" || d.status === "approved")
+    .sort((a, b) => (a.priority || 3) - (b.priority || 3));
   if (respawnTargets.length > 0) {
     log.directive.info(`Respawning agents for ${respawnTargets.length} active directive(s)...`);
     const INITIAL_DELAY = 5000; // 5s — let HTTP server start first
@@ -650,7 +651,7 @@ function sendJSON(res, status, data) {
   res.writeHead(status, {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(data));
@@ -867,6 +868,7 @@ async function handleRequest(req, res) {
       }
     }
 
+    const priority = [1, 2, 3, 4].includes(data.priority) ? data.priority : 3;
     const directive = {
       id: `dir_${Date.now()}`,
       type: data.type,
@@ -877,6 +879,7 @@ async function handleRequest(req, res) {
       directiveApprovalId: null,
       retryCount: 0,
       failureReason: null,
+      priority,
       dependsOn: dependsOn.length > 0 ? dependsOn : null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -998,6 +1001,7 @@ async function handleRequest(req, res) {
     if (data.type) directive.type = data.type;
     if (data.failureReason !== undefined) directive.failureReason = data.failureReason;
     if (data.retryCount !== undefined) directive.retryCount = data.retryCount;
+    if (data.priority !== undefined && [1, 2, 3, 4].includes(data.priority)) directive.priority = data.priority;
     directive.updatedAt = Date.now();
     directive.lastActivity = Date.now(); // Track when agent last touched this directive
 
@@ -1122,7 +1126,8 @@ async function handleRequest(req, res) {
     if (directive.status === "approved" && prevStatus !== "approved") {
       spawnImplementationAgent(directive);
     }
-    // Spawn planning agents for any newly unblocked directives
+    // Spawn planning agents for any newly unblocked directives (higher priority first)
+    unblockedDirectives.sort((a, b) => (a.priority || 3) - (b.priority || 3));
     for (const d of unblockedDirectives) {
       spawnPlanningAgent(d);
     }
@@ -1157,6 +1162,55 @@ async function handleRequest(req, res) {
     saveDirectives(directives, directive, "pending");
     spawnPlanningAgent(directive);
     sendJSON(res, 200, { ok: true, directive, message: "Directive unblocked and moved to planning" });
+    return;
+  }
+
+  // POST /directives/:id/cancel — Cancel a directive (kills agent if running)
+  const directiveCancelMatch = pathname.match(/^\/directives\/([^/]+)\/cancel$/);
+  if (req.method === "POST" && directiveCancelMatch) {
+    const id = directiveCancelMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    const terminalStatuses = ["completed", "failed", "cancelled"];
+    if (terminalStatuses.includes(directive.status)) {
+      sendJSON(res, 409, { error: `Directive is already "${directive.status}" — cannot cancel` });
+      return;
+    }
+    // Kill agent if one is running for this directive
+    const agentKilled = killAgent(id);
+    const prevStatus = directive.status;
+    directive.status = "cancelled";
+    directive.updatedAt = Date.now();
+    saveDirectives(directives, directive, prevStatus);
+    log.bridge.info(`Directive cancelled: ${id} "${directive.title}" (was ${prevStatus}, agent killed: ${agentKilled})`);
+    sendJSON(res, 200, { ok: true, directive, agentKilled });
+    return;
+  }
+
+  // DELETE /directives/:id — Permanently remove a directive (only terminal statuses)
+  const directiveDeleteMatch = pathname.match(/^\/directives\/([^/]+)$/);
+  if (req.method === "DELETE" && directiveDeleteMatch) {
+    const id = directiveDeleteMatch[1];
+    const directives = getDirectives();
+    const idx = directives.findIndex((d) => d.id === id);
+    if (idx === -1) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    const directive = directives[idx];
+    const terminalStatuses = ["completed", "failed", "cancelled"];
+    if (!terminalStatuses.includes(directive.status)) {
+      sendJSON(res, 409, { error: `Directive is "${directive.status}" — cancel it first before deleting` });
+      return;
+    }
+    directives.splice(idx, 1);
+    saveDirectives(directives, null, null);
+    log.bridge.info(`Directive deleted: ${id} "${directive.title}"`);
+    sendJSON(res, 200, { ok: true, message: `Directive ${id} deleted` });
     return;
   }
 
@@ -1359,7 +1413,7 @@ async function handleRequest(req, res) {
     const statusColors = {
       pending: "#6b7280", planning: "#8b5cf6", planned: "#3b82f6",
       approved: "#06b6d4", in_progress: "#f59e0b", completed: "#10b981",
-      failed: "#ef4444", stale: "#f97316",
+      failed: "#ef4444", stale: "#f97316", cancelled: "#78716c",
     };
 
     const agentRows = agents.map(a => {
@@ -1368,8 +1422,14 @@ async function handleRequest(req, res) {
       return `<tr><td>${escapeHtml(a.directiveId)}</td><td>${escapeHtml(a.type)}</td><td>${a.pid}</td><td>${rtStr}</td></tr>`;
     }).join("");
 
+    const priorityLabels = { 1: "critical", 2: "high", 3: "normal", 4: "low" };
+    const priorityColors = { 1: "#ef4444", 2: "#f97316", 3: "#6b7280", 4: "#9ca3af" };
+
     const directiveRows = [...directives].reverse().map(d => {
       const color = statusColors[d.status] || "#6b7280";
+      const pri = d.priority || 3;
+      const priLabel = priorityLabels[pri] || "normal";
+      const priColor = priorityColors[pri] || "#6b7280";
       let depsHtml = "-";
       if (d.dependsOn && d.dependsOn.length > 0) {
         depsHtml = d.dependsOn.map(depId => {
@@ -1384,9 +1444,11 @@ async function handleRequest(req, res) {
         <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
         <td>${escapeHtml(d.title || d.id)}</td>
         <td style="font-size:12px;color:#9ca3af;">${escapeHtml(d.type || "-")}</td>
+        <td style="font-size:12px;"><span style="color:${priColor};font-weight:${pri <= 2 ? "bold" : "normal"};">${priLabel}</span></td>
         <td style="font-size:12px;">${depsHtml}</td>
         <td style="font-size:12px;color:#9ca3af;" data-ts="${d.createdAt}">${escapeHtml(d.createdAt)}</td>
         <td style="font-size:12px;color:#9ca3af;" data-ts="${d.updatedAt}">${escapeHtml(d.updatedAt)}</td>
+        <td>${!["completed","failed","cancelled"].includes(d.status) ? `<button onclick="cancelDirective('${d.id}')" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Cancel directive">&times;</button>` : ""}</td>
       </tr>`;
     }).join("");
 
@@ -1468,7 +1530,7 @@ ${agents.length > 0 ? `<table><tr><th>Directive</th><th>Type</th><th>PID</th><th
 
 <section>
 <h2>Directives</h2>
-${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Deps</th><th>Created</th><th>Last Activity</th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
+${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Deps</th><th>Created</th><th>Last Activity</th><th></th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
 </section>
 
 <section>
@@ -1555,6 +1617,17 @@ setInterval(function() {
     countdownEl.textContent = "Next refresh in " + countdown + "s";
   }
 }, 1000);
+
+// Cancel a directive
+function cancelDirective(id) {
+  if (!confirm("Cancel this directive?")) return;
+  fetch("/directives/" + id + "/cancel", { method: "POST" })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) { refreshNow(); } else { alert("Error: " + (data.error || "Unknown")); }
+    })
+    .catch(function(err) { alert("Network error: " + err.message); });
+}
 
 // Submit directive form
 function submitDirective(e) {
@@ -2112,7 +2185,7 @@ const GEMINI_BRIDGE_TOOLS = [
   },
   {
     name: "send_dev_directive",
-    description: "Send a development directive to Cipher. Optionally pass dependsOn to block it until other directives complete.",
+    description: "Send a development directive to Cipher. Optionally pass dependsOn to block it until other directives complete. Priority: 1=critical, 2=high, 3=normal (default), 4=low.",
     parameters: {
       type: "OBJECT",
       properties: {
@@ -2120,6 +2193,7 @@ const GEMINI_BRIDGE_TOOLS = [
         title: { type: "STRING", description: "Short title" },
         description: { type: "STRING", description: "Detailed description" },
         dependsOn: { type: "ARRAY", items: { type: "STRING" }, description: "Optional array of directive IDs this depends on. Will stay pending until all are completed." },
+        priority: { type: "INTEGER", description: "Priority: 1=critical, 2=high, 3=normal (default), 4=low" },
       },
       required: ["type", "title", "description"],
     },
@@ -2757,10 +2831,11 @@ async function handleToolCall(name, args) {
           return dep && dep.status === "completed";
         });
 
+        const priority = [1, 2, 3, 4].includes(args.priority) ? args.priority : 3;
         const directive = {
           id: `dir_${Date.now()}`, type, title: title || "",
           description, status: ((type === "quick" || type === "explore") && depsResolved) ? "planning" : "pending",
-          plan: null, directiveApprovalId: null,
+          plan: null, directiveApprovalId: null, priority,
           dependsOn: dependsOn.length > 0 ? dependsOn : null,
           createdAt: Date.now(), updatedAt: Date.now(),
         };
