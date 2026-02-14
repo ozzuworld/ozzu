@@ -903,6 +903,32 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /directives/:id/log — View agent log file for a directive
+  const directiveLogMatch = pathname.match(/^\/directives\/([^/]+)\/log$/);
+  if (req.method === "GET" && directiveLogMatch) {
+    const id = directiveLogMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      res.writeHead(404, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+      res.end("Directive not found");
+      return;
+    }
+    const logPath = `${DATA_DIR}/agent-${id}.log`;
+    if (!fs.existsSync(logPath)) {
+      res.writeHead(404, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+      res.end("Log file not found");
+      return;
+    }
+    const limit = parseInt(url.searchParams.get("limit")) || 200;
+    const content = fs.readFileSync(logPath, "utf-8");
+    const lines = content.split("\n");
+    const output = lines.slice(-limit).join("\n");
+    res.writeHead(200, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+    res.end(output);
+    return;
+  }
+
   // PATCH /directives/:id — Update directive (status, plan, title)
   const directivePatchMatch = pathname.match(/^\/directives\/([^/]+)$/);
   if (req.method === "PATCH" && directivePatchMatch) {
