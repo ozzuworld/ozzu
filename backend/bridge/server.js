@@ -1530,7 +1530,7 @@ ${agents.length > 0 ? `<table><tr><th>Directive</th><th>Type</th><th>PID</th><th
 
 <section>
 <h2>Directives</h2>
-${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Deps</th><th>Created</th><th>Last Activity</th><th></th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
+${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Priority</th><th>Deps</th><th>Created</th><th>Last Activity</th><th></th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
 </section>
 
 <section>
@@ -1551,6 +1551,13 @@ ${failures.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Reason</th>
     <option value="quick">Quick</option>
     <option value="feature">Feature</option>
     <option value="explore">Explore</option>
+  </select>
+  <label for="d-priority">Priority</label>
+  <select id="d-priority" name="priority">
+    <option value="1">Critical</option>
+    <option value="2">High</option>
+    <option value="3" selected>Normal</option>
+    <option value="4">Low</option>
   </select>
   <button type="submit" class="submit-btn" id="submit-btn">Submit Directive</button>
   <div id="form-msg"></div>
@@ -1635,6 +1642,7 @@ function submitDirective(e) {
   var title = document.getElementById("d-title").value.trim();
   var desc = document.getElementById("d-desc").value.trim();
   var type = document.getElementById("d-type").value;
+  var priority = parseInt(document.getElementById("d-priority").value, 10) || 3;
   var msgEl = document.getElementById("form-msg");
   var btn = document.getElementById("submit-btn");
 
@@ -1648,7 +1656,7 @@ function submitDirective(e) {
   fetch("/directives", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: type, title: title, description: desc || title })
+    body: JSON.stringify({ type: type, title: title, description: desc || title, priority: priority })
   })
     .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
     .then(function(res) {
