@@ -617,6 +617,10 @@ function parseBody(req) {
   });
 }
 
+function escapeHtml(str) {
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function sendJSON(res, status, data) {
   res.writeHead(status, {
     "Content-Type": "application/json",
@@ -1214,6 +1218,110 @@ async function handleRequest(req, res) {
       devices: devices.size,
       persona: currentPersona,
     });
+    return;
+  }
+
+  // GET /dashboard — HTML pipeline overview for browser
+  if (req.method === "GET" && pathname === "/dashboard") {
+    const directives = getDirectives();
+    const agents = getRunningAgents();
+    const pgHealth = await db.healthCheck();
+    let redisHealthy = false;
+    try { if (_redisConnected) { await redis.ping(); redisHealthy = true; } } catch { redisHealthy = false; }
+    const uptime = process.uptime();
+    const uptimeStr = `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${Math.floor(uptime % 60)}s`;
+
+    const statusColors = {
+      pending: "#6b7280", planning: "#8b5cf6", planned: "#3b82f6",
+      approved: "#06b6d4", in_progress: "#f59e0b", completed: "#10b981",
+      failed: "#ef4444", stale: "#f97316",
+    };
+
+    const agentRows = agents.map(a => {
+      const runtime = Math.floor((Date.now() - new Date(a.startedAt).getTime()) / 1000);
+      const rtStr = `${Math.floor(runtime / 60)}m ${runtime % 60}s`;
+      return `<tr><td>${escapeHtml(a.directiveId)}</td><td>${escapeHtml(a.type)}</td><td>${a.pid}</td><td>${rtStr}</td></tr>`;
+    }).join("");
+
+    const directiveRows = [...directives].reverse().map(d => {
+      const color = statusColors[d.status] || "#6b7280";
+      const created = new Date(d.createdAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      const updated = new Date(d.updatedAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      return `<tr>
+        <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
+        <td>${escapeHtml(d.title || d.id)}</td>
+        <td style="font-size:12px;color:#9ca3af;">${escapeHtml(d.type || "-")}</td>
+        <td style="font-size:12px;color:#9ca3af;">${created}</td>
+        <td style="font-size:12px;color:#9ca3af;">${updated}</td>
+      </tr>`;
+    }).join("");
+
+    const failures = directives.filter(d => d.failureReason).reverse().slice(0, 5);
+    const failureRows = failures.map(d => {
+      const color = statusColors[d.status] || "#6b7280";
+      return `<tr>
+        <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
+        <td>${escapeHtml(d.title || d.id)}</td>
+        <td style="color:#f87171;font-size:13px;">${escapeHtml(d.failureReason)}</td>
+        <td>${d.retryCount || 0}</td>
+      </tr>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ozzu Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f172a; color: #e2e8f0; font-family: "SF Mono", "Fira Code", monospace; padding: 24px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .subtitle { color: #64748b; font-size: 13px; margin-bottom: 24px; }
+  .cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px 20px; min-width: 160px; }
+  .card .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+  .card .value { font-size: 24px; font-weight: bold; margin-top: 4px; }
+  .card .value.ok { color: #10b981; }
+  .card .value.warn { color: #f59e0b; }
+  .card .value.bad { color: #ef4444; }
+  section { margin-bottom: 28px; }
+  h2 { font-size: 16px; margin-bottom: 10px; border-bottom: 1px solid #334155; padding-bottom: 6px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #1e293b; }
+  th { color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  tr:hover { background: #1e293b; }
+  .empty { color: #475569; font-style: italic; padding: 12px; }
+</style>
+</head><body>
+<h1>Ozzu Pipeline Dashboard</h1>
+<p class="subtitle">Bridge server on 10.128.0.8:3333 &mdash; refreshed ${new Date().toLocaleString("en-US", { timeZone: "America/New_York" })}</p>
+
+<div class="cards">
+  <div class="card"><div class="label">Uptime</div><div class="value">${uptimeStr}</div></div>
+  <div class="card"><div class="label">PostgreSQL</div><div class="value ${pgHealth.connected ? "ok" : "bad"}">${pgHealth.connected ? "Connected" : "Down"}</div></div>
+  <div class="card"><div class="label">Redis</div><div class="value ${redisHealthy ? "ok" : "bad"}">${redisHealthy ? "Connected" : "Down"}</div></div>
+  <div class="card"><div class="label">Gemini</div><div class="value ${geminiReady ? "ok" : "warn"}">${geminiReady ? "Connected" : "Down"}</div></div>
+  <div class="card"><div class="label">Active Agents</div><div class="value ${agents.length > 0 ? "warn" : "ok"}">${agents.length}</div></div>
+  <div class="card"><div class="label">Directives</div><div class="value">${directives.length}</div></div>
+</div>
+
+<section>
+<h2>Running Agents</h2>
+${agents.length > 0 ? `<table><tr><th>Directive</th><th>Type</th><th>PID</th><th>Runtime</th></tr>${agentRows}</table>` : `<p class="empty">No agents currently running.</p>`}
+</section>
+
+<section>
+<h2>Directives</h2>
+${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Created</th><th>Last Activity</th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
+</section>
+
+<section>
+<h2>Recent Failures</h2>
+${failures.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Reason</th><th>Retries</th></tr>${failureRows}</table>` : `<p class="empty">No failures. All clear.</p>`}
+</section>
+
+</body></html>`;
+
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(html);
     return;
   }
 
