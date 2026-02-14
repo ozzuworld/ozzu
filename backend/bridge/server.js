@@ -1780,6 +1780,37 @@ async function handleRequest(req, res) {
       </tr>`;
     }).join("");
 
+    // ── Execution Timeline (last 24h) ──
+    const now24 = Date.now();
+    const h24ago = now24 - 24 * 60 * 60 * 1000;
+    const timelineDirectives = directives.filter(d => d.startedAt && d.startedAt >= h24ago);
+    const tlBarColors = { completed: "#10b981", failed: "#ef4444", in_progress: "#3b82f6", stale: "#f59e0b" };
+    const timelineBars = timelineDirectives.map(d => {
+      const endTs = d.completedAt || now24;
+      const leftPct = Math.max(0, ((d.startedAt - h24ago) / (now24 - h24ago)) * 100);
+      const widthPct = Math.max(0.3, ((endTs - d.startedAt) / (now24 - h24ago)) * 100);
+      const color = tlBarColors[d.status] || "#6b7280";
+      const label = escapeHtml(d.title || d.id);
+      const startTime = new Date(d.startedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" });
+      const endTime = d.completedAt ? new Date(d.completedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" }) : "ongoing";
+      return `<div style="display:flex;align-items:center;height:28px;gap:8px;">
+        <div style="width:180px;flex-shrink:0;font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${label}">${label}</div>
+        <div style="flex:1;position:relative;height:20px;background:#1e293b;border-radius:3px;">
+          <div style="position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;height:16px;background:${color};border-radius:3px;min-width:3px;" title="${label}\n${startTime} — ${endTime}\nStatus: ${escapeHtml(d.status)}"></div>
+        </div>
+      </div>`;
+    }).join("");
+
+    // Hour markers for timeline
+    const tlHourMarkers = [];
+    for (let h = 0; h < 24; h++) {
+      const markerTs = h24ago + h * 60 * 60 * 1000;
+      const pct = (h / 24) * 100;
+      const hLabel = new Date(markerTs).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" });
+      tlHourMarkers.push(`<span style="position:absolute;left:${pct}%;transform:translateX(-50%);font-size:10px;color:#475569;white-space:nowrap;">${hLabel}</span>`);
+    }
+    const tlHourMarkersHtml = tlHourMarkers.join("");
+
     const failures = directives.filter(d => d.failureReason).reverse().slice(0, 5);
     const failureRows = failures.map(d => {
       const color = statusColors[d.status] || "#6b7280";
@@ -1872,6 +1903,23 @@ async function handleRequest(req, res) {
 <h2>Running Agents</h2>
 ${agents.length > 0 ? `<table><tr><th>Directive</th><th>Type</th><th>PID</th><th>Runtime</th></tr>${agentRows}</table>` : `<p class="empty">No agents currently running.</p>`}
 </section>
+
+${timelineDirectives.length > 0 ? `<section>
+<h2>Execution Timeline (Last 24h)</h2>
+<div style="display:flex;gap:6px;margin-bottom:10px;font-size:11px;">
+  <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#10b981;display:inline-block;"></span> Completed</span>
+  <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#ef4444;display:inline-block;"></span> Failed</span>
+  <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#3b82f6;display:inline-block;"></span> In Progress</span>
+  <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#f59e0b;display:inline-block;"></span> Stale</span>
+</div>
+<div style="display:flex;gap:8px;">
+  <div style="width:180px;flex-shrink:0;"></div>
+  <div style="flex:1;position:relative;height:18px;margin-bottom:4px;">${tlHourMarkersHtml}</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:2px;">
+  ${timelineBars}
+</div>
+</section>` : ""}
 
 <section>
 <h2>Directives</h2>
