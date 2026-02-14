@@ -1416,11 +1416,12 @@ async function handleRequest(req, res) {
     // When a directive completes, unblock any pending directives that depended on it
     const unblockedDirectives = [];
     if (directive.status === "completed" && prevStatus !== "completed") {
+      const depMap = new Map(directives.map(d => [d.id, d]));
       for (const d of directives) {
         if (d.status !== "pending" || !d.dependsOn || !d.dependsOn.includes(directive.id)) continue;
         // Check if ALL dependencies are now completed
         const allResolved = d.dependsOn.every(depId => {
-          const dep = directives.find(dd => dd.id === depId);
+          const dep = depMap.get(depId);
           return dep && dep.status === "completed";
         });
         if (allResolved) {
@@ -1925,6 +1926,8 @@ async function handleRequest(req, res) {
     const totalFinished = completedDirectives.length + failedDirectives.length;
     const successRate = totalFinished > 0 ? Math.round((completedDirectives.length / totalFinished) * 100) : null;
 
+    // Build directive lookup map (O(1) instead of O(n) per dependency)
+    const directiveMap = new Map(directives.map(d => [d.id, d]));
     const directiveRows = [...directives].reverse().map(d => {
       const color = statusColors[d.status] || "#6b7280";
       const pri = d.priority || 3;
@@ -1933,7 +1936,7 @@ async function handleRequest(req, res) {
       let depsHtml = "-";
       if (d.dependsOn && d.dependsOn.length > 0) {
         depsHtml = d.dependsOn.map(depId => {
-          const dep = directives.find(dd => dd.id === depId);
+          const dep = directiveMap.get(depId);
           const depColor = dep ? (dep.status === "completed" ? "#10b981" : "#f59e0b") : "#6b7280";
           const depLabel = dep ? (dep.title || depId) : depId;
           const checkmark = dep && dep.status === "completed" ? "&#10003; " : "&#9679; ";
