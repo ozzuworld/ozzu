@@ -74,6 +74,17 @@ export const rooms: Room[] = [
         ],
       },
       {
+        id: "spotify",
+        name: "Spotify",
+        icon: "🎵",
+        rarity: "legendary",
+        lore: "A mystical jukebox that summons any melody from the aether. Its vast library holds every song ever recorded.",
+        primaryEntityId: "media_player.spotify_king_kazuma",
+        entities: [
+          { entityId: "media_player.spotify_king_kazuma", label: "Playback", icon: "▶️" },
+        ],
+      },
+      {
         id: "living_room_cam",
         name: "Living Room Camera",
         icon: "📹",

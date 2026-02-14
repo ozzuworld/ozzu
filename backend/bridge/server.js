@@ -139,6 +139,7 @@ const ENTITY_CONFIG = [
   { entityId: "sensor.151732606804847_time_remaining", label: "Washing Machine — Time Remaining" },
   { entityId: "sensor.151732606804847_temperature", label: "Washing Machine — Temperature" },
   { entityId: "sensor.151732606804847_water_level", label: "Washing Machine — Water Level" },
+  { entityId: "media_player.spotify_king_kazuma", label: "Spotify — Playback" },
 ];
 
 // ── Camera config ──
@@ -3115,6 +3116,48 @@ const GEMINI_HA_TOOLS = [
     },
   },
   {
+    name: "media_next_track",
+    description: "Skip to the next track on a media player (e.g. Spotify)",
+    parameters: {
+      type: "OBJECT",
+      properties: { entity_id: { type: "STRING", description: "The Home Assistant entity_id" } },
+      required: ["entity_id"],
+    },
+  },
+  {
+    name: "media_previous_track",
+    description: "Go back to the previous track on a media player (e.g. Spotify)",
+    parameters: {
+      type: "OBJECT",
+      properties: { entity_id: { type: "STRING", description: "The Home Assistant entity_id" } },
+      required: ["entity_id"],
+    },
+  },
+  {
+    name: "volume_set",
+    description: "Set the volume level on a media player. Use media_player.spotify_king_kazuma for Spotify.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        entity_id: { type: "STRING", description: "The Home Assistant entity_id" },
+        volume_level: { type: "NUMBER", description: "Volume level from 0.0 (mute) to 1.0 (max)" },
+      },
+      required: ["entity_id", "volume_level"],
+    },
+  },
+  {
+    name: "media_seek",
+    description: "Seek to a specific position in the current media track.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        entity_id: { type: "STRING", description: "The Home Assistant entity_id" },
+        seek_position: { type: "NUMBER", description: "Position in seconds to seek to" },
+      },
+      required: ["entity_id", "seek_position"],
+    },
+  },
+  {
     name: "set_ac_temperature",
     description: "Set the AC target temperature. Use climate.living_room_ac as entity_id. Temperature range: 61-86°F (16-30°C). Always pass the value in Fahrenheit.",
     parameters: {
@@ -3702,6 +3745,10 @@ function resolveHAToolCall(name, args) {
     case "toggle": return { domain, service: "toggle", entityId };
     case "set_number_value": return { domain: "number", service: "set_value", data: { value: args.value }, entityId };
     case "media_play_pause": return { domain: "media_player", service: "media_play_pause", entityId };
+    case "media_next_track": return { domain: "media_player", service: "media_next_track", entityId };
+    case "media_previous_track": return { domain: "media_player", service: "media_previous_track", entityId };
+    case "volume_set": return { domain: "media_player", service: "volume_set", data: { volume_level: args.volume_level }, entityId };
+    case "media_seek": return { domain: "media_player", service: "media_seek", data: { seek_position: args.seek_position }, entityId };
     case "set_ac_temperature": return { domain: "climate", service: "set_temperature", data: { temperature: args.temperature }, entityId };
     case "set_ac_mode": return { domain: "climate", service: "set_hvac_mode", data: { hvac_mode: args.hvac_mode }, entityId };
     case "set_ac_fan": return { domain: "climate", service: "set_fan_mode", data: { fan_mode: args.fan_mode }, entityId };

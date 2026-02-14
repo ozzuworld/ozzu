@@ -94,6 +94,39 @@ export const HA_FUNCTION_DECLARATIONS = [
       required: ["entity_id", "option"],
     },
   },
+  {
+    name: "media_next_track",
+    description: "Skip to the next track on a media player (e.g. Spotify)",
+    parameters: {
+      type: "OBJECT" as any,
+      properties: { entity_id: entityIdParam },
+      required: ["entity_id"],
+    },
+  },
+  {
+    name: "media_previous_track",
+    description: "Go back to the previous track on a media player (e.g. Spotify)",
+    parameters: {
+      type: "OBJECT" as any,
+      properties: { entity_id: entityIdParam },
+      required: ["entity_id"],
+    },
+  },
+  {
+    name: "volume_set",
+    description: "Set the volume level on a media player (0.0 to 1.0)",
+    parameters: {
+      type: "OBJECT" as any,
+      properties: {
+        entity_id: entityIdParam,
+        volume_level: {
+          type: "NUMBER" as const,
+          description: "Volume level from 0.0 (mute) to 1.0 (max)",
+        },
+      },
+      required: ["entity_id", "volume_level"],
+    },
+  },
 ];
 
 // ── Tool call resolver ──
@@ -143,6 +176,25 @@ export function resolveToolCall(
         domain: "select",
         service: "select_option",
         data: { option: args.option as string },
+        entityId,
+      };
+    case "media_next_track":
+      return {
+        domain: "media_player",
+        service: "media_next_track",
+        entityId,
+      };
+    case "media_previous_track":
+      return {
+        domain: "media_player",
+        service: "media_previous_track",
+        entityId,
+      };
+    case "volume_set":
+      return {
+        domain: "media_player",
+        service: "volume_set",
+        data: { volume_level: args.volume_level as number },
         entityId,
       };
     default:

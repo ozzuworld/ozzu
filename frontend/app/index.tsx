@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { View, Animated, Easing, useWindowDimensions, PermissionsAndroid, Platform } from "react-native";
+import { View, Text, Animated, Easing, useWindowDimensions, PermissionsAndroid, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { StatusBadge } from "../components/StatusBadge";
 import { HamburgerMenu } from "../components/HamburgerMenu";
@@ -9,8 +9,11 @@ import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
+import { TVPressable } from "../components/TVPressable";
 import { CameraOverlay } from "../components/CameraOverlay";
 import { ContentPanel } from "../components/ContentPanel";
+import { MediaPlayer } from "../components/MediaPlayer";
+import { useEntity } from "../lib/useEntity";
 import { useKeepAwake } from "expo-keep-awake";
 
 // ── HUD corner bracket ──
@@ -122,6 +125,8 @@ export default function LandingScreen() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const [showMediaPlayer, setShowMediaPlayer] = useState(false);
+  const spotifyEntity = useEntity("media_player.spotify_king_kazuma");
 
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
   const playerRef = useRef<StreamingPlayer>(new StreamingPlayer());
@@ -349,6 +354,31 @@ export default function LandingScreen() {
         onClose={() =>
           setContentPanel({ visible: false, title: "", content: "" })
         }
+      />
+
+      {/* Floating music button */}
+      {spotifyEntity && spotifyEntity.state !== "unavailable" && !showMediaPlayer && (
+        <View
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 24,
+            zIndex: 90,
+          }}
+        >
+          <TVPressable
+            rarity="legendary"
+            onPress={() => setShowMediaPlayer(true)}
+            style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+          >
+            <Text style={{ fontSize: 20 }}>🎵</Text>
+          </TVPressable>
+        </View>
+      )}
+
+      <MediaPlayer
+        visible={showMediaPlayer}
+        onClose={() => setShowMediaPlayer(false)}
       />
 
       <Keypad
