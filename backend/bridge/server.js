@@ -72,6 +72,8 @@ const HA_URL = process.env.HA_URL || "http://localhost:8123";
 const HA_TOKEN = process.env.HA_TOKEN || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
+const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY || "";
+
 const GEMINI_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
 // ── Persona system ──
 let currentPersona = "june"; // "june" or "cipher"
@@ -696,6 +698,18 @@ function sendJSON(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+// ── API key auth for sensitive (mutating) endpoints ──
+function requireAuth(req, res) {
+  if (!BRIDGE_API_KEY) return true; // no key configured — skip auth (backward compatible)
+  const authHeader = req.headers["authorization"] || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (token !== BRIDGE_API_KEY) {
+    sendJSON(res, 401, { error: "Unauthorized — invalid or missing API key" });
+    return false;
+  }
+  return true;
+}
+
 // ── Route handlers ──
 
 async function handleRequest(req, res) {
@@ -898,6 +912,7 @@ async function handleRequest(req, res) {
 
   // POST /directives — June creates a directive
   if (req.method === "POST" && pathname === "/directives") {
+    if (!requireAuth(req, res)) return;
     const data = await parseBody(req);
     const validTypes = ["quick", "feature", "explore"];
     if (!data.type || !validTypes.includes(data.type)) {
@@ -1066,6 +1081,7 @@ async function handleRequest(req, res) {
   // DELETE /agents/:directiveId — Kill a running agent
   const agentDeleteMatch = pathname.match(/^\/agents\/([^/]+)$/);
   if (req.method === "DELETE" && agentDeleteMatch) {
+    if (!requireAuth(req, res)) return;
     const directiveId = agentDeleteMatch[1];
     const killed = killAgent(directiveId);
     if (killed) {
@@ -1126,6 +1142,7 @@ async function handleRequest(req, res) {
   // PATCH /directives/:id — Update directive (status, plan, title)
   const directivePatchMatch = pathname.match(/^\/directives\/([^/]+)$/);
   if (req.method === "PATCH" && directivePatchMatch) {
+    if (!requireAuth(req, res)) return;
     const id = directivePatchMatch[1];
     const data = await parseBody(req);
     const directives = getDirectives();
@@ -1364,6 +1381,7 @@ async function handleRequest(req, res) {
   // POST /directives/:id/cancel — Cancel a directive (kills agent if running)
   const directiveCancelMatch = pathname.match(/^\/directives\/([^/]+)\/cancel$/);
   if (req.method === "POST" && directiveCancelMatch) {
+    if (!requireAuth(req, res)) return;
     const id = directiveCancelMatch[1];
     const directives = getDirectives();
     const directive = directives.find((d) => d.id === id);
@@ -1390,6 +1408,7 @@ async function handleRequest(req, res) {
   // POST /directives/:id/retry — Retry a failed/stale/cancelled directive
   const directiveRetryMatch = pathname.match(/^\/directives\/([^/]+)\/retry$/);
   if (req.method === "POST" && directiveRetryMatch) {
+    if (!requireAuth(req, res)) return;
     const id = directiveRetryMatch[1];
     const directives = getDirectives();
     const directive = directives.find((d) => d.id === id);
@@ -1421,6 +1440,7 @@ async function handleRequest(req, res) {
   // DELETE /directives/:id — Permanently remove a directive (only terminal statuses)
   const directiveDeleteMatch = pathname.match(/^\/directives\/([^/]+)$/);
   if (req.method === "DELETE" && directiveDeleteMatch) {
+    if (!requireAuth(req, res)) return;
     const id = directiveDeleteMatch[1];
     const directives = getDirectives();
     const idx = directives.findIndex((d) => d.id === id);
@@ -1443,6 +1463,7 @@ async function handleRequest(req, res) {
 
   // POST /directives/bulk — Perform the same action on multiple directives
   if (req.method === "POST" && pathname === "/directives/bulk") {
+    if (!requireAuth(req, res)) return;
     const data = await parseBody(req);
     const validActions = ["cancel", "retry", "delete"];
     if (!data.action || !validActions.includes(data.action)) {
@@ -2390,6 +2411,7 @@ function submitDirective(e) {
 
   // PATCH /config — update safe runtime settings
   if (req.method === "PATCH" && pathname === "/config") {
+    if (!requireAuth(req, res)) return;
     const data = await parseBody(req);
     const errors = [];
     const updated = {};
