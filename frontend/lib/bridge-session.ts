@@ -33,6 +33,10 @@ export class BridgeSession {
   private deviceId: string = "unknown";
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyClosed = false;
+  private reconnectAttempt = 0;
+  private static readonly RECONNECT_BASE_MS = 1000;
+  private static readonly RECONNECT_MAX_MS = 30000;
+  private static readonly RECONNECT_MAX_ATTEMPTS = 50;
 
   get role(): "mic" | "speaker" {
     return this._role;
@@ -67,6 +71,7 @@ export class BridgeSession {
 
     ws.onopen = () => {
       console.log("[BridgeSession] Connected, registering...");
+      this.reconnectAttempt = 0; // Reset backoff on successful connection
       ws.send(
         JSON.stringify({
           type: "register",
@@ -106,11 +111,21 @@ export class BridgeSession {
       this.ws = null;
 
       if (!this.intentionallyClosed) {
-        console.log("[BridgeSession] Reconnecting in 5s...");
+        if (this.reconnectAttempt >= BridgeSession.RECONNECT_MAX_ATTEMPTS) {
+          console.log("[BridgeSession] Max reconnect attempts reached, giving up");
+          this.callbacks?.onError("Bridge connection lost — max retries exceeded");
+          return;
+        }
+        const delay = Math.min(
+          BridgeSession.RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempt),
+          BridgeSession.RECONNECT_MAX_MS
+        );
+        this.reconnectAttempt++;
+        console.log(`[BridgeSession] Reconnecting in ${delay / 1000}s (attempt ${this.reconnectAttempt})...`);
         this.reconnectTimer = setTimeout(() => {
           this.reconnectTimer = null;
           if (!this.intentionallyClosed) this._connect();
-        }, 5000);
+        }, delay);
       }
     };
   }
