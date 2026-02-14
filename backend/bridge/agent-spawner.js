@@ -10,6 +10,7 @@ const WORKDIR = "/home/gcp/ozzu";
 const LOG_DIR = "/tmp/ozzu-bridge";
 const AGENT_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const SIGKILL_GRACE_MS = 5000; // 5s grace after SIGTERM before SIGKILL
+const MAX_CONCURRENT_AGENTS = 2; // Max simultaneous agent processes (~500MB-1GB each)
 
 // Running agents: directiveId → { process, type, startedAt, pid, timeout, logFile }
 const runningAgents = new Map();
@@ -137,6 +138,12 @@ function spawnAgent(directive, type) {
     return null;
   }
 
+  // Guard: concurrency limit — directive stays in current state, picked up when a slot opens
+  if (runningAgents.size >= MAX_CONCURRENT_AGENTS) {
+    log(`QUEUED: Concurrency limit reached (${runningAgents.size}/${MAX_CONCURRENT_AGENTS}), deferring ${directive.id} "${directive.title}"`);
+    return null;
+  }
+
   ensureLogDir();
   const logFile = path.join(LOG_DIR, `agent-${directive.id}.log`);
   const logStream = fs.createWriteStream(logFile, { flags: "a" });
@@ -210,6 +217,10 @@ function spawnAgent(directive, type) {
 
     log(`Agent exited for ${directive.id}: code=${code} signal=${signal}`);
 
+    // Slot opened — check for deferred directives after a short delay
+    // (delay lets the directive status reset complete first)
+    setTimeout(() => drainQueue(), 2000);
+
     // On non-zero exit (crash/timeout), reset directive to recoverable state
     if (code !== 0) {
       const failStatus = type === "planning" ? "pending" : "stale";
@@ -276,6 +287,39 @@ function spawnAgent(directive, type) {
   });
 
   return child;
+}
+
+// After an agent exits and a slot opens, look for pending/approved directives to spawn
+function drainQueue() {
+  if (runningAgents.size >= MAX_CONCURRENT_AGENTS) return;
+
+  const http = require("http");
+  http.get(`${BRIDGE}/directives`, (res) => {
+    let body = "";
+    res.on("data", (d) => body += d);
+    res.on("end", () => {
+      try {
+        const directives = JSON.parse(body);
+        // Sort by priority (lower = higher priority)
+        directives.sort((a, b) => (a.priority || 3) - (b.priority || 3));
+
+        for (const d of directives) {
+          if (runningAgents.size >= MAX_CONCURRENT_AGENTS) break;
+          if (runningAgents.has(d.id)) continue;
+
+          if (d.status === "planning") {
+            log(`Drain: picking up deferred planning directive ${d.id} "${d.title}"`);
+            spawnAgent(d, "planning");
+          } else if (d.status === "approved") {
+            log(`Drain: picking up deferred approved directive ${d.id} "${d.title}"`);
+            spawnAgent(d, "implementation");
+          }
+        }
+      } catch (e) {
+        log(`Drain: failed to parse directives: ${e.message}`);
+      }
+    });
+  }).on("error", (e) => log(`Drain: failed to fetch directives: ${e.message}`));
 }
 
 function spawnPlanningAgent(directive) {
@@ -543,4 +587,5 @@ module.exports = {
   killAgent,
   killAllAgents,
   startWatchdog,
+  MAX_CONCURRENT_AGENTS,
 };

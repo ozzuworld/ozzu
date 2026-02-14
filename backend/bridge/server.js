@@ -10,7 +10,7 @@ const WebSocket = require("ws");
 const Redis = require("ioredis");
 const db = require("./db");
 const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
-const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents, startWatchdog } = require("./agent-spawner");
+const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents, startWatchdog, MAX_CONCURRENT_AGENTS } = require("./agent-spawner");
 const createLogger = require("./logger");
 
 const log = {
@@ -1909,7 +1909,7 @@ function submitDirective(e) {
       status: healthy ? "healthy" : "degraded",
       service: "ozzu-bridge",
       uptime: process.uptime(),
-      agents: { active: agents.length, details: agents.map(a => ({ directiveId: a.directiveId, type: a.type, pid: a.pid })) },
+      agents: { active: agents.length, maxConcurrent: MAX_CONCURRENT_AGENTS, details: agents.map(a => ({ directiveId: a.directiveId, type: a.type, pid: a.pid })) },
       directives: { ...dirStats, totalRetries, recentFailures },
       redis: { connected: redisHealthy },
       postgres: pgHealth,
