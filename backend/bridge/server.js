@@ -429,10 +429,11 @@ async function initStorage() {
   }
 
   // Clean up expired approvals (older than 1 hour and still pending)
+  const APPROVAL_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
   const freshApprovals = _approvals.filter(a => {
     if (a.status !== "pending") return true;
     const age = now - new Date(a.createdAt || 0).getTime();
-    if (age > STALE_THRESHOLD_MS) {
+    if (age > APPROVAL_EXPIRY_MS) {
       log.directive.info(`Approval expired stale: ${a.id} (age: ${Math.round(age / 60000)}min)`);
       return false;
     }
@@ -602,10 +603,17 @@ function expireApprovals(approvals) {
 
 // ── Request parsing ──
 
+const MAX_BODY_SIZE = 1024 * 1024; // 1MB
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
-    req.on("data", (chunk) => (body += chunk));
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new Error("Body too large"));
+      }
+    });
     req.on("end", () => {
       try {
         resolve(body ? JSON.parse(body) : {});
@@ -863,9 +871,9 @@ async function handleRequest(req, res) {
       return dep && dep.status === "completed";
     });
 
-    // Auto-transition quick directives straight to planning (triggers agent spawner)
+    // Auto-transition quick and explore directives straight to planning (triggers agent spawner)
     // But only if dependencies are resolved
-    if (data.type === "quick" && depsResolved) {
+    if ((data.type === "quick" || data.type === "explore") && depsResolved) {
       directive.status = "planning";
     }
 
@@ -2562,7 +2570,7 @@ async function handleToolCall(name, args) {
 
         const directive = {
           id: `dir_${Date.now()}`, type, title: title || "",
-          description, status: (type === "quick" && depsResolved) ? "planning" : "pending",
+          description, status: ((type === "quick" || type === "explore") && depsResolved) ? "planning" : "pending",
           plan: null, directiveApprovalId: null,
           dependsOn: dependsOn.length > 0 ? dependsOn : null,
           createdAt: Date.now(), updatedAt: Date.now(),
