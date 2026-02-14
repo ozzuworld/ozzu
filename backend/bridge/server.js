@@ -939,6 +939,77 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /directives/stats — Pipeline analytics
+  if (req.method === "GET" && pathname === "/directives/stats") {
+    const directives = getDirectives();
+    const agents = getRunningAgents();
+    const now = Date.now();
+    const todayStart = new Date().setHours(0, 0, 0, 0);
+
+    // By status
+    const byStatus = {};
+    for (const d of directives) {
+      byStatus[d.status] = (byStatus[d.status] || 0) + 1;
+    }
+
+    // By type
+    const byType = {};
+    for (const d of directives) {
+      byType[d.type] = (byType[d.type] || 0) + 1;
+    }
+
+    // Average duration (completed directives with timing data)
+    const completedWithDuration = directives.filter(d => d.status === "completed" && d.duration);
+    const averageDuration = completedWithDuration.length > 0
+      ? Math.round(completedWithDuration.reduce((sum, d) => sum + d.duration, 0) / completedWithDuration.length)
+      : null;
+
+    // Success rate
+    const completed = directives.filter(d => d.status === "completed").length;
+    const failed = directives.filter(d => d.status === "failed").length;
+    const successRate = (completed + failed) > 0
+      ? Math.round((completed / (completed + failed)) * 10000) / 100
+      : null;
+
+    // Today stats
+    const todayDirectives = directives.filter(d => d.createdAt >= todayStart);
+    const todayStats = {
+      submitted: todayDirectives.length,
+      completed: todayDirectives.filter(d => d.status === "completed").length,
+      failed: todayDirectives.filter(d => d.status === "failed").length,
+    };
+
+    // Top failure reasons
+    const reasonCounts = {};
+    for (const d of directives) {
+      if (d.status === "failed" && d.failureReason) {
+        reasonCounts[d.failureReason] = (reasonCounts[d.failureReason] || 0) + 1;
+      }
+    }
+    const topFailureReasons = Object.entries(reasonCounts)
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Agent utilization
+    const agentUtilization = {
+      active: agents.length,
+      max: MAX_CONCURRENT_AGENTS,
+      utilization: Math.round((agents.length / MAX_CONCURRENT_AGENTS) * 10000) / 100,
+    };
+
+    sendJSON(res, 200, {
+      totalDirectives: directives.length,
+      byStatus,
+      byType,
+      averageDuration,
+      successRate,
+      todayStats,
+      topFailureReasons,
+      agentUtilization,
+    });
+    return;
+  }
+
   // GET /agents — List running agent subprocesses
   if (req.method === "GET" && pathname === "/agents") {
     sendJSON(res, 200, getRunningAgents());
@@ -1117,6 +1188,17 @@ async function handleRequest(req, res) {
           `Let King Kazuma know it's done and the build is on its way.`
         );
       }
+    }
+
+    // Broadcast directive status change to all connected WebSocket clients
+    if (data.status && data.status !== prevStatus) {
+      broadcastToAll({
+        type: "directiveUpdate",
+        directiveId: directive.id,
+        oldStatus: prevStatus,
+        newStatus: data.status,
+        title: directive.title,
+      });
     }
 
     saveDirectives(directives, directive, prevStatus);
