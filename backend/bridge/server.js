@@ -1590,6 +1590,12 @@ async function handleRequest(req, res) {
   <div class="card"><div class="label">Directives</div><div class="value">${directives.length}</div></div>
 </div>
 
+<div class="cards">
+  <div class="card"><div class="label">Completed Today</div><div class="value ok">${completedToday}</div></div>
+  <div class="card"><div class="label">Avg Duration</div><div class="value">${avgDuration !== null ? formatDuration(avgDuration) : "N/A"}</div></div>
+  <div class="card"><div class="label">Success Rate</div><div class="value ${successRate !== null && successRate >= 80 ? "ok" : successRate !== null && successRate >= 50 ? "warn" : successRate !== null ? "bad" : ""}">${successRate !== null ? successRate + "%" : "N/A"}</div></div>
+</div>
+
 <section>
 <h2>Running Agents</h2>
 ${agents.length > 0 ? `<table><tr><th>Directive</th><th>Type</th><th>PID</th><th>Runtime</th></tr>${agentRows}</table>` : `<p class="empty">No agents currently running.</p>`}
@@ -1597,7 +1603,7 @@ ${agents.length > 0 ? `<table><tr><th>Directive</th><th>Type</th><th>PID</th><th
 
 <section>
 <h2>Directives</h2>
-${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Priority</th><th>Deps</th><th>Created</th><th>Last Activity</th><th></th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
+${directives.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Type</th><th>Priority</th><th>Deps</th><th>Created</th><th>Last Activity</th><th>Duration</th><th></th></tr>${directiveRows}</table>` : `<p class="empty">No directives.</p>`}
 </section>
 
 <section>
