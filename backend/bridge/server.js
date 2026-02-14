@@ -3840,6 +3840,9 @@ async function handleToolCall(name, args) {
         }
 
         // Escalate: send PIN request to all devices, wait for response
+        if (pendingPinRequests.size >= 20) {
+          return { success: false, message: "Too many pending PIN requests. Wait for existing ones to resolve." };
+        }
         return new Promise((resolve) => {
           const pinId = `pin_${Date.now()}`;
           pendingPinRequests.set(pinId, { approvalId, approved, resolve });
@@ -4411,7 +4414,9 @@ function broadcastToAll(msg) {
   const data = JSON.stringify(msg);
   for (const [ws, info] of devices) {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
+      try { ws.send(data); } catch (err) {
+        log.ws.warn(`Send failed to ${info?.deviceId || "unknown"}: ${err.message}`);
+      }
     }
   }
 }
@@ -4423,7 +4428,9 @@ function broadcastToRole(role, msg) {
   const data = JSON.stringify(msg);
   for (const [ws, info] of devices) {
     if (info.role === role && ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
+      try { ws.send(data); } catch (err) {
+        log.ws.warn(`Send failed to ${info?.deviceId || "unknown"}: ${err.message}`);
+      }
     }
   }
 }
