@@ -530,4 +530,5 @@ module.exports = {
   migrateDirectivesFromRedis,
   migrateApprovalsFromRedis,
   migrateStatusFromRedis,
+  close: () => pool.end(),
 };

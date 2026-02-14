@@ -28,6 +28,7 @@ const log = {
 
 const PORT = 3333;
 const DATA_DIR = "/tmp/ozzu-bridge";
+const _intervals = []; // tracked for graceful shutdown
 const UPDATES_DIR = path.join(DATA_DIR, "updates");
 const STATUS_FILE = path.join(DATA_DIR, "status.json");
 const APPROVALS_FILE = path.join(DATA_DIR, "approvals.json");
@@ -569,13 +570,13 @@ async function initStorage() {
   if (pgReady) {
     await migrateRedisToPostgres();
     // Start entity snapshot interval (every 5 min)
-    setInterval(() => { try { captureEntitySnapshots().catch(err =>
-      log.pg.error("snapshot error:", err.message)); } catch (err) { log.pg.error("snapshot sync error:", err.message); } }, 5 * 60 * 1000);
+    _intervals.push(setInterval(() => { try { captureEntitySnapshots().catch(err =>
+      log.pg.error("snapshot error:", err.message)); } catch (err) { log.pg.error("snapshot sync error:", err.message); } }, 5 * 60 * 1000));
     // Prune old snapshots daily
-    setInterval(() => db.pruneEntitySnapshots(7).catch(err =>
-      log.pg.error("prune error:", err.message)), 24 * 60 * 60 * 1000);
+    _intervals.push(setInterval(() => db.pruneEntitySnapshots(7).catch(err =>
+      log.pg.error("prune error:", err.message)), 24 * 60 * 60 * 1000));
     // Close stale conversations every hour (open >2h with no recent turns)
-    setInterval(async () => {
+    _intervals.push(setInterval(async () => {
       try {
         const res = await db.query(`
           UPDATE conversations SET ended_at = NOW(), summary = 'Session ended (auto-closed)'
@@ -583,7 +584,7 @@ async function initStorage() {
           RETURNING id`);
         if (res.rowCount > 0) log.pg.info(`Auto-closed ${res.rowCount} stale conversation(s)`);
       } catch (err) { log.pg.error("conversation cleanup:", err.message); }
-    }, 60 * 60 * 1000);
+    }, 60 * 60 * 1000));
   }
 }
 
@@ -1240,12 +1241,14 @@ async function handleRequest(req, res) {
       res.end("Invalid directive ID");
       return;
     }
-    if (!fs.existsSync(logPath)) {
+    const limit = parseInt(url.searchParams.get("limit")) || 200;
+    try {
+      await fs.promises.access(logPath);
+    } catch {
       res.writeHead(404, { "Content-Type": "text/plain", ...CORS_HEADERS });
       res.end("Log file not found");
       return;
     }
-    const limit = parseInt(url.searchParams.get("limit")) || 200;
     try {
       const content = await fs.promises.readFile(logPath, "utf-8");
       const lines = content.split("\n");
@@ -1685,7 +1688,9 @@ async function handleRequest(req, res) {
     const updateDir = path.join(UPDATES_DIR, runtimeVersion);
     const metadataPath = path.join(updateDir, "metadata.json");
 
-    if (!fs.existsSync(metadataPath)) {
+    let metadataExists = true;
+    try { await fs.promises.access(metadataPath); } catch { metadataExists = false; }
+    if (!metadataExists) {
       // No update available — return directive
       const boundary = "ota-boundary";
       res.writeHead(200, {
@@ -1833,7 +1838,7 @@ async function handleRequest(req, res) {
       return;
     }
 
-    if (!fs.existsSync(filePath)) {
+    try { await fs.promises.access(filePath); } catch {
       sendJSON(res, 404, { error: "Asset not found" });
       return;
     }
@@ -3978,14 +3983,18 @@ async function handleToolCall(name, args) {
           return { success: false, message: `Command denied: ${validation.reason}` };
         }
         try {
-          const { execSync } = require("child_process");
+          const { exec } = require("child_process");
+          const { promisify } = require("util");
+          const execAsync = promisify(exec);
           log.bridge.info(`Executing: ${args.command}`);
-          let output = execSync(args.command, {
+          const { stdout, stderr } = await execAsync(args.command, {
             shell: "/bin/sh",
             timeout: 30000,
             maxBuffer: 512 * 1024,
             encoding: "utf8",
           });
+          let output = stdout || "";
+          if (stderr) output += (output ? "\n" : "") + stderr;
           const truncated = output.length > 8000;
           if (truncated) output = output.slice(0, 8000);
           log.bridge.info(`Success (${output.length} chars, truncated: ${truncated})`);
@@ -4361,7 +4370,7 @@ const MAX_TRANSCRIPT_TURNS = 200; // cap to prevent unbounded memory growth
 function pushTranscript(entry) {
   conversationTranscript.push(entry);
   if (conversationTranscript.length > MAX_TRANSCRIPT_TURNS) {
-    conversationTranscript.splice(0, conversationTranscript.length - MAX_TRANSCRIPT_TURNS);
+    conversationTranscript = conversationTranscript.slice(-MAX_TRANSCRIPT_TURNS);
   }
 }
 let currentConversationId = null; // PG conversation id for transcript logging
@@ -5407,7 +5416,7 @@ const wss = new WebSocket.Server({ server, path: "/ws" });
 // Ping/pong keepalive — detect dead connections over VPN
 const WS_PING_INTERVAL_MS = 30000; // 30s ping
 const WS_PONG_TIMEOUT_MS = 10000;  // 10s to respond
-setInterval(() => {
+_intervals.push(setInterval(() => {
   for (const ws of wss.clients) {
     if (ws._pongPending) {
       // Missed previous pong — connection is dead
@@ -5419,7 +5428,7 @@ setInterval(() => {
     ws._pongPending = true;
     ws.ping();
   }
-}, WS_PING_INTERVAL_MS);
+}, WS_PING_INTERVAL_MS));
 
 wss.on("connection", (ws) => {
   log.ws.info("New device connection");
@@ -5620,9 +5629,14 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 
-// Graceful shutdown: save conversation, kill agents, exit
+// Graceful shutdown: save conversation, kill agents, close connections, exit
 async function gracefulShutdown(signal) {
   log.bridge.info(`${signal} received, shutting down...`);
+  // Clear all tracked intervals
+  for (const id of _intervals) clearInterval(id);
+  _intervals.length = 0;
+  // Clear tracked timers
+  if (_geminiReconnectTimer) { clearTimeout(_geminiReconnectTimer); _geminiReconnectTimer = null; }
   // End the current conversation in PG so it doesn't stay orphaned
   if (currentConversationId) {
     try {
@@ -5637,6 +5651,17 @@ async function gracefulShutdown(signal) {
     try { await cipherPipeline.stop(); } catch {}
   }
   killAllAgents();
+  // Close WebSocket server and all client connections
+  try {
+    for (const ws of wss.clients) ws.terminate();
+    wss.close();
+  } catch {}
+  // Close HTTP server
+  try { server.close(); } catch {}
+  // Close database and Redis connections
+  try { await db.close(); } catch {}
+  try { redis.disconnect(); } catch {}
+  log.bridge.info("Shutdown complete");
   process.exit(0);
 }
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
