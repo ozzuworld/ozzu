@@ -999,7 +999,7 @@ function smartDeploy(directive) {
   if (native.any) {
     const platforms = [native.android && "Android (native)", native.ios && "iOS (native)"].filter(Boolean).join(" + ") || "Android";
     log(`Native changes detected (${platforms}) — triggering CI builds for all platforms`);
-    notify(`Native changes detected (${platforms}) — CI builds started for Android + iOS, ~10 minutes.`);
+    notify(`Big update going out — full rebuild for all devices, should be done in about 10 minutes.`);
 
     // Android APK build + deploy (with artifact verification)
     if (native.android) {
@@ -1024,10 +1024,10 @@ function smartDeploy(directive) {
       }, (err) => {
         if (err) {
           log(`Android deploy failed: ${err.message}`);
-          notify(`Android CI build/deploy failed: ${err.message}`);
+          notify(`Android update failed: ${err.message}`);
         } else {
           log("Android APK deployed successfully");
-          notify("Android APK deployed! Update installed on all tablets.");
+          notify("Android update's live on all tablets.");
         }
       });
     }
@@ -1057,16 +1057,16 @@ function smartDeploy(directive) {
       }, (err) => {
         if (err) {
           log(`iOS deploy failed: ${err.message}`);
-          notify(`iOS CI build/deploy failed: ${err.message}`);
+          notify(`iPhone update failed: ${err.message}`);
         } else {
           log("iOS IPA deployed successfully");
-          notify("iOS app deployed! Update installed on iPhone.");
+          notify("iPhone's updated too.");
         }
       });
     }
   } else {
     log("JS-only changes — deploying via OTA (Android) + CI build (iOS)");
-    notify("JS-only changes — OTA for Android (instant), iOS build started (~10 min).");
+    notify("Quick update going out to tablets now. iPhone build takes about 10 minutes.");
 
     // Android: instant OTA deploy
     exec(`cd ${WORKDIR} && ./scripts/ota-deploy.sh --restart`, {
@@ -1075,10 +1075,10 @@ function smartDeploy(directive) {
     }, (err) => {
       if (err) {
         log(`OTA deploy failed: ${err.message}`);
-        notify("OTA deploy failed. May need a full APK rebuild.");
+        notify("Tablet update failed — might need a full rebuild.");
       } else {
         log("OTA deploy complete");
-        notify("OTA update deployed! Android devices restarting with new version.");
+        notify("Tablets are updating now — should be live in a few seconds.");
       }
     });
 
@@ -1104,10 +1104,10 @@ function smartDeploy(directive) {
     }, (err) => {
       if (err) {
         log(`iOS deploy failed: ${err.message}`);
-        notify(`iOS build/deploy failed: ${err.message}`);
+        notify(`iPhone update failed: ${err.message}`);
       } else {
         log("iOS IPA deployed successfully");
-        notify("iOS app updated! iPhone now matches Android version.");
+        notify("iPhone's caught up — all devices are on the latest now.");
       }
     });
   }
@@ -1116,7 +1116,7 @@ function smartDeploy(directive) {
   if (bridgeChanged) {
     const restartDelay = native.any ? 5000 : 3000; // Wait for deploy to start first
     log(`Bridge code changed — scheduling restart in ${restartDelay}ms`);
-    notify("Bridge server code was updated — restarting to load changes...");
+    notify("Server code changed — restarting in a sec.");
     setTimeout(() => {
       log("Triggering bridge restart via POST /restart");
       const payload = JSON.stringify({});
