@@ -389,6 +389,7 @@ async function initStorage() {
 
   // Phase C: Stale auto-retry — promote stale directives with low retryCount
   let retryCount = 0;
+  let failedCount = 0;
   for (const d of _directives) {
     if (d.status === "stale") {
       const rc = d.retryCount || 0;
@@ -403,13 +404,29 @@ async function initStorage() {
         d.status = "failed";
         d.failureReason = d.failureReason || `exhausted: failed after ${rc} retries`;
         d.updatedAt = new Date().toISOString();
+        failedCount++;
         log.directive.warn(`Stale exhausted: ${d.id} "${d.title}" (stale → failed, retries: ${rc})`);
+
+        // Notify June about the failure so she can inform King Kazuma
+        const failedTitle = d.title || d.description?.substring(0, 80) || d.id;
+        const failReason = d.failureReason;
+        setTimeout(() => {
+          engage("directive failure notification");
+          sendNotification(
+            `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
+            `Cipher's directive "${failedTitle}" has failed after exhausting all retries. ` +
+            `Reason: ${failReason}. ` +
+            `This directive needs attention — King Kazuma may want to review it, ` +
+            `adjust the approach, or create a new directive to try again.`
+          );
+        }, 10000); // Longer delay — this runs at startup before connections are ready
       }
     }
   }
-  if (retryCount > 0) {
+  if (retryCount > 0 || failedCount > 0) {
     saveDirectives(_directives);
-    log.directive.info(`Auto-retried ${retryCount} stale directive(s)`);
+    if (retryCount > 0) log.directive.info(`Auto-retried ${retryCount} stale directive(s)`);
+    if (failedCount > 0) log.directive.info(`Failed ${failedCount} exhausted directive(s)`);
   }
 
   // Phase B: Respawn agents for directives still in actionable states
@@ -1037,9 +1054,32 @@ async function handleRequest(req, res) {
           `He can ask you for status updates anytime.`
         );
       } else if (directive.status === "completed" && prevStatus === "in_progress") {
+        // Calculate duration from creation to completion
+        const durationMs = Date.now() - (directive.createdAt || Date.now());
+        const durationMin = Math.round(durationMs / 60000);
+        let durationStr;
+        if (durationMin < 60) {
+          durationStr = `${durationMin} minute${durationMin !== 1 ? "s" : ""}`;
+        } else {
+          const hrs = Math.floor(durationMin / 60);
+          const mins = durationMin % 60;
+          durationStr = `${hrs}h ${mins}m`;
+        }
+
+        // Parse changed files from plan field if available
+        let changedFilesStr = "";
+        if (directive.plan) {
+          const filePatterns = directive.plan.match(/(?:[\w./-]+\.(?:js|ts|tsx|jsx|py|json|yml|yaml|md|css|html|sh|sql|env))/g);
+          if (filePatterns && filePatterns.length > 0) {
+            const uniqueFiles = [...new Set(filePatterns)].slice(0, 10);
+            changedFilesStr = ` Files touched: ${uniqueFiles.join(", ")}.`;
+          }
+        }
+
         notifyPersona(
           `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
           `Cipher has finished implementing "${title}". ` +
+          `It took ${durationStr} from start to finish.${changedFilesStr} ` +
           `The code has been committed and pushed. A CI build is running now — ` +
           `once it passes, the update will be deployed to all devices automatically. ` +
           `Let King Kazuma know it's done and the build is on its way.`
@@ -1330,8 +1370,6 @@ async function handleRequest(req, res) {
 
     const directiveRows = [...directives].reverse().map(d => {
       const color = statusColors[d.status] || "#6b7280";
-      const created = new Date(d.createdAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-      const updated = new Date(d.updatedAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
       let depsHtml = "-";
       if (d.dependsOn && d.dependsOn.length > 0) {
         depsHtml = d.dependsOn.map(depId => {
@@ -1347,8 +1385,8 @@ async function handleRequest(req, res) {
         <td>${escapeHtml(d.title || d.id)}</td>
         <td style="font-size:12px;color:#9ca3af;">${escapeHtml(d.type || "-")}</td>
         <td style="font-size:12px;">${depsHtml}</td>
-        <td style="font-size:12px;color:#9ca3af;">${created}</td>
-        <td style="font-size:12px;color:#9ca3af;">${updated}</td>
+        <td style="font-size:12px;color:#9ca3af;" data-ts="${d.createdAt}">${escapeHtml(d.createdAt)}</td>
+        <td style="font-size:12px;color:#9ca3af;" data-ts="${d.updatedAt}">${escapeHtml(d.updatedAt)}</td>
       </tr>`;
     }).join("");
 
