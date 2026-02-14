@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { View, Text, Animated, Easing, useWindowDimensions, PermissionsAndroid, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { useRouter } from "expo-router";
 import { StatusBadge } from "../components/StatusBadge";
 import { HamburgerMenu } from "../components/HamburgerMenu";
 import LottieView from "lottie-react-native";
@@ -12,7 +13,6 @@ import { Keypad } from "../components/Keypad";
 import { TVPressable } from "../components/TVPressable";
 import { CameraOverlay } from "../components/CameraOverlay";
 import { ContentPanel } from "../components/ContentPanel";
-import { MediaPlayer } from "../components/MediaPlayer";
 import { useEntity } from "../lib/useEntity";
 import { useKeepAwake } from "expo-keep-awake";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
@@ -97,6 +97,7 @@ function ScanLine() {
 
 export default function LandingScreen() {
   useKeepAwake();
+  const router = useRouter();
   const { insets, isPhone, screenWidth, screenHeight } = usePhoneLayout();
 
   // Detect device role once
@@ -127,7 +128,6 @@ export default function LandingScreen() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
-  const [showMediaPlayer, setShowMediaPlayer] = useState(false);
   const spotifyEntity = useEntity("media_player.spotify_king_kazuma");
 
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
@@ -311,7 +311,7 @@ export default function LandingScreen() {
           zIndex: 10,
         }}
       >
-        <HamburgerMenu onShowMediaPlayer={() => setShowMediaPlayer(true)} />
+        <HamburgerMenu />
         <StatusBadge />
       </View>
 
@@ -360,7 +360,7 @@ export default function LandingScreen() {
       />
 
       {/* Floating music button */}
-      {spotifyEntity && spotifyEntity.state !== "unavailable" && !showMediaPlayer && (
+      {spotifyEntity && spotifyEntity.state !== "unavailable" && (
         <View
           style={{
             position: "absolute",
@@ -371,18 +371,13 @@ export default function LandingScreen() {
         >
           <TVPressable
             rarity="legendary"
-            onPress={() => setShowMediaPlayer(true)}
+            onPress={() => router.push("/music")}
             style={{ paddingHorizontal: 10, paddingVertical: 8 }}
           >
             <Text style={{ fontSize: 20 }}>🎵</Text>
           </TVPressable>
         </View>
       )}
-
-      <MediaPlayer
-        visible={showMediaPlayer}
-        onClose={() => setShowMediaPlayer(false)}
-      />
 
       <Keypad
         visible={showKeypad}

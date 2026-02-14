@@ -11,14 +11,11 @@ type MenuItem =
 
 const staticMenuItems: MenuItem[] = [
   { icon: "⚔️", label: "INVENTORY", route: "/equipment" },
+  { icon: "🎵", label: "MUSIC", route: "/music" },
   { icon: "📤", label: "UPLOAD", route: "/upload" },
 ];
 
-interface HamburgerMenuProps {
-  onShowMediaPlayer?: () => void;
-}
-
-export function HamburgerMenu({ onShowMediaPlayer }: HamburgerMenuProps) {
+export function HamburgerMenu() {
   const router = useRouter();
   const [visible, setVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
@@ -57,12 +54,7 @@ export function HamburgerMenu({ onShowMediaPlayer }: HamburgerMenuProps) {
     return () => anim.stop();
   }, [visible]);
 
-  const menuItems: MenuItem[] = [
-    ...staticMenuItems,
-    ...(onShowMediaPlayer
-      ? [{ icon: "🎵", label: "MUSIC", action: onShowMediaPlayer }]
-      : []),
-  ];
+  const menuItems: MenuItem[] = staticMenuItems;
 
   const handleItemPress = (item: MenuItem) => {
     setVisible(false);
