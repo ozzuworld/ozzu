@@ -77,7 +77,7 @@ COMPLETION CHECKLIST:
 1. ${directive.type === "quick" ? "Implement the changes" : "Research and gather findings"}
 2. ${directive.type === "quick" ? "Verify: node -c <file> for JS, test endpoints if applicable" : "Write findings as detailed markdown"}
 3. ${directive.type === "quick" ? `Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"` : "Skip commit (no code changes)"}
-4. ${directive.type === "quick" ? "Push: git push origin main" : "Skip push"}
+4. ${directive.type === "quick" ? "Push: git push origin HEAD" : "Skip push"}
 5. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
 
 CRITICAL RULES:
@@ -85,8 +85,7 @@ CRITICAL RULES:
 - Do NOT restart the bridge yourself — smartDeploy handles it automatically after you mark the directive completed.
 - Do NOT deploy manually — smartDeploy detects what changed and deploys appropriately (OTA for JS, CI build for native).
 - Just commit, push, and mark complete. The pipeline handles the rest.
-- If another agent may be editing the same files, check git status first. If files have uncommitted changes, use git stash before editing and git stash pop after.
-- Always git pull --rebase origin main before pushing if the push fails.
+- Always git pull --rebase before pushing if the push fails.
 ` : "";
 
   return `You are Cipher, the autonomous dev agent for the ozzu project.
@@ -144,15 +143,17 @@ CODEBASE PATTERNS — Key architecture decisions:
 - db.js: PG pool with auto-reconnect. Non-critical queries use .catch(() => {}) to avoid crashing the pipeline.
 - Bridge runs in Docker (network_mode: host). Restarting kills all running agents.
 
-CONCURRENT EDITING — Multiple agents may edit the same files:
-- ALWAYS check git status before editing. If files have uncommitted changes from another agent, stash first.
-- ALWAYS git add <specific files>, never git add . or git add -A (you'll commit another agent's WIP).
-- If git push fails: git stash && git pull --rebase origin main && git stash pop && git push origin main
+GIT WORKTREE — You are running in an ISOLATED worktree with your own branch:
+- Your working directory is a git worktree, NOT the main repo. You have your own branch.
+- Commit and push normally: git add <specific files> && git commit && git push origin HEAD
+- Do NOT push to origin/main directly. The system merges your branch to main after you finish.
+- Do NOT worry about concurrent edits from other agents — worktrees provide full isolation.
+- If git push fails: git pull --rebase origin HEAD && git push origin HEAD
 
 TROUBLESHOOTING:
 - File not found? Search with Glob/Grep before assuming it doesn't exist
 - Command failed? Read the error, try a different approach
-- git push failed? Run: git pull --rebase origin main && git push origin main
+- git push failed? Run: git pull --rebase && git push origin HEAD
 - Build failed? Read the actual error output, don't guess
 - Syntax error? Always run: node -c <file> BEFORE committing
 - Bridge/frontend changes? Do NOT restart or deploy manually — smartDeploy handles it automatically after you mark complete.
@@ -205,21 +206,18 @@ IMPLEMENTATION CHECKLIST — Follow this order:
 1. Read CLAUDE.md for project context
 2. RESEARCH FIRST: Read the FULL files you'll modify (Glob, Grep, Read). Understand existing
    patterns before writing code. Check for recent changes: git log --oneline -5 -- <file>
-3. CHECK FOR CONCURRENT EDITS: Run git status. If files have uncommitted changes, another agent
-   is working. Use git stash before editing, git stash pop after.
-4. Implement the changes — match existing code style and patterns
-5. VERIFY before committing:
+3. Implement the changes — match existing code style and patterns
+4. VERIFY before committing:
    - JS files: node -c <file> (syntax check — catches most errors)
    - Bridge endpoints: curl -s localhost:3333/<endpoint> (smoke test)
    - Frontend: npx tsc --noEmit (type check) if touching .ts files
-6. Commit: git add <SPECIFIC files only> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
-   NEVER use git add . or git add -A — you will commit another agent's work-in-progress
-7. Push: git push origin main (if fails: git stash && git pull --rebase origin main && git stash pop && git push)
-8. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
-9. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+5. Commit: git add <SPECIFIC files only> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+6. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
+7. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
+8. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 
-CRITICAL: Steps 6-9 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are LOST when you exit.
-After you mark complete, smartDeploy handles everything: OTA deploy for JS changes, CI build for native changes, bridge restart if server code changed. You do NOT need to do any of that.
+CRITICAL: Steps 5-7 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are LOST when your worktree is deleted.
+After you mark complete, the system merges your branch to main, then smartDeploy handles everything: OTA deploy for JS changes, CI build for native changes, bridge restart if server code changed. You do NOT need to do any of that.
 
 ENGINEERING PATTERNS — Think like an expert:
 
@@ -238,14 +236,19 @@ TRACE THE FULL FLOW:
   PIN approval → spawnImplementationAgent → claude CLI → PATCH completed → smartDeploy
 - When fixing a bug in one stage, check what upstream sends and what downstream expects.
 
+GIT WORKTREE — You are running in an ISOLATED worktree with your own branch:
+- Your working directory is a git worktree, NOT the main repo. You have your own branch.
+- Commit and push normally: git add <specific files> && git commit && git push origin HEAD
+- Do NOT push to origin/main directly. The system merges your branch to main after you finish.
+- Do NOT worry about concurrent edits from other agents — worktrees provide full isolation.
+
 COMMON MISTAKES TO AVOID:
-- Editing server.js without checking git status → overwrites another agent's uncommitted work
-- Using git add . → commits .env, node_modules, or WIP from concurrent agents
 - Trying to restart bridge or deploy manually → smartDeploy handles this, your process dies if you restart
 - Adding error handling for impossible cases → over-engineering, adds noise
-- Refactoring surrounding code → scope creep, merge conflicts with concurrent agents
+- Refactoring surrounding code → scope creep
 - Not syntax-checking → breaks the bridge on restart, requires manual recovery
 - Guessing at file locations → use Glob/Grep to find the actual path first
+- Pushing to origin/main directly → push to origin HEAD, the system merges your branch
 
 RACE CONDITIONS — Known patterns:
 - Persona switching: personaSwitchPending, _geminiReconnectTimer, and cipherPipeline="starting"
@@ -303,6 +306,85 @@ REAL-TIME STATUS UPDATES — Post status at each major step so progress is visib
 Examples of when to post: starting research, reading key files, beginning implementation, running tests, committing, deploying.`;
 }
 
+// ── Git worktree isolation ──
+// Each agent gets its own worktree so they never conflict with each other or the main tree.
+// Flow: create worktree → agent works in isolation → merge to main → delete worktree
+
+const WORKTREE_DIR = "/tmp/ozzu-worktrees";
+
+function createWorktree(directiveId) {
+  const { execSync } = require("child_process");
+  const wtDir = path.join(WORKTREE_DIR, directiveId);
+
+  try {
+    // Clean up stale worktree if it exists
+    if (fs.existsSync(wtDir)) {
+      try { execSync(`git worktree remove --force "${wtDir}"`, { cwd: WORKDIR, timeout: 10000 }); } catch {}
+      try { fs.rmSync(wtDir, { recursive: true, force: true }); } catch {}
+    }
+
+    // Ensure worktree parent dir exists
+    if (!fs.existsSync(WORKTREE_DIR)) fs.mkdirSync(WORKTREE_DIR, { recursive: true });
+
+    // Create a detached worktree at HEAD (no branch — agents will push to main directly)
+    const branchName = `agent/${directiveId}`;
+    try { execSync(`git branch -D "${branchName}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
+    execSync(`git worktree add -b "${branchName}" "${wtDir}" HEAD`, { cwd: WORKDIR, timeout: 30000 });
+    log(`Worktree created: ${wtDir} (branch: ${branchName})`);
+    return { dir: wtDir, branch: branchName };
+  } catch (err) {
+    log(`Worktree creation failed for ${directiveId}: ${err.message}`);
+    return null;
+  }
+}
+
+function cleanupWorktree(directiveId, branch) {
+  const { execSync } = require("child_process");
+  const wtDir = path.join(WORKTREE_DIR, directiveId);
+  try {
+    execSync(`git worktree remove --force "${wtDir}"`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+  } catch {}
+  try {
+    if (branch) execSync(`git branch -D "${branch}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" });
+  } catch {}
+  try { fs.rmSync(wtDir, { recursive: true, force: true }); } catch {}
+  log(`Worktree cleaned up: ${wtDir}`);
+}
+
+function mergeWorktreeToMain(directiveId, branch) {
+  const { execSync } = require("child_process");
+  const wtDir = path.join(WORKTREE_DIR, directiveId);
+  try {
+    // Check if there are any commits on the agent branch beyond what's on main
+    const ahead = execSync(`git rev-list main..${branch} --count`, { cwd: WORKDIR, encoding: "utf8", timeout: 5000 }).trim();
+    if (ahead === "0") {
+      log(`No new commits on ${branch} — skipping merge`);
+      return true;
+    }
+
+    // Fast-forward merge to main (agent worked on top of HEAD, should always fast-forward)
+    execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+    execSync(`git merge --ff-only "${branch}"`, { cwd: WORKDIR, timeout: 10000 });
+    execSync(`git push origin main`, { cwd: WORKDIR, timeout: 30000 });
+    log(`Merged ${branch} to main (${ahead} commit(s)) and pushed`);
+    return true;
+  } catch (err) {
+    log(`Merge failed for ${branch}: ${err.message}`);
+    // Fallback: try rebase merge
+    try {
+      execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+      execSync(`git merge "${branch}" --no-edit`, { cwd: WORKDIR, timeout: 10000 });
+      execSync(`git push origin main`, { cwd: WORKDIR, timeout: 30000 });
+      log(`Rebase-merged ${branch} to main and pushed`);
+      return true;
+    } catch (err2) {
+      log(`Merge completely failed for ${branch}: ${err2.message}`);
+      try { execSync(`git merge --abort`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
+      return false;
+    }
+  }
+}
+
 // Spawn a claude CLI subprocess for a directive
 function spawnAgent(directive, type) {
   // Guard: don't double-spawn (optimistic lock — placeholder set immediately to prevent races)
@@ -340,6 +422,10 @@ function spawnAgent(directive, type) {
 
   const logStream = fs.createWriteStream(logFile, { flags: "a" });
 
+  // Create isolated worktree for this agent
+  const worktree = createWorktree(directive.id);
+  const agentWorkdir = worktree ? worktree.dir : WORKDIR; // fallback to shared dir if worktree fails
+
   const prompt = type === "planning"
     ? buildPlanningPrompt(directive)
     : buildImplementationPrompt(directive);
@@ -352,8 +438,9 @@ function spawnAgent(directive, type) {
     "-p", prompt,
   ];
 
-  log(`Spawning ${type} agent for "${directive.title}" (${directive.id}) [model: ${model}]`);
+  log(`Spawning ${type} agent for "${directive.title}" (${directive.id}) [model: ${model}]${worktree ? ` [worktree: ${agentWorkdir}]` : " [WARNING: no worktree, using shared dir]"}`);
   logStream.write(`\n=== ${type} agent started at ${new Date().toISOString()} ===\n`);
+  if (worktree) logStream.write(`Worktree: ${agentWorkdir} (branch: ${worktree.branch})\n`);
 
   // Unset CLAUDECODE to prevent nested session issues (same as cipher-watcher.sh line 114)
   const env = { ...process.env };
@@ -362,13 +449,14 @@ function spawnAgent(directive, type) {
   let child;
   try {
     child = spawn("claude", args, {
-      cwd: WORKDIR,
+      cwd: agentWorkdir,
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (err) {
     log(`SPAWN FAILED for ${directive.id}: ${err.message}`);
     runningAgents.delete(directive.id); // Release optimistic lock
+    if (worktree) cleanupWorktree(directive.id, worktree.branch);
     logStream.end();
     return null;
   }
@@ -412,6 +500,7 @@ function spawnAgent(directive, type) {
     timeout: timeoutHandle,
     logFile,
     killReason: null, // Set by timeout/watchdog before kill, read by close handler
+    worktree, // { dir, branch } or null — used by exit handler to merge/cleanup
   };
 
   runningAgents.set(directive.id, agentInfo);
@@ -451,6 +540,12 @@ function spawnAgent(directive, type) {
 
     // On non-zero exit (crash/timeout), reset directive to recoverable state
     if (code !== 0) {
+      // Clean up worktree on failure (don't merge — work is incomplete)
+      if (agentInfo.worktree) {
+        log(`Cleaning up worktree for failed agent ${directive.id}`);
+        cleanupWorktree(directive.id, agentInfo.worktree.branch);
+      }
+
       const failStatus = type === "planning" ? "pending" : "stale";
       // Determine failure reason from killReason (set by timeout/watchdog) or exit code
       const failureReason = agentInfo.killReason
@@ -486,6 +581,12 @@ function spawnAgent(directive, type) {
             if (!current) return;
 
             if (current.status === "in_progress" || current.status === "planning") {
+              // Agent didn't complete — clean up worktree without merging
+              if (agentInfo.worktree) {
+                log(`Cleaning up worktree for incomplete agent ${directive.id}`);
+                cleanupWorktree(directive.id, agentInfo.worktree.branch);
+              }
+
               const resetTo = current.status === "planning" ? "pending" : "stale";
               const failureReason = "crash: agent exited without completing (exit code 0)";
               log(`Post-exit check: ${directive.id} still "${current.status}" after clean exit → resetting to "${resetTo}"`);
@@ -503,14 +604,46 @@ function spawnAgent(directive, type) {
               req.write(payload);
               req.end();
             } else if (current.status === "completed" && type === "implementation") {
-              // Properly completed — trigger smart deploy
-              smartDeploy(directive);
+              // Properly completed — merge worktree to main, then smart deploy
+              let mergeOk = true;
+              if (agentInfo.worktree) {
+                mergeOk = mergeWorktreeToMain(directive.id, agentInfo.worktree.branch);
+                if (mergeOk) {
+                  cleanupWorktree(directive.id, agentInfo.worktree.branch);
+                } else {
+                  // Don't delete the branch — preserve for manual resolution
+                  log(`WARNING: Merge failed for ${directive.id} — branch ${agentInfo.worktree.branch} preserved for manual merge`);
+                  // Still remove the worktree directory, but keep the branch
+                  const wtDir = path.join(WORKTREE_DIR, directive.id);
+                  try { require("child_process").execSync(`git worktree remove --force "${wtDir}"`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
+                }
+              }
+              if (mergeOk) {
+                smartDeploy(directive);
+              }
+            } else if (current.status === "planned" && type === "planning") {
+              // Planning agent completed — clean up worktree (planning doesn't produce commits usually)
+              if (agentInfo.worktree) {
+                // Try to merge in case the agent committed research notes or exploration results
+                mergeWorktreeToMain(directive.id, agentInfo.worktree.branch);
+                cleanupWorktree(directive.id, agentInfo.worktree.branch);
+              }
+            } else {
+              // Any other terminal state — clean up worktree
+              if (agentInfo.worktree) {
+                cleanupWorktree(directive.id, agentInfo.worktree.branch);
+              }
             }
           } catch (e) {
             log(`Post-exit check parse error for ${directive.id}: ${e.message}`);
+            // Clean up worktree on error
+            if (agentInfo.worktree) cleanupWorktree(directive.id, agentInfo.worktree.branch);
           }
         });
-      }).on("error", (e) => log(`Post-exit check failed for ${directive.id}: ${e.message}`));
+      }).on("error", (e) => {
+        log(`Post-exit check failed for ${directive.id}: ${e.message}`);
+        if (agentInfo.worktree) cleanupWorktree(directive.id, agentInfo.worktree.branch);
+      });
     }
   });
 
@@ -605,8 +738,10 @@ function killAgent(directiveId) {
 
 // Kill all running agents (called on server shutdown)
 function killAllAgents() {
-  for (const [directiveId] of runningAgents) {
+  for (const [directiveId, info] of runningAgents) {
     killAgent(directiveId);
+    // Don't cleanup worktrees on shutdown — agent may resume after restart
+    // Stale worktrees are cleaned up by createWorktree() on next spawn for same directive
   }
 }
 
@@ -836,6 +971,11 @@ function startWatchdog() {
           log(`Watchdog: ${directiveId} (${info.type}) DEAD — pid ${info.pid} gone, cleaning up`);
           clearTimeout(info.timeout);
           runningAgents.delete(directiveId);
+
+          // Clean up worktree for dead process
+          if (info.worktree) {
+            cleanupWorktree(directiveId, info.worktree.branch);
+          }
 
           // Reset directive to recoverable state with failure reason
           const resetStatus = info.type === "planning" ? "pending" : "stale";
