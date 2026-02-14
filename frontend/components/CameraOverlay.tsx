@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
-import { View, Text, Animated, Dimensions, Platform } from "react-native";
+import { View, Text, Animated, useWindowDimensions, Platform } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { TVPressable } from "./TVPressable";
 import { RARITY_COLORS } from "../lib/rooms";
@@ -83,7 +83,7 @@ export function CameraOverlay({
 
   if (!visible) return null;
 
-  const { height: screenHeight } = Dimensions.get("window");
+  const { height: screenHeight } = useWindowDimensions();
   const size = Math.round(screenHeight * 0.4);
 
   const glowRadius = glowAnim.interpolate({

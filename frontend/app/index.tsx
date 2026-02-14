@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { View, Animated, Easing, Dimensions, PermissionsAndroid, Platform } from "react-native";
+import { View, Animated, Easing, useWindowDimensions, PermissionsAndroid, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { StatusBadge } from "../components/StatusBadge";
 import { HamburgerMenu } from "../components/HamburgerMenu";
@@ -60,7 +60,7 @@ function HudCorner({ top, left, right, bottom }: { top?: number; left?: number; 
 // ── Scan line ──
 function ScanLine() {
   const translateY = useRef(new Animated.Value(0)).current;
-  const screenHeight = Dimensions.get("window").height;
+  const { height: screenHeight } = useWindowDimensions();
 
   useEffect(() => {
     const loop = Animated.loop(

@@ -44,7 +44,9 @@ let _rateLimitHits = 0;
 
 // ── Log ring buffer — captures recent console output for GET /logs ──
 const LOG_RING_MAX = 500;
-const _logRing = [];
+const _logRing = new Array(LOG_RING_MAX);
+let _logRingHead = 0; // next write index
+let _logRingCount = 0;
 const _origStdoutWrite = process.stdout.write.bind(process.stdout);
 const _origStderrWrite = process.stderr.write.bind(process.stderr);
 function _captureLog(chunk) {
@@ -52,9 +54,15 @@ function _captureLog(chunk) {
   const lines = str.split("\n");
   for (const line of lines) {
     if (line.length === 0) continue;
-    _logRing.push({ ts: new Date().toISOString(), line });
-    if (_logRing.length > LOG_RING_MAX) _logRing.shift();
+    _logRing[_logRingHead] = { ts: new Date().toISOString(), line };
+    _logRingHead = (_logRingHead + 1) % LOG_RING_MAX;
+    if (_logRingCount < LOG_RING_MAX) _logRingCount++;
   }
+}
+function getLogRing() {
+  if (_logRingCount < LOG_RING_MAX) return _logRing.slice(0, _logRingCount);
+  // Circular: tail is from _logRingHead to end, then 0 to _logRingHead
+  return [..._logRing.slice(_logRingHead), ..._logRing.slice(0, _logRingHead)];
 }
 process.stdout.write = function (chunk, encoding, cb) {
   _captureLog(chunk);
@@ -2539,7 +2547,7 @@ function submitDirective(e) {
   if (req.method === "GET" && pathname === "/logs") {
     const lines = Math.min(Math.max(parseInt(url.searchParams.get("lines")) || 100, 1), 500);
     const sinceParam = url.searchParams.get("since"); // e.g. "1h", "30m", "5s"
-    let filtered = _logRing;
+    let filtered = getLogRing();
     if (sinceParam) {
       const match = sinceParam.match(/^(\d+)([hms])$/);
       if (match) {
@@ -4631,7 +4639,9 @@ function handleGeminiMessage(msg) {
       ws.close();
     }
     // Reconnect immediately (don't wait for the 2s auto-reconnect delay)
-    setTimeout(() => connectGemini(), 500);
+    if (!personaSwitchPending) {
+      _geminiReconnectTimer = setTimeout(() => { _geminiReconnectTimer = null; connectGemini(); }, 500);
+    }
     return;
   }
 

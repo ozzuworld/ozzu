@@ -4,7 +4,7 @@ import {
   Text,
   Animated,
   Easing,
-  Dimensions,
+  useWindowDimensions,
   ScrollView,
   Platform,
 } from "react-native";
@@ -837,7 +837,7 @@ export function ContentPanel({
 
   if (!shouldRender) return null;
 
-  const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const panelWidth = Math.min(screenWidth * 0.6, 600);
   const panelHeight = screenHeight * 0.65;
 
