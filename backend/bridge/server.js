@@ -1702,7 +1702,8 @@ async function handleRequest(req, res) {
           return `<span style="color:${depColor};font-size:11px;" title="${escapeHtml(depId)}">${checkmark}${escapeHtml(depLabel)}</span>`;
         }).join("<br>");
       }
-      return `<tr class="directive-row" data-status="${escapeHtml(d.status)}" data-title="${escapeHtml((d.title || d.id).toLowerCase())}">
+      return `<tr class="directive-row" data-status="${escapeHtml(d.status)}" data-title="${escapeHtml((d.title || d.id).toLowerCase())}" data-id="${escapeHtml(d.id)}">
+        <td><input type="checkbox" class="directive-check" value="${escapeHtml(d.id)}" onchange="updateBulkBar()"></td>
         <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
         <td>${escapeHtml(d.title || d.id)}</td>
         <td style="font-size:12px;color:#9ca3af;">${escapeHtml(d.type || "-")}</td>
@@ -1819,7 +1820,18 @@ ${agents.length > 0 ? `<table><tr><th>Directive</th><th>Type</th><th>PID</th><th
     <button class="filter-pill" data-filter="failed" onclick="setStatusFilter('failed',this)">Failed</button>
   </div>
 </div>
-${directives.length > 0 ? `<table id="directives-table"><tr><th>Status</th><th>Title</th><th>Type</th><th>Priority</th><th>Deps</th><th>Created</th><th>Last Activity</th><th>Duration</th><th></th></tr>${directiveRows}</table><div class="load-more-wrap" id="load-more-wrap"><button class="load-more-btn" id="load-more-btn" onclick="loadMore()">Load More</button><span id="load-more-count" style="color:#64748b;font-size:12px;margin-left:8px;"></span></div>` : `<p class="empty">No directives.</p>`}
+<div id="bulk-bar" style="display:none;background:#1e293b;border:1px solid #475569;border-radius:8px;padding:10px 16px;margin-bottom:12px;align-items:center;gap:12px;">
+  <span id="bulk-count" style="font-size:13px;color:#94a3b8;">0 selected</span>
+  <select id="bulk-action" style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:6px 12px;font-family:inherit;font-size:13px;">
+    <option value="">— Bulk Action —</option>
+    <option value="cancel">Cancel Selected</option>
+    <option value="retry">Retry Selected</option>
+    <option value="delete">Delete Selected</option>
+  </select>
+  <button onclick="executeBulkAction()" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer;">Apply</button>
+  <span id="bulk-msg" style="font-size:12px;"></span>
+</div>
+${directives.length > 0 ? `<table id="directives-table"><tr><th><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th><th>Status</th><th>Title</th><th>Type</th><th>Priority</th><th>Deps</th><th>Created</th><th>Last Activity</th><th>Duration</th><th></th></tr>${directiveRows}</table><div class="load-more-wrap" id="load-more-wrap"><button class="load-more-btn" id="load-more-btn" onclick="loadMore()">Load More</button><span id="load-more-count" style="color:#64748b;font-size:12px;margin-left:8px;"></span></div>` : `<p class="empty">No directives.</p>`}
 </section>
 
 <section>
@@ -2022,6 +2034,77 @@ function retryDirective(id) {
       if (data.ok) { refreshNow(); } else { alert("Error: " + (data.error || "Unknown")); }
     })
     .catch(function(err) { alert("Network error: " + err.message); });
+}
+
+// Bulk selection
+function toggleSelectAll(el) {
+  var checked = el.checked;
+  document.querySelectorAll(".directive-check").forEach(function(cb) {
+    if (cb.closest(".directive-row").style.display !== "none") cb.checked = checked;
+  });
+  updateBulkBar();
+}
+
+function getSelectedIds() {
+  var ids = [];
+  document.querySelectorAll(".directive-check:checked").forEach(function(cb) {
+    ids.push(cb.value);
+  });
+  return ids;
+}
+
+function updateBulkBar() {
+  var ids = getSelectedIds();
+  var bar = document.getElementById("bulk-bar");
+  var countEl = document.getElementById("bulk-count");
+  if (ids.length > 0) {
+    bar.style.display = "flex";
+    countEl.textContent = ids.length + " selected";
+  } else {
+    bar.style.display = "none";
+  }
+  // Sync select-all checkbox
+  var allBoxes = document.querySelectorAll(".directive-check");
+  var visibleBoxes = [];
+  allBoxes.forEach(function(cb) { if (cb.closest(".directive-row").style.display !== "none") visibleBoxes.push(cb); });
+  var selectAll = document.getElementById("select-all");
+  if (selectAll && visibleBoxes.length > 0) {
+    selectAll.checked = visibleBoxes.every(function(cb) { return cb.checked; });
+  }
+}
+
+function executeBulkAction() {
+  var action = document.getElementById("bulk-action").value;
+  if (!action) { alert("Select a bulk action first."); return; }
+  var ids = getSelectedIds();
+  if (ids.length === 0) { alert("No directives selected."); return; }
+  var labels = { cancel: "Cancel", retry: "Retry", "delete": "Delete" };
+  if (!confirm(labels[action] + " " + ids.length + " directive(s)?")) return;
+  var msgEl = document.getElementById("bulk-msg");
+  msgEl.textContent = "Processing...";
+  msgEl.style.color = "#94a3b8";
+  fetch("/directives/bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: action, ids: ids })
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        var msg = data.succeeded.length + " succeeded";
+        if (data.failed.length > 0) msg += ", " + data.failed.length + " failed";
+        msgEl.textContent = msg;
+        msgEl.style.color = data.failed.length > 0 ? "#f59e0b" : "#10b981";
+        setTimeout(refreshNow, 1000);
+      } else {
+        msgEl.textContent = "Error: " + (data.error || "Unknown");
+        msgEl.style.color = "#ef4444";
+      }
+    })
+    .catch(function(err) {
+      msgEl.textContent = "Network error: " + err.message;
+      msgEl.style.color = "#ef4444";
+    });
 }
 
 // Template pre-fill
@@ -2427,7 +2510,7 @@ const INFRA_MAP =
   "- dev-01 (172.168.0.59): runs wyze-bridge for camera streams\n\n" +
   "Bridge HTTP API (localhost:3333): POST /status, GET /status, POST /notify, " +
   "POST /approvals, GET /approvals, POST /directives, GET /directives, GET /templates, PATCH /directives/:id, " +
-  "POST /directives/:id/unblock, GET /agents, DELETE /agents/:directiveId\n\n" +
+  "POST /directives/:id/unblock, POST /directives/bulk, GET /agents, DELETE /agents/:directiveId\n\n" +
   "Common operations with run_command:\n" +
   "- Container health: docker ps, docker stats --no-stream, docker logs <name> --tail N\n" +
   "- Container management: docker restart <name>, docker compose -f /home/gcp/ozzu/backend/docker-compose.yml up -d <service>\n" +
