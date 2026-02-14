@@ -1,7 +1,9 @@
-// Cipher Pipeline: Deepgram STT → Claude Agent SDK → Deepgram Aura TTS
+// Cipher Pipeline: Deepgram STT → Claude Agent SDK (Opus) → Deepgram Aura TTS
 // Uses Max subscription via OAuth — no separate API key needed.
-// The Agent SDK spawns Claude Code as a subprocess, giving Cipher
-// full codebase access (Read, Bash, Grep) plus custom bridge tools via MCP.
+// Cipher is a CONVERSATIONAL ROUTER — it delegates all dev work to directive agents.
+// SDK built-in tools (Read, Bash, Grep) are intentionally excluded so Cipher
+// never tries to code inline. It uses only MCP bridge tools for operational tasks
+// and sends_dev_directive for anything that touches code.
 
 const { EventEmitter } = require("events");
 const { createClient, LiveTranscriptionEvents, LiveTTSEvents } = require("@deepgram/sdk");
@@ -44,6 +46,13 @@ class CipherPipeline extends EventEmitter {
 
     // Utterance accumulator for Deepgram partials
     this._utteranceBuffer = "";
+
+    // STT reconnect backoff
+    this._sttReconnectAttempt = 0;
+
+    // STT keepAlive interval (cleared on disconnect)
+    this._sttKeepAliveInterval = null;
+    this._lastAudioSentAt = 0;
 
     // Turn-based state: "cipher" (speaking/thinking) or "user" (listening)
     // Mic and speaker never overlap — eliminates echo entirely.
@@ -192,6 +201,9 @@ class CipherPipeline extends EventEmitter {
 
       this.dgSTT.on(LiveTranscriptionEvents.Open, () => {
         console.log("[cipher] Deepgram STT connected");
+        this._sttReconnectAttempt = 0;
+        // Start keepAlive interval
+        this._startSTTKeepAlive();
       });
 
       this.dgSTT.on(LiveTranscriptionEvents.Transcript, (data) => {
@@ -225,20 +237,25 @@ class CipherPipeline extends EventEmitter {
 
       this.dgSTT.on(LiveTranscriptionEvents.Error, (err) => {
         console.error("[cipher] Deepgram STT error:", err.message);
+        // Error without subsequent Close can leave STT dead — force reconnect
+        if (this.dgSTT && !this.dgSTT.isConnected?.()) {
+          console.log("[cipher] STT error left connection dead, forcing reconnect...");
+          this._stopSTTKeepAlive();
+          this.dgSTT = null;
+          this._scheduleSTTReconnect();
+        }
       });
 
       this.dgSTT.on(LiveTranscriptionEvents.Close, (ev) => {
         const code = ev?.code || "unknown";
         const reason = ev?.reason || "";
         console.log(`[cipher] Deepgram STT closed (code=${code}${reason ? `, reason=${reason}` : ""})`);
+        this._stopSTTKeepAlive();
         this.dgSTT = null;
-        // Auto-reconnect if pipeline is still running
-        if (this.running) {
-          console.log("[cipher] Deepgram STT reconnecting in 1s...");
-          setTimeout(() => {
-            if (this.running) this._connectSTT();
-          }, 1000);
-        }
+        // Clear stale utterance buffer to prevent text accumulation across reconnects
+        this._utteranceBuffer = "";
+        // Auto-reconnect with exponential backoff
+        this._scheduleSTTReconnect();
       });
     } catch (err) {
       console.error("[cipher] Deepgram STT init failed:", err.message);
@@ -250,6 +267,46 @@ class CipherPipeline extends EventEmitter {
     if (!this.dgSTT || !this.running) return;
     const buf = Buffer.from(pcmBase64, "base64");
     this.dgSTT.send(buf);
+    this._lastAudioSentAt = Date.now();
+  }
+
+  _scheduleSTTReconnect() {
+    if (!this.running) return;
+    if (this._sttReconnectAttempt >= 20) {
+      console.error("[cipher] STT reconnect: max attempts (20) reached, giving up");
+      return;
+    }
+    const delay = Math.min(1000 * Math.pow(2, this._sttReconnectAttempt), 30000);
+    this._sttReconnectAttempt++;
+    console.log("[cipher] STT reconnecting in %dms (attempt %d/20)...", delay, this._sttReconnectAttempt);
+    setTimeout(() => {
+      if (this.running && !this.dgSTT) this._connectSTT();
+    }, delay);
+  }
+
+  _startSTTKeepAlive() {
+    this._stopSTTKeepAlive();
+    this._sttKeepAliveInterval = setInterval(() => {
+      if (!this.dgSTT || !this.running) {
+        this._stopSTTKeepAlive();
+        return;
+      }
+      // Only send keepAlive if no audio sent in the last 5 seconds
+      if (Date.now() - this._lastAudioSentAt > 5000) {
+        try {
+          this.dgSTT.keepAlive();
+        } catch (err) {
+          console.warn("[cipher] STT keepAlive failed:", err.message);
+        }
+      }
+    }, 8000);
+  }
+
+  _stopSTTKeepAlive() {
+    if (this._sttKeepAliveInterval) {
+      clearInterval(this._sttKeepAliveInterval);
+      this._sttKeepAliveInterval = null;
+    }
   }
 
   async sendText(text) {
@@ -278,6 +335,7 @@ class CipherPipeline extends EventEmitter {
     this.running = false;
     console.log("[cipher] Stopping pipeline...");
 
+    this._stopSTTKeepAlive();
     if (this.dgSTT) {
       try { this.dgSTT.requestClose(); } catch {}
       this.dgSTT = null;
@@ -311,7 +369,6 @@ class CipherPipeline extends EventEmitter {
       const bridgeServer = this._createBridgeMcpServer(tool, createSdkMcpServer);
 
       const allowedTools = this.tools.map(t => `mcp__bridge__${t.name}`);
-      allowedTools.push("Read", "Glob", "Grep", "Bash");
 
       const self = this;
 
@@ -338,7 +395,7 @@ class CipherPipeline extends EventEmitter {
           mcpServers: { bridge: bridgeServer },
           allowedTools,
           maxTurns: Infinity,
-          model: process.env.CIPHER_MODEL || "sonnet",
+          model: process.env.CIPHER_MODEL || "opus",
           cwd: "/home/gcp/ozzu",
           persistSession: false,
           permissionMode: "acceptEdits",
