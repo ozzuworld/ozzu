@@ -558,11 +558,9 @@ async function initStorage() {
         setTimeout(() => {
           engage("directive failure notification");
           sendNotification(
-            `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
-            `Cipher's directive "${failedTitle}" has failed after exhausting all retries. ` +
-            `Reason: ${failReason}. ` +
-            `This directive needs attention — King Kazuma may want to review it, ` +
-            `adjust the approach, or create a new directive to try again.`
+            `[SYSTEM — Tell King Kazuma briefly, don't dump details.]\n` +
+            `"${failedTitle}" failed after multiple tries. Reason: ${failReason}. ` +
+            `Might need a different approach.`
           );
         }, 10000); // Longer delay — this runs at startup before connections are ready
       }
@@ -896,9 +894,8 @@ async function handleRequest(req, res) {
       setTimeout(() => {
         engage("cipher status notification");
         sendNotification(
-          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
-          `Cipher reported a ${entry.event}: ${entry.message}\n` +
-          `Let King Kazuma know so he can help resolve it.`
+          `[SYSTEM — Brief heads-up for King Kazuma.]\n` +
+          `Hit a ${entry.event}: ${entry.message}`
         );
       }, 500);
     }
@@ -959,7 +956,7 @@ async function handleRequest(req, res) {
       setTimeout(() => {
         engage("system notification");
         sendNotification(
-          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n${data.message}`
+          `[SYSTEM — Tell King Kazuma casually.]\n${data.message}`
         );
       }, 500);
     }
@@ -1002,12 +999,9 @@ async function handleRequest(req, res) {
     setTimeout(() => {
       engage("cipher approval request");
       sendNotification(
-        `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
-        `Cipher needs approval for something important: ${approval.description}\n` +
-        `This is a high-risk action that requires King Kazuma's authorization.\n` +
-        `Approval ID: ${approval.id}\n\n` +
-        `Ask King Kazuma if he wants to approve this. ` +
-        `If yes, use the approve_action tool with approval ID "${approval.id}" and needs_user_pin: true.`
+        `[SYSTEM — Ask King Kazuma naturally.]\n` +
+        `Need approval for: ${approval.description}\n` +
+        `If he says yes, use approve_action with approval ID "${approval.id}" and needs_user_pin: true.`
       );
     }, 500);
 
@@ -1407,12 +1401,9 @@ async function handleRequest(req, res) {
       setTimeout(() => {
         engage("plan ready notification");
         sendNotification(
-          `[SYSTEM NOTIFICATION — Do NOT read this verbatim. Summarize naturally to King Kazuma.]\n` +
-          `Cipher just finished planning the directive "${directive.title}". ` +
-          `The plan needs King Kazuma's approval before implementation can begin. ` +
-          `Here's the plan summary:\n${planSummary}\n\n` +
-          `Tell King Kazuma the plan is ready and ask if he'd like to approve it. ` +
-          `If he says yes, use the approve_action tool with approval ID "${approvalId}" and needs_user_pin: true.`
+          `[SYSTEM — Don't read verbatim, tell King Kazuma conversationally.]\n` +
+          `The plan for "${directive.title}" is ready. Quick summary:\n${planSummary}\n\n` +
+          `Ask if he wants to approve it. If yes, use approve_action with approval ID "${approvalId}" and needs_user_pin: true.`
         );
       }, 500);
     }
@@ -1427,10 +1418,8 @@ async function handleRequest(req, res) {
 
       if (directive.status === "in_progress" && prevStatus === "approved") {
         notifyPersona(
-          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
-          `Cipher has started implementing "${title}". ` +
-          `Let King Kazuma know that the work is now in progress. ` +
-          `He can ask you for status updates anytime.`
+          `[SYSTEM — Brief update, don't read verbatim.]\n` +
+          `"${title}" is being built now.`
         );
       } else if (directive.status === "completed" && prevStatus === "in_progress") {
         // Calculate duration from creation to completion
@@ -1456,12 +1445,9 @@ async function handleRequest(req, res) {
         }
 
         notifyPersona(
-          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
-          `Cipher has finished implementing "${title}". ` +
-          `It took ${durationStr} from start to finish.${changedFilesStr} ` +
-          `The code has been committed and pushed. A CI build is running now — ` +
-          `once it passes, the update will be deployed to all devices automatically. ` +
-          `Let King Kazuma know it's done and the build is on its way.`
+          `[SYSTEM — Tell King Kazuma casually, don't read verbatim.]\n` +
+          `"${title}" is done. Took ${durationStr}.${changedFilesStr} ` +
+          `It's deploying now — devices will update automatically.`
         );
       }
     }
@@ -5397,6 +5383,13 @@ async function startCipherPipeline() {
     "REAL commands to you will: mention your name, reference the project, or continue the current topic.\n" +
     "\n" +
     "HOW TO SOUND NATURAL — you're a person, not a chatbot:\n" +
+    "- TRANSLATE TECH TO SPEECH: Never say 'OTA deploy', 'CI build', 'bridge restarted', " +
+    "'directive agent spawned', 'worktree merged'. These are internal system terms. " +
+    "Instead: 'update's going out', 'build's running', 'I just came back up', " +
+    "'the work kicked off', 'changes are in'. Talk like you're explaining to a smart " +
+    "colleague over coffee, not reading a terminal.\n" +
+    "- VARY YOUR GREETINGS: Don't always say 'Back online. What do you need?' after restarts. " +
+    "Mix it up: 'Hey, I'm back.', 'Yo.', 'What's up?', 'Back — did I miss anything?'\n" +
     "- DON'T PARROT BACK: If he says 'it's a Media washing machine model MF-200 on the network', " +
     "don't say 'Got it — Media brand washing machine, model MF-200, already on the network.' " +
     "Just say 'Cool, I'll scan for it' or 'On it.' He already knows what he said.\n" +
@@ -5406,13 +5399,16 @@ async function startCipherPipeline() {
     "- DON'T REPEAT YOURSELF: If you said the plan is ready, don't say it again next turn. " +
     "He heard you. Move forward.\n" +
     "- LEAD WITH THE ANSWER: Don't build up to it. Instead of 'I've investigated the issue and " +
-    "found that the directive system has a problem where...' just say 'Found the issue — the plan " +
-    "got stuck in Claude Code's plan mode instead of the directive pipeline.'\n" +
+    "found that the directive system has a problem where...' just say 'Found it — the plan " +
+    "got stuck because X.'\n" +
     "- USE SHORT ACKNOWLEDGMENTS: 'On it.', 'Yeah.', 'Makes sense.', 'Done.', 'Found it.' " +
     "These are natural. 'I understand and will proceed with your request' is not.\n" +
     "- TALK LIKE A COWORKER, not a customer service bot. You're peers. " +
     "He says 'check the thing', you say 'Yep, looks like it's stuck on...' not " +
     "'I'll check that for you right away.'\n" +
+    "- SYSTEM MESSAGES ARE FOR YOU, NOT KING KAZUMA: When you get a [SYSTEM] message, " +
+    "absorb the info and translate it naturally. Never say 'I received a system notification' " +
+    "or mirror the system message format. Just talk about what happened.\n" +
     "- NEVER SAY 'I CAN'T': If King Kazuma asks you to do something, find a way. " +
     "You have tools — use them. 'Send me the PIN' → call approve_action to trigger the PIN keypad. " +
     "'Deploy the OTA' → call run_command to trigger the deploy. " +
@@ -6010,11 +6006,11 @@ wss.on("connection", (ws) => {
       setTimeout(() => {
         engage("bridge restart notification");
         sendNotification(
-          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
-          `The bridge server has restarted. This is restart #${_restartCount}. ` +
-          `Previous instance ran for ${uptimeStr} (started ${_previousStartedAt}). ` +
-          (hadActiveAgents ? `There were active agents that may have been interrupted by the restart. ` : `No agents were running at the time. `) +
-          (_lastRestartReason ? `Restart reason: ${_lastRestartReason}.` : `Restart reason: unknown (likely docker restart or deploy).`)
+          `[SYSTEM — Don't read this out loud, just let King Kazuma know casually.]\n` +
+          `You just came back online after a restart.` +
+          (hadActiveAgents ? ` Some work might've been interrupted.` : ``) +
+          (_lastRestartReason && !_lastRestartReason.includes("unknown") ? ` Reason: ${_lastRestartReason}.` : ``) +
+          ` Just say you're back — don't dump technical stats.`
         );
       }, 15000);
     }
