@@ -681,12 +681,16 @@ function escapeHtml(str) {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
 function sendJSON(res, status, data) {
   res.writeHead(status, {
     "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    ...CORS_HEADERS,
   });
   res.end(JSON.stringify(data));
 }
@@ -699,7 +703,8 @@ async function handleRequest(req, res) {
 
   // CORS preflight
   if (req.method === "OPTIONS") {
-    sendJSON(res, 204, null);
+    res.writeHead(204, CORS_HEADERS);
+    res.end();
     return;
   }
 
@@ -915,6 +920,7 @@ async function handleRequest(req, res) {
       failureReason: null,
       priority,
       dependsOn: dependsOn.length > 0 ? dependsOn : null,
+      activity_log: [{ timestamp: Date.now(), type: "status_change", message: "Directive created with status: pending" }],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -1073,13 +1079,13 @@ async function handleRequest(req, res) {
     const directives = getDirectives();
     const directive = directives.find((d) => d.id === id);
     if (!directive) {
-      res.writeHead(404, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+      res.writeHead(404, { "Content-Type": "text/plain", ...CORS_HEADERS });
       res.end("Directive not found");
       return;
     }
     const logPath = `${DATA_DIR}/agent-${id}.log`;
     if (!fs.existsSync(logPath)) {
-      res.writeHead(404, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+      res.writeHead(404, { "Content-Type": "text/plain", ...CORS_HEADERS });
       res.end("Log file not found");
       return;
     }
@@ -1087,7 +1093,7 @@ async function handleRequest(req, res) {
     const content = fs.readFileSync(logPath, "utf-8");
     const lines = content.split("\n");
     const output = lines.slice(-limit).join("\n");
-    res.writeHead(200, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+    res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
     res.end(output);
     return;
   }
@@ -1115,6 +1121,14 @@ async function handleRequest(req, res) {
     if (data.priority !== undefined && [1, 2, 3, 4].includes(data.priority)) directive.priority = data.priority;
     directive.updatedAt = Date.now();
     directive.lastActivity = Date.now(); // Track when agent last touched this directive
+
+    // Initialize activity_log if missing (for older directives)
+    if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+
+    // Auto-log status changes
+    if (data.status && data.status !== prevStatus) {
+      directive.activity_log.push({ timestamp: Date.now(), type: "status_change", message: `Status changed from ${prevStatus} to ${data.status}` });
+    }
 
     // Track execution timing
     if (data.status && (data.status === "planning" || data.status === "in_progress") && !directive.startedAt) {
@@ -1266,6 +1280,30 @@ async function handleRequest(req, res) {
     }
 
     sendJSON(res, 200, { ok: true, directive, unblocked: unblockedDirectives.length > 0 ? unblockedDirectives.map(d => d.id) : undefined });
+    return;
+  }
+
+  // POST /directives/:id/comment — Add a manual comment to a directive's activity log
+  const directiveCommentMatch = pathname.match(/^\/directives\/([^/]+)\/comment$/);
+  if (req.method === "POST" && directiveCommentMatch) {
+    const id = directiveCommentMatch[1];
+    const data = await parseBody(req);
+    if (!data.message || !data.message.trim()) {
+      sendJSON(res, 400, { error: "message is required" });
+      return;
+    }
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+    const entry = { timestamp: Date.now(), type: "comment", message: data.message.trim() };
+    directive.activity_log.push(entry);
+    directive.updatedAt = Date.now();
+    saveDirectives(directives, directive, null);
+    sendJSON(res, 200, { ok: true, entry });
     return;
   }
 
@@ -1471,7 +1509,7 @@ async function handleRequest(req, res) {
         "expo-sfv-version": "0",
         "cache-control": "private, max-age=0",
         "content-type": `multipart/mixed; boundary=${boundary}`,
-        "Access-Control-Allow-Origin": "*",
+        ...CORS_HEADERS,
       });
       res.end(
         `--${boundary}\r\n` +
@@ -1502,7 +1540,7 @@ async function handleRequest(req, res) {
         "expo-sfv-version": "0",
         "cache-control": "private, max-age=0",
         "content-type": `multipart/mixed; boundary=${boundary}`,
-        "Access-Control-Allow-Origin": "*",
+        ...CORS_HEADERS,
       });
       res.end(
         `--${boundary}\r\n` +
@@ -1568,7 +1606,7 @@ async function handleRequest(req, res) {
       "expo-sfv-version": "0",
       "cache-control": "private, max-age=0",
       "content-type": `multipart/mixed; boundary=${boundary}`,
-      "Access-Control-Allow-Origin": "*",
+      ...CORS_HEADERS,
     });
     res.end(
       `--${boundary}\r\n` +
@@ -1617,7 +1655,7 @@ async function handleRequest(req, res) {
 
     res.writeHead(200, {
       "Content-Type": contentTypes[ext] || "application/octet-stream",
-      "Access-Control-Allow-Origin": "*",
+      ...CORS_HEADERS,
     });
     fs.createReadStream(filePath).pipe(res);
     return;
@@ -1702,10 +1740,24 @@ async function handleRequest(req, res) {
           return `<span style="color:${depColor};font-size:11px;" title="${escapeHtml(depId)}">${checkmark}${escapeHtml(depLabel)}</span>`;
         }).join("<br>");
       }
+      const actLog = Array.isArray(d.activity_log) ? d.activity_log : [];
+      const lastComment = [...actLog].reverse().find(e => e.type === "comment");
+      const lastCommentHtml = lastComment
+        ? `<div style="font-size:11px;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;" title="${escapeHtml(lastComment.message)}">${escapeHtml(lastComment.message)}</div>`
+        : "";
+      const logEntries = actLog.map(e => {
+        const icon = e.type === "status_change" ? "&#9656;" : e.type === "comment" ? "&#9998;" : "&#9670;";
+        const typeColor = e.type === "status_change" ? "#3b82f6" : e.type === "comment" ? "#10b981" : "#f59e0b";
+        return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid #1e293b;">` +
+          `<span style="color:${typeColor};font-size:12px;flex-shrink:0;">${icon}</span>` +
+          `<span style="color:#64748b;font-size:11px;flex-shrink:0;" data-ts="${e.timestamp}">${e.timestamp}</span>` +
+          `<span style="color:#94a3b8;font-size:11px;background:${typeColor}22;padding:1px 6px;border-radius:3px;flex-shrink:0;">${escapeHtml(e.type)}</span>` +
+          `<span style="font-size:12px;color:#e2e8f0;">${escapeHtml(e.message)}</span></div>`;
+      }).join("");
       return `<tr class="directive-row" data-status="${escapeHtml(d.status)}" data-title="${escapeHtml((d.title || d.id).toLowerCase())}" data-id="${escapeHtml(d.id)}">
         <td><input type="checkbox" class="directive-check" value="${escapeHtml(d.id)}" onchange="updateBulkBar()"></td>
         <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
-        <td>${escapeHtml(d.title || d.id)}</td>
+        <td><a href="#" onclick="toggleActivityLog('${escapeHtml(d.id)}');return false;" style="color:#e2e8f0;text-decoration:none;border-bottom:1px dashed #475569;">${escapeHtml(d.title || d.id)}</a>${lastCommentHtml}</td>
         <td style="font-size:12px;color:#9ca3af;">${escapeHtml(d.type || "-")}</td>
         <td style="font-size:12px;"><span style="color:${priColor};font-weight:${pri <= 2 ? "bold" : "normal"};">${priLabel}</span></td>
         <td style="font-size:12px;">${depsHtml}</td>
@@ -1713,6 +1765,18 @@ async function handleRequest(req, res) {
         <td style="font-size:12px;color:#9ca3af;" data-ts="${d.updatedAt}">${escapeHtml(d.updatedAt)}</td>
         <td style="font-size:12px;color:#9ca3af;">${formatDuration(d.duration)}</td>
         <td>${!["completed","failed","cancelled"].includes(d.status) ? `<button onclick="cancelDirective('${d.id}')" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Cancel directive">&times;</button>` : ""}${["failed","stale","cancelled"].includes(d.status) ? ` <button onclick="retryDirective('${d.id}')" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Retry directive">&#8635;</button>` : ""}</td>
+      </tr>
+      <tr class="activity-log-row" id="log-${escapeHtml(d.id)}" style="display:none;" data-parent-status="${escapeHtml(d.status)}" data-parent-title="${escapeHtml((d.title || d.id).toLowerCase())}">
+        <td colspan="10" style="padding:8px 16px;background:#0f172a;border-bottom:2px solid #334155;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <strong style="font-size:13px;color:#94a3b8;">Activity Log (${actLog.length} entries)</strong>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="comment-input-${escapeHtml(d.id)}" placeholder="Add a comment..." style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:4px;padding:4px 8px;font-size:12px;font-family:inherit;width:220px;" onkeydown="if(event.key==='Enter'){addComment('${escapeHtml(d.id)}');}">
+              <button onclick="addComment('${escapeHtml(d.id)}')" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit;">Add</button>
+            </div>
+          </div>
+          <div style="max-height:200px;overflow-y:auto;">${logEntries || '<span style="color:#475569;font-style:italic;">No activity yet.</span>'}</div>
+        </td>
       </tr>`;
     }).join("");
 
@@ -1926,6 +1990,7 @@ function applyFilters() {
     // Search filter
     var searchMatch = !query || title.indexOf(query) !== -1;
 
+    var logRow = document.getElementById("log-" + row.getAttribute("data-id"));
     if (statusMatch && searchMatch) {
       matchCount++;
       if (matchCount <= visibleCount) {
@@ -1933,9 +1998,11 @@ function applyFilters() {
         shownCount++;
       } else {
         row.style.display = "none";
+        if (logRow) logRow.style.display = "none";
       }
     } else {
       row.style.display = "none";
+      if (logRow) logRow.style.display = "none";
     }
   });
 
@@ -1989,6 +2056,11 @@ function refreshNow() {
       var searchVal = "";
       var searchEl = document.getElementById("directive-search");
       if (searchEl) searchVal = searchEl.value;
+      // Preserve open activity log panels
+      var openLogs = [];
+      document.querySelectorAll(".activity-log-row").forEach(function(r) {
+        if (r.style.display === "table-row") openLogs.push(r.id);
+      });
       if (newContent) contentEl.innerHTML = newContent.innerHTML;
       if (newRefreshed) refreshedEl.textContent = newRefreshed.textContent;
       // Restore search value
@@ -1998,6 +2070,11 @@ function refreshNow() {
       document.querySelectorAll(".filter-pill").forEach(function(p) {
         p.classList.remove("active");
         if (p.getAttribute("data-filter") === currentStatusFilter) p.classList.add("active");
+      });
+      // Restore open activity log panels
+      openLogs.forEach(function(logId) {
+        var el = document.getElementById(logId);
+        if (el) el.style.display = "table-row";
       });
       convertTimestamps();
       applyFilters();
@@ -2034,6 +2111,39 @@ function retryDirective(id) {
       if (data.ok) { refreshNow(); } else { alert("Error: " + (data.error || "Unknown")); }
     })
     .catch(function(err) { alert("Network error: " + err.message); });
+}
+
+// Toggle activity log panel
+function toggleActivityLog(id) {
+  var row = document.getElementById("log-" + id);
+  if (!row) return;
+  row.style.display = row.style.display === "none" ? "table-row" : "none";
+  // Convert timestamps inside the log panel
+  row.querySelectorAll("[data-ts]").forEach(function(el) {
+    var ts = el.getAttribute("data-ts");
+    if (ts) { el.textContent = timeAgo(ts); el.title = ts; }
+  });
+}
+
+// Add comment to a directive
+function addComment(id) {
+  var input = document.getElementById("comment-input-" + id);
+  if (!input) return;
+  var msg = input.value.trim();
+  if (!msg) return;
+  input.disabled = true;
+  fetch("/directives/" + id + "/comment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: msg })
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      input.disabled = false;
+      if (data.ok) { input.value = ""; refreshNow(); }
+      else { alert("Error: " + (data.error || "Unknown")); }
+    })
+    .catch(function(err) { input.disabled = false; alert("Network error: " + err.message); });
 }
 
 // Bulk selection
@@ -2169,7 +2279,7 @@ function submitDirective(e) {
 
 </body></html>`;
 
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CORS_HEADERS });
     res.end(html);
     return;
   }
@@ -2190,7 +2300,7 @@ function submitDirective(e) {
       }
     }
     const result = filtered.slice(-lines).map(e => `[${e.ts}] ${e.line}`).join("\n");
-    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", ...CORS_HEADERS });
     res.end(result || "(no logs captured yet)\n");
     return;
   }
