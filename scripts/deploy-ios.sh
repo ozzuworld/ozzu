@@ -94,7 +94,14 @@ echo ""
 echo "Installing via sideloader on dev-01..."
 echo "(iPhone must be connected via USB or previously paired)"
 echo ""
-ssh -t "$DEV01" "ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL \$HOME/bin/sideloader install $REMOTE_IPA_DIR/ozzu.ipa -i"
+# Sideloader extracts IPA to /tmp/{basename}/ — keep IPA in home dir to avoid
+# collision with the extraction directory, and use a unique name to avoid
+# stale root-owned dirs from previous runs
+DEPLOY_NAME="ozzu-$(date +%s).ipa"
+ssh "$DEV01" "mkdir -p \$HOME/ozzu-deploy && cp $REMOTE_IPA_DIR/ozzu.ipa \$HOME/ozzu-deploy/$DEPLOY_NAME"
+ssh -t "$DEV01" "ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL \$HOME/bin/sideloader install \$HOME/ozzu-deploy/$DEPLOY_NAME -i"
+# Clean up
+ssh "$DEV01" "rm -rf \$HOME/ozzu-deploy /tmp/$DEPLOY_NAME 2>/dev/null; true"
 
 # ── Step 6: Verify ──
 echo ""
