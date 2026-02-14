@@ -121,8 +121,8 @@ function spawnAgent(directive, type) {
     ? buildPlanningPrompt(directive)
     : buildImplementationPrompt(directive);
 
-  // Use opus for feature/explore directives (complex multi-step work), sonnet for quick fixes
-  const model = directive.type === "quick" ? "sonnet" : "opus";
+  // All directive agents use Opus for strongest reasoning
+  const model = "opus";
   const args = [
     "--model", model,
     "--allowedTools", "Bash Read Write Edit Glob Grep WebFetch WebSearch",
@@ -203,9 +203,44 @@ function spawnAgent(directive, type) {
       req.on("error", (err) => log(`Failed to reset ${directive.id}: ${err.message}`));
       req.write(payload);
       req.end();
-    } else if (type === "implementation") {
-      // Successful implementation — trigger smart deploy
-      smartDeploy(directive);
+    } else {
+      // Agent exited cleanly (code 0) — verify directive was properly completed.
+      // If still in a transient state, the agent forgot to PATCH it.
+      const http = require("http");
+      http.get(`${BRIDGE}/directives`, (res) => {
+        let body = "";
+        res.on("data", (d) => body += d);
+        res.on("end", () => {
+          try {
+            const directives = JSON.parse(body);
+            const current = directives.find(d => d.id === directive.id);
+            if (!current) return;
+
+            if (current.status === "in_progress" || current.status === "planning") {
+              const resetTo = current.status === "planning" ? "pending" : "stale";
+              log(`Post-exit check: ${directive.id} still "${current.status}" after clean exit → resetting to "${resetTo}"`);
+              const payload = JSON.stringify({ status: resetTo });
+              const req = http.request(
+                `${BRIDGE}/directives/${directive.id}`,
+                { method: "PATCH", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+                (patchRes) => {
+                  let b = "";
+                  patchRes.on("data", (d) => b += d);
+                  patchRes.on("end", () => log(`Post-exit reset ${directive.id} → ${resetTo}: ${patchRes.statusCode}`));
+                }
+              );
+              req.on("error", (e) => log(`Post-exit reset failed for ${directive.id}: ${e.message}`));
+              req.write(payload);
+              req.end();
+            } else if (current.status === "completed" && type === "implementation") {
+              // Properly completed — trigger smart deploy
+              smartDeploy(directive);
+            }
+          } catch (e) {
+            log(`Post-exit check parse error for ${directive.id}: ${e.message}`);
+          }
+        });
+      }).on("error", (e) => log(`Post-exit check failed for ${directive.id}: ${e.message}`));
     }
   });
 
@@ -261,41 +296,45 @@ function killAllAgents() {
 
 // ── Smart deploy (ported from cipher-watcher.sh) ──
 
-function hasNativeChanges() {
+// Returns { android: bool, ios: bool, any: bool } indicating which platforms have native changes
+function detectNativeChanges() {
   try {
     const { execSync } = require("child_process");
     const changed = execSync("git diff --name-only HEAD~1 HEAD", {
       cwd: WORKDIR, encoding: "utf8", timeout: 10000,
     }).trim();
 
-    if (!changed) return false;
+    if (!changed) return { android: false, ios: false, any: false };
 
-    const nativePatterns = [
-      /frontend\/modules\/.*\/android\//,
-      /frontend\/modules\/.*\/ios\//,
-      /frontend\/app\.json/,
-      /frontend\/plugins\//,
-      /frontend\/android\//,
-      /frontend\/ios\//,
-    ];
+    const lines = changed.split("\n");
+    let android = false, ios = false;
 
-    for (const line of changed.split("\n")) {
-      for (const pattern of nativePatterns) {
-        if (pattern.test(line)) return true;
-      }
+    // Patterns that affect only one platform
+    const androidOnly = [/frontend\/modules\/.*\/android\//, /frontend\/android\//];
+    const iosOnly = [/frontend\/modules\/.*\/ios\//, /frontend\/ios\//];
+    // Patterns that affect both platforms
+    const both = [/frontend\/app\.json/, /frontend\/plugins\//];
+
+    for (const line of lines) {
+      for (const p of androidOnly) { if (p.test(line)) android = true; }
+      for (const p of iosOnly) { if (p.test(line)) ios = true; }
+      for (const p of both) { if (p.test(line)) { android = true; ios = true; } }
     }
 
-    // Check if package.json added a native dependency
+    // Native dependency added = both platforms
     if (changed.includes("frontend/package.json")) {
       const pkgDiff = execSync("git diff HEAD~1 HEAD -- frontend/package.json", {
         cwd: WORKDIR, encoding: "utf8", timeout: 10000,
       });
-      if (/^\+.*"(expo-|react-native-|@react-native)/m.test(pkgDiff)) return true;
+      if (/^\+.*"(expo-|react-native-|@react-native)/m.test(pkgDiff)) {
+        android = true;
+        ios = true;
+      }
     }
 
-    return false;
+    return { android, ios, any: android || ios };
   } catch {
-    return false;
+    return { android: false, ios: false, any: false };
   }
 }
 
@@ -314,23 +353,74 @@ function smartDeploy(directive) {
     req.end();
   };
 
-  if (hasNativeChanges()) {
-    log("Native changes detected — CI will handle APK build + deploy");
-    notify("Native changes detected — a full APK rebuild is needed. CI build started, this will take about 10 minutes.");
+  const native = detectNativeChanges();
+  if (native.any) {
+    const platforms = [native.android && "Android", native.ios && "iOS"].filter(Boolean).join(" + ");
+    log(`Native changes detected (${platforms}) — triggering CI builds`);
+    notify(`Native changes detected (${platforms}) — CI builds started, ~10 minutes.`);
 
-    // Watch CI run in background
-    exec(`sleep 15 && cd ${WORKDIR} && RUN_ID=$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId') && gh run watch "$RUN_ID" --exit-status && ./scripts/deploy.sh`, {
-      cwd: WORKDIR,
-      timeout: 30 * 60 * 1000, // 30 min max
-    }, (err) => {
-      if (err) {
-        log(`APK deploy failed: ${err.message}`);
-        notify(`CI build/deploy failed: ${err.message}`);
-      } else {
-        log("APK deployed successfully");
-        notify("APK deployed! The new update has been installed on all devices.");
-      }
-    });
+    // Android APK build + deploy (with artifact verification)
+    if (native.android) {
+      const androidCmd = [
+        `sleep 15`,
+        `cd ${WORKDIR}`,
+        `RUN_ID=$(gh run list --workflow=build-android.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
+        `gh run watch "$RUN_ID" --exit-status`,
+        // Verify artifact can be downloaded and is valid before deploying
+        `rm -rf /tmp/ozzu-apk-verify`,
+        `gh run download "$RUN_ID" --name ozzu-android --dir /tmp/ozzu-apk-verify -R ozzuworld/ozzu`,
+        `test -f /tmp/ozzu-apk-verify/app-debug.apk || { echo "ERROR: APK artifact not found after download"; exit 1; }`,
+        `APK_SIZE=$(stat -c%s /tmp/ozzu-apk-verify/app-debug.apk 2>/dev/null || echo 0)`,
+        `test "$APK_SIZE" -gt 1000000 || { echo "ERROR: APK too small ($APK_SIZE bytes), likely corrupt"; exit 1; }`,
+        `rm -rf /tmp/ozzu-apk-verify`,
+        `./scripts/deploy.sh`,
+      ].join(" && ");
+
+      exec(androidCmd, {
+        cwd: WORKDIR,
+        timeout: 30 * 60 * 1000,
+      }, (err) => {
+        if (err) {
+          log(`Android deploy failed: ${err.message}`);
+          notify(`Android CI build/deploy failed: ${err.message}`);
+        } else {
+          log("Android APK deployed successfully");
+          notify("Android APK deployed! Update installed on all tablets.");
+        }
+      });
+    }
+
+    // iOS IPA build + deploy via dev-01 (with artifact verification)
+    if (native.ios) {
+      const iosCmd = [
+        `cd ${WORKDIR}`,
+        `gh workflow run build-ios.yml`,
+        `sleep 20`,
+        `RUN_ID=$(gh run list --workflow=build-ios.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
+        `gh run watch "$RUN_ID" --exit-status`,
+        // Verify artifact can be downloaded and is valid before deploying
+        `rm -rf /tmp/ozzu-ios-verify`,
+        `gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ios-verify -R ozzuworld/ozzu`,
+        `test -f /tmp/ozzu-ios-verify/ozzu.ipa || { echo "ERROR: IPA artifact not found after download"; exit 1; }`,
+        `IPA_SIZE=$(stat -c%s /tmp/ozzu-ios-verify/ozzu.ipa 2>/dev/null || echo 0)`,
+        `test "$IPA_SIZE" -gt 1000000 || { echo "ERROR: IPA too small ($IPA_SIZE bytes), likely corrupt"; exit 1; }`,
+        `rm -rf /tmp/ozzu-ios-verify`,
+        `./scripts/deploy-ios.sh`,
+      ].join(" && ");
+
+      exec(iosCmd, {
+        cwd: WORKDIR,
+        timeout: 30 * 60 * 1000,
+      }, (err) => {
+        if (err) {
+          log(`iOS deploy failed: ${err.message}`);
+          notify(`iOS CI build/deploy failed: ${err.message}`);
+        } else {
+          log("iOS IPA deployed successfully");
+          notify("iOS app deployed! Update installed on iPhone.");
+        }
+      });
+    }
   } else {
     log("JS-only changes — deploying via OTA");
     notify("JS-only changes — deploying instantly via OTA update...");
@@ -350,10 +440,73 @@ function smartDeploy(directive) {
   }
 }
 
+// ── Watchdog: periodic liveness check for running agents ──
+
+const WATCHDOG_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const STALL_THRESHOLD_MS = 15 * 60 * 1000;  // 15 minutes without directive activity = stalled
+
+function startWatchdog() {
+  log("Watchdog started (interval: 5min, stall threshold: 15min)");
+  setInterval(() => {
+    for (const [directiveId, info] of runningAgents) {
+      try {
+        process.kill(info.pid, 0); // signal 0 = check existence
+        const runtime = Math.round((Date.now() - new Date(info.startedAt).getTime()) / 60000);
+        log(`Watchdog: ${directiveId} (${info.type}) alive — pid ${info.pid}, ${runtime}min`);
+
+        // Stall detection: check if directive has had recent activity
+        const http = require("http");
+        http.get(`${BRIDGE}/directives`, (res) => {
+          let body = "";
+          res.on("data", (d) => body += d);
+          res.on("end", () => {
+            try {
+              const directives = JSON.parse(body);
+              const d = directives.find(x => x.id === directiveId);
+              if (!d || !d.lastActivity) return;
+              const idleMs = Date.now() - d.lastActivity;
+              if (idleMs > STALL_THRESHOLD_MS) {
+                log(`Watchdog: ${directiveId} STALLED — pid ${info.pid} alive but no activity for ${Math.round(idleMs / 60000)}min, killing`);
+                info.process.kill("SIGTERM");
+                setTimeout(() => {
+                  try { if (!info.process.killed) info.process.kill("SIGKILL"); } catch (e) { /* gone */ }
+                }, SIGKILL_GRACE_MS);
+              }
+            } catch (e) { /* parse error, skip */ }
+          });
+        }).on("error", () => {});
+      } catch (err) {
+        if (err.code === "ESRCH") {
+          log(`Watchdog: ${directiveId} (${info.type}) DEAD — pid ${info.pid} gone, cleaning up`);
+          clearTimeout(info.timeout);
+          runningAgents.delete(directiveId);
+
+          // Reset directive to recoverable state
+          const resetStatus = info.type === "planning" ? "pending" : "stale";
+          const payload = JSON.stringify({ status: resetStatus });
+          const req = require("http").request(
+            `${BRIDGE}/directives/${directiveId}`,
+            { method: "PATCH", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+            (res) => {
+              let body = "";
+              res.on("data", (d) => body += d);
+              res.on("end", () => log(`Watchdog: reset ${directiveId} → ${resetStatus}: ${res.statusCode}`));
+            }
+          );
+          req.on("error", (e) => log(`Watchdog: failed to reset ${directiveId}: ${e.message}`));
+          req.write(payload);
+          req.end();
+        }
+      }
+    }
+  }, WATCHDOG_INTERVAL_MS);
+}
+
 module.exports = {
   spawnPlanningAgent,
   spawnImplementationAgent,
   getRunningAgents,
   killAgent,
   killAllAgents,
+  startWatchdog,
 };

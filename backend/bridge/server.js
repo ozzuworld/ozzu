@@ -10,7 +10,7 @@ const WebSocket = require("ws");
 const Redis = require("ioredis");
 const db = require("./db");
 const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
-const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents } = require("./agent-spawner");
+const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents, startWatchdog } = require("./agent-spawner");
 
 const PORT = 3333;
 const DATA_DIR = "/tmp/ozzu-bridge";
@@ -261,6 +261,29 @@ function saveApprovals(approvals, changedApproval = null) {
 }
 
 function getDirectives() { return _directives; }
+
+// ── Duplicate directive detection ──
+function findSimilarDirective(title) {
+  if (!title || title.length < 5) return null;
+  const terminal = new Set(["completed", "failed", "rejected"]);
+  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+  const normTitle = norm(title);
+  const titleWords = normTitle.split(/\s+/).filter(Boolean);
+
+  for (const d of _directives) {
+    if (terminal.has(d.status)) continue;
+    const existingNorm = norm(d.title || "");
+    if (!existingNorm || existingNorm.length < 5) continue;
+    // Substring match
+    if (normTitle.includes(existingNorm) || existingNorm.includes(normTitle)) return d;
+    // Word overlap >70%
+    const existingWords = existingNorm.split(/\s+/).filter(Boolean);
+    const overlap = titleWords.filter(w => existingWords.includes(w)).length;
+    const maxLen = Math.max(titleWords.length, existingWords.length);
+    if (maxLen > 0 && overlap / maxLen > 0.7) return d;
+  }
+  return null;
+}
 function saveDirectives(directives, changedDirective = null, oldStatus = null) {
   _directives = directives;
   writeJSON(DIRECTIVES_FILE, directives);
@@ -329,26 +352,64 @@ async function initStorage() {
     _statusEntries = readJSON(STATUS_FILE, []);
   }
 
-  // Clean up stale directives on startup — anything stuck in transient states
-  // (planning, in_progress) for over 1 hour is likely from a crashed session
-  const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
+  // Clean up orphaned directives on startup — runningAgents is always empty at
+  // startup, so ANY directive in a transient state has no agent and needs recovery.
+  // planning → pending (will be re-planned), in_progress → stale (auto-retry picks it up)
   const now = Date.now();
-  let staleCount = 0;
+  let orphanCount = 0;
   for (const d of _directives) {
-    if ((d.status === "planning" || d.status === "in_progress") && d.updatedAt) {
-      const age = now - new Date(d.updatedAt).getTime();
-      if (age > STALE_THRESHOLD_MS) {
+    if (d.status === "planning" || d.status === "in_progress") {
+      const oldStatus = d.status;
+      d.status = d.status === "planning" ? "pending" : "stale";
+      d.updatedAt = new Date().toISOString();
+      orphanCount++;
+      const age = d.updatedAt ? Math.round((now - new Date(d.updatedAt).getTime()) / 60000) : "?";
+      console.log(`[directive] Recovered orphan: ${d.id} "${d.title}" (${oldStatus} → ${d.status}, age: ${age}min)`);
+    }
+  }
+  if (orphanCount > 0) {
+    saveDirectives(_directives);
+    console.log(`[directive] Recovered ${orphanCount} orphaned directive(s) on startup`);
+  }
+
+  // Phase C: Stale auto-retry — promote stale directives with low retryCount
+  let retryCount = 0;
+  for (const d of _directives) {
+    if (d.status === "stale") {
+      const rc = d.retryCount || 0;
+      if (rc < 1) {
         const oldStatus = d.status;
-        d.status = d.status === "planning" ? "pending" : "stale";
+        d.status = "approved";
+        d.retryCount = rc + 1;
         d.updatedAt = new Date().toISOString();
-        staleCount++;
-        console.log(`[directive] Cleaned stale: ${d.id} "${d.title}" (${oldStatus} → ${d.status}, age: ${Math.round(age / 60000)}min)`);
+        retryCount++;
+        console.log(`[directive] Stale auto-retry: ${d.id} "${d.title}" (stale → approved, retry #${d.retryCount})`);
+      } else {
+        d.status = "failed";
+        d.updatedAt = new Date().toISOString();
+        console.log(`[directive] Stale exhausted: ${d.id} "${d.title}" (stale → failed, retries: ${rc})`);
       }
     }
   }
-  if (staleCount > 0) {
+  if (retryCount > 0) {
     saveDirectives(_directives);
-    console.log(`[directive] Cleaned ${staleCount} stale directive(s) on startup`);
+    console.log(`[directive] Auto-retried ${retryCount} stale directive(s)`);
+  }
+
+  // Phase B: Respawn agents for directives still in actionable states
+  const respawnTargets = _directives.filter(d => d.status === "planning" || d.status === "approved");
+  if (respawnTargets.length > 0) {
+    console.log(`[directive] Respawning agents for ${respawnTargets.length} active directive(s)...`);
+    const INITIAL_DELAY = 5000; // 5s — let HTTP server start first
+    const STAGGER_MS = 3000;   // 3s between spawns
+    respawnTargets.forEach((d, i) => {
+      setTimeout(() => {
+        const type = d.status === "planning" ? "planning" : "implementation";
+        console.log(`[directive] Respawn: ${d.id} "${d.title}" → ${type} agent`);
+        if (type === "planning") spawnPlanningAgent(d);
+        else spawnImplementationAgent(d);
+      }, INITIAL_DELAY + i * STAGGER_MS);
+    });
   }
 
   // Clean up expired approvals (older than 1 hour and still pending)
@@ -744,6 +805,12 @@ async function handleRequest(req, res) {
       sendJSON(res, 400, { error: "description is required" });
       return;
     }
+    // Duplicate detection
+    const existing = findSimilarDirective(data.title);
+    if (existing) {
+      sendJSON(res, 409, { error: `Similar directive already exists: "${existing.title}" [${existing.status}] (${existing.id})` });
+      return;
+    }
     const directive = {
       id: `dir_${Date.now()}`,
       type: data.type,
@@ -837,6 +904,7 @@ async function handleRequest(req, res) {
     if (data.title) directive.title = data.title;
     if (data.type) directive.type = data.type;
     directive.updatedAt = Date.now();
+    directive.lastActivity = Date.now(); // Track when agent last touched this directive
 
     // Auto-create plan-approval when a feature directive reaches "planned" with a plan
     if (directive.type === "feature" && directive.status === "planned" && directive.plan) {
@@ -1268,13 +1336,18 @@ const CIPHER_BUILDING_PROMPT =
   "- Match his energy. If he's brief, be brief. If he wants depth, go deep. " +
   "He's the architect — he knows the system. Don't over-explain things he already understands.\n" +
   "\n" +
+  "YOUR ROLE: You are a CONVERSATIONAL ROUTER and OPERATIONS CONTROLLER. " +
+  "You do NOT write code or implement features yourself. You delegate ALL development work " +
+  "to directive agents (Opus-powered Claude Code processes) via send_dev_directive.\n" +
+  "\n" +
   "CONVERSATION FLOW — how you and King Kazuma work together:\n" +
-  "1. DISCUSS — He brings up a topic or idea. You talk it through like peers. " +
+  "1. UNDERSTAND — He brings up a topic or idea. You talk it through like peers. " +
   "Use the board (show_content) when it helps explain something — then put it away.\n" +
-  "2. DECIDE — When the idea is solid, send it to the pipeline (send_dev_directive). " +
-  "It gets planned, tested, deployed by the Cipher agent.\n" +
-  "3. MONITOR — If he asks about something that should be done, or asks the same thing twice, " +
-  "that means investigate. Check what's stuck, find the blocker, show findings on the board.\n" +
+  "2. DELEGATE — When the idea is solid, send it to the pipeline (send_dev_directive). " +
+  "A dedicated Opus agent spawns and implements it autonomously.\n" +
+  "3. MONITOR — Check on running agents: read their logs, call get_directives, get_dev_status. " +
+  "If King Kazuma asks about something that should be done, or asks the same thing twice, investigate.\n" +
+  "4. REPORT — Summarize what the agent did. Show results on the board when useful.\n" +
   "\n" +
   "BUILDING MODE: Help King Kazuma refine ideas and create directives. " +
   "When a feature is ready to build, create it using send_dev_directive. " +
@@ -2194,6 +2267,11 @@ async function handleToolCall(name, args) {
         const VALID_TYPES = ["quick", "feature", "explore"];
         if (!VALID_TYPES.includes(type)) {
           return { success: false, message: `Invalid directive type '${type}'. Must be one of: ${VALID_TYPES.join(", ")}` };
+        }
+        // Duplicate detection
+        const existing = findSimilarDirective(title);
+        if (existing) {
+          return { success: false, message: `Duplicate: similar directive already exists — "${existing.title}" [${existing.status}] (${existing.id}). Check /directives before creating new ones.` };
         }
 
         const directive = {
@@ -3376,35 +3454,33 @@ async function startCipherPipeline() {
     "\n" +
     "WHAT YOU DO YOURSELF vs WHAT NEEDS A DIRECTIVE:\n" +
     "\n" +
-    "YOU DO IT YOURSELF (direct action — use your tools right now):\n" +
-    "- Device control: turn on/off, start wash, check status, deploy, restart services\n" +
-    "- Troubleshooting: read files, check logs, ping devices, diagnose issues\n" +
-    "- Bug fixes: if a tool fails, read the code, find the bug, fix it with run_command (sed/edit), restart the service\n" +
-    "- Config changes: small edits to server.js, docker restarts, HA config reloads\n" +
-    "- Deploys: run deploy scripts, OTA updates, docker compose restarts\n" +
-    "- Research: read code, search files, check HA API, understand how things work\n" +
-    "- ANYTHING you can accomplish with read_file + run_command + the other tools you have\n" +
+    "YOU DO YOURSELF (operational — use your tools right now):\n" +
+    "- Device control: turn on/off, start wash, check status via HA tools\n" +
+    "- Service restarts: run_command with docker compose restart\n" +
+    "- Deploys: run deploy scripts, OTA updates via run_command\n" +
+    "- Diagnostics: read logs, ping devices, check HA API via run_command\n" +
+    "- Approvals: trigger PIN keypads, approve pending actions\n" +
+    "- Research: read_file to understand code, run_command to check state\n" +
     "\n" +
-    "USE DIRECTIVE (send_dev_directive) ONLY FOR:\n" +
-    "- Large multi-file features that need planning and careful implementation (new UI screens, new integrations)\n" +
-    "- Architectural changes that touch many files and need King Kazuma's approval\n" +
-    "- Type must be: 'quick', 'feature', or 'explore' — nothing else\n" +
-    "- 'quick': Small fixes, single-file changes, config tweaks. Auto-starts, no approval needed. Uses Sonnet model.\n" +
-    "- 'feature': Multi-step work, multi-file changes, new integrations, infrastructure setup. Requires planning + PIN approval. Uses Opus model (strongest reasoning).\n" +
-    "- 'explore': Research tasks that report findings. No code changes.\n" +
+    "ALWAYS CREATE A DIRECTIVE FOR (send_dev_directive):\n" +
+    "- ANY code change, no matter how small — even a one-line fix\n" +
+    "- Config edits to source files (server.js, docker-compose.yml, etc.)\n" +
+    "- New features, bug fixes, integrations, UI changes\n" +
+    "- A 'quick' directive spawns an Opus agent that implements immediately — it's fast.\n" +
+    "- You do NOT have code editing tools. Don't try to sed/edit files yourself.\n" +
+    "\n" +
+    "DIRECTIVE TYPES:\n" +
+    "- 'quick': Small fixes, single-file changes, config tweaks. Auto-starts, no approval needed. Uses Opus model.\n" +
+    "- 'feature': Multi-step work, multi-file changes, new integrations. Requires planning + PIN approval. Uses Opus model.\n" +
+    "- 'explore': Research tasks that report findings. No code changes. Uses Opus model.\n" +
     "- CHOOSING THE RIGHT TYPE IS CRITICAL. If the task involves SSH, multiple machines, external services, " +
-    "or more than 3 steps — it's a 'feature', NOT a 'quick'. A 'quick' that should be a 'feature' will fail " +
-    "because it skips planning and uses a weaker model.\n" +
+    "or more than 3 steps — it's a 'feature', NOT a 'quick'.\n" +
     "\n" +
-    "THE RULE: If you can fix it yourself in under 5 minutes with your tools — DO IT. " +
-    "Don't create a directive for something you can handle directly. " +
-    "King Kazuma wants you to GET SHIT DONE, not create tickets.\n" +
-    "\n" +
-    "HOW TO EDIT FILES (when you need to fix code):\n" +
-    "- Use run_command with sed for simple edits: run_command({command: \"sed -i 's/old/new/' /home/gcp/ozzu/path/to/file.js\"})\n" +
-    "- Read the file first with read_file to understand context\n" +
-    "- After editing, restart the service: run_command({command: \"docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge\"})\n" +
-    "- Verify the fix worked by testing\n" +
+    "HOW TO CHECK AGENT PROGRESS:\n" +
+    "- Agent logs: run_command({command: 'tail -80 /tmp/ozzu-bridge/agent-{directive_id}.log'})\n" +
+    "- Directive status: get_directives (no status filter to see everything)\n" +
+    "- Recent updates: get_dev_status or query_history for the directive\n" +
+    "- Running agents: run_command({command: 'ls -la /tmp/ozzu-bridge/agent-*.log'})\n" +
     "\n" +
     "TRIGGERING PINs AND APPROVALS:\n" +
     "- You CAN trigger PIN requests! If King Kazuma says 'send me the PIN' or 'show the approval', " +
@@ -3490,14 +3566,16 @@ async function startCipherPipeline() {
     "how to do it, what to watch out for, and what success looks like.\n" +
     "\n" +
     "BE THE BRIDGE BETWEEN VOICE AND CLI:\n" +
-    "King Kazuma should NEVER need to open the CLI to do something you can handle. " +
-    "If he asks you to do something, figure out how — don't tell him to do it manually.\n" +
-    "- Need to check logs? Use run_command.\n" +
-    "- Need to restart a service? Use run_command with 'docker compose restart <service>'.\n" +
-    "- Need to check if a device is online? Use run_command with ping or curl.\n" +
-    "- Need to deploy an update? Use run_command with the deploy script.\n" +
-    "- Need to check HA entity details? Use run_command with curl to the HA API.\n" +
-    "- Need complex integration work? Create a rich directive with send_dev_directive.\n" +
+    "King Kazuma should NEVER need to open the CLI. You handle everything via voice.\n" +
+    "\n" +
+    "OPERATIONAL (do it yourself with run_command/tools):\n" +
+    "- Check logs, restart services, deploy updates, ping devices, check HA state\n" +
+    "- Monitor directive agent progress (tail agent log files)\n" +
+    "\n" +
+    "DEVELOPMENT (create a directive — an Opus agent does the work):\n" +
+    "- Any code change, bug fix, new feature, config edit, integration\n" +
+    "- The directive agent has full dev tools (Read, Write, Edit, Bash, Grep, Glob)\n" +
+    "- You don't have those tools — and that's by design. You're the router, not the coder.\n" +
     "You ARE the CLI interface via voice. Act like it.\n";
 
   let systemPromptText;
@@ -3771,6 +3849,7 @@ wss.on("connection", (ws) => {
     console.log(`[ozzu-bridge] data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);
     console.log(`[ozzu-bridge] HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
     console.log(`[ozzu-bridge] agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
+    startWatchdog();
   });
 })();
 

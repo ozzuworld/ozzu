@@ -87,9 +87,31 @@ deploy_apk() {
   local EXIT=$?
 
   if [ $EXIT -eq 0 ]; then
-    log "CI build passed, deploying APK to all devices..."
+    log "CI build passed, verifying artifact before deploy..."
+
+    # Verify artifact exists and is valid before deploying
+    rm -rf /tmp/ozzu-apk-verify
+    cd "$WORKDIR" && gh run download "$RUN_ID" --name ozzu-android --dir /tmp/ozzu-apk-verify -R ozzuworld/ozzu >> "$LOGFILE" 2>&1
+    if [ ! -f /tmp/ozzu-apk-verify/app-debug.apk ]; then
+      log "APK artifact not found after download — aborting deploy"
+      curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+        -d '{"message":"CI build passed but APK artifact not found. Deploy aborted."}' > /dev/null
+      rm -rf /tmp/ozzu-apk-verify
+      return
+    fi
+    APK_SIZE=$(stat -c%s /tmp/ozzu-apk-verify/app-debug.apk 2>/dev/null || echo 0)
+    if [ "$APK_SIZE" -lt 1000000 ]; then
+      log "APK too small ($APK_SIZE bytes), likely corrupt — aborting deploy"
+      curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+        -d "{\"message\":\"CI build passed but APK is only ${APK_SIZE} bytes (expected ~84MB). Deploy aborted — artifact may be corrupt.\"}" > /dev/null
+      rm -rf /tmp/ozzu-apk-verify
+      return
+    fi
+    rm -rf /tmp/ozzu-apk-verify
+    log "Artifact verified (${APK_SIZE} bytes), deploying to all devices..."
+
     curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
-      -d '{"message":"CI build passed. Installing new APK on all devices now..."}' > /dev/null
+      -d '{"message":"CI build passed and artifact verified. Installing new APK on all devices now..."}' > /dev/null
     cd "$WORKDIR" && ./scripts/deploy.sh >> "$LOGFILE" 2>&1
     log "APK deploy complete"
     curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
