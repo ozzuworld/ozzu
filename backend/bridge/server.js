@@ -2640,6 +2640,42 @@ function submitDirective(e) {
     return;
   }
 
+  // GET /entities/stats — entity snapshot analytics for HA integration monitoring
+  if (req.method === "GET" && pathname === "/entities/stats") {
+    try {
+      const [totalRes, uniqueRes, topRes, sizeRes, rateRes] = await Promise.all([
+        db.query("SELECT COUNT(*) AS total FROM entity_snapshots"),
+        db.query("SELECT COUNT(DISTINCT entity_id) AS unique_count FROM entity_snapshots"),
+        db.query(
+          `SELECT entity_id, COUNT(*) AS snapshot_count,
+                  MIN(captured_at) AS oldest, MAX(captured_at) AS newest
+           FROM entity_snapshots
+           GROUP BY entity_id ORDER BY snapshot_count DESC LIMIT 10`
+        ),
+        db.query("SELECT pg_total_relation_size('entity_snapshots') AS size_bytes"),
+        db.query(
+          "SELECT COUNT(*) AS count FROM entity_snapshots WHERE captured_at >= NOW() - INTERVAL '1 hour'"
+        ),
+      ]);
+      sendJSON(res, 200, {
+        total_snapshots: parseInt(totalRes.rows[0].total, 10),
+        unique_entities: parseInt(uniqueRes.rows[0].unique_count, 10),
+        top_entities: topRes.rows.map(r => ({
+          entity_id: r.entity_id,
+          count: parseInt(r.snapshot_count, 10),
+          oldest: r.oldest,
+          newest: r.newest,
+        })),
+        table_size_bytes: parseInt(sizeRes.rows[0].size_bytes, 10),
+        snapshots_last_hour: parseInt(rateRes.rows[0].count, 10),
+      });
+    } catch (err) {
+      log.pg.error("Entity stats query failed:", err.message);
+      sendJSON(res, 500, { error: "Failed to query entity stats" });
+    }
+    return;
+  }
+
   sendJSON(res, 404, { error: "Not found" });
 }
 
