@@ -376,18 +376,21 @@ async function initStorage() {
 
   // Clean up orphaned directives on startup — runningAgents is always empty at
   // startup, so ANY directive in a transient state has no agent and needs recovery.
-  // planning → pending (will be re-planned), in_progress → stale (auto-retry picks it up)
+  // planning directives are LEFT as-is so Phase B can respawn them directly.
+  // in_progress → stale (auto-retry picks it up)
   const now = Date.now();
   let orphanCount = 0;
   for (const d of _directives) {
-    if (d.status === "planning" || d.status === "in_progress") {
-      const oldStatus = d.status;
-      d.status = d.status === "planning" ? "pending" : "stale";
+    if (d.status === "in_progress") {
+      d.status = "stale";
       d.updatedAt = new Date().toISOString();
-      if (!d.failureReason) d.failureReason = `crash: server restarted while ${oldStatus}`;
+      if (!d.failureReason) d.failureReason = `crash: server restarted while in_progress`;
       orphanCount++;
       const age = d.updatedAt ? Math.round((now - new Date(d.updatedAt).getTime()) / 60000) : "?";
-      log.directive.info(`Recovered orphan: ${d.id} "${d.title}" (${oldStatus} → ${d.status}, age: ${age}min)`);
+      log.directive.info(`Recovered orphan: ${d.id} "${d.title}" (in_progress → stale, age: ${age}min)`);
+    } else if (d.status === "planning") {
+      // Don't reset planning directives — Phase B will respawn their agents
+      log.directive.info(`Will respawn planning directive: ${d.id} "${d.title}"`);
     }
   }
   if (orphanCount > 0) {

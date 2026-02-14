@@ -186,13 +186,14 @@ function spawnAgent(directive, type) {
     child.kill("SIGTERM");
 
     // SIGKILL fallback if SIGTERM doesn't work
+    // Note: child.killed is true immediately after .kill() call, so we use
+    // process.kill(pid, 0) to check if the process is actually still alive
     setTimeout(() => {
       try {
-        if (!child.killed) {
-          child.kill("SIGKILL");
-          log(`SIGKILL sent to ${type} agent for ${directive.id}`);
-        }
-      } catch (e) { /* process may already be gone */ }
+        process.kill(child.pid, 0); // throws ESRCH if process is gone
+        child.kill("SIGKILL");
+        log(`SIGKILL sent to ${type} agent for ${directive.id}`);
+      } catch (e) { /* process already gone (ESRCH) or no permission */ }
     }, SIGKILL_GRACE_MS);
   }, AGENT_TIMEOUT_MS);
 
@@ -352,11 +353,13 @@ function killAgent(directiveId) {
   log(`Killing agent for ${directiveId} (pid ${agent.pid})`);
   agent.process.kill("SIGTERM");
 
-  // SIGKILL fallback
+  // SIGKILL fallback — use process.kill(pid, 0) to check if still alive
+  // (agent.process.killed is true immediately after .kill() call)
   setTimeout(() => {
     try {
-      if (!agent.process.killed) agent.process.kill("SIGKILL");
-    } catch (e) { /* already gone */ }
+      process.kill(agent.pid, 0); // throws ESRCH if process is gone
+      agent.process.kill("SIGKILL");
+    } catch (e) { /* already gone (ESRCH) or no permission */ }
   }, SIGKILL_GRACE_MS);
 
   return true;
@@ -545,8 +548,12 @@ function startWatchdog() {
                 log(`Watchdog: ${directiveId} STALLED — pid ${info.pid} alive but no activity for ${stallMin}min, killing`);
                 info.killReason = `watchdog: stalled for ${stallMin}min`;
                 info.process.kill("SIGTERM");
+                // SIGKILL fallback — use process.kill(pid, 0) to check if still alive
                 setTimeout(() => {
-                  try { if (!info.process.killed) info.process.kill("SIGKILL"); } catch (e) { /* gone */ }
+                  try {
+                    process.kill(info.pid, 0); // throws ESRCH if gone
+                    info.process.kill("SIGKILL");
+                  } catch (e) { /* already gone */ }
                 }, SIGKILL_GRACE_MS);
               }
             } catch (e) { /* parse error, skip */ }
