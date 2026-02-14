@@ -1174,10 +1174,32 @@ async function handleRequest(req, res) {
   // Full health check endpoint
   if (req.method === "GET" && pathname === "/health") {
     const pgHealth = await db.healthCheck();
-    sendJSON(res, 200, {
+
+    // Redis liveness check via PING
+    let redisHealthy = false;
+    try {
+      if (_redisConnected) {
+        await redis.ping();
+        redisHealthy = true;
+      }
+    } catch { redisHealthy = false; }
+
+    // Directive queue stats from in-memory cache
+    const dirStats = { pending: 0, planning: 0, planned: 0, approved: 0, in_progress: 0, completed: 0, failed: 0, stale: 0 };
+    for (const d of _directives) {
+      if (dirStats[d.status] !== undefined) dirStats[d.status]++;
+    }
+
+    const agents = getRunningAgents();
+    const healthy = pgHealth.connected && redisHealthy;
+
+    sendJSON(res, healthy ? 200 : 503, {
+      status: healthy ? "healthy" : "degraded",
       service: "ozzu-bridge",
       uptime: process.uptime(),
-      redis: _redisConnected,
+      agents: { active: agents.length, details: agents.map(a => ({ directiveId: a.directiveId, type: a.type, pid: a.pid })) },
+      directives: dirStats,
+      redis: { connected: redisHealthy },
       postgres: pgHealth,
       gemini: { connected: !!geminiReady, model: GEMINI_MODEL },
       devices: [...devices.values()].map(d => ({ deviceId: d.deviceId, role: d.role })),
