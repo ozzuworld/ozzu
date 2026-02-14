@@ -209,7 +209,6 @@ async function createSession() {
     "--model", "opus",
     "--output-format", "json",
     "--allowedTools", "Read Grep Glob Bash WebSearch WebFetch",
-    "--dangerously-skip-permissions",
     "--system-prompt", SYSTEM_PROMPT,
     "-p", bootstrapMsg,
   ];
@@ -235,7 +234,6 @@ async function resumeSession(message) {
   const args = [
     "--resume", _session.id,
     "--output-format", "json",
-    "--dangerously-skip-permissions",
     "-p", message,
   ];
 
@@ -287,7 +285,6 @@ async function rotateSession() {
     "--model", "opus",
     "--output-format", "json",
     "--allowedTools", "Read Grep Glob Bash WebSearch WebFetch",
-    "--dangerously-skip-permissions",
     "--system-prompt", SYSTEM_PROMPT,
     "-p", bootstrapMessage,
   ];
