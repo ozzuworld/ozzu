@@ -1951,7 +1951,7 @@ function timeAgo(dateStr) {
 
 // Convert all timestamps on load
 function convertTimestamps() {
-  document.querySelectorAll("td[data-ts]").forEach(function(el) {
+  document.querySelectorAll("[data-ts]").forEach(function(el) {
     var ts = el.getAttribute("data-ts");
     if (ts) {
       el.textContent = timeAgo(ts);
@@ -2620,7 +2620,7 @@ const INFRA_MAP =
   "- dev-01 (172.168.0.59): runs wyze-bridge for camera streams\n\n" +
   "Bridge HTTP API (localhost:3333): POST /status, GET /status, POST /notify, " +
   "POST /approvals, GET /approvals, POST /directives, GET /directives, GET /templates, PATCH /directives/:id, " +
-  "POST /directives/:id/unblock, POST /directives/bulk, GET /agents, DELETE /agents/:directiveId\n\n" +
+  "POST /directives/:id/unblock, POST /directives/:id/comment, POST /directives/bulk, GET /agents, DELETE /agents/:directiveId\n\n" +
   "Common operations with run_command:\n" +
   "- Container health: docker ps, docker stats --no-stream, docker logs <name> --tail N\n" +
   "- Container management: docker restart <name>, docker compose -f /home/gcp/ozzu/backend/docker-compose.yml up -d <service>\n" +
