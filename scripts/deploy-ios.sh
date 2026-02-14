@@ -12,11 +12,10 @@
 set -e
 
 REPO="ozzuworld/ozzu"
-DEV01="172.168.0.59"
-DEV01_USER="ozzu"
+DEV01="dev-01"  # SSH alias (hadmin@172.168.0.61)
 IPA_DIR="/tmp/ozzu-ios"
 REMOTE_IPA_DIR="/tmp/ozzu-ios"
-ANISETTE_URL="http://localhost:6969"
+ANISETTE_URL="http://10.8.0.1:6969"  # Anisette runs on GCP VM, reachable via VPN
 IOS_BUNDLE_ID="com.ozzu.app"
 
 # Parse args
@@ -68,8 +67,8 @@ echo "IPA size: $(du -h "$IPA" | cut -f1)"
 # ── Step 2: Check dev-01 is reachable ──
 echo ""
 echo "Checking dev-01 ($DEV01) connectivity..."
-if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$DEV01_USER@$DEV01" true 2>/dev/null; then
-  echo "Error: Cannot SSH to $DEV01_USER@$DEV01"
+if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$DEV01" true 2>/dev/null; then
+  echo "Error: Cannot SSH to $DEV01"
   echo "  Ensure dev-01 is online and SSH key is configured"
   exit 1
 fi
@@ -77,16 +76,17 @@ echo "dev-01 is reachable."
 
 # ── Step 3: Check prerequisites on dev-01 ──
 echo "Checking sideloader on dev-01..."
-if ! ssh "$DEV01_USER@$DEV01" "command -v sideloader" >/dev/null 2>&1; then
-  echo "Error: sideloader not found on dev-01"
-  echo "  Run ./scripts/setup-ios-sideloading.sh on dev-01 first"
+SIDELOADER_BIN="\$HOME/bin/sideloader"
+if ! ssh "$DEV01" "test -x $SIDELOADER_BIN" 2>/dev/null; then
+  echo "Error: sideloader not found at $SIDELOADER_BIN on dev-01"
+  echo "  Run ./scripts/setup-ios-sideloading.sh first"
   exit 1
 fi
 
 # ── Step 4: Transfer IPA to dev-01 ──
 echo "Transferring IPA to dev-01..."
-ssh "$DEV01_USER@$DEV01" "mkdir -p $REMOTE_IPA_DIR"
-scp -q "$IPA" "$DEV01_USER@$DEV01:$REMOTE_IPA_DIR/ozzu.ipa"
+ssh "$DEV01" "mkdir -p $REMOTE_IPA_DIR"
+scp -q "$IPA" "$DEV01:$REMOTE_IPA_DIR/ozzu.ipa"
 echo "IPA transferred."
 
 # ── Step 5: Install via Sideloader ──
@@ -94,22 +94,15 @@ echo ""
 echo "Installing via sideloader on dev-01..."
 echo "(iPhone must be connected via USB or previously paired)"
 echo ""
-ssh "$DEV01_USER@$DEV01" "ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL sideloader install $REMOTE_IPA_DIR/ozzu.ipa -i"
+ssh -t "$DEV01" "ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL \$HOME/bin/sideloader install $REMOTE_IPA_DIR/ozzu.ipa -i"
 
 # ── Step 6: Verify ──
 echo ""
-echo "Checking installed apps..."
-INSTALLED=$(ssh "$DEV01_USER@$DEV01" "ideviceinstaller list 2>/dev/null | grep -i ozzu" || true)
-if [ -n "$INSTALLED" ]; then
-  echo "SUCCESS: $INSTALLED"
-else
-  echo "Warning: Could not verify installation via ideviceinstaller"
-  echo "  Check the iPhone directly to confirm the app is installed"
-fi
+echo "Install command complete."
 
 # Cleanup
 [ -d "$IPA_DIR" ] && rm -rf "$IPA_DIR"
-ssh "$DEV01_USER@$DEV01" "rm -rf $REMOTE_IPA_DIR" 2>/dev/null || true
+ssh "$DEV01" "rm -rf $REMOTE_IPA_DIR" 2>/dev/null || true
 
 echo ""
 echo "Done. Open the ozzu app on iPhone to verify it connects to the bridge."

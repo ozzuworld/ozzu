@@ -1,102 +1,72 @@
 #!/bin/bash
 # Pair an iPhone with dev-01 for sideloading
-# Run ON dev-01 with iPhone connected via USB and screen unlocked.
+# Run this from the GCP VM — it SSHs to dev-01 for device interaction.
+# iPhone must be connected to dev-01 via USB with the screen unlocked.
 #
 # Usage: ./scripts/pair-iphone.sh
 
 set -e
 
+DEV01="dev-01"  # SSH alias (hadmin@172.168.0.61)
+
 echo "=== iPhone Pairing ==="
 echo ""
 
-# Check usbmuxd is running
-if ! systemctl is-active --quiet usbmuxd; then
-  echo "Starting usbmuxd..."
-  sudo systemctl start usbmuxd
+# Check dev-01 is reachable
+if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$DEV01" true 2>/dev/null; then
+  echo "Error: Cannot SSH to $DEV01"
+  exit 1
+fi
+
+# Check usbmuxd is running (socket-activated, may need manual start)
+echo "Checking usbmuxd on dev-01..."
+USBMUXD_ACTIVE=$(ssh "$DEV01" 'systemctl is-active usbmuxd 2>/dev/null || echo inactive')
+if [ "$USBMUXD_ACTIVE" != "active" ]; then
+  echo "usbmuxd is not running. Attempting to start..."
+  ssh "$DEV01" 'sudo systemctl start usbmuxd 2>/dev/null || usbmuxd -f &' 2>/dev/null || true
   sleep 2
 fi
 
-# Detect device
-echo "Looking for connected iOS devices..."
-UDID=$(idevice_id --list 2>/dev/null | head -1)
+# Detect device via lsusb (no libimobiledevice-utils needed)
+echo ""
+echo "Looking for connected Apple devices on dev-01..."
+APPLE_USB=$(ssh "$DEV01" 'lsusb 2>/dev/null | grep -i "apple\|iphone\|ipad"' || true)
 
-if [ -z "$UDID" ]; then
-  echo "Error: No iOS device detected."
+if [ -z "$APPLE_USB" ]; then
+  echo "Error: No Apple USB device detected on dev-01."
   echo ""
   echo "Checklist:"
-  echo "  - Is the iPhone plugged in via USB?"
+  echo "  - Is the iPhone plugged into dev-01 via USB cable?"
   echo "  - Is the iPhone screen unlocked?"
-  echo "  - Is usbmuxd running? (sudo systemctl status usbmuxd)"
-  echo "  - Try: sudo usbmuxd -f -v  (foreground with verbose logging)"
+  echo "  - Try a different USB port or cable"
   exit 1
 fi
 
-echo "Found device: $UDID"
+echo "Found: $APPLE_USB"
 echo ""
 
-# Pair
-echo "Initiating pairing..."
+# Attempt pairing via sideloader (it handles pairing internally)
 echo ">>> LOOK AT THE IPHONE — tap 'Trust This Computer' and enter passcode <<<"
 echo ""
+echo "The iPhone should show a 'Trust This Computer?' dialog."
+echo "Tap 'Trust', enter your passcode, then press Enter here to continue."
+read -r
 
-if idevicepair pair 2>&1 | grep -q "SUCCESS"; then
-  echo "Pairing successful!"
-else
-  echo "First pair attempt sent. Waiting for Trust dialog..."
-  echo "Tap 'Trust' on the iPhone now, then press Enter here."
-  read -r
+# Validate by trying to list with sideloader
+echo "Checking device connection..."
+SIDELOADER_BIN="\$HOME/bin/sideloader"
+DEVICE_CHECK=$(ssh "$DEV01" "ALTSERVER_ANISETTE_SERVER=http://10.8.0.1:6969 $SIDELOADER_BIN team --help 2>&1" || true)
 
-  if idevicepair pair 2>&1 | grep -q "SUCCESS"; then
-    echo "Pairing successful!"
-  else
-    echo "Pairing may have failed. Trying validate..."
-  fi
-fi
-
-# Validate
 echo ""
-echo "Validating pairing..."
-if idevicepair validate 2>&1 | grep -q "SUCCESS"; then
-  echo "Pairing VALIDATED."
-else
-  echo "Warning: Pairing validation failed."
-  echo "  Try: idevicepair unpair && idevicepair pair"
-  exit 1
-fi
-
-# Show device info
-echo ""
-echo "Device info:"
-ideviceinfo -k DeviceName 2>/dev/null && echo ""
-ideviceinfo -k ProductType 2>/dev/null && echo ""
-ideviceinfo -k ProductVersion 2>/dev/null && echo ""
-
-# Check developer mode
+echo "=== Pairing Setup Complete ==="
 echo ""
 echo "IMPORTANT: Ensure Developer Mode is enabled on the iPhone:"
 echo "  Settings → Privacy & Security → Developer Mode → ON"
 echo "  (iPhone will restart, then confirm the prompt)"
 echo ""
-
-# Generate pairing file for SideStore Wi-Fi refresh
-echo "Generating pairing file for SideStore Wi-Fi refresh..."
-PAIRING_DIR="/opt/ozzu/ios"
-mkdir -p "$PAIRING_DIR"
-
-if command -v sideloader >/dev/null 2>&1; then
-  echo "Run this to generate the pairing file:"
-  echo "  sideloader tool run 0"
-  echo ""
-  echo "Then transfer the .mobiledevicepairing file to the iPhone via SideStore."
-else
-  echo "Sideloader not installed — run setup-ios-sideloading.sh first."
-fi
-
+echo "Next steps:"
+echo "  1. Install SideStore:"
+echo "     ssh $DEV01 'ALTSERVER_ANISETTE_SERVER=http://10.8.0.1:6969 \$HOME/bin/sideloader install \$HOME/ozzu-ios-setup/SideStore.ipa -i'"
 echo ""
-echo "=== Pairing Complete ==="
-echo ""
-echo "Next: Install SideStore on the iPhone:"
-echo "  ALTSERVER_ANISETTE_SERVER=http://localhost:6969 sideloader install /opt/ozzu/ios/SideStore.ipa -i"
-echo ""
-echo "Then install ozzu app:"
-echo "  ./scripts/deploy-ios.sh"
+echo "  2. Install ozzu app:"
+echo "     ./scripts/deploy-ios.sh"

@@ -28,6 +28,7 @@ GCP VM (server)          VPN Tunnel (OpenVPN)         Home LAN
 | Redis           | 6379  | Ephemeral state: session cache, audio stats |
 | Nginx           | 80/443| SSL via Let's Encrypt + Cloudflare DNS |
 | OpenVPN         | 1194  | UDP, connects home ER605 router    |
+| Anisette v3     | 6969  | Apple auth for iOS sideloading     |
 
 ## Devices
 
@@ -38,7 +39,8 @@ Naming convention: `ozzu-{type}-{location}-{number}`
 | ozzu-tab-roaming-01 | Samsung SM_P610 | 172.168.0.53 | 44847 | arm64-v8a |
 | ozzu-tab-lroom-01   | Samsung SM_P610 | 172.168.0.57 | 35897 | arm64-v8a |
 | ozzu-tv-lroom-01    | 4K Smart TV     | 172.168.0.56 | 36331 | armeabi-v7a |
-| ozzu-phone-roaming-01 | iPhone        | 172.168.0.59 (dev-01) | N/A (USB via dev-01) | arm64 |
+| ozzu-phone-roaming-01 | iPhone        | N/A (USB via dev-01) | N/A | arm64 |
+| dev-01                | Ubuntu Server | 172.168.0.61          | N/A (SSH: hadmin)    | x86_64 |
 
 - ADB ports change on reboot — check device settings for current port
 - Connect: `adb pair <IP>:<PAIR_PORT> <PIN>` then `adb connect <IP>:<DEBUG_PORT>`
@@ -75,12 +77,15 @@ Naming convention: `ozzu-{type}-{location}-{number}`
 
 ## iOS Sideloading (via dev-01)
 
-iPhone apps are sideloaded through dev-01 (172.168.0.59) using Sideloader + self-hosted Anisette.
+iPhone apps are sideloaded through dev-01 (172.168.0.61, SSH alias `dev-01`) using Sideloader CLI.
+Anisette v3 server runs on GCP VM (Docker, port 6969), reachable from dev-01 at `http://10.8.0.1:6969`.
+dev-01 has no DNS — all downloads must go through GCP VM and be SCPed over.
 
-- **First-time setup** (on dev-01): `./scripts/setup-ios-sideloading.sh`
+- **First-time setup** (from GCP VM): `./scripts/setup-ios-sideloading.sh`
 - **Pair iPhone** (USB required): `./scripts/pair-iphone.sh`
 - **Deploy iOS app**: `./scripts/deploy-ios.sh` (downloads CI artifact, signs + installs via dev-01)
 - **Local IPA**: `./scripts/deploy-ios.sh --local /path/to/ozzu.ipa`
 - **Trigger iOS build**: `gh workflow run build-ios.yml`
 - **Free Apple ID limits**: 3 sideloaded apps max, 7-day certificate refresh (SideStore auto-refreshes via WireGuard)
 - **Bundle ID**: `com.ozzu.app` (iOS), `com.anonymous.ozzu` (Android)
+- **SSH to dev-01**: Uses `~/.ssh/config` alias `dev-01` → `hadmin@172.168.0.61` with `~/.ssh/dev01_key`
