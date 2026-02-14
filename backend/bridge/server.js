@@ -10,7 +10,7 @@ const WebSocket = require("ws");
 const Redis = require("ioredis");
 const db = require("./db");
 const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
-const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, MAX_CONCURRENT_AGENTS } = require("./agent-spawner");
+const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, getConfig, setConfig } = require("./agent-spawner");
 const createLogger = require("./logger");
 
 const log = {
@@ -1022,8 +1022,8 @@ async function handleRequest(req, res) {
     // Agent utilization
     const agentUtilization = {
       active: agents.length,
-      max: MAX_CONCURRENT_AGENTS,
-      utilization: Math.round((agents.length / MAX_CONCURRENT_AGENTS) * 10000) / 100,
+      max: getConfig().MAX_CONCURRENT_AGENTS,
+      utilization: Math.round((agents.length / getConfig().MAX_CONCURRENT_AGENTS) * 10000) / 100,
     };
 
     sendJSON(res, 200, {
@@ -2353,6 +2353,67 @@ function submitDirective(e) {
     return;
   }
 
+  // GET /config — read-only view of runtime configuration
+  if (req.method === "GET" && pathname === "/config") {
+    const cfg = getConfig();
+    sendJSON(res, 200, {
+      ...cfg,
+      persona: currentPersona,
+    });
+    return;
+  }
+
+  // PATCH /config — update safe runtime settings
+  if (req.method === "PATCH" && pathname === "/config") {
+    const data = await parseBody(req);
+    const errors = [];
+    const updated = {};
+
+    if (data.MAX_CONCURRENT_AGENTS !== undefined) {
+      const v = parseInt(data.MAX_CONCURRENT_AGENTS);
+      if (isNaN(v) || v < 1 || v > 4) {
+        errors.push("MAX_CONCURRENT_AGENTS must be 1-4");
+      } else {
+        setConfig("MAX_CONCURRENT_AGENTS", v);
+        updated.MAX_CONCURRENT_AGENTS = v;
+      }
+    }
+
+    if (data.AGENT_TIMEOUT_MS !== undefined) {
+      const v = parseInt(data.AGENT_TIMEOUT_MS);
+      if (isNaN(v) || v < 300000 || v > 7200000) {
+        errors.push("AGENT_TIMEOUT_MS must be 300000-7200000 (5min-2hr)");
+      } else {
+        setConfig("AGENT_TIMEOUT_MS", v);
+        updated.AGENT_TIMEOUT_MS = v;
+      }
+    }
+
+    if (data.LOG_LEVEL !== undefined) {
+      const valid = ["debug", "info", "warn", "error"];
+      if (!valid.includes(data.LOG_LEVEL)) {
+        errors.push(`LOG_LEVEL must be one of: ${valid.join(", ")}`);
+      } else {
+        setConfig("LOG_LEVEL", data.LOG_LEVEL);
+        updated.LOG_LEVEL = data.LOG_LEVEL;
+      }
+    }
+
+    if (errors.length > 0) {
+      sendJSON(res, 400, { error: "Validation failed", details: errors });
+      return;
+    }
+
+    if (Object.keys(updated).length === 0) {
+      sendJSON(res, 400, { error: "No valid writable settings provided. Writable: MAX_CONCURRENT_AGENTS, AGENT_TIMEOUT_MS, LOG_LEVEL" });
+      return;
+    }
+
+    log.bridge(`Config updated: ${JSON.stringify(updated)}`);
+    sendJSON(res, 200, { updated, config: { ...getConfig(), persona: currentPersona } });
+    return;
+  }
+
   // Full health check endpoint
   if (req.method === "GET" && pathname === "/health") {
     const pgHealth = await db.healthCheck();
@@ -2385,7 +2446,7 @@ function submitDirective(e) {
       status: healthy ? "healthy" : "degraded",
       service: "ozzu-bridge",
       uptime: process.uptime(),
-      agents: { active: agents.length, maxConcurrent: MAX_CONCURRENT_AGENTS, details: agents.map(a => ({ directiveId: a.directiveId, type: a.type, pid: a.pid })) },
+      agents: { active: agents.length, maxConcurrent: getConfig().MAX_CONCURRENT_AGENTS, details: agents.map(a => ({ directiveId: a.directiveId, type: a.type, pid: a.pid })) },
       directives: { ...dirStats, totalRetries, recentFailures },
       redis: { connected: redisHealthy },
       postgres: pgHealth,
