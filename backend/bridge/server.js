@@ -1022,6 +1022,7 @@ async function handleRequest(req, res) {
 
     // Spawn planning agent for quick directives (already in planning status)
     if (directive.status === "planning") {
+      setLastRestartReason(`directive: ${directive.title || directive.id}`);
       spawnPlanningAgent(directive);
     }
 
@@ -1354,6 +1355,7 @@ async function handleRequest(req, res) {
     // ── Agent spawner hooks ──
     // Auto-spawn planning agent when directive enters "planning"
     if (directive.status === "planning" && prevStatus !== "planning") {
+      setLastRestartReason(`directive: ${directive.title || directive.id}`);
       spawnPlanningAgent(directive);
     }
     // Auto-spawn implementation agent when directive is approved (with a plan or quick type)
