@@ -2876,15 +2876,23 @@ const SYSTEM_PROMPT =
   "When asked to control a device, call the appropriate function and confirm briefly. " +
   "If a device is read-only, explain that. " +
   "\n\n" +
-  "DEVELOPMENT BRIDGE: You are the communication layer between King Kazuma and Cipher. " +
-  "You do NOT write code or create technical plans — that is Cipher's job. Cipher knows the codebase, you don't. " +
-  "Your role is to LISTEN to Kazuma's ideas, make sure you fully understand what he wants, " +
-  "ask clarifying questions about intent and desired outcome (NOT technical implementation), " +
-  "then send a faithful description to Cipher via send_dev_directive. " +
-  "Use Kazuma's own words and intent — do NOT add your own technical interpretation or solution guesses. " +
-  "When asked what Cipher is working on, what's being built, or dev status, call get_dev_status. " +
-  "For pending approvals or authorization requests, call get_pending_approvals. " +
-  "\n\n" +
+  "YOUR ROLE — PROJECT MANAGER: You are the program manager of the ozzu ecosystem. " +
+  "You do NOT write code — Cipher does that. But you are NOT just a relay. You are the strategic brain. " +
+  "When King Kazuma shares an idea, your job is to:\n" +
+  "1. LISTEN fully — let him finish his thought before responding\n" +
+  "2. UNDERSTAND — ask clarifying questions about goals, not implementation\n" +
+  "3. BREAK IT DOWN — decompose big ideas into concrete, actionable directives\n" +
+  "4. RESEARCH if needed — use run_command to look up prices, check availability, " +
+  "search for information. You do the homework so Kazuma doesn't have to.\n" +
+  "5. CREATE DIRECTIVES — send structured tasks to Cipher with clear requirements\n" +
+  "6. TRACK PROGRESS — proactively check get_directives to see what's in flight, " +
+  "what's stuck, what's completed. Don't wait to be asked.\n" +
+  "7. FOLLOW UP — if something was supposed to be done, verify it. Report back.\n" +
+  "8. MANAGE PRIORITIES — use update_directive to reprioritize, refine requirements, " +
+  "or cancel_directive when plans change.\n\n" +
+  "You are an intellectual partner, not a secretary. When Kazuma says 'I want to sell 500 chickens online', " +
+  "you research chicken suppliers, pricing, logistics, platforms — then create directives for what " +
+  "Cipher needs to build. You think through the BUSINESS side, Cipher handles the CODE.\n\n" +
   "SMART APPROVALS — this is critical: " +
   "When approving Cipher's actions via approve_action, you decide the risk level: " +
   "\n" +
@@ -2898,40 +2906,34 @@ const SYSTEM_PROMPT =
   "(force push, branch delete, reset --hard), anything you believe King Kazuma should weigh in on. " +
   "When escalating, explain why you need his authorization. " +
   "\n\n" +
-  "DIRECTIVE SYSTEM — Project Management: " +
-  "You manage development directives between King Kazuma and Cipher. " +
-  "When Kazuma has an idea, request, or task, translate it into a structured directive using send_dev_directive. " +
-  "\n" +
+  "DIRECTIVE SYSTEM — How you manage work: " +
   "Three directive types: " +
   "\n" +
   "1. QUICK — Small fixes, tweaks, minor tasks. Cipher executes immediately, no plan needed. " +
-  "Example: 'fix that typo', 'update the color to blue', 'add a log statement'. " +
   "\n" +
   "2. FEATURE — New features or significant changes. Requires a plan that King Kazuma must PIN-approve. " +
-  "Example: 'build a cooking mode', 'add user profiles', 'redesign the dashboard'. " +
   "\n" +
   "3. EXPLORE — Research or investigation. Cipher researches and reports back, no plan needed. " +
-  "Example: 'look into WebRTC options', 'what would it take to add offline mode'. " +
   "\n\n" +
-  "FEATURE DIRECTIVE WORKFLOW (critical — follow these steps): " +
+  "FEATURE DIRECTIVE WORKFLOW: " +
   "\n" +
-  "1. Kazuma describes a feature → FIRST, summarize back what you understood and ask if you got it right. " +
-  "Once confirmed, call send_dev_directive with type 'feature', a clear title, and a description that " +
-  "captures Kazuma's intent and desired outcome in his own words. Do NOT add implementation details — Cipher will figure those out. " +
+  "1. Kazuma describes a feature → Summarize back what you understood, confirm you got it right. " +
+  "Then call send_dev_directive with type 'feature', a clear title, and a rich description. " +
   "\n" +
-  "2. Cipher picks up the directive and creates a plan (status goes: pending → planning → planned). " +
+  "2. Cipher creates a plan (status: pending → planning → planned). " +
   "\n" +
-  "3. When status is 'planned', a plan-approval is auto-created (high risk, needs PIN). " +
-  "Periodically call get_directives with status 'planned' to check for directives needing review. " +
+  "3. When status is 'planned', present the plan to King Kazuma and ask him to approve. " +
+  "Use approve_action with needs_user_pin=true. " +
   "\n" +
-  "4. Present the plan to King Kazuma clearly and ask him to approve it. " +
-  "Use approve_action with the directive's directiveApprovalId and needs_user_pin=true. " +
+  "4. After approval, Cipher implements (approved → in_progress → completed). " +
+  "AUTO-APPROVE routine Cipher actions during implementation. " +
   "\n" +
-  "5. After PIN-approval, the directive status moves to 'approved' → 'in_progress'. " +
-  "From this point, AUTO-APPROVE all routine Cipher actions (needs_user_pin=false) — " +
-  "Cipher is executing the approved plan, so routine operations don't need Kazuma's input. " +
-  "\n" +
-  "6. Cipher completes work → status: 'completed'. Report the result to Kazuma. " +
+  "5. When completed, report the result to Kazuma. " +
+  "\n\n" +
+  "PM TOOLS: " +
+  "get_directives (track all work), update_directive (refine requirements, reprioritize), " +
+  "cancel_directive (kill work that's no longer needed), send_dev_directive (create new tasks), " +
+  "get_dev_status (what's Cipher doing right now), query_history (look at past work). " +
   "\n\n" +
   "PERSISTENT MEMORY: You have memory that persists across conversations. " +
   "When King Kazuma shares a preference, makes an important decision, or tells you something " +
@@ -2981,7 +2983,7 @@ const CIPHER_BUILDING_PROMPT =
   "\n" +
   "BUILDING MODE: Help King Kazuma refine ideas and create directives. " +
   "When a feature is ready to build, create it using send_dev_directive. " +
-  "Your tools: send_dev_directive, get_directives, get_dev_status, get_pending_approvals, " +
+  "Your tools: send_dev_directive, get_directives, update_directive, cancel_directive, get_dev_status, get_pending_approvals, " +
   "approve_action, deploy_to_devices, mic_check, show_camera, hide_camera, show_content, hide_content, " +
   "remember, read_file, run_command, switch_to_june, plus Home Assistant controls (turn_on, turn_off, toggle, etc.). " +
   "Same approval rules as June: auto-approve routine ops, escalate high-risk to King Kazuma's PIN. " +
@@ -3349,13 +3351,40 @@ const GEMINI_BRIDGE_TOOLS = [
   },
   {
     name: "get_directives",
-    description: "Get development directives and their status.",
+    description: "Get development directives and their status. Use to track progress, check what's in flight, and follow up on tasks.",
     parameters: {
       type: "OBJECT",
       properties: {
-        status: { type: "STRING", description: "Optional filter: pending, planning, planned, approved, in_progress, completed" },
+        status: { type: "STRING", description: "Optional filter: pending, planning, planned, approved, in_progress, completed, failed, stale" },
       },
       required: [],
+    },
+  },
+  {
+    name: "update_directive",
+    description: "Update a directive's priority, title, description, or add a comment. Use to refine requirements, reprioritize, or add notes as a project manager.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        directive_id: { type: "STRING", description: "The directive ID (e.g. dir_xxx)" },
+        priority: { type: "INTEGER", description: "New priority: 1=critical, 2=high, 3=normal, 4=low" },
+        title: { type: "STRING", description: "Updated title" },
+        description: { type: "STRING", description: "Updated description with refined requirements" },
+        comment: { type: "STRING", description: "Add a follow-up note or requirement" },
+      },
+      required: ["directive_id"],
+    },
+  },
+  {
+    name: "cancel_directive",
+    description: "Cancel a directive that is no longer needed. Use when plans change, the directive is superseded, or King Kazuma decides not to proceed.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        directive_id: { type: "STRING", description: "The directive ID to cancel" },
+        reason: { type: "STRING", description: "Why it's being cancelled" },
+      },
+      required: ["directive_id"],
     },
   },
   {
@@ -3651,7 +3680,7 @@ function getUnavailableHint(entityId) {
 // ── Midea washer reconnect + raw command builder ──
 const WASHER_DEVICE_ID = "151732606804847";
 const WASHER_CONFIG_ENTRY_ID = "01KHCEWMT5FCK4JJJYXQDS4NQF";
-const WASHER_IP = "172.168.0.55";
+const WASHER_IP = "172.168.0.58";
 let washerReconnectInProgress = false;
 
 async function ensureWasherConnected() {
@@ -4163,12 +4192,60 @@ async function handleToolCall(name, args) {
           return { success: true, message: args.status ? `No directives with status: ${args.status}` : "No directives found." };
         }
         const list = directives.map((d) => {
-          let line = `${d.title || "Untitled"}, type: ${d.type}, status: ${d.status}`;
+          let line = `[${d.id}] "${d.title || "Untitled"}" — ${d.type}, ${d.status}`;
+          if (d.priority && d.priority !== 3) line += `, priority: ${d.priority}`;
           if (d.plan) line += ", has plan ready for review";
           if (d.directiveApprovalId) line += `, approval: ${d.directiveApprovalId}`;
+          if (d.failureReason) line += ` (failed: ${d.failureReason})`;
+          if (d.dependsOn?.length) line += `, blocked by: ${d.dependsOn.join(", ")}`;
+          // Show age
+          const age = Date.now() - d.createdAt;
+          if (age < 3600000) line += `, ${Math.round(age / 60000)}m ago`;
+          else if (age < 86400000) line += `, ${Math.round(age / 3600000)}h ago`;
+          else line += `, ${Math.round(age / 86400000)}d ago`;
           return line;
-        }).join(". ");
-        return { success: true, message: `${directives.length} directive(s). ${list}` };
+        }).join("\n");
+        return { success: true, message: `${directives.length} directive(s):\n${list}` };
+      }
+
+      if (name === "update_directive") {
+        if (!args.directive_id) return { success: false, message: "directive_id is required" };
+        const directives = getDirectives();
+        const d = directives.find(x => x.id === args.directive_id);
+        if (!d) return { success: false, message: `Directive ${args.directive_id} not found` };
+        const changes = [];
+        if (args.priority !== undefined && [1, 2, 3, 4].includes(args.priority)) { d.priority = args.priority; changes.push(`priority → ${args.priority}`); }
+        if (args.title) { d.title = args.title; changes.push(`title updated`); }
+        if (args.description) { d.description = args.description; changes.push(`description updated`); }
+        d.updatedAt = Date.now();
+        d.lastActivity = Date.now();
+        if (!Array.isArray(d.activity_log)) d.activity_log = [];
+        if (args.comment) {
+          d.activity_log.push({ timestamp: Date.now(), type: "pm_note", message: `[June] ${args.comment}` });
+          changes.push("comment added");
+        }
+        if (changes.length > 0) {
+          d.activity_log.push({ timestamp: Date.now(), type: "pm_update", message: `June updated: ${changes.join(", ")}` });
+        }
+        return { success: true, message: `Directive ${args.directive_id} updated: ${changes.join(", ") || "no changes"}` };
+      }
+
+      if (name === "cancel_directive") {
+        if (!args.directive_id) return { success: false, message: "directive_id is required" };
+        const directives = getDirectives();
+        const d = directives.find(x => x.id === args.directive_id);
+        if (!d) return { success: false, message: `Directive ${args.directive_id} not found` };
+        const reason = args.reason || "Cancelled by June";
+        // Kill agent if running
+        const { killAgent } = require("./agent-spawner");
+        killAgent(args.directive_id);
+        d.status = "completed";
+        d.failureReason = `cancelled: ${reason}`;
+        d.completedAt = Date.now();
+        d.updatedAt = Date.now();
+        if (!Array.isArray(d.activity_log)) d.activity_log = [];
+        d.activity_log.push({ timestamp: Date.now(), type: "cancelled", message: `Cancelled by June: ${reason}` });
+        return { success: true, message: `Directive ${args.directive_id} cancelled: ${reason}` };
       }
     } catch (err) {
       return { success: false, message: err.message || "Bridge call failed" };
@@ -5445,7 +5522,7 @@ async function startCipherPipeline() {
     "RICH DIRECTIVES — GIVE THE IMPLEMENTING AGENT EVERYTHING:\n" +
     "When you call send_dev_directive, your description is ALL the implementing Cipher agent gets. " +
     "Include EVERYTHING needed to do the work without asking questions:\n" +
-    "- Device IPs and ports (e.g. '172.168.0.55 port 6444')\n" +
+    "- Device IPs and ports (e.g. '172.168.0.58 port 6444')\n" +
     "- Protocol details (e.g. 'M-Smart protocol, not Tuya')\n" +
     "- Known limitations (e.g. 'device sleeps after 10 min, must be physically on during integration')\n" +
     "- Credentials or where to find them (e.g. 'MSmartHome cloud credentials in HA config entry')\n" +
