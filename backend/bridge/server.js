@@ -36,6 +36,12 @@ const MAX_STATUS_ENTRIES = 20;
 const MAX_DIRECTIVES = 20;
 const APPROVAL_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours (plan reviews need time)
 
+// ── Rate limiter for POST /directives — sliding window ──
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const _directiveCreationTimestamps = [];
+let _rateLimitHits = 0;
+
 // ── Log ring buffer — captures recent console output for GET /logs ──
 const LOG_RING_MAX = 500;
 const _logRing = [];
@@ -282,6 +288,20 @@ let _approvals = [];
 let _directives = [];
 let _redisConnected = false;
 
+// ── Uptime & restart tracking ──
+const _serverStartedAt = new Date().toISOString();
+let _restartCount = 0;
+let _lastRestartReason = null;
+let _previousStartedAt = null;
+
+function setLastRestartReason(reason) {
+  if (!_lastRestartReason && _restartCount > 0) {
+    _lastRestartReason = reason;
+    if (_redisConnected) redis.set("ozzu:lastRestartReason", reason).catch(() => {});
+    log.bridge.info(`Last restart reason set: ${reason}`);
+  }
+}
+
 function getStatusEntries() { return _statusEntries; }
 function saveStatusEntries(entries, latestEntry = null) {
   _statusEntries = entries;
@@ -365,6 +385,17 @@ async function initStorage() {
       cipherMode = mode;
       log.bridge.info(`Restored persona: ${persona}${mode ? ` (${mode})` : ""}`);
     }
+
+    // ── Uptime & restart tracking ──
+    const prevStartedAt = await redis.get("ozzu:serverStartedAt");
+    const prevCount = await redis.get("ozzu:restartCount");
+    if (prevStartedAt) {
+      _previousStartedAt = prevStartedAt;
+      _restartCount = (parseInt(prevCount, 10) || 0) + 1;
+      log.bridge.info(`Restart #${_restartCount} (previous started: ${_previousStartedAt})`);
+    }
+    await redis.set("ozzu:serverStartedAt", _serverStartedAt);
+    await redis.set("ozzu:restartCount", String(_restartCount));
 
     // Load from Redis, or migrate from JSON files
     const storedDirectives = await redis.get("ozzu:directives");
@@ -913,6 +944,19 @@ async function handleRequest(req, res) {
   // POST /directives — June creates a directive
   if (req.method === "POST" && pathname === "/directives") {
     if (!requireAuth(req, res)) return;
+    // Rate limit: max 10 directives per 5 minutes (sliding window)
+    const now = Date.now();
+    while (_directiveCreationTimestamps.length > 0 && _directiveCreationTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
+      _directiveCreationTimestamps.shift();
+    }
+    if (_directiveCreationTimestamps.length >= RATE_LIMIT_MAX) {
+      _rateLimitHits++;
+      const oldestInWindow = _directiveCreationTimestamps[0];
+      const retryAfterSec = Math.ceil((oldestInWindow + RATE_LIMIT_WINDOW_MS - now) / 1000);
+      res.setHeader("Retry-After", String(retryAfterSec));
+      sendJSON(res, 429, { error: `Rate limit exceeded: max ${RATE_LIMIT_MAX} directives per ${RATE_LIMIT_WINDOW_MS / 60000} minutes`, retryAfter: retryAfterSec });
+      return;
+    }
     const data = await parseBody(req);
     const validTypes = ["quick", "feature", "explore"];
     if (!data.type || !validTypes.includes(data.type)) {
@@ -974,6 +1018,7 @@ async function handleRequest(req, res) {
     directives.push(directive);
     while (directives.length > MAX_DIRECTIVES) directives.shift();
     saveDirectives(directives, directive, null);
+    _directiveCreationTimestamps.push(Date.now());
 
     // Spawn planning agent for quick directives (already in planning status)
     if (directive.status === "planning") {
@@ -1943,6 +1988,7 @@ async function handleRequest(req, res) {
   <div class="card"><div class="label">Completed Today</div><div class="value ok">${completedToday}</div></div>
   <div class="card"><div class="label">Avg Duration</div><div class="value">${avgDuration !== null ? formatDuration(avgDuration) : "N/A"}</div></div>
   <div class="card"><div class="label">Success Rate</div><div class="value ${successRate !== null && successRate >= 80 ? "ok" : successRate !== null && successRate >= 50 ? "warn" : successRate !== null ? "bad" : ""}">${successRate !== null ? successRate + "%" : "N/A"}</div></div>
+  <div class="card"><div class="label">Rate Limit</div><div class="value ${_directiveCreationTimestamps.filter(t => t > Date.now() - RATE_LIMIT_WINDOW_MS).length >= RATE_LIMIT_MAX ? "bad" : _directiveCreationTimestamps.filter(t => t > Date.now() - RATE_LIMIT_WINDOW_MS).length >= RATE_LIMIT_MAX - 2 ? "warn" : "ok"}">${_directiveCreationTimestamps.filter(t => t > Date.now() - RATE_LIMIT_WINDOW_MS).length}/${RATE_LIMIT_MAX}</div></div>
 </div>
 
 <section>
@@ -2493,8 +2539,13 @@ function submitDirective(e) {
       status: healthy ? "healthy" : "degraded",
       service: "ozzu-bridge",
       uptime: process.uptime(),
+      serverStartedAt: _serverStartedAt,
+      restartCount: _restartCount,
+      lastRestartReason: _lastRestartReason,
+      previousStartedAt: _previousStartedAt,
       agents: { active: agents.length, maxConcurrent: getConfig().MAX_CONCURRENT_AGENTS, details: agents.map(a => ({ directiveId: a.directiveId, type: a.type, pid: a.pid })) },
       directives: { ...dirStats, totalRetries, recentFailures },
+      rateLimit: { windowMinutes: RATE_LIMIT_WINDOW_MS / 60000, max: RATE_LIMIT_MAX, recentCreations: _directiveCreationTimestamps.filter(t => t > Date.now() - RATE_LIMIT_WINDOW_MS).length, totalHits: _rateLimitHits },
       redis: { connected: redisHealthy },
       postgres: pgHealth,
       gemini: { connected: !!geminiReady, model: GEMINI_MODEL },
@@ -5192,6 +5243,23 @@ wss.on("connection", (ws) => {
     log.bridge.info(`HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
     startWatchdog();
+
+    // Notify June about restart if this isn't the first boot
+    if (_restartCount > 0 && _previousStartedAt) {
+      const prevUptime = Math.round((new Date(_serverStartedAt).getTime() - new Date(_previousStartedAt).getTime()) / 1000);
+      const uptimeStr = `${Math.floor(prevUptime / 3600)}h ${Math.floor((prevUptime % 3600) / 60)}m ${Math.floor(prevUptime % 60)}s`;
+      const hadActiveAgents = _directives.some(d => d.failureReason && d.failureReason.startsWith("crash: server restarted"));
+      setTimeout(() => {
+        engage("bridge restart notification");
+        sendNotification(
+          `[SYSTEM NOTIFICATION — Summarize naturally to King Kazuma.]\n` +
+          `The bridge server has restarted. This is restart #${_restartCount}. ` +
+          `Previous instance ran for ${uptimeStr} (started ${_previousStartedAt}). ` +
+          (hadActiveAgents ? `There were active agents that may have been interrupted by the restart. ` : `No agents were running at the time. `) +
+          (_lastRestartReason ? `Restart reason: ${_lastRestartReason}.` : `Restart reason: unknown (likely docker restart or deploy).`)
+        );
+      }, 15000);
+    }
   });
 })();
 
