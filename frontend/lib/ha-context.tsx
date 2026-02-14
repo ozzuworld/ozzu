@@ -102,8 +102,15 @@ export function HAProvider({ children }: { children: React.ReactNode }) {
       target?: { entity_id: string | string[] }
     ) => {
       const conn = connectionRef.current;
-      if (!conn) return;
-      await haCallService(conn, domain, service, data, target);
+      if (!conn) {
+        console.warn("[HA] callService: not connected");
+        return;
+      }
+      try {
+        await haCallService(conn, domain, service, data, target);
+      } catch (err) {
+        console.error(`[HA] callService ${domain}.${service} failed:`, err);
+      }
     },
     []
   );

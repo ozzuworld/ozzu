@@ -20,8 +20,17 @@ export function StatusBadge() {
   const [time, setTime] = useState(getTimeString);
 
   useEffect(() => {
-    const interval = setInterval(() => setTime(getTimeString()), 30000);
-    return () => clearInterval(interval);
+    // Align updates to minute boundaries for accurate clock display
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    const msToNextMinute = (60 - new Date().getSeconds()) * 1000;
+    const timeoutId = setTimeout(() => {
+      setTime(getTimeString());
+      intervalId = setInterval(() => setTime(getTimeString()), 60000);
+    }, msToNextMinute);
+    return () => {
+      clearTimeout(timeoutId);
+      if (intervalId) clearInterval(intervalId);
+    };
   }, []);
 
   return (

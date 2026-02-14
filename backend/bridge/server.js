@@ -5323,6 +5323,16 @@ async function startCipherPipeline() {
     log.cipher.error("Pipeline error:", err.message);
   });
 
+  cipherPipeline.on("dead", (reason) => {
+    log.cipher.error(`Pipeline dead: ${reason} — falling back to Gemini`);
+    const deadPipeline = cipherPipeline;
+    cipherPipeline = null;
+    if (deadPipeline && typeof deadPipeline === "object") {
+      deadPipeline.stop().catch(() => {});
+    }
+    if (devices.size > 0) connectGemini();
+  });
+
   // Start the pipeline
   const ok = await cipherPipeline.start();
   if (!ok) {
