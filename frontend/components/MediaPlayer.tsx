@@ -13,6 +13,7 @@ import { TVPressable } from "./TVPressable";
 import { RARITY_COLORS } from "../lib/rooms";
 import { useMediaPlayer } from "../lib/useMediaPlayer";
 import { HA_URL, HA_TOKEN } from "../lib/config";
+import { usePhoneLayout } from "../lib/usePhoneLayout";
 
 interface MediaPlayerProps {
   visible: boolean;
@@ -32,6 +33,7 @@ function formatTime(seconds: number): string {
 export function MediaPlayer({ visible, onClose }: MediaPlayerProps) {
   const { state, controls } = useMediaPlayer();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const { insets, isPhone } = usePhoneLayout();
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -188,7 +190,7 @@ export function MediaPlayer({ visible, onClose }: MediaPlayerProps) {
 
   if (!visible) return null;
 
-  const panelWidth = Math.min(screenWidth * 0.55, 480);
+  const panelWidth = Math.min(screenWidth * (isPhone ? 0.9 : 0.55), 480);
   const panelHeight = Math.min(screenHeight * 0.50, 260);
   const artSize = Math.min(100, panelHeight - 60);
   const progressRatio = state.duration > 0 ? state.position / state.duration : 0;
@@ -209,8 +211,8 @@ export function MediaPlayer({ visible, onClose }: MediaPlayerProps) {
     <Animated.View
       style={{
         position: "absolute",
-        bottom: 20,
-        right: 20,
+        bottom: Math.max(20, insets.bottom + 8),
+        right: Math.max(20, insets.right + 8),
         width: panelWidth,
         height: panelHeight,
         zIndex: 100,

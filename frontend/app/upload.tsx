@@ -8,6 +8,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
 import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
+import { usePhoneLayout } from "../lib/usePhoneLayout";
 
 const TOP_BAR_HEIGHT = 48;
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -46,6 +47,7 @@ function isAllowedFile(mimeType: string, name: string): boolean {
 
 export default function UploadScreen() {
   const router = useRouter();
+  const { insets } = usePhoneLayout();
   const [mode, setMode] = useState<Mode>("FILE");
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [textContent, setTextContent] = useState("");
@@ -192,11 +194,12 @@ export default function UploadScreen() {
       {/* Top Bar */}
       <View
         style={{
-          height: TOP_BAR_HEIGHT,
+          paddingTop: insets.top,
+          height: TOP_BAR_HEIGHT + insets.top,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingHorizontal: 16,
+          paddingHorizontal: Math.max(16, insets.left, insets.right),
         }}
       >
         <Text style={{ color: "#F59E0B", fontSize: 24, fontWeight: "bold" }}>
@@ -228,7 +231,7 @@ export default function UploadScreen() {
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 24, gap: 20 }}
+        contentContainerStyle={{ padding: Math.max(24, insets.left, insets.right), paddingBottom: Math.max(24, insets.bottom), gap: 20 }}
       >
         {/* Title */}
         <Text

@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { TVPressable } from "./TVPressable";
 import { RARITY_COLORS } from "../lib/rooms";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface ContentPanelProps {
   visible: boolean;
@@ -604,6 +605,8 @@ export function ContentPanel({
   const [shouldRender, setShouldRender] = useState(false);
   // Must be called unconditionally (Rules of Hooks)
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const isPhone = screenWidth < 500;
 
   // ── Animated values ──
   // Phase 1: Light burst
@@ -843,12 +846,15 @@ export function ContentPanel({
 
   if (!shouldRender) return null;
 
-  const panelWidth = Math.min(screenWidth * 0.6, 600);
+  const panelWidth = Math.min(screenWidth * (isPhone ? 0.9 : 0.6), 600);
   const panelHeight = screenHeight * 0.65;
 
+  const panelBottom = Math.max(20, insets.bottom + 8);
+  const panelLeft = Math.max(20, insets.left + 8);
+
   // Center of the panel in absolute coordinates (for burst/ray origin)
-  const panelCenterX = 20 + panelWidth / 2;
-  const panelCenterY = screenHeight - 20 - panelHeight / 2;
+  const panelCenterX = panelLeft + panelWidth / 2;
+  const panelCenterY = screenHeight - panelBottom - panelHeight / 2;
 
   const glowOpacity = glowAnim.interpolate({
     inputRange: [0, 1],
@@ -983,8 +989,8 @@ export function ContentPanel({
       <Animated.View
         style={{
           position: "absolute",
-          bottom: 20,
-          left: 20,
+          bottom: panelBottom,
+          left: panelLeft,
           width: panelWidth,
           height: panelHeight,
           opacity: panelOpacity,

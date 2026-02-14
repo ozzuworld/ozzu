@@ -2,6 +2,7 @@ import "../global.css";
 import React from "react";
 import { LogBox, View, Text } from "react-native";
 import { Stack } from "expo-router";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { HAProvider } from "../lib/ha-context";
 
 if (!__DEV__) {
@@ -47,15 +48,17 @@ class ErrorBoundary extends React.Component<
 
 export default function RootLayout() {
   return (
-    <ErrorBoundary>
-      <HAProvider>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: "#111111" },
-          }}
-        />
-      </HAProvider>
-    </ErrorBoundary>
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <HAProvider>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: "#111111" },
+            }}
+          />
+        </HAProvider>
+      </ErrorBoundary>
+    </SafeAreaProvider>
   );
 }

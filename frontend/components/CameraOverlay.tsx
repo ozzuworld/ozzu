@@ -3,6 +3,7 @@ import { View, Text, Animated, useWindowDimensions, Platform } from "react-nativ
 import { useVideoPlayer, VideoView } from "expo-video";
 import { TVPressable } from "./TVPressable";
 import { RARITY_COLORS } from "../lib/rooms";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface CameraOverlayProps {
   visible: boolean;
@@ -25,6 +26,7 @@ export function CameraOverlay({
   const glowAnim = useRef(new Animated.Value(0)).current;
   // Must be called unconditionally (Rules of Hooks)
   const { height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   const player = useVideoPlayer(visible ? streamUrl : null, (p) => {
     p.loop = true;
@@ -104,8 +106,8 @@ export function CameraOverlay({
     <Animated.View
       style={{
         position: "absolute",
-        bottom: 20,
-        right: 20,
+        bottom: Math.max(20, insets.bottom + 8),
+        right: Math.max(20, insets.right + 8),
         width: size,
         height: size,
         opacity: fadeAnim,

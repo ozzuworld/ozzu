@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Animated, ScrollView, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface TranscriptBubbleProps {
   inputTranscript: string;
@@ -12,6 +13,7 @@ export function TranscriptBubble({
   responseText,
   isStreaming,
 }: TranscriptBubbleProps) {
+  const insets = useSafeAreaInsets();
   const opacity = useRef(new Animated.Value(0)).current;
   const scrollRef = useRef<ScrollView>(null);
   const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,8 +66,8 @@ export function TranscriptBubble({
     <Animated.View
       style={{
         position: "absolute",
-        bottom: 32,
-        left: 20,
+        bottom: Math.max(32, insets.bottom + 8),
+        left: Math.max(20, insets.left + 8),
         maxWidth: "60%",
         maxHeight: 80,
         backgroundColor: "rgba(20,20,20,0.8)",

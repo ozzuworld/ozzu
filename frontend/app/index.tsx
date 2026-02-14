@@ -15,6 +15,7 @@ import { ContentPanel } from "../components/ContentPanel";
 import { MediaPlayer } from "../components/MediaPlayer";
 import { useEntity } from "../lib/useEntity";
 import { useKeepAwake } from "expo-keep-awake";
+import { usePhoneLayout } from "../lib/usePhoneLayout";
 
 // ── HUD corner bracket ──
 const BRACKET_LEN = 20;
@@ -96,6 +97,7 @@ function ScanLine() {
 
 export default function LandingScreen() {
   useKeepAwake();
+  const { insets, isPhone, screenWidth, screenHeight } = usePhoneLayout();
 
   // Detect device role once
   const deviceRole = useRef<"mic" | "speaker">("mic");
@@ -289,10 +291,10 @@ export default function LandingScreen() {
       />
 
       {/* ── HUD corner brackets ── */}
-      <HudCorner top={12} left={12} />
-      <HudCorner top={12} right={12} />
-      <HudCorner bottom={12} left={12} />
-      <HudCorner bottom={12} right={12} />
+      <HudCorner top={Math.max(12, insets.top)} left={Math.max(12, insets.left)} />
+      <HudCorner top={Math.max(12, insets.top)} right={Math.max(12, insets.right)} />
+      <HudCorner bottom={Math.max(12, insets.bottom)} left={Math.max(12, insets.left)} />
+      <HudCorner bottom={Math.max(12, insets.bottom)} right={Math.max(12, insets.right)} />
 
       {/* ── Scan line ── */}
       <ScanLine />
@@ -300,11 +302,12 @@ export default function LandingScreen() {
       {/* Top Bar — hamburger left, status right */}
       <View
         style={{
-          height: 48,
+          paddingTop: insets.top,
+          height: 48 + insets.top,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingHorizontal: 20,
+          paddingHorizontal: Math.max(20, insets.left, insets.right),
           zIndex: 10,
         }}
       >
@@ -325,8 +328,8 @@ export default function LandingScreen() {
           autoPlay
           loop
           style={{
-            width: 420,
-            height: 420,
+            width: Math.min(screenWidth * 0.85, screenHeight * 0.5, 420),
+            height: Math.min(screenWidth * 0.85, screenHeight * 0.5, 420),
           }}
         />
       </View>
@@ -361,8 +364,8 @@ export default function LandingScreen() {
         <View
           style={{
             position: "absolute",
-            bottom: 24,
-            right: 24,
+            bottom: Math.max(24, insets.bottom + 8),
+            right: Math.max(24, insets.right + 8),
             zIndex: 90,
           }}
         >

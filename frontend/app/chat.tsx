@@ -11,10 +11,12 @@ import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
 import { useKeepAwake } from "expo-keep-awake";
+import { usePhoneLayout } from "../lib/usePhoneLayout";
 
 export default function ChatScreen() {
   useKeepAwake();
   const router = useRouter();
+  const { insets } = usePhoneLayout();
 
   // Detect device role once
   const deviceRole = useRef<"mic" | "speaker">("mic");
@@ -173,11 +175,12 @@ export default function ChatScreen() {
       {/* Top Bar */}
       <View
         style={{
-          height: 48,
+          paddingTop: insets.top,
+          height: 48 + insets.top,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingHorizontal: 16,
+          paddingHorizontal: Math.max(16, insets.left, insets.right),
         }}
       >
         <Text style={{ color: "#F59E0B", fontSize: 24, fontWeight: "bold" }}>
@@ -274,8 +277,8 @@ export default function ChatScreen() {
           flexDirection: "row",
           justifyContent: "center",
           gap: 12,
-          paddingBottom: 24,
-          paddingHorizontal: 24,
+          paddingBottom: Math.max(24, insets.bottom),
+          paddingHorizontal: Math.max(24, insets.left, insets.right),
         }}
       >
         {isMic && isListening && (

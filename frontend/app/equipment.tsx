@@ -9,6 +9,7 @@ import { ItemCardModal } from "../components/ItemCardModal";
 import { TVPressable } from "../components/TVPressable";
 import { useHA } from "../lib/ha-context";
 import { rooms, type InventoryItem, RARITY_COLORS } from "../lib/rooms";
+import { usePhoneLayout } from "../lib/usePhoneLayout";
 
 const TOP_BAR_HEIGHT = 48;
 const INVENTORY_TOTAL_SLOTS = 20;
@@ -46,12 +47,12 @@ const INITIAL_EQUIPPED: EquippedState = {
   AMULET: null,
 };
 
-function EmptyInvSlot() {
+function EmptyInvSlot({ size }: { size: number }) {
   return (
     <View
       style={{
-        width: INV_SLOT_SIZE,
-        height: INV_SLOT_SIZE,
+        width: size,
+        height: size,
         borderWidth: 1,
         borderColor: "#222",
         borderRadius: 8,
@@ -64,6 +65,9 @@ function EmptyInvSlot() {
 export default function EquipmentScreen() {
   const router = useRouter();
   const { callService } = useHA();
+  const { insets, isPhone } = usePhoneLayout();
+
+  const invSlotSize = isPhone ? 70 : INV_SLOT_SIZE;
 
   const [equipped, setEquipped] = useState<EquippedState>(INITIAL_EQUIPPED);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
@@ -138,11 +142,12 @@ export default function EquipmentScreen() {
       {/* Top Bar */}
       <View
         style={{
-          height: TOP_BAR_HEIGHT,
+          paddingTop: insets.top,
+          height: TOP_BAR_HEIGHT + insets.top,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingHorizontal: 16,
+          paddingHorizontal: Math.max(16, insets.left, insets.right),
         }}
       >
         <Text style={{ color: "#F59E0B", fontSize: 24, fontWeight: "bold" }}>
@@ -229,7 +234,7 @@ export default function EquipmentScreen() {
         />
 
         {/* Inventory Panel */}
-        <View style={{ flex: 1, padding: 20 }}>
+        <View style={{ flex: 1, padding: 20, paddingBottom: Math.max(20, insets.bottom) }}>
           {/* Inventory Header */}
           <View
             style={{
@@ -291,8 +296,8 @@ export default function EquipmentScreen() {
                   rarity={item.rarity}
                   onPress={() => handleEquip(item)}
                   style={{
-                    width: INV_SLOT_SIZE,
-                    height: INV_SLOT_SIZE,
+                    width: invSlotSize,
+                    height: invSlotSize,
                     padding: 6,
                     justifyContent: "center",
                     alignItems: "center",
@@ -333,7 +338,7 @@ export default function EquipmentScreen() {
 
             {/* Empty slots */}
             {Array.from({ length: emptySlotCount }, (_, i) => (
-              <EmptyInvSlot key={`empty-${i}`} />
+              <EmptyInvSlot key={`empty-${i}`} size={invSlotSize} />
             ))}
           </View>
         </View>

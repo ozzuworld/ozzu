@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo } from "react";
-import { Animated, Easing } from "react-native";
+import { Animated, Easing, useWindowDimensions } from "react-native";
 import { getDeviceType } from "../modules/pcm-player";
 
 type OrbMode = "idle" | "ambient" | "active";
@@ -326,6 +326,7 @@ const CONTAINER_SIZE = 420;
 export function NebulaOrb({ active, ambient }: NebulaOrbProps) {
   const mode: OrbMode = active ? "active" : ambient ? "ambient" : "idle";
   const containerPulse = useContainerPulse(mode);
+  const { width: screenWidth } = useWindowDimensions();
 
   const isTV = useMemo(() => {
     try {
@@ -334,6 +335,8 @@ export function NebulaOrb({ active, ambient }: NebulaOrbProps) {
       return false;
     }
   }, []);
+
+  const containerSize = screenWidth < 500 ? Math.min(screenWidth * 0.85, CONTAINER_SIZE) : CONTAINER_SIZE;
 
   // TV: fewer layers for performance
   const layers = useMemo(() => {
@@ -347,8 +350,8 @@ export function NebulaOrb({ active, ambient }: NebulaOrbProps) {
     <Animated.View
       renderToHardwareTextureAndroid
       style={{
-        width: CONTAINER_SIZE,
-        height: CONTAINER_SIZE,
+        width: containerSize,
+        height: containerSize,
         alignItems: "center",
         justifyContent: "center",
         overflow: "hidden",
