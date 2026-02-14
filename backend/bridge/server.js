@@ -561,8 +561,8 @@ async function initStorage() {
   if (pgReady) {
     await migrateRedisToPostgres();
     // Start entity snapshot interval (every 5 min)
-    setInterval(() => captureEntitySnapshots().catch(err =>
-      log.pg.error("snapshot error:", err.message)), 5 * 60 * 1000);
+    setInterval(() => { try { captureEntitySnapshots().catch(err =>
+      log.pg.error("snapshot error:", err.message)); } catch (err) { log.pg.error("snapshot sync error:", err.message); } }, 5 * 60 * 1000);
     // Prune old snapshots daily
     setInterval(() => db.pruneEntitySnapshots(7).catch(err =>
       log.pg.error("prune error:", err.message)), 24 * 60 * 60 * 1000);
@@ -639,6 +639,10 @@ async function captureEntitySnapshots() {
   if (!db.isConnected()) return;
   try {
     const states = await haFetch("/api/states");
+    if (!Array.isArray(states)) {
+      log.pg.warn("Entity snapshot: HA returned non-array response, skipping");
+      return;
+    }
     const entityIds = new Set(ENTITY_CONFIG.map((e) => e.entityId));
     let stored = 0;
     for (const state of states) {
@@ -760,6 +764,10 @@ function parseBody(req) {
 
 function escapeHtml(str) {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+// Escape for use inside single-quoted JS strings in inline handlers
+function escapeJsString(str) {
+  return String(str).replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
 }
 
 const CORS_HEADERS = {
@@ -1684,15 +1692,23 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+    let metadata, metaRaw;
+    try {
+      metaRaw = fs.readFileSync(metadataPath, "utf8");
+      metadata = JSON.parse(metaRaw);
+    } catch (err) {
+      log.bridge.error(`OTA metadata parse failed: ${err.message}`);
+      sendJSON(res, 500, { error: "Corrupt OTA metadata" });
+      return;
+    }
     const platformMeta = metadata.fileMetadata?.[platform];
     if (!platformMeta) {
       sendJSON(res, 404, { error: `No ${platform} update found` });
       return;
     }
 
-    // Compute update ID from metadata
-    const metaHash = crypto.createHash("sha256").update(fs.readFileSync(metadataPath)).digest("hex");
+    // Compute update ID from metadata (reuse already-read buffer)
+    const metaHash = crypto.createHash("sha256").update(metaRaw).digest("hex");
     const updateId = `${metaHash.slice(0,8)}-${metaHash.slice(8,12)}-${metaHash.slice(12,16)}-${metaHash.slice(16,20)}-${metaHash.slice(20,32)}`;
 
     // If client already has this update, return no-update
@@ -1794,9 +1810,10 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const filePath = path.join(UPDATES_DIR, runtimeVersion, assetPath);
-    // Prevent directory traversal
-    if (!filePath.startsWith(path.join(UPDATES_DIR, runtimeVersion))) {
+    const allowedBase = path.resolve(UPDATES_DIR, runtimeVersion);
+    const filePath = path.resolve(UPDATES_DIR, runtimeVersion, assetPath);
+    // Prevent directory traversal — resolved path must be within allowed base
+    if (!filePath.startsWith(allowedBase + path.sep) && filePath !== allowedBase) {
       sendJSON(res, 403, { error: "Forbidden" });
       return;
     }
@@ -1920,22 +1937,22 @@ async function handleRequest(req, res) {
       return `<tr class="directive-row" data-status="${escapeHtml(d.status)}" data-title="${escapeHtml((d.title || d.id).toLowerCase())}" data-id="${escapeHtml(d.id)}">
         <td><input type="checkbox" class="directive-check" value="${escapeHtml(d.id)}" onchange="updateBulkBar()"></td>
         <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
-        <td><a href="#" onclick="toggleActivityLog('${escapeHtml(d.id)}');return false;" style="color:#e2e8f0;text-decoration:none;border-bottom:1px dashed #475569;">${escapeHtml(d.title || d.id)}</a>${lastCommentHtml}</td>
+        <td><a href="#" onclick="toggleActivityLog('${escapeHtml(escapeJsString(d.id))}');return false;" style="color:#e2e8f0;text-decoration:none;border-bottom:1px dashed #475569;">${escapeHtml(d.title || d.id)}</a>${lastCommentHtml}</td>
         <td style="font-size:12px;color:#9ca3af;">${escapeHtml(d.type || "-")}</td>
         <td style="font-size:12px;"><span style="color:${priColor};font-weight:${pri <= 2 ? "bold" : "normal"};">${priLabel}</span></td>
         <td style="font-size:12px;">${depsHtml}</td>
         <td style="font-size:12px;color:#9ca3af;" data-ts="${d.createdAt}">${escapeHtml(d.createdAt)}</td>
         <td style="font-size:12px;color:#9ca3af;" data-ts="${d.updatedAt}">${escapeHtml(d.updatedAt)}</td>
         <td style="font-size:12px;color:#9ca3af;">${formatDuration(d.duration)}</td>
-        <td>${!["completed","failed","cancelled"].includes(d.status) ? `<button onclick="cancelDirective('${escapeHtml(d.id)}')" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Cancel directive">&times;</button>` : ""}${["failed","stale","cancelled"].includes(d.status) ? ` <button onclick="retryDirective('${escapeHtml(d.id)}')" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Retry directive">&#8635;</button>` : ""}</td>
+        <td>${!["completed","failed","cancelled"].includes(d.status) ? `<button onclick="cancelDirective('${escapeHtml(escapeJsString(d.id))}')" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Cancel directive">&times;</button>` : ""}${["failed","stale","cancelled"].includes(d.status) ? ` <button onclick="retryDirective('${escapeHtml(escapeJsString(d.id))}')" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Retry directive">&#8635;</button>` : ""}</td>
       </tr>
       <tr class="activity-log-row" id="log-${escapeHtml(d.id)}" style="display:none;" data-parent-status="${escapeHtml(d.status)}" data-parent-title="${escapeHtml((d.title || d.id).toLowerCase())}">
         <td colspan="10" style="padding:8px 16px;background:#0f172a;border-bottom:2px solid #334155;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <strong style="font-size:13px;color:#94a3b8;">Activity Log (${actLog.length} entries)</strong>
             <div style="display:flex;gap:6px;align-items:center;">
-              <input type="text" id="comment-input-${escapeHtml(d.id)}" placeholder="Add a comment..." style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:4px;padding:4px 8px;font-size:12px;font-family:inherit;width:220px;" onkeydown="if(event.key==='Enter'){addComment('${escapeHtml(d.id)}');}">
-              <button onclick="addComment('${escapeHtml(d.id)}')" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit;">Add</button>
+              <input type="text" id="comment-input-${escapeHtml(d.id)}" placeholder="Add a comment..." style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:4px;padding:4px 8px;font-size:12px;font-family:inherit;width:220px;" onkeydown="if(event.key==='Enter'){addComment('${escapeHtml(escapeJsString(d.id))}');}">
+              <button onclick="addComment('${escapeHtml(escapeJsString(d.id))}')" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit;">Add</button>
             </div>
           </div>
           <div style="max-height:200px;overflow-y:auto;">${logEntries || '<span style="color:#475569;font-style:italic;">No activity yet.</span>'}</div>
@@ -4383,6 +4400,7 @@ let geminiResumeToken = null;
 let geminiConnecting = false;
 let geminiReady = false;
 let geminiSpeaking = false; // true while model is outputting audio — used to gate mic input
+let _geminiReconnectTimer = null; // tracked so persona switch can cancel it
 
 async function connectGemini() {
   if (geminiWs || geminiConnecting) return;
@@ -4517,9 +4535,9 @@ async function connectGemini() {
     }
 
     // Auto-reconnect as long as devices are still connected and cipher pipeline isn't active
-    if (devices.size > 0 && !cipherPipeline) {
+    if (devices.size > 0 && !cipherPipeline && !personaSwitchPending) {
       log.gemini.info("Auto-reconnecting in 2s...");
-      setTimeout(() => connectGemini(), 2000);
+      _geminiReconnectTimer = setTimeout(() => { _geminiReconnectTimer = null; connectGemini(); }, 2000);
     }
   });
 }
@@ -4952,9 +4970,10 @@ async function switchPersona() {
   goAwayDuringToolCall = false;
   goAwayPartialOutput = "";
   if (goAwayNudgeTimer) { clearTimeout(goAwayNudgeTimer); goAwayNudgeTimer = null; }
+  if (_geminiReconnectTimer) { clearTimeout(_geminiReconnectTimer); _geminiReconnectTimer = null; }
 
   // Stop previous cipher pipeline if it was running
-  if (cipherPipeline) {
+  if (cipherPipeline && typeof cipherPipeline === "object") {
     await cipherPipeline.stop();
     cipherPipeline = null;
   }
@@ -4978,15 +4997,22 @@ async function switchPersona() {
   broadcastToAll({ type: "personaSwitch", persona: currentPersona, mode: cipherMode });
 
   // Start appropriate backend for new persona
-  if (willStartCipher) {
-    // Cipher uses Claude pipeline (Deepgram STT → Claude Agent SDK → Cartesia TTS)
-    await startCipherPipeline();
-  } else {
-    // June uses Gemini Live Audio — auto-reconnect will handle it
-    if (currentPersona === "cipher") {
-      log.cipher.warn("Claude backend disabled — falling back to Gemini for Cipher");
+  try {
+    if (willStartCipher) {
+      // Cipher uses Claude pipeline (Deepgram STT → Claude Agent SDK → Cartesia TTS)
+      await startCipherPipeline();
+    } else {
+      // June uses Gemini Live Audio — auto-reconnect will handle it
+      if (currentPersona === "cipher") {
+        log.cipher.warn("Claude backend disabled — falling back to Gemini for Cipher");
+      }
+      if (devices.size > 0) connectGemini();
     }
-    if (devices.size > 0) connectGemini();
+  } catch (err) {
+    log.persona.error(`switchPersona failed: ${err.message}`);
+    personaSwitchPending = false;
+    // If cipher pipeline failed to start, clear sentinel so Gemini can reconnect
+    if (cipherPipeline === "starting") cipherPipeline = null;
   }
 }
 
@@ -5378,8 +5404,10 @@ wss.on("connection", (ws) => {
         db.upsertDevice(deviceId, role === "speaker" ? "tv" : "tablet").catch(err =>
           log.pg.error("upsert device:", err.message));
 
-        // Start AI session if not already running
-        if (cipherPipeline) {
+        // Start AI session if not already running (skip during persona switch)
+        if (personaSwitchPending) {
+          log.ws.info("Persona switch pending, deferring AI session start");
+        } else if (cipherPipeline) {
           // Cipher pipeline already active
           ws.send(JSON.stringify({ type: "ready" }));
         } else if (!geminiWs && !geminiConnecting) {
