@@ -5,12 +5,20 @@ import { TVPressable } from "./TVPressable";
 
 const PANEL_WIDTH = 200;
 
-const menuItems = [
-  { icon: "⚔️", label: "INVENTORY", route: "/equipment" as const },
-  { icon: "📤", label: "UPLOAD", route: "/upload" as const },
+type MenuItem =
+  | { icon: string; label: string; route: string }
+  | { icon: string; label: string; action: () => void };
+
+const staticMenuItems: MenuItem[] = [
+  { icon: "⚔️", label: "INVENTORY", route: "/equipment" },
+  { icon: "📤", label: "UPLOAD", route: "/upload" },
 ];
 
-export function HamburgerMenu() {
+interface HamburgerMenuProps {
+  onShowMediaPlayer?: () => void;
+}
+
+export function HamburgerMenu({ onShowMediaPlayer }: HamburgerMenuProps) {
   const router = useRouter();
   const [visible, setVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
@@ -49,9 +57,20 @@ export function HamburgerMenu() {
     return () => anim.stop();
   }, [visible]);
 
-  const navigate = (route: string) => {
+  const menuItems: MenuItem[] = [
+    ...staticMenuItems,
+    ...(onShowMediaPlayer
+      ? [{ icon: "🎵", label: "MUSIC", action: onShowMediaPlayer }]
+      : []),
+  ];
+
+  const handleItemPress = (item: MenuItem) => {
     setVisible(false);
-    router.push(route as any);
+    if ("route" in item) {
+      router.push(item.route as any);
+    } else {
+      item.action();
+    }
   };
 
   return (
@@ -152,8 +171,8 @@ export function HamburgerMenu() {
 
             {menuItems.map((item) => (
               <TVPressable
-                key={item.route}
-                onPress={() => navigate(item.route)}
+                key={item.label}
+                onPress={() => handleItemPress(item)}
                 style={{
                   paddingVertical: 14,
                   paddingHorizontal: 16,

@@ -308,7 +308,7 @@ export default function LandingScreen() {
           zIndex: 10,
         }}
       >
-        <HamburgerMenu />
+        <HamburgerMenu onShowMediaPlayer={() => setShowMediaPlayer(true)} />
         <StatusBadge />
       </View>
 
