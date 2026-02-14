@@ -78,12 +78,13 @@ COMPLETION CHECKLIST:
 2. ${directive.type === "quick" ? "Verify: node -c <file> for JS, test endpoints if applicable" : "Write findings as detailed markdown"}
 3. ${directive.type === "quick" ? `Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"` : "Skip commit (no code changes)"}
 4. ${directive.type === "quick" ? "Push: git push origin main" : "Skip push"}
-5. ${directive.type === "quick" ? "If bridge code changed: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge" : ""}
-6. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
+5. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
 
 CRITICAL RULES:
 - You MUST commit and push before marking complete. Uncommitted changes are lost.
-- Do NOT restart the bridge if you're running inside it — your process will die. Only restart if your changes are committed and pushed.
+- Do NOT restart the bridge yourself — smartDeploy handles it automatically after you mark the directive completed.
+- Do NOT deploy manually — smartDeploy detects what changed and deploys appropriately (OTA for JS, CI build for native).
+- Just commit, push, and mark complete. The pipeline handles the rest.
 - If another agent may be editing the same files, check git status first. If files have uncommitted changes, use git stash before editing and git stash pop after.
 - Always git pull --rebase origin main before pushing if the push fails.
 ` : "";
@@ -94,8 +95,8 @@ Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md FIRST — it has all project context.
 SYSTEM ARCHITECTURE:
 - GCP VM (10.128.0.8) runs all services. Bridge at :3333, HA at :8123, Postgres :5432, Redis :6379
 - Home LAN (172.168.0.0/24) via VPN tunnel. Devices: tablets (.53, .57), TV (.56), dev-01 (.59)
-- Bridge runs in Docker — restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
-- Frontend: Expo React Native. CI builds on push to main. Deploy: ./scripts/deploy.sh
+- Bridge runs in Docker. Do NOT restart it yourself — smartDeploy auto-restarts after you mark complete.
+- Frontend: Expo React Native. CI builds on push to main. smartDeploy auto-deploys after you mark complete.
 - Bridge API: /directives, /status, /notify, /approvals, /health, /dashboard
 
 A new ${directive.type} directive:
@@ -154,7 +155,7 @@ TROUBLESHOOTING:
 - git push failed? Run: git pull --rebase origin main && git push origin main
 - Build failed? Read the actual error output, don't guess
 - Syntax error? Always run: node -c <file> BEFORE committing
-- Bridge code changed? Always restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
+- Bridge/frontend changes? Do NOT restart or deploy manually — smartDeploy handles it automatically after you mark complete.
 
 KNOWN PATTERNS TO FOLLOW:
 - Race conditions: this codebase has multiple interacting async systems (Gemini, Cipher, persona
@@ -190,8 +191,8 @@ SYSTEM ARCHITECTURE:
 - GCP VM (10.128.0.8) runs: Home Assistant (:8123), Bridge server (:3333), PostgreSQL (:5432), Redis (:6379)
 - Home LAN (172.168.0.0/24) via VPN: tablets (.53, .57), TV (.56), dev-01 (.59)
 - dev-01 is a Linux server at 172.168.0.59, reachable via SSH from this VM
-- Bridge runs in Docker container "bridge" — restart: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
-- Frontend is Expo React Native, builds via GitHub Actions, deploys with ./scripts/deploy.sh
+- Bridge runs in Docker. Do NOT restart it yourself — smartDeploy auto-restarts after you mark complete.
+- Frontend: Expo React Native. Do NOT deploy manually — smartDeploy auto-deploys after you mark complete.
 - Bridge API at ${BRIDGE} has endpoints: /directives, /status, /notify, /approvals, /health
 
 Implement this approved directive:
@@ -214,13 +215,11 @@ IMPLEMENTATION CHECKLIST — Follow this order:
 6. Commit: git add <SPECIFIC files only> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
    NEVER use git add . or git add -A — you will commit another agent's work-in-progress
 7. Push: git push origin main (if fails: git stash && git pull --rebase origin main && git stash pop && git push)
-8. If bridge code changed: docker compose -f /home/gcp/ozzu/backend/docker-compose.yml restart bridge
-   WARNING: This kills YOUR process if you're running inside the bridge container. Only restart
-   if your changes are committed and pushed.
-9. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
-10. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+8. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
+9. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 
-CRITICAL: Steps 6-10 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are LOST when you exit.
+CRITICAL: Steps 6-9 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are LOST when you exit.
+After you mark complete, smartDeploy handles everything: OTA deploy for JS changes, CI build for native changes, bridge restart if server code changed. You do NOT need to do any of that.
 
 ENGINEERING PATTERNS — Think like an expert:
 
@@ -242,7 +241,7 @@ TRACE THE FULL FLOW:
 COMMON MISTAKES TO AVOID:
 - Editing server.js without checking git status → overwrites another agent's uncommitted work
 - Using git add . → commits .env, node_modules, or WIP from concurrent agents
-- Restarting bridge before pushing → kills your process, changes lost
+- Trying to restart bridge or deploy manually → smartDeploy handles this, your process dies if you restart
 - Adding error handling for impossible cases → over-engineering, adds noise
 - Refactoring surrounding code → scope creep, merge conflicts with concurrent agents
 - Not syntax-checking → breaks the bridge on restart, requires manual recovery
@@ -655,6 +654,20 @@ function detectNativeChanges() {
   }
 }
 
+function detectBridgeChanges() {
+  try {
+    const { execSync } = require("child_process");
+    const changed = execSync("git diff --name-only HEAD~1 HEAD", {
+      cwd: WORKDIR, encoding: "utf8", timeout: 10000,
+    }).trim();
+    if (!changed) return false;
+    const bridgePatterns = [/backend\/bridge\/server\.js/, /backend\/bridge\/cipher-pipeline\.js/, /backend\/bridge\/agent-spawner\.js/, /backend\/bridge\/db\.js/];
+    return changed.split("\n").some(line => bridgePatterns.some(p => p.test(line)));
+  } catch {
+    return false;
+  }
+}
+
 function smartDeploy(directive) {
   const { execSync, exec } = require("child_process");
   const http = require("http");
@@ -669,6 +682,9 @@ function smartDeploy(directive) {
     req.write(payload);
     req.end();
   };
+
+  // Check if bridge server code changed — needs restart
+  const bridgeChanged = detectBridgeChanges();
 
   const native = detectNativeChanges();
   if (native.any) {
@@ -754,6 +770,26 @@ function smartDeploy(directive) {
         notify("OTA update deployed! All devices are restarting with the new version now.");
       }
     });
+  }
+
+  // Bridge restart — do this LAST (kills this process, Docker auto-restarts)
+  if (bridgeChanged) {
+    const restartDelay = native.any ? 5000 : 3000; // Wait for deploy to start first
+    log(`Bridge code changed — scheduling restart in ${restartDelay}ms`);
+    notify("Bridge server code was updated — restarting to load changes...");
+    setTimeout(() => {
+      log("Triggering bridge restart via POST /restart");
+      const payload = JSON.stringify({});
+      const key = process.env.BRIDGE_API_KEY || "";
+      const req = http.request(
+        `${BRIDGE}/restart`,
+        { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload), ...(key ? { Authorization: `Bearer ${key}` } : {}) } },
+        (res) => { res.on("data", () => {}); }
+      );
+      req.on("error", (e) => log(`Bridge restart request failed: ${e.message}`));
+      req.write(payload);
+      req.end();
+    }, restartDelay);
   }
 }
 

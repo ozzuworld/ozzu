@@ -492,22 +492,26 @@ async function initStorage() {
     log.directive.info(`Recovered ${orphanCount} orphaned directive(s) on startup`);
   }
 
-  // Phase C: Stale auto-retry — promote stale directives with low retryCount
+  // Phase C: Stale + crashed-failed auto-retry
   let retryCount = 0;
   let failedCount = 0;
   for (const d of _directives) {
-    if (d.status === "stale") {
+    // Retry stale directives or failed directives that were killed by server crashes
+    const isStale = d.status === "stale";
+    const isCrashFailed = d.status === "failed" && d.failureReason?.startsWith("crash:");
+    if (isStale || isCrashFailed) {
       const rc = d.retryCount || 0;
       // Allow more retries for crash-related failures (server restarts are not the agent's fault)
       const maxRetries = d.failureReason?.startsWith("crash:") ? 5 : 2;
       if (rc < maxRetries) {
         const oldStatus = d.status;
         d.status = "approved";
+        d.failureReason = null;
         d.retryCount = rc + 1;
         d.updatedAt = new Date().toISOString();
         retryCount++;
-        log.directive.info(`Stale auto-retry: ${d.id} "${d.title}" (stale → approved, retry #${d.retryCount})`);
-      } else {
+        log.directive.info(`Auto-retry: ${d.id} "${d.title}" (${oldStatus} → approved, retry #${d.retryCount})`);
+      } else if (isStale) {
         d.status = "failed";
         d.failureReason = d.failureReason || `exhausted: failed after ${rc} retries`;
         d.updatedAt = new Date().toISOString();
@@ -4567,15 +4571,20 @@ function selectSpeaker() {
     if (sameZone.length > 0) return sameZone[0];
   }
 
-  // Step 4: Global best speaker — skip if mic is roaming
+  // Step 4: Global best speaker — ALWAYS prefer AEC-capable (mic+speaker) over speaker-only (TV)
+  // This prevents audio going to TV when no active mic is set (tablet reconnecting, etc.)
   if (micZone !== "roaming") {
-    const global = speakers
-      .filter(s => s.ws !== activeMic)
-      .sort((a, b) => a.info.speakerPriority - b.info.speakerPriority);
-    if (global.length > 0) return global[0];
+    const global = speakers.filter(s => s.ws !== activeMic);
+    // AEC devices first, then speaker-only, each sorted by priority
+    const aecDevices = global.filter(s => s.info.capabilities?.mic).sort((a, b) => a.info.speakerPriority - b.info.speakerPriority);
+    if (aecDevices.length > 0) return aecDevices[0];
+    const speakerOnly = global.filter(s => !s.info.capabilities?.mic).sort((a, b) => a.info.speakerPriority - b.info.speakerPriority);
+    if (speakerOnly.length > 0) return speakerOnly[0];
   }
 
-  // Fallback: any speaker
+  // Fallback: any AEC device first, then any speaker
+  const aecFallback = speakers.filter(s => s.info.capabilities?.mic).sort((a, b) => a.info.speakerPriority - b.info.speakerPriority);
+  if (aecFallback.length > 0) return aecFallback[0];
   return speakers.sort((a, b) => a.info.speakerPriority - b.info.speakerPriority)[0] || null;
 }
 
@@ -5384,6 +5393,16 @@ async function startCipherPipeline() {
     "- The bridge logs (docker logs bridge) show YOUR voice conversation, not the directive agent's work.\n" +
     "- If King Kazuma asks 'what is the agent doing?' — read the agent log file for that directive, not docker logs.\n" +
     "- Use get_dev_status to see recent status updates from the agent, and query_history for directive history.\n" +
+    "\n" +
+    "COMPLETING THE FULL PIPELINE — CRITICAL:\n" +
+    "When a directive agent finishes, YOUR job isn't done. You must complete the lifecycle:\n" +
+    "1. Check agent log: verify it actually completed (commit hash, what files changed)\n" +
+    "2. If server.js was changed: call restart_bridge to reload the bridge with the new code\n" +
+    "3. If frontend was changed: call deploy_to_devices to push the new build to all devices\n" +
+    "4. If BOTH changed: restart_bridge FIRST, wait for reconnection, then deploy_to_devices\n" +
+    "5. Tell King Kazuma what was done, what's live, and what needs manual action (API keys, OAuth, etc.)\n" +
+    "NEVER leave a completed directive without deploying it. The code sitting in git helps nobody.\n" +
+    "If something needs manual action from King Kazuma, say it clearly: 'I need you to do X.'\n" +
     "\n" +
     "PROACTIVE INVESTIGATION — CRITICAL:\n" +
     "- If King Kazuma asks about something that should already be done, or asks the SAME question " +
