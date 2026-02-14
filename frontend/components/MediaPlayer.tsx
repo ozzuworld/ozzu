@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -41,37 +41,52 @@ export function MediaPlayer({ visible, onClose }: MediaPlayerProps) {
   const prevTrackRef = useRef(state.trackName);
   const volumeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Shadow refs to avoid PanResponder stale closures
+  const seekRef = useRef(controls.seek);
+  const durationRef = useRef(state.duration);
+  const setVolumeRef = useRef(controls.setVolume);
+  useEffect(() => { seekRef.current = controls.seek; }, [controls.seek]);
+  useEffect(() => { durationRef.current = state.duration; }, [state.duration]);
+  useEffect(() => { setVolumeRef.current = controls.setVolume; }, [controls.setVolume]);
+
+  // Cleanup volume debounce on unmount
+  useEffect(() => {
+    return () => {
+      if (volumeDebounceRef.current) clearTimeout(volumeDebounceRef.current);
+    };
+  }, []);
+
   // Open/close animation
   useEffect(() => {
-    if (visible) {
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          friction: 8,
-          tension: 65,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scaleAnim, {
-          toValue: 0.3,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
+    const anim = visible
+      ? Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 300,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.spring(scaleAnim, {
+            toValue: 1,
+            friction: 8,
+            tension: 65,
+            useNativeDriver: true,
+          }),
+        ])
+      : Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(scaleAnim, {
+            toValue: 0.3,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+        ]);
+    anim.start();
+    return () => anim.stop();
   }, [visible]);
 
   // Shimmer glow loop
@@ -99,8 +114,9 @@ export function MediaPlayer({ visible, onClose }: MediaPlayerProps) {
 
   // Track change pulse
   useEffect(() => {
+    let anim: Animated.CompositeAnimation | null = null;
     if (state.trackName && state.trackName !== prevTrackRef.current) {
-      Animated.sequence([
+      anim = Animated.sequence([
         Animated.timing(artPulseAnim, {
           toValue: 1.05,
           duration: 150,
@@ -111,59 +127,64 @@ export function MediaPlayer({ visible, onClose }: MediaPlayerProps) {
           duration: 150,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]);
+      anim.start();
     }
     prevTrackRef.current = state.trackName;
+    return () => { if (anim) anim.stop(); };
   }, [state.trackName]);
 
-  // Progress bar seek
+  // Progress bar seek — uses refs to avoid stale closures in PanResponder
   const progressBarWidth = useRef(0);
-  const handleProgressSeek = useCallback(
-    (locationX: number) => {
-      if (progressBarWidth.current <= 0 || state.duration <= 0) return;
-      const ratio = Math.max(0, Math.min(1, locationX / progressBarWidth.current));
-      controls.seek(ratio * state.duration);
-    },
-    [state.duration, controls]
+
+  const progressResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          const x = evt.nativeEvent.locationX;
+          if (progressBarWidth.current <= 0 || durationRef.current <= 0) return;
+          const ratio = Math.max(0, Math.min(1, x / progressBarWidth.current));
+          seekRef.current(ratio * durationRef.current);
+        },
+        onPanResponderMove: (evt) => {
+          const x = evt.nativeEvent.locationX;
+          if (progressBarWidth.current <= 0 || durationRef.current <= 0) return;
+          const ratio = Math.max(0, Math.min(1, x / progressBarWidth.current));
+          seekRef.current(ratio * durationRef.current);
+        },
+      }),
+    []
   );
 
-  const progressResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        handleProgressSeek(evt.nativeEvent.locationX);
-      },
-      onPanResponderMove: (evt) => {
-        handleProgressSeek(evt.nativeEvent.locationX);
-      },
-    })
-  ).current;
-
-  // Volume slider
+  // Volume slider — uses refs to avoid stale closures in PanResponder
   const volumeBarWidth = useRef(0);
-  const handleVolumeChange = useCallback(
-    (locationX: number) => {
-      if (volumeBarWidth.current <= 0) return;
-      const ratio = Math.max(0, Math.min(1, locationX / volumeBarWidth.current));
-      if (volumeDebounceRef.current) clearTimeout(volumeDebounceRef.current);
-      volumeDebounceRef.current = setTimeout(() => {
-        controls.setVolume(ratio);
-      }, 200);
-    },
-    [controls]
-  );
 
-  const volumeResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        handleVolumeChange(evt.nativeEvent.locationX);
-      },
-      onPanResponderMove: (evt) => {
-        handleVolumeChange(evt.nativeEvent.locationX);
-      },
-    })
-  ).current;
+  const volumeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          const x = evt.nativeEvent.locationX;
+          if (volumeBarWidth.current <= 0) return;
+          const ratio = Math.max(0, Math.min(1, x / volumeBarWidth.current));
+          if (volumeDebounceRef.current) clearTimeout(volumeDebounceRef.current);
+          volumeDebounceRef.current = setTimeout(() => {
+            setVolumeRef.current(ratio);
+          }, 200);
+        },
+        onPanResponderMove: (evt) => {
+          const x = evt.nativeEvent.locationX;
+          if (volumeBarWidth.current <= 0) return;
+          const ratio = Math.max(0, Math.min(1, x / volumeBarWidth.current));
+          if (volumeDebounceRef.current) clearTimeout(volumeDebounceRef.current);
+          volumeDebounceRef.current = setTimeout(() => {
+            setVolumeRef.current(ratio);
+          }, 200);
+        },
+      }),
+    []
+  );
 
   if (!visible) return null;
 
@@ -259,7 +280,10 @@ export function MediaPlayer({ visible, onClose }: MediaPlayerProps) {
           >
             {albumArtUrl ? (
               <Image
-                source={{ uri: albumArtUrl }}
+                source={{
+                  uri: albumArtUrl,
+                  headers: { Authorization: `Bearer ${HA_TOKEN}` },
+                }}
                 style={{ width: "100%", height: "100%" }}
                 resizeMode="cover"
               />
