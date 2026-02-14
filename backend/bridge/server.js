@@ -234,9 +234,10 @@ const CMD_BLOCKED_PATTERNS = [
   /\.env\.local/, /secrets\.yaml/, /openvpn\/config/, /\/etc\/shadow/, /\/etc\/passwd/,
 ];
 
-// Allow && (chaining) and > (redirect) — needed for edit+restart and file writes
-// Still block ; (unchecked chaining), $( (subshells), and ` (backtick execution)
-const CMD_BLOCKED_OPERATORS = [";", "`", "\n"];
+// Allow && (chaining), | (pipes), and > (redirects) — needed for edit+restart and file writes
+// Each segment after &&, ||, or | is whitelist-checked (see validateCommand split logic)
+// Block: ; (unchecked chaining), ` (backtick execution), $( (subshell expansion), ${ (variable expansion)
+const CMD_BLOCKED_OPERATORS = [";", "`", "\n", "$(", "${"];
 
 function validateCommand(command) {
   if (!command || typeof command !== "string") return { ok: false, reason: "No command provided" };
