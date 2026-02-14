@@ -2176,8 +2176,8 @@ function submitDirective(e) {
 
   // GET /logs — serve recent bridge logs from in-memory ring buffer
   if (req.method === "GET" && pathname === "/logs") {
-    const lines = Math.min(Math.max(parseInt(params.get("lines")) || 100, 1), 500);
-    const sinceParam = params.get("since"); // e.g. "1h", "30m", "5s"
+    const lines = Math.min(Math.max(parseInt(url.searchParams.get("lines")) || 100, 1), 500);
+    const sinceParam = url.searchParams.get("since"); // e.g. "1h", "30m", "5s"
     let filtered = _logRing;
     if (sinceParam) {
       const match = sinceParam.match(/^(\d+)([hms])$/);
