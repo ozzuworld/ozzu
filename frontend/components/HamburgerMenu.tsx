@@ -12,6 +12,7 @@ type MenuItem =
 const staticMenuItems: MenuItem[] = [
   { icon: "⚔️", label: "INVENTORY", route: "/equipment" },
   { icon: "🎵", label: "MUSIC", route: "/music" },
+  { icon: "📋", label: "DIRECTIVES", route: "/directives" },
   { icon: "📤", label: "UPLOAD", route: "/upload" },
 ];
 

@@ -35,6 +35,14 @@ export interface Directive {
   status: string;
   plan: string | null;
   directiveApprovalId: string | null;
+  retryCount: number;
+  failureReason: string | null;
+  priority: number;
+  dependsOn: string[] | null;
+  activity_log: Array<{ timestamp: number; type: string; message: string }>;
+  startedAt?: number;
+  completedAt?: number;
+  duration?: number;
   createdAt: number;
   updatedAt: number;
 }
