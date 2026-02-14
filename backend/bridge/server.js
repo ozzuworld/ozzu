@@ -1982,6 +1982,28 @@ async function handleRequest(req, res) {
   .load-more-wrap { text-align: center; padding: 12px 0; }
   .load-more-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-family: inherit; cursor: pointer; transition: background 0.2s; }
   .load-more-btn:hover { background: #475569; }
+
+  /* Mobile responsive */
+  @media (max-width: 768px) {
+    body { padding: 12px; }
+    h1 { font-size: 18px; }
+    .cards { flex-direction: column; gap: 10px; }
+    .card { min-width: unset; padding: 12px 16px; }
+    .card .value { font-size: 20px; }
+    .card .label { font-size: 13px; }
+    section { margin-bottom: 20px; }
+    h2 { font-size: 15px; }
+    table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+    th, td { padding: 8px 10px; font-size: 13px; }
+    .filter-bar { gap: 8px; }
+    .filter-bar input[type="text"] { width: 100%; }
+    .new-directive { padding: 14px; }
+    .new-directive input, .new-directive textarea, .new-directive select { font-size: 16px; padding: 10px 12px; }
+    .new-directive .submit-btn { width: 100%; padding: 12px; font-size: 16px; }
+    .refresh-bar { flex-wrap: wrap; gap: 8px; }
+    /* Timeline horizontal scroll on mobile */
+    section:has(h2) > div { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  }
 </style>
 </head><body>
 <h1>Ozzu Pipeline Dashboard</h1>
