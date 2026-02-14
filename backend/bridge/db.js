@@ -13,6 +13,35 @@ const pool = new Pool({
 });
 
 let _pgConnected = false;
+let _reconnectTimer = null;
+
+// Log when a new client connects from the pool
+pool.on("connect", () => {
+  console.log("[pg] New client connected to pool");
+});
+
+// Handle unexpected pool-level errors (e.g. backend disconnect)
+pool.on("error", (err) => {
+  console.error("[pg] Pool error:", err.message);
+  _pgConnected = false;
+  startReconnect();
+});
+
+function startReconnect() {
+  if (_reconnectTimer) return; // already trying
+  console.log("[pg] Starting reconnect attempts every 30s");
+  _reconnectTimer = setInterval(async () => {
+    try {
+      await pool.query("SELECT 1");
+      _pgConnected = true;
+      console.log("[pg] Reconnected to PostgreSQL");
+      clearInterval(_reconnectTimer);
+      _reconnectTimer = null;
+    } catch (err) {
+      console.error("[pg] Reconnect failed:", err.message);
+    }
+  }, 30000);
+}
 
 async function init() {
   try {
@@ -23,6 +52,7 @@ async function init() {
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
+    startReconnect();
   }
   return _pgConnected;
 }
