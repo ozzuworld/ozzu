@@ -10,7 +10,8 @@ const WebSocket = require("ws");
 const Redis = require("ioredis");
 const db = require("./db");
 const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
-const { spawnPlanningAgent, spawnImplementationAgent, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, getConfig, setConfig } = require("./agent-spawner");
+const { spawnPlanningAgent, spawnImplementationAgent, spawnWorkerWithPrompt, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, getConfig, setConfig } = require("./agent-spawner");
+const orchestrator = require("./orchestrator");
 const createLogger = require("./logger");
 
 const log = {
@@ -81,6 +82,39 @@ const DIRECTIVE_TEMPLATES = [
   { name: "Infrastructure", type: "quick", titleTemplate: "{change}", descriptionTemplate: "Apply the infrastructure change described above." },
   { name: "Deploy", type: "quick", titleTemplate: "Deploy {target}", descriptionTemplate: "Deploy to the specified target." },
 ];
+
+// ── Orchestrator-based directive routing ──
+// Routes directives through the persistent Cipher orchestrator for context-aware dispatch.
+// Falls back to direct spawn if orchestrator is unavailable.
+async function routeDirective(directive, type) {
+  if (!orchestrator.isAvailable()) {
+    // Fallback: direct spawn with generic template (current behavior)
+    if (type === "planning") spawnPlanningAgent(directive);
+    else spawnImplementationAgent(directive);
+    return;
+  }
+
+  try {
+    const message = `NEW_DIRECTIVE: ${JSON.stringify({
+      id: directive.id,
+      type: directive.type,
+      title: directive.title,
+      description: directive.description,
+      priority: directive.priority,
+      status: directive.status,
+      plan: directive.plan || null,
+      failureReason: directive.failureReason || null,
+      retryCount: directive.retryCount || 0,
+    })}`;
+
+    const response = await orchestrator.sendMessage(message);
+    await orchestrator.handleResponse(directive, response);
+  } catch (err) {
+    log.directive.error(`Orchestrator routing failed for ${directive.id}: ${err.message} — falling back to direct spawn`);
+    if (type === "planning") spawnPlanningAgent(directive);
+    else spawnImplementationAgent(directive);
+  }
+}
 
 const BRIDGE_PIN = process.env.BRIDGE_PIN || "1234";
 const HA_URL = process.env.HA_URL || "http://localhost:8123";
@@ -551,8 +585,7 @@ async function initStorage() {
       setTimeout(() => {
         const type = d.status === "planning" ? "planning" : "implementation";
         log.directive.info(`Respawn: ${d.id} "${d.title}" → ${type} agent`);
-        if (type === "planning") spawnPlanningAgent(d);
-        else spawnImplementationAgent(d);
+        routeDirective(d, type);
       }, INITIAL_DELAY + i * STAGGER_MS);
     });
   }
@@ -1127,7 +1160,7 @@ async function handleRequest(req, res) {
     // Spawn planning agent for quick directives (already in planning status)
     if (directive.status === "planning") {
       setLastRestartReason(`directive: ${directive.title || directive.id}`);
-      spawnPlanningAgent(directive);
+      routeDirective(directive, "planning");
     }
 
     sendJSON(res, 200, { ok: true, directive, blockedByDeps: !depsResolved && directive.dependsOn ? true : undefined });
@@ -1475,16 +1508,16 @@ async function handleRequest(req, res) {
     // Auto-spawn planning agent when directive enters "planning"
     if (directive.status === "planning" && prevStatus !== "planning") {
       setLastRestartReason(`directive: ${directive.title || directive.id}`);
-      spawnPlanningAgent(directive);
+      routeDirective(directive, "planning");
     }
     // Auto-spawn implementation agent when directive is approved (with a plan or quick type)
     if (directive.status === "approved" && prevStatus !== "approved") {
-      spawnImplementationAgent(directive);
+      routeDirective(directive, "implementation");
     }
     // Spawn planning agents for any newly unblocked directives (higher priority first)
     unblockedDirectives.sort((a, b) => (a.priority || 3) - (b.priority || 3));
     for (const d of unblockedDirectives) {
-      spawnPlanningAgent(d);
+      routeDirective(d, "planning");
     }
 
     sendJSON(res, 200, { ok: true, directive, unblocked: unblockedDirectives.length > 0 ? unblockedDirectives.map(d => d.id) : undefined });
@@ -1541,7 +1574,7 @@ async function handleRequest(req, res) {
     directive.status = "planning";
     directive.updatedAt = Date.now();
     saveDirectives(directives, directive, "pending");
-    spawnPlanningAgent(directive);
+    routeDirective(directive, "planning");
     sendJSON(res, 200, { ok: true, directive, message: "Directive unblocked and moved to planning" });
     return;
   }
@@ -3537,7 +3570,7 @@ function syncDirectiveFromApproval(approvalId, approved) {
 
   // Auto-spawn implementation agent when directive is approved via PIN
   if (directive.status === "approved" && prevStatus !== "approved") {
-    spawnImplementationAgent(directive);
+    routeDirective(directive, "implementation");
   }
 }
 
@@ -4048,7 +4081,7 @@ async function handleToolCall(name, args) {
         saveDirectives(directives, directive, null);
         // Auto-spawn planning agent for quick directives
         if (directive.status === "planning") {
-          spawnPlanningAgent(directive);
+          routeDirective(directive, "planning");
         }
         const depsMsg = !depsResolved ? ` (blocked — waiting on: ${dependsOn.join(", ")})` : "";
         return { success: true, message: `Directive created: ${directive.id} [${type}] "${title}" — status: ${directive.status}${depsMsg}` };
@@ -5942,6 +5975,26 @@ wss.on("connection", (ws) => {
 
 (async () => {
   await initStorage();
+  // Bootstrap orchestrator session (non-blocking — directives fall back to direct spawn if unavailable)
+  orchestrator.ensureSession().then(async () => {
+    const info = orchestrator.getSessionInfo();
+    if (info) {
+      log.bridge.info(`Orchestrator session: ${info.id} (${info.messageCount} messages)`);
+      // Notify orchestrator of restart with active directive summary
+      try {
+        const active = _directives.filter(d => ["planning", "approved", "in_progress"].includes(d.status));
+        if (active.length > 0) {
+          await orchestrator.sendMessage(`BRIDGE_RESTARTED: ${JSON.stringify({
+            activeDirectives: active.map(d => ({ id: d.id, title: d.title, status: d.status, type: d.type })),
+          })}`);
+        }
+      } catch {}
+    } else {
+      log.bridge.info("Orchestrator unavailable — directives will use direct spawn");
+    }
+  }).catch(err => {
+    log.bridge.error(`Orchestrator bootstrap failed: ${err.message}`);
+  });
   server.listen(PORT, "0.0.0.0", () => {
     log.bridge.info(`listening on :${PORT}`);
     log.bridge.info(`data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);

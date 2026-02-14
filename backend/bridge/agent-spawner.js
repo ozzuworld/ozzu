@@ -385,8 +385,40 @@ function mergeWorktreeToMain(directiveId, branch) {
   }
 }
 
+// Wrap an orchestrator-crafted prompt with infrastructure boilerplate
+function wrapWorkerPrompt(directive, type, orchestratorPrompt) {
+  const isImmediate = directive.type === "quick" || directive.type === "explore";
+  return `You are Cipher, the autonomous dev agent for the ozzu project.
+Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md FIRST — it has all project context.
+
+Directive: ${directive.title} (${directive.id})
+Type: ${directive.type} | Agent role: ${type}
+${directive.plan ? `Approved Plan:\n${directive.plan}\n` : ""}
+ORCHESTRATOR INSTRUCTIONS (from Cipher orchestrator — follow these precisely):
+${orchestratorPrompt}
+
+GIT WORKTREE — You are running in an ISOLATED worktree with your own branch:
+- Commit and push normally: git add <specific files> && git commit && git push origin HEAD
+- Do NOT push to origin/main directly. The system merges your branch after you finish.
+
+COMPLETION CHECKLIST:
+1. Implement the changes as instructed above
+2. Verify: node -c <file> for JS, test endpoints if applicable
+3. Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+4. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
+5. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
+6. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+
+CRITICAL: You MUST commit and push before marking complete. Uncommitted changes are LOST.
+Do NOT restart the bridge or deploy manually — smartDeploy handles it automatically.
+
+REAL-TIME STATUS UPDATES:
+  curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<what you are doing>","directiveId":"${directive.id}"}'`;
+}
+
 // Spawn a claude CLI subprocess for a directive
-function spawnAgent(directive, type) {
+// customPrompt: optional orchestrator-crafted prompt (bypasses generic template)
+function spawnAgent(directive, type, customPrompt) {
   // Guard: don't double-spawn (optimistic lock — placeholder set immediately to prevent races)
   if (runningAgents.has(directive.id)) {
     log(`SKIP: Agent already running for ${directive.id} (${runningAgents.get(directive.id).type})`);
@@ -426,9 +458,9 @@ function spawnAgent(directive, type) {
   const worktree = createWorktree(directive.id);
   const agentWorkdir = worktree ? worktree.dir : WORKDIR; // fallback to shared dir if worktree fails
 
-  const prompt = type === "planning"
-    ? buildPlanningPrompt(directive)
-    : buildImplementationPrompt(directive);
+  const prompt = customPrompt
+    ? wrapWorkerPrompt(directive, type, customPrompt)
+    : (type === "planning" ? buildPlanningPrompt(directive) : buildImplementationPrompt(directive));
 
   // All directive agents use Opus for strongest reasoning
   const model = "opus";
@@ -553,6 +585,9 @@ function spawnAgent(directive, type) {
       const errorNote = signal === "SIGTERM" ? "Agent timed out" : `Agent crashed (exit ${code})`;
       log(`Resetting ${directive.id} to ${failStatus}: ${errorNote} (reason: ${failureReason})`);
 
+      // Notify orchestrator about the failure (async, non-blocking)
+      notifyOrchestratorFailure(directive, code, failureReason, agentInfo.logFile);
+
       // PATCH the directive back to recoverable state with failure reason
       const payload = JSON.stringify({ status: failStatus, failureReason });
       const req = require("http").request(
@@ -604,23 +639,8 @@ function spawnAgent(directive, type) {
               req.write(payload);
               req.end();
             } else if (current.status === "completed" && type === "implementation") {
-              // Properly completed — merge worktree to main, then smart deploy
-              let mergeOk = true;
-              if (agentInfo.worktree) {
-                mergeOk = mergeWorktreeToMain(directive.id, agentInfo.worktree.branch);
-                if (mergeOk) {
-                  cleanupWorktree(directive.id, agentInfo.worktree.branch);
-                } else {
-                  // Don't delete the branch — preserve for manual resolution
-                  log(`WARNING: Merge failed for ${directive.id} — branch ${agentInfo.worktree.branch} preserved for manual merge`);
-                  // Still remove the worktree directory, but keep the branch
-                  const wtDir = path.join(WORKTREE_DIR, directive.id);
-                  try { require("child_process").execSync(`git worktree remove --force "${wtDir}"`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
-                }
-              }
-              if (mergeOk) {
-                smartDeploy(directive);
-              }
+              // Properly completed — send to orchestrator for review before merging
+              reviewAndMerge(directive, agentInfo);
             } else if (current.status === "planned" && type === "planning") {
               // Planning agent completed — clean up worktree (planning doesn't produce commits usually)
               if (agentInfo.worktree) {
@@ -648,6 +668,155 @@ function spawnAgent(directive, type) {
   });
 
   return child;
+}
+
+// Notify orchestrator about a worker failure (fire-and-forget)
+function notifyOrchestratorFailure(directive, exitCode, failureReason, logFile) {
+  const orchestrator = require("./orchestrator");
+  if (!orchestrator.isAvailable()) return;
+
+  let logTail = "";
+  if (logFile) {
+    try {
+      const content = fs.readFileSync(logFile, "utf8");
+      const lines = content.split("\n");
+      logTail = lines.slice(-30).join("\n");
+    } catch {}
+  }
+
+  orchestrator.sendMessage(`WORKER_FAILED: ${JSON.stringify({
+    directiveId: directive.id,
+    title: directive.title,
+    exitCode,
+    error: failureReason,
+    logTail: logTail || "(no log captured)",
+  })}`).catch(err => {
+    log(`Failed to notify orchestrator of failure for ${directive.id}: ${err.message}`);
+  });
+}
+
+// Send completed worker results to orchestrator for review, then merge if approved
+async function reviewAndMerge(directive, agentInfo) {
+  const orchestrator = require("./orchestrator");
+
+  // Capture git diff and log tail for orchestrator review
+  let gitDiff = "";
+  let logTail = "";
+
+  if (agentInfo.worktree) {
+    try {
+      const { execSync } = require("child_process");
+      gitDiff = execSync(`git diff main...${agentInfo.worktree.branch}`, {
+        cwd: WORKDIR, encoding: "utf8", timeout: 15000,
+      });
+      // Truncate to 5KB to stay within reasonable prompt size
+      if (gitDiff.length > 5000) gitDiff = gitDiff.slice(0, 5000) + "\n... (truncated)";
+    } catch (err) {
+      log(`Failed to capture diff for ${directive.id}: ${err.message}`);
+    }
+  }
+
+  if (agentInfo.logFile) {
+    try {
+      const content = fs.readFileSync(agentInfo.logFile, "utf8");
+      const lines = content.split("\n");
+      logTail = lines.slice(-50).join("\n");
+    } catch {}
+  }
+
+  // If orchestrator is unavailable, proceed with direct merge (fallback)
+  if (!orchestrator.isAvailable()) {
+    log(`Orchestrator unavailable — direct merge for ${directive.id}`);
+    doMergeAndDeploy(directive, agentInfo);
+    return;
+  }
+
+  try {
+    const message = `WORKER_COMPLETED: ${JSON.stringify({
+      directiveId: directive.id,
+      title: directive.title,
+      exitCode: 0,
+      gitDiff: gitDiff || "(no diff captured)",
+      logTail: logTail || "(no log captured)",
+    })}`;
+
+    const response = await orchestrator.sendMessage(message);
+    log(`Orchestrator review for ${directive.id}: action=${response.action}, merge_approved=${response.merge_approved}`);
+
+    if (response.action === "merge_approved" || response.merge_approved === true) {
+      log(`Orchestrator approved merge for ${directive.id}: ${response.merge_feedback || "OK"}`);
+      doMergeAndDeploy(directive, agentInfo);
+    } else if (response.action === "needs_changes") {
+      log(`Orchestrator rejected merge for ${directive.id}: ${response.merge_feedback || "needs changes"}`);
+      // Spawn a fix worker with the orchestrator's feedback
+      if (response.worker_prompt && agentInfo.worktree) {
+        // Clean up old worktree first
+        cleanupWorktree(directive.id, agentInfo.worktree.branch);
+        // Reset directive to approved so a new worker can pick it up
+        const payload = JSON.stringify({ status: "approved" });
+        const http = require("http");
+        const req = http.request(
+          `${BRIDGE}/directives/${directive.id}`,
+          { method: "PATCH", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+        );
+        req.on("error", () => {});
+        req.write(payload);
+        req.end();
+        // Spawn fix worker after brief delay
+        setTimeout(() => spawnAgent(directive, "implementation", response.worker_prompt), 3000);
+      } else {
+        // No fix instructions — merge anyway (don't block forever)
+        log(`No fix instructions from orchestrator — merging anyway for ${directive.id}`);
+        doMergeAndDeploy(directive, agentInfo);
+      }
+    } else {
+      // Unknown response — merge anyway
+      doMergeAndDeploy(directive, agentInfo);
+    }
+  } catch (err) {
+    log(`Orchestrator review failed for ${directive.id}: ${err.message} — proceeding with merge`);
+    doMergeAndDeploy(directive, agentInfo);
+  }
+}
+
+// Perform the actual merge + deploy (extracted from the old inline handler)
+function doMergeAndDeploy(directive, agentInfo) {
+  let mergeOk = true;
+  if (agentInfo.worktree) {
+    mergeOk = mergeWorktreeToMain(directive.id, agentInfo.worktree.branch);
+    if (mergeOk) {
+      cleanupWorktree(directive.id, agentInfo.worktree.branch);
+    } else {
+      log(`WARNING: Merge failed for ${directive.id} — branch ${agentInfo.worktree.branch} preserved for manual merge`);
+      const wtDir = path.join(WORKTREE_DIR, directive.id);
+      try { require("child_process").execSync(`git worktree remove --force "${wtDir}"`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
+    }
+  }
+  if (mergeOk) {
+    smartDeploy(directive);
+  }
+}
+
+// Route a directive through the orchestrator (with fallback to direct spawn)
+async function routeThroughOrchestrator(directive, type) {
+  const orchestrator = require("./orchestrator");
+  if (!orchestrator.isAvailable()) {
+    spawnAgent(directive, type);
+    return;
+  }
+  try {
+    const message = `NEW_DIRECTIVE: ${JSON.stringify({
+      id: directive.id, type: directive.type, title: directive.title,
+      description: directive.description, priority: directive.priority,
+      status: directive.status, plan: directive.plan || null,
+      failureReason: directive.failureReason || null,
+    })}`;
+    const response = await orchestrator.sendMessage(message);
+    await orchestrator.handleResponse(directive, response);
+  } catch (err) {
+    log(`Orchestrator routing failed for ${directive.id}: ${err.message} — direct spawn`);
+    spawnAgent(directive, type);
+  }
 }
 
 // After an agent exits and a slot opens, look for pending/approved directives to spawn
@@ -681,10 +850,10 @@ function drainQueue() {
 
           if (d.status === "planning") {
             log(`Drain: picking up deferred planning directive ${d.id} "${d.title}"`);
-            spawnAgent(d, "planning");
+            routeThroughOrchestrator(d, "planning");
           } else if (d.status === "approved") {
             log(`Drain: picking up deferred approved directive ${d.id} "${d.title}"`);
-            spawnAgent(d, "implementation");
+            routeThroughOrchestrator(d, "implementation");
           }
         }
       } catch (e) {
@@ -701,6 +870,11 @@ function spawnPlanningAgent(directive) {
 
 function spawnImplementationAgent(directive) {
   return spawnAgent(directive, "implementation");
+}
+
+// Spawn a worker with an orchestrator-crafted prompt
+function spawnWorkerWithPrompt(directive, type, orchestratorPrompt) {
+  return spawnAgent(directive, type, orchestratorPrompt);
 }
 
 function getRunningAgents() {
@@ -796,7 +970,7 @@ function detectBridgeChanges() {
       cwd: WORKDIR, encoding: "utf8", timeout: 10000,
     }).trim();
     if (!changed) return false;
-    const bridgePatterns = [/backend\/bridge\/server\.js/, /backend\/bridge\/cipher-pipeline\.js/, /backend\/bridge\/agent-spawner\.js/, /backend\/bridge\/db\.js/];
+    const bridgePatterns = [/backend\/bridge\/server\.js/, /backend\/bridge\/cipher-pipeline\.js/, /backend\/bridge\/agent-spawner\.js/, /backend\/bridge\/orchestrator\.js/, /backend\/bridge\/db\.js/];
     return changed.split("\n").some(line => bridgePatterns.some(p => p.test(line)));
   } catch {
     return false;
@@ -1033,6 +1207,7 @@ function startWatchdog() {
 module.exports = {
   spawnPlanningAgent,
   spawnImplementationAgent,
+  spawnWorkerWithPrompt,
   getRunningAgents,
   killAgent,
   killAllAgents,
