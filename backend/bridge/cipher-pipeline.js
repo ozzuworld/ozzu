@@ -36,6 +36,9 @@ class CipherPipeline extends EventEmitter {
     // TTS connection
     this.dgTTS = null;
     this._ttsActive = false; // true while streaming a response to TTS
+    this._ttsReconnectAttempt = 0; // exponential backoff counter, reset on successful open
+    this._ttsStreamId = 0; // incremented on each new TTS connection
+    this._currentTtsStreamId = 0; // stream ID for the active speech, set in _startTTS()
 
     // Claude Agent SDK state
     this._messageQueue = [];
@@ -84,80 +87,7 @@ class CipherPipeline extends EventEmitter {
     this._connectSTT();
 
     // Start Deepgram Aura TTS
-    if (this.deepgramClient) {
-      try {
-        this.dgTTS = this.deepgramClient.speak.live({
-          model: CIPHER_VOICE,
-          encoding: "linear16",
-          sample_rate: 24000,
-        });
-
-        this.dgTTS.on(LiveTTSEvents.Open, () => {
-          console.log("[cipher] Deepgram TTS connected (voice: %s)", CIPHER_VOICE);
-        });
-
-        this.dgTTS.on(LiveTTSEvents.Audio, (data) => {
-          // Buffer small chunks into ~100ms packets for smooth playback
-          const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-          if (!this._ttsAudioCount) this._ttsAudioCount = 0;
-          this._ttsAudioCount++;
-          if (this._ttsAudioCount <= 3) {
-            console.log("[cipher] TTS Audio event #%d: %d bytes, type=%s", this._ttsAudioCount, buf.length, typeof data);
-          }
-          this._audioBuffer.push(buf);
-          this._audioBufferBytes += buf.length;
-
-          if (this._audioBufferBytes >= this._audioBufferTarget) {
-            this._emitBufferedAudio();
-          } else if (!this._audioFlushTimer) {
-            // Flush after 80ms even if buffer isn't full (keeps latency low)
-            this._audioFlushTimer = setTimeout(() => this._emitBufferedAudio(), 80);
-          }
-        });
-
-        this.dgTTS.on(LiveTTSEvents.Flushed, () => {
-          // Emit any remaining buffered audio
-          this._emitBufferedAudio();
-          this._ttsFlushing = false;
-          console.log("[cipher] TTS flushed");
-          this.speaking = false;
-          // Wait for tablet to finish playing, then open mic
-          // playbackRemaining = estimated time until tablet speaker finishes
-          // networkBuffer = 3s for VPN transit + Android audio buffer + acoustic echo decay
-          // Minimum 4s total to ensure speaker has fully stopped before mic opens
-          const playbackRemaining = Math.max(0, (this._estimatedPlaybackEnd || 0) - Date.now());
-          const delay = Math.max(playbackRemaining + 3000, 4000);
-          console.log("[cipher] Mic opens in %dms (playback remaining: %dms)", delay, playbackRemaining);
-          // Store timer so _startTTS() can cancel it if Cipher speaks again
-          if (this._micOpenTimer) clearTimeout(this._micOpenTimer);
-          this._micOpenTimer = setTimeout(() => {
-            this._micOpenTimer = null;
-            if (!this.running) return;
-            this._turn = "user";
-            this._turnReady = true;
-            this.emit("listeningReady");
-            console.log("[cipher] Turn: user (listening)");
-          }, delay);
-        });
-
-        this.dgTTS.on(LiveTTSEvents.Warning, (warning) => {
-          console.warn("[cipher] TTS warning:", warning);
-        });
-
-        this.dgTTS.on(LiveTTSEvents.Error, (err) => {
-          console.error("[cipher] Deepgram TTS error:", err);
-        });
-
-        this.dgTTS.on(LiveTTSEvents.Close, () => {
-          console.log("[cipher] Deepgram TTS closed");
-        });
-      } catch (err) {
-        console.error("[cipher] Deepgram TTS init failed:", err.message);
-        this.dgTTS = null;
-      }
-    } else {
-      console.warn("[cipher] No DEEPGRAM_API_KEY — TTS disabled, text output only");
-    }
+    this._connectTTS();
 
     // Start Claude Agent SDK query loop (runs in background)
     this._startClaudeSession();
@@ -281,6 +211,110 @@ class CipherPipeline extends EventEmitter {
     console.log("[cipher] STT reconnecting in %dms (attempt %d/20)...", delay, this._sttReconnectAttempt);
     setTimeout(() => {
       if (this.running && !this.dgSTT) this._connectSTT();
+    }, delay);
+  }
+
+  _connectTTS() {
+    if (!this.deepgramClient) {
+      console.warn("[cipher] No DEEPGRAM_API_KEY — TTS disabled, text output only");
+      return;
+    }
+    if (this.dgTTS) return; // already connected
+
+    try {
+      this._ttsStreamId++;
+      const streamId = this._ttsStreamId;
+
+      this.dgTTS = this.deepgramClient.speak.live({
+        model: CIPHER_VOICE,
+        encoding: "linear16",
+        sample_rate: 24000,
+      });
+
+      this.dgTTS.on(LiveTTSEvents.Open, () => {
+        console.log("[cipher] Deepgram TTS connected (voice: %s, streamId: %d)", CIPHER_VOICE, streamId);
+        this._ttsReconnectAttempt = 0;
+      });
+
+      this.dgTTS.on(LiveTTSEvents.Audio, (data) => {
+        // Drop audio from stale TTS connections to prevent interleaved audio
+        if (streamId !== this._ttsStreamId) return;
+
+        // Buffer small chunks into ~100ms packets for smooth playback
+        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        if (!this._ttsAudioCount) this._ttsAudioCount = 0;
+        this._ttsAudioCount++;
+        if (this._ttsAudioCount <= 3) {
+          console.log("[cipher] TTS Audio event #%d: %d bytes, type=%s", this._ttsAudioCount, buf.length, typeof data);
+        }
+        this._audioBuffer.push(buf);
+        this._audioBufferBytes += buf.length;
+
+        if (this._audioBufferBytes >= this._audioBufferTarget) {
+          this._emitBufferedAudio();
+        } else if (!this._audioFlushTimer) {
+          // Flush after 80ms even if buffer isn't full (keeps latency low)
+          this._audioFlushTimer = setTimeout(() => this._emitBufferedAudio(), 80);
+        }
+      });
+
+      this.dgTTS.on(LiveTTSEvents.Flushed, () => {
+        // Emit any remaining buffered audio
+        this._emitBufferedAudio();
+        this._ttsFlushing = false;
+        console.log("[cipher] TTS flushed");
+        this.speaking = false;
+        // Wait for tablet to finish playing, then open mic
+        const playbackRemaining = Math.max(0, (this._estimatedPlaybackEnd || 0) - Date.now());
+        const delay = Math.max(playbackRemaining + 3000, 4000);
+        console.log("[cipher] Mic opens in %dms (playback remaining: %dms)", delay, playbackRemaining);
+        if (this._micOpenTimer) clearTimeout(this._micOpenTimer);
+        this._micOpenTimer = setTimeout(() => {
+          this._micOpenTimer = null;
+          if (!this.running) return;
+          this._turn = "user";
+          this._turnReady = true;
+          this.emit("listeningReady");
+          console.log("[cipher] Turn: user (listening)");
+        }, delay);
+      });
+
+      this.dgTTS.on(LiveTTSEvents.Warning, (warning) => {
+        console.warn("[cipher] TTS warning:", warning);
+      });
+
+      this.dgTTS.on(LiveTTSEvents.Error, (err) => {
+        console.error("[cipher] Deepgram TTS error:", err);
+        // Error without subsequent Close can leave TTS dead — force reconnect
+        if (this.dgTTS && !this.dgTTS.isConnected?.()) {
+          console.log("[cipher] TTS error left connection dead, forcing reconnect...");
+          this.dgTTS = null;
+          this._scheduleTTSReconnect();
+        }
+      });
+
+      this.dgTTS.on(LiveTTSEvents.Close, () => {
+        console.log("[cipher] Deepgram TTS closed (streamId: %d)", streamId);
+        this.dgTTS = null;
+        this._scheduleTTSReconnect();
+      });
+    } catch (err) {
+      console.error("[cipher] Deepgram TTS init failed:", err.message);
+      this.dgTTS = null;
+    }
+  }
+
+  _scheduleTTSReconnect() {
+    if (!this.running) return;
+    if (this._ttsReconnectAttempt >= 10) {
+      console.error("[cipher] TTS reconnect: max attempts (10) reached, giving up");
+      return;
+    }
+    const delay = Math.min(1000 * Math.pow(2, this._ttsReconnectAttempt), 15000);
+    this._ttsReconnectAttempt++;
+    console.log("[cipher] TTS reconnecting in %dms (attempt %d/10)...", delay, this._ttsReconnectAttempt);
+    setTimeout(() => {
+      if (this.running && !this.dgTTS) this._connectTTS();
     }, delay);
   }
 
@@ -582,7 +616,8 @@ class CipherPipeline extends EventEmitter {
     this._audioEmitCount = 0;
     this._ttsAudioCount = 0;
     this._ttsSendCount = 0;
-    console.log("[cipher] TTS: streaming started");
+    this._currentTtsStreamId = this._ttsStreamId;
+    console.log("[cipher] TTS: streaming started (streamId: %d)", this._currentTtsStreamId);
   }
 
   _stripMarkdownForTTS(text) {
