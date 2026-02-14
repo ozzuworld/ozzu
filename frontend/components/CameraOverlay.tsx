@@ -23,6 +23,8 @@ export function CameraOverlay({
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
+  // Must be called unconditionally (Rules of Hooks)
+  const { height: screenHeight } = useWindowDimensions();
 
   const player = useVideoPlayer(visible ? streamUrl : null, (p) => {
     p.loop = true;
@@ -31,8 +33,9 @@ export function CameraOverlay({
 
   // Fade in/out
   useEffect(() => {
+    let anim: Animated.CompositeAnimation;
     if (visible) {
-      Animated.parallel([
+      anim = Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
           duration: 300,
@@ -43,9 +46,9 @@ export function CameraOverlay({
           duration: 300,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]);
     } else {
-      Animated.parallel([
+      anim = Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 0,
           duration: 200,
@@ -56,8 +59,10 @@ export function CameraOverlay({
           duration: 200,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]);
     }
+    anim.start();
+    return () => anim.stop();
   }, [visible]);
 
   // Shimmer glow animation
@@ -83,7 +88,6 @@ export function CameraOverlay({
 
   if (!visible) return null;
 
-  const { height: screenHeight } = useWindowDimensions();
   const size = Math.round(screenHeight * 0.4);
 
   const glowRadius = glowAnim.interpolate({

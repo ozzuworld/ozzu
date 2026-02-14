@@ -16,8 +16,9 @@ export function HamburgerMenu() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    let anim: Animated.CompositeAnimation;
     if (visible) {
-      Animated.parallel([
+      anim = Animated.parallel([
         Animated.timing(scaleAnim, {
           toValue: 1,
           duration: 200,
@@ -28,9 +29,9 @@ export function HamburgerMenu() {
           duration: 200,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]);
     } else {
-      Animated.parallel([
+      anim = Animated.parallel([
         Animated.timing(scaleAnim, {
           toValue: 0.9,
           duration: 150,
@@ -41,8 +42,10 @@ export function HamburgerMenu() {
           duration: 150,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]);
     }
+    anim.start();
+    return () => anim.stop();
   }, [visible]);
 
   const navigate = (route: string) => {

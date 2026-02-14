@@ -602,6 +602,8 @@ export function ContentPanel({
   onClose,
 }: ContentPanelProps) {
   const [shouldRender, setShouldRender] = useState(false);
+  // Must be called unconditionally (Rules of Hooks)
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
   // ── Animated values ──
   // Phase 1: Light burst
@@ -746,14 +748,16 @@ export function ContentPanel({
       ]);
 
       // Run all phases together (delays handle orchestration)
-      Animated.parallel([
+      const openAnim = Animated.parallel([
         phase1,
         phase1Fade,
         phase2,
         phase2Fade,
         phase3,
         phase4,
-      ]).start();
+      ]);
+      openAnim.start();
+      return () => openAnim.stop();
     } else if (shouldRender) {
       // ── Closing animation ──
       // Panel dissolve
@@ -807,10 +811,12 @@ export function ContentPanel({
         }),
       ]);
 
-      Animated.parallel([closePanel, closeGlow, closeBurst]).start(() => {
+      const closeAnim = Animated.parallel([closePanel, closeGlow, closeBurst]);
+      closeAnim.start(() => {
         setShouldRender(false);
         resetAnimValues();
       });
+      return () => closeAnim.stop();
     }
   }, [visible]);
 
@@ -837,7 +843,6 @@ export function ContentPanel({
 
   if (!shouldRender) return null;
 
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const panelWidth = Math.min(screenWidth * 0.6, 600);
   const panelHeight = screenHeight * 0.65;
 

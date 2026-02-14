@@ -24,7 +24,7 @@ export function useEntitySummary(): string {
       const entity = entities[id];
       if (!entity) continue;
       const label = entityLabelMap.get(id) ?? id;
-      const unit = entity.attributes.unit_of_measurement ?? "";
+      const unit = entity.attributes?.unit_of_measurement ?? "";
       lines.push(`- ${label} (${id}): ${entity.state}${unit ? ` ${unit}` : ""}`);
     }
     return lines.join("\n");
