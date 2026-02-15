@@ -49,7 +49,7 @@ export default function UploadScreen() {
   const router = useRouter();
   const { insets } = usePhoneLayout();
   const [mode, setMode] = useState<Mode>("FILE");
-  const [file, setFile] = useState<SelectedFile | null>(null);
+  const [files, setFiles] = useState<SelectedFile[]>([]);
   const [textContent, setTextContent] = useState("");
   const [sending, setSending] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
@@ -86,26 +86,26 @@ export default function UploadScreen() {
       const result = await DocumentPicker.getDocumentAsync({
         type: ["text/*", "application/pdf", "application/json", "image/*"],
         copyToCacheDirectory: true,
+        multiple: true,
       });
-      if (result.canceled || !result.assets?.[0]) return;
-      const asset = result.assets[0];
-      if (!isAllowedFile(asset.mimeType || "", asset.name)) {
-        setError("Unsupported file type");
-        return;
+      if (result.canceled || !result.assets?.length) return;
+      const newFiles: SelectedFile[] = [];
+      let skipped = 0;
+      for (const asset of result.assets) {
+        if (!isAllowedFile(asset.mimeType || "", asset.name)) { skipped++; continue; }
+        if (asset.size && asset.size > MAX_FILE_SIZE) { skipped++; continue; }
+        const contentType = detectContentType(asset.mimeType || "application/octet-stream");
+        newFiles.push({
+          uri: asset.uri,
+          name: asset.name,
+          size: asset.size || 0,
+          mimeType: asset.mimeType || "application/octet-stream",
+          contentType,
+          previewUri: contentType === "image" ? asset.uri : undefined,
+        });
       }
-      if (asset.size && asset.size > MAX_FILE_SIZE) {
-        setError("File too large (max 5MB)");
-        return;
-      }
-      const contentType = detectContentType(asset.mimeType || "application/octet-stream");
-      setFile({
-        uri: asset.uri,
-        name: asset.name,
-        size: asset.size || 0,
-        mimeType: asset.mimeType || "application/octet-stream",
-        contentType,
-        previewUri: contentType === "image" ? asset.uri : undefined,
-      });
+      if (skipped > 0) setError(`${skipped} file(s) skipped (unsupported or >5MB)`);
+      if (newFiles.length > 0) setFiles((prev) => [...prev, ...newFiles]);
     } catch (e: any) {
       setError(e.message || "Failed to pick document");
     }
@@ -119,24 +119,27 @@ export default function UploadScreen() {
         quality: 0.7,
         base64: false,
         allowsEditing: false,
+        allowsMultipleSelection: true,
       });
-      if (result.canceled || !result.assets?.[0]) return;
-      const asset = result.assets[0];
-      const info = await FileSystem.getInfoAsync(asset.uri);
-      if (info.exists && info.size > MAX_FILE_SIZE) {
-        setError("Image too large (max 5MB)");
-        return;
+      if (result.canceled || !result.assets?.length) return;
+      const newFiles: SelectedFile[] = [];
+      let skipped = 0;
+      for (const asset of result.assets) {
+        const info = await FileSystem.getInfoAsync(asset.uri);
+        if (info.exists && info.size > MAX_FILE_SIZE) { skipped++; continue; }
+        const ext = asset.uri.split(".").pop() || "jpg";
+        const name = `image-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+        newFiles.push({
+          uri: asset.uri,
+          name,
+          size: info.exists ? info.size : 0,
+          mimeType: asset.mimeType || `image/${ext}`,
+          contentType: "image",
+          previewUri: asset.uri,
+        });
       }
-      const ext = asset.uri.split(".").pop() || "jpg";
-      const name = `image-${Date.now()}.${ext}`;
-      setFile({
-        uri: asset.uri,
-        name,
-        size: info.exists ? info.size : 0,
-        mimeType: asset.mimeType || `image/${ext}`,
-        contentType: "image",
-        previewUri: asset.uri,
-      });
+      if (skipped > 0) setError(`${skipped} image(s) skipped (>5MB)`);
+      if (newFiles.length > 0) setFiles((prev) => [...prev, ...newFiles]);
     } catch (e: any) {
       setError(e.message || "Failed to pick image");
     }
@@ -147,34 +150,25 @@ export default function UploadScreen() {
       setError(null);
       setSending(true);
       try {
-        let contentType: ContentType;
-        let data: string;
-        let filename: string | undefined;
-
         if (mode === "TEXT") {
-          contentType = "text";
-          data = textContent;
-        } else if (file) {
-          contentType = file.contentType;
-          filename = file.name;
-          if (contentType === "image") {
-            data = await FileSystem.readAsStringAsync(file.uri, {
-              encoding: FileSystem.EncodingType.Base64,
+          bridgeRef.current.sendUpload(target, "text", textContent);
+        } else if (files.length > 0) {
+          for (const f of files) {
+            const data = await FileSystem.readAsStringAsync(f.uri, {
+              encoding: f.contentType === "image"
+                ? FileSystem.EncodingType.Base64
+                : FileSystem.EncodingType.UTF8,
             });
-          } else {
-            data = await FileSystem.readAsStringAsync(file.uri, {
-              encoding: FileSystem.EncodingType.UTF8,
-            });
+            bridgeRef.current.sendUpload(target, f.contentType, data, f.name);
           }
         } else {
           setSending(false);
           return;
         }
 
-        bridgeRef.current.sendUpload(target, contentType, data, filename);
-
         const label = target === "cipher" ? "CIPHER" : "JUNE";
-        setFlash(`Sent to ${label}`);
+        const count = mode === "TEXT" ? 1 : files.length;
+        setFlash(`Sent ${count} item${count > 1 ? "s" : ""} to ${label}`);
         setTimeout(() => {
           setFlash(null);
           router.back();
@@ -185,10 +179,15 @@ export default function UploadScreen() {
         setSending(false);
       }
     },
-    [mode, file, textContent, router]
+    [mode, files, textContent, router]
   );
 
-  const hasContent = mode === "TEXT" ? textContent.trim().length > 0 : file !== null;
+  const hasContent = mode === "TEXT" ? textContent.trim().length > 0 : files.length > 0;
+  const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+
+  const removeFile = useCallback((index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#111111" }}>
@@ -331,56 +330,56 @@ export default function UploadScreen() {
               </TVPressable>
             </View>
 
-            {/* Preview */}
-            {file && (
-              <View
-                style={{
-                  backgroundColor: "#1A1A1A",
-                  borderWidth: 1,
-                  borderColor: "#333",
-                  borderRadius: 8,
-                  padding: 12,
-                  gap: 8,
-                }}
-              >
-                {file.previewUri && (
-                  <Image
-                    source={{ uri: file.previewUri }}
-                    style={{
-                      width: "100%",
-                      height: 160,
-                      borderRadius: 6,
-                      backgroundColor: "#222",
-                    }}
-                    resizeMode="contain"
-                  />
-                )}
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Text style={{ fontSize: 16 }}>
-                    {file.contentType === "image" ? "🖼️" : "📄"}
+            {/* File List */}
+            {files.length > 0 && (
+              <View style={{ gap: 6 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                  <Text style={{ color: "#737373", fontSize: 11, fontFamily: "monospace" }}>
+                    {files.length} file{files.length > 1 ? "s" : ""} · {formatSize(totalSize)}
                   </Text>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={{
-                        color: "#E5E5E5",
-                        fontSize: 13,
-                        fontFamily: "monospace",
-                      }}
-                      numberOfLines={1}
-                    >
-                      {file.name}
+                  <TVPressable onPress={() => setFiles([])} style={{ padding: 4 }}>
+                    <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>
+                      CLEAR ALL
                     </Text>
-                    <Text
-                      style={{
-                        color: "#525252",
-                        fontSize: 11,
-                        fontFamily: "monospace",
-                      }}
-                    >
-                      {formatSize(file.size)} · {file.contentType.toUpperCase()}
-                    </Text>
-                  </View>
+                  </TVPressable>
                 </View>
+                {files.map((f, i) => (
+                  <View
+                    key={`${f.name}-${i}`}
+                    style={{
+                      backgroundColor: "#1A1A1A",
+                      borderWidth: 1,
+                      borderColor: "#333",
+                      borderRadius: 8,
+                      padding: 10,
+                      gap: 6,
+                    }}
+                  >
+                    {f.previewUri && (
+                      <Image
+                        source={{ uri: f.previewUri }}
+                        style={{ width: "100%", height: 120, borderRadius: 6, backgroundColor: "#222" }}
+                        resizeMode="contain"
+                      />
+                    )}
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Text style={{ fontSize: 14 }}>
+                        {f.contentType === "image" ? "🖼️" : "📄"}
+                      </Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: "#E5E5E5", fontSize: 12, fontFamily: "monospace" }} numberOfLines={1}>
+                          {f.name}
+                        </Text>
+                        <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
+                          {formatSize(f.size)} · {f.contentType.toUpperCase()}
+                        </Text>
+                      </View>
+                      <TVPressable onPress={() => removeFile(i)} style={{ padding: 6 }}>
+                        <Text style={{ color: "#EF4444", fontSize: 14 }}>✕</Text>
+                      </TVPressable>
+                    </View>
+                  </View>
+                ))}
               </View>
             )}
           </View>
@@ -483,7 +482,7 @@ export default function UploadScreen() {
                 letterSpacing: 1,
               }}
             >
-              {sending ? "SENDING..." : "SEND TO CIPHER"}
+              {sending ? "SENDING..." : files.length > 1 ? `SEND ${files.length} TO CIPHER` : "SEND TO CIPHER"}
             </Text>
           </TVPressable>
           <TVPressable
@@ -509,7 +508,7 @@ export default function UploadScreen() {
                 letterSpacing: 1,
               }}
             >
-              {sending ? "SENDING..." : "SEND TO JUNE"}
+              {sending ? "SENDING..." : files.length > 1 ? `SEND ${files.length} TO JUNE` : "SEND TO JUNE"}
             </Text>
           </TVPressable>
         </View>
