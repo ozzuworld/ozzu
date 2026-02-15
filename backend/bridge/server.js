@@ -3269,6 +3269,57 @@ document.getElementById("approval-modal").addEventListener("click", function(e) 
     return;
   }
 
+  // GET /cipher/history — retrieve Cipher conversation history with full turns
+  if (req.method === "GET" && pathname === "/cipher/history") {
+    try {
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "100", 10), 500);
+      const conversationLimit = Math.min(parseInt(url.searchParams.get("conversations") || "5", 10), 20);
+      const since = url.searchParams.get("since") || null;
+      const typesParam = url.searchParams.get("types");
+      const contentTypes = typesParam ? typesParam.split(",").map(t => t.trim()) : null;
+      const format = url.searchParams.get("format") || "json";
+
+      const conversations = await db.getConversationHistory({
+        persona: "cipher",
+        limit,
+        conversationLimit,
+        since,
+        contentTypes,
+      });
+
+      if (format === "text") {
+        // Human-readable text format for CLI piping
+        let text = "";
+        for (const c of conversations) {
+          const startDate = c.startedAt ? new Date(c.startedAt).toLocaleString() : "?";
+          const duration = c.endedAt && c.startedAt
+            ? Math.round((new Date(c.endedAt) - new Date(c.startedAt)) / 60000)
+            : "?";
+          text += `--- Session ${c.id} (${startDate} — ${duration} min) ---\n`;
+          if (c.summary) text += `Summary: ${c.summary}\n`;
+          for (const t of c.turns) {
+            const prefix = `[${t.role}]`;
+            if (t.contentType === "upload") {
+              text += `${prefix} [upload] ${t.content}\n`;
+            } else if (t.contentType === "tool_result" || t.contentType === "tool_call") {
+              text += `[tool_call] ${t.content}\n`;
+            } else {
+              text += `${prefix} ${t.content}\n`;
+            }
+          }
+          text += "\n";
+        }
+        res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
+        res.end(text);
+      } else {
+        sendJSON(res, 200, { conversations });
+      }
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
   // GET /entities/stats — entity snapshot analytics for HA integration monitoring
   if (req.method === "GET" && pathname === "/entities/stats") {
     try {
@@ -6022,7 +6073,7 @@ function handleGeminiMessage(msg) {
     pushTranscript({ role: "user", text, timestamp: Date.now() });
     // Log turn to PG
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, "user", text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
+      db.addConversationTurn(currentConversationId, "user", text, turnIndex++, null, 'text', { source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
     }
 
     // Check for wake word — strip spaces so fragmented "Ju" + "ne" still matches
@@ -6069,7 +6120,7 @@ function handleGeminiMessage(msg) {
     pushTranscript({ role: "model", text: sc.outputTranscription.text, timestamp: Date.now() });
     // Log turn to PG
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, currentPersona, sc.outputTranscription.text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
+      db.addConversationTurn(currentConversationId, currentPersona, sc.outputTranscription.text, turnIndex++, null, 'text', { source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
     }
     if (isEngaged()) {
       broadcastToAll({ type: "transcript", text: sc.outputTranscription.text });
@@ -6106,7 +6157,7 @@ async function handleGeminiToolCalls(functionCalls) {
       log.gemini.info(`Tool ${name} → ${result.success ? "ok" : "fail"}: ${result.message?.substring(0, 80)}`);
       // Log tool call to PG conversation
       if (currentConversationId) {
-        db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }).catch(err => log.pg.warn("turn log:", err.message));
+        db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }, result.success ? 'tool_result' : 'tool_result', { toolName: name, success: result.success, source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
       }
       return {
         id: fc.id,
@@ -6663,7 +6714,7 @@ async function startCipherPipeline() {
     // Log to conversation transcript
     conversationTranscript.push({ role: "user", text });
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, "user", text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
+      db.addConversationTurn(currentConversationId, "user", text, turnIndex++, null, 'text', { source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
     }
   });
 
@@ -6672,14 +6723,14 @@ async function startCipherPipeline() {
     broadcastToAll({ type: "transcript", text });
     pushTranscript({ role: "cipher", text });
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, "cipher", text, turnIndex++).catch(err => log.pg.warn("turn log:", err.message));
+      db.addConversationTurn(currentConversationId, "cipher", text, turnIndex++, null, 'text', { source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
     }
   });
 
   cipherPipeline.on("toolCall", ({ name, args, result }) => {
     extendEngagement();
     if (currentConversationId) {
-      db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }).catch(err => log.pg.warn("turn log:", err.message));
+      db.addConversationTurn(currentConversationId, "tool", `${name}: ${result.message?.substring(0, 500) || ""}`, turnIndex++, { name, args, success: result.success }, 'tool_result', { toolName: name, success: result.success, source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
     }
   });
 
@@ -6916,6 +6967,13 @@ wss.on("connection", (ws) => {
           log.bridge.info(`Upload persisted: ${savePath}`);
         } catch (persistErr) {
           log.bridge.warn(`Upload persist failed: ${persistErr.message}`);
+        }
+
+        // Log upload to conversation transcript
+        if (currentConversationId) {
+          db.addConversationTurn(currentConversationId, "user", `[Upload: ${filename || "(unnamed)"}]`, turnIndex++, null, 'upload', {
+            filename: filename || null, contentType, target, from: info?.deviceId
+          }).catch(err => log.pg.warn("upload turn log:", err.message));
         }
 
         if (target === "cipher") {
