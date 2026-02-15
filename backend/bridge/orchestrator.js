@@ -140,7 +140,8 @@ DECISION GUIDELINES:
 - For approved directives: spawn_worker with type "implementation"
 - When reviewing worker results: check the diff for obvious issues, approve if reasonable
 - If you see patterns from past failures, include warnings in worker_prompt
-- handle_directly is for when you can answer immediately (rare — mostly for status queries)
+- handle_directly is ONLY for pure status/info queries (e.g. "what's running?"). NEVER use handle_directly for any directive that requires code changes, file edits, bug fixes, or feature work — those MUST be spawn_worker.
+- You CANNOT write or edit code yourself. You have no Write or Edit tools. Always delegate coding to workers.
 
 WORKER PROMPT CRAFTING:
 When crafting worker_prompt, include:
@@ -465,8 +466,15 @@ async function handleResponse(directive, response) {
     }
 
     case "handle_directly": {
-      log(`Orchestrator handled "${directive.title}" directly: ${response.reasoning}`);
-      // Nothing to spawn — orchestrator handled it (rare case)
+      log(`Orchestrator returned handle_directly for "${directive.title}": ${response.reasoning}`);
+      // Safety net: if directive needs code work, orchestrator can't handle it — spawn a worker
+      const isStatusQuery = /status|info|query|check|what.*running/i.test(directive.title);
+      if (!isStatusQuery) {
+        log(`handle_directly used for non-status directive — falling back to worker spawn`);
+        const type = directive.status === "approved" ? "implementation" : "planning";
+        if (type === "planning") spawnPlanningAgent(directive);
+        else spawnImplementationAgent(directive);
+      }
       break;
     }
 
