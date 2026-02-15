@@ -1,13 +1,7 @@
 name: Build Android APK
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'frontend/**'
-      - '!frontend/ios/**'
-      - '.github/workflows/build-android.yml'
-  workflow_dispatch:
+  workflow_dispatch: # Triggered by smartDeploy when native changes detected
 
 jobs:
   build-android:

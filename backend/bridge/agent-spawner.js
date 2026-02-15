@@ -977,6 +977,46 @@ function detectBridgeChanges() {
   }
 }
 
+// Spawn a deploy command as a detached process that survives bridge restarts.
+// Writes a wrapper script to /tmp, runs it with nohup, logs to /tmp/ozzu-bridge/.
+// On completion, POSTs a notification to the bridge.
+function spawnDetachedDeploy(platform, command) {
+  const fs = require("fs");
+  const { spawn } = require("child_process");
+  const scriptPath = `/tmp/ozzu-bridge/deploy-${platform}-${Date.now()}.sh`;
+  const logPath = `/tmp/ozzu-bridge/deploy-${platform}.log`;
+  const notifyUrl = `http://localhost:${PORT}/notify`;
+
+  const successMsg = platform === "ios"
+    ? "iPhone's updated — connect it to see the latest."
+    : "Android update's live on all tablets.";
+  const failMsg = platform === "ios"
+    ? "iPhone update failed — check deploy log."
+    : "Android update failed — check deploy log.";
+
+  const script = `#!/bin/bash
+exec > "${logPath}" 2>&1
+echo "=== ${platform} deploy started at $(date -u) ==="
+if ${command}; then
+  echo "=== ${platform} deploy SUCCESS at $(date -u) ==="
+  curl -s -X POST ${notifyUrl} -H 'Content-Type: application/json' -d '{"message":"${successMsg}"}' || true
+else
+  echo "=== ${platform} deploy FAILED at $(date -u) ==="
+  curl -s -X POST ${notifyUrl} -H 'Content-Type: application/json' -d '{"message":"${failMsg}"}' || true
+fi
+rm -f "${scriptPath}"
+`;
+
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+  const child = spawn("bash", [scriptPath], {
+    cwd: WORKDIR,
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  log(`Detached ${platform} deploy started (pid ${child.pid}, log: ${logPath})`);
+}
+
 function smartDeploy(directive) {
   const { execSync, exec } = require("child_process");
   const http = require("http");
@@ -1002,13 +1042,14 @@ function smartDeploy(directive) {
     notify(`Big update going out — full rebuild for all devices, should be done in about 10 minutes.`);
 
     // Android APK build + deploy (with artifact verification)
+    // Spawn detached so it survives bridge restarts
     if (native.android) {
-      const androidCmd = [
-        `sleep 15`,
+      spawnDetachedDeploy("android", [
         `cd ${WORKDIR}`,
+        `gh workflow run build-android.yml`,
+        `sleep 20`,
         `RUN_ID=$(gh run list --workflow=build-android.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
         `gh run watch "$RUN_ID" --exit-status`,
-        // Verify artifact can be downloaded and is valid before deploying
         `rm -rf /tmp/ozzu-apk-verify`,
         `gh run download "$RUN_ID" --name ozzu-android --dir /tmp/ozzu-apk-verify -R ozzuworld/ozzu`,
         `test -f /tmp/ozzu-apk-verify/app-debug.apk || { echo "ERROR: APK artifact not found after download"; exit 1; }`,
@@ -1016,54 +1057,26 @@ function smartDeploy(directive) {
         `test "$APK_SIZE" -gt 1000000 || { echo "ERROR: APK too small ($APK_SIZE bytes), likely corrupt"; exit 1; }`,
         `rm -rf /tmp/ozzu-apk-verify`,
         `./scripts/deploy.sh`,
-      ].join(" && ");
-
-      exec(androidCmd, {
-        cwd: WORKDIR,
-        timeout: 30 * 60 * 1000,
-      }, (err) => {
-        if (err) {
-          log(`Android deploy failed: ${err.message}`);
-          notify(`Android update failed: ${err.message}`);
-        } else {
-          log("Android APK deployed successfully");
-          notify("Android update's live on all tablets.");
-        }
-      });
+      ].join(" && "));
     }
 
     // iOS IPA build + deploy via dev-01 — ALWAYS build iOS alongside Android
     // iPhone can't do OTA, so every frontend change needs a full rebuild to keep in sync
-    {
-      const iosCmd = [
-        `cd ${WORKDIR}`,
-        `gh workflow run build-ios.yml`,
-        `sleep 20`,
-        `RUN_ID=$(gh run list --workflow=build-ios.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
-        `gh run watch "$RUN_ID" --exit-status`,
-        // Verify artifact can be downloaded and is valid before deploying
-        `rm -rf /tmp/ozzu-ios-verify`,
-        `gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ios-verify -R ozzuworld/ozzu`,
-        `test -f /tmp/ozzu-ios-verify/ozzu.ipa || { echo "ERROR: IPA artifact not found after download"; exit 1; }`,
-        `IPA_SIZE=$(stat -c%s /tmp/ozzu-ios-verify/ozzu.ipa 2>/dev/null || echo 0)`,
-        `test "$IPA_SIZE" -gt 1000000 || { echo "ERROR: IPA too small ($IPA_SIZE bytes), likely corrupt"; exit 1; }`,
-        `rm -rf /tmp/ozzu-ios-verify`,
-        `./scripts/deploy-ios.sh`,
-      ].join(" && ");
-
-      exec(iosCmd, {
-        cwd: WORKDIR,
-        timeout: 30 * 60 * 1000,
-      }, (err) => {
-        if (err) {
-          log(`iOS deploy failed: ${err.message}`);
-          notify(`iPhone update failed: ${err.message}`);
-        } else {
-          log("iOS IPA deployed successfully");
-          notify("iPhone's updated too.");
-        }
-      });
-    }
+    // Spawn detached so it survives bridge restarts (iOS build takes 15-20 min)
+    spawnDetachedDeploy("ios", [
+      `cd ${WORKDIR}`,
+      `gh workflow run build-ios.yml`,
+      `sleep 20`,
+      `RUN_ID=$(gh run list --workflow=build-ios.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
+      `gh run watch "$RUN_ID" --exit-status`,
+      `rm -rf /tmp/ozzu-ios-verify`,
+      `gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ios-verify -R ozzuworld/ozzu`,
+      `test -f /tmp/ozzu-ios-verify/ozzu.ipa || { echo "ERROR: IPA artifact not found after download"; exit 1; }`,
+      `IPA_SIZE=$(stat -c%s /tmp/ozzu-ios-verify/ozzu.ipa 2>/dev/null || echo 0)`,
+      `test "$IPA_SIZE" -gt 1000000 || { echo "ERROR: IPA too small ($IPA_SIZE bytes), likely corrupt"; exit 1; }`,
+      `rm -rf /tmp/ozzu-ios-verify`,
+      `./scripts/deploy-ios.sh`,
+    ].join(" && "));
   } else {
     log("JS-only changes — deploying via OTA (Android) + CI build (iOS)");
     notify("Quick update going out to tablets now. iPhone build takes about 10 minutes.");
@@ -1083,7 +1096,8 @@ function smartDeploy(directive) {
     });
 
     // iOS: always needs a full rebuild (no OTA for sideloaded apps)
-    const iosCmd = [
+    // Spawn detached so it survives bridge restarts (iOS build takes 15-20 min)
+    spawnDetachedDeploy("ios", [
       `cd ${WORKDIR}`,
       `gh workflow run build-ios.yml`,
       `sleep 20`,
@@ -1096,20 +1110,7 @@ function smartDeploy(directive) {
       `test "$IPA_SIZE" -gt 1000000 || { echo "ERROR: IPA too small ($IPA_SIZE bytes)"; exit 1; }`,
       `rm -rf /tmp/ozzu-ios-verify`,
       `./scripts/deploy-ios.sh`,
-    ].join(" && ");
-
-    exec(iosCmd, {
-      cwd: WORKDIR,
-      timeout: 30 * 60 * 1000,
-    }, (err) => {
-      if (err) {
-        log(`iOS deploy failed: ${err.message}`);
-        notify(`iPhone update failed: ${err.message}`);
-      } else {
-        log("iOS IPA deployed successfully");
-        notify("iPhone's caught up — all devices are on the latest now.");
-      }
-    });
+    ].join(" && "));
   }
 
   // Bridge restart — do this LAST (kills this process, Docker auto-restarts)
