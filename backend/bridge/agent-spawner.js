@@ -425,6 +425,10 @@ function cleanupWorktree(directiveId, branch) {
   try {
     if (branch) execSync(`git branch -D "${branch}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" });
   } catch {}
+  // Delete remote branch too (prevents stale agent branches piling up)
+  try {
+    if (branch) execSync(`git push origin --delete "${branch}"`, { cwd: WORKDIR, timeout: 15000, stdio: "ignore" });
+  } catch {}
   pruneWorktrees();
   log(`Worktree cleaned up: ${wtDir}`);
 }
