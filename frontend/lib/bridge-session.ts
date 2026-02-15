@@ -22,6 +22,7 @@ export interface BridgeCallbacks {
   onHideCamera: () => void;
   onShowContent: (title: string, content: string) => void;
   onHideContent: () => void;
+  onConnected: () => void;
   onListeningReady: () => void;
   onError: (message: string) => void;
 }
@@ -144,6 +145,7 @@ export class BridgeSession {
             }
             this.pendingMessages = [];
           }
+          this.callbacks?.onConnected();
           break;
         case "audio":
           this.callbacks?.onAudioChunk(msg.data);

@@ -11,6 +11,7 @@ import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
 import { canUseBiometric, authenticateWithBiometric, BRIDGE_PIN } from "../lib/biometric-auth";
+import { fetchPendingApprovals, resolveApproval } from "../lib/bridge-api";
 import { TVPressable } from "../components/TVPressable";
 import { CameraOverlay } from "../components/CameraOverlay";
 import { ContentPanel } from "../components/ContentPanel";
@@ -110,7 +111,7 @@ export default function LandingScreen() {
   const isMic = deviceRole.current === "mic";
 
   const [showKeypad, setShowKeypad] = useState(false);
-  const pendingPinRef = useRef<{ approvalId: string } | null>(null);
+  const pendingPinRef = useRef<{ approvalId: string; restResolve?: boolean } | null>(null);
 
   const [cameraOverlay, setCameraOverlay] = useState<{
     visible: boolean;
@@ -193,21 +194,29 @@ export default function LandingScreen() {
         setIsStreaming(true);
       },
       onPinRequest: async (approvalId) => {
+        // Ignore if already handling a pin request (prevents stacking)
+        if (pendingPinRef.current) return;
         pendingPinRef.current = { approvalId };
-        const biometricAvailable = await canUseBiometric();
-        if (biometricAvailable) {
-          const success = await authenticateWithBiometric('Authorize Action');
-          if (success) {
-            pendingPinRef.current = null;
-            bridgeRef.current.sendPinResponse(approvalId, BRIDGE_PIN);
-            return;
+        try {
+          const biometricAvailable = await canUseBiometric();
+          if (biometricAvailable) {
+            const success = await authenticateWithBiometric('Authorize Action');
+            if (success) {
+              pendingPinRef.current = null;
+              bridgeRef.current.sendPinResponse(approvalId, BRIDGE_PIN);
+              return;
+            }
           }
+        } catch (err) {
+          console.warn("Biometric auth error, falling back to keypad:", err);
         }
-        setShowKeypad(true);
+        if (pendingPinRef.current?.approvalId === approvalId) {
+          setShowKeypad(true);
+        }
       },
       onPinResolved: () => {
-        setShowKeypad(false);
         pendingPinRef.current = null;
+        setShowKeypad(false);
       },
       onShowCamera: (_cameraId, streamUrl, cameraName) => {
         setCameraOverlay({ visible: true, streamUrl, cameraName });
@@ -220,6 +229,33 @@ export default function LandingScreen() {
       },
       onHideContent: () => {
         setContentPanel({ visible: false, title: "", content: "" });
+      },
+      onConnected: async () => {
+        if (cancelled) return;
+        try {
+          const approvals = await fetchPendingApprovals();
+          if (approvals.length === 0 || pendingPinRef.current) return;
+          const approval = approvals[0];
+          pendingPinRef.current = { approvalId: approval.id, restResolve: true };
+          try {
+            const biometricAvailable = await canUseBiometric();
+            if (biometricAvailable) {
+              const success = await authenticateWithBiometric('Authorize Action');
+              if (success) {
+                pendingPinRef.current = null;
+                resolveApproval(approval.id, true, BRIDGE_PIN).catch(() => {});
+                return;
+              }
+            }
+          } catch (err) {
+            console.warn("Biometric auth error, falling back to keypad:", err);
+          }
+          if (pendingPinRef.current?.approvalId === approval.id) {
+            setShowKeypad(true);
+          }
+        } catch (err) {
+          console.warn("[index] Failed to fetch pending approvals:", err);
+        }
       },
       onListeningReady: () => {
         // Cipher finished speaking — show listening state on orb
@@ -249,7 +285,11 @@ export default function LandingScreen() {
     const pending = pendingPinRef.current;
     if (!pending) return;
     pendingPinRef.current = null;
-    bridgeRef.current.sendPinResponse(pending.approvalId, pin);
+    if (pending.restResolve) {
+      resolveApproval(pending.approvalId, true, pin).catch(() => {});
+    } else {
+      bridgeRef.current.sendPinResponse(pending.approvalId, pin);
+    }
   }, []);
 
   const handleKeypadCancel = useCallback(() => {

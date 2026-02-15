@@ -11,6 +11,7 @@ import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
 import { canUseBiometric, authenticateWithBiometric, BRIDGE_PIN } from "../lib/biometric-auth";
+import { fetchPendingApprovals, resolveApproval } from "../lib/bridge-api";
 import { useKeepAwake } from "expo-keep-awake";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 
@@ -29,7 +30,7 @@ export default function ChatScreen() {
   const isSpeaker = deviceRole.current === "speaker";
 
   const [showKeypad, setShowKeypad] = useState(false);
-  const pendingPinRef = useRef<{ approvalId: string } | null>(null);
+  const pendingPinRef = useRef<{ approvalId: string; restResolve?: boolean } | null>(null);
 
   const [responseText, setResponseText] = useState("");
   const [inputTranscript, setInputTranscript] = useState("");
@@ -95,21 +96,56 @@ export default function ChatScreen() {
         setIsStreaming(true);
       },
       onPinRequest: async (approvalId, description) => {
+        // Ignore if already handling a pin request (prevents stacking)
+        if (pendingPinRef.current) return;
         pendingPinRef.current = { approvalId };
-        const biometricAvailable = await canUseBiometric();
-        if (biometricAvailable) {
-          const success = await authenticateWithBiometric('Authorize Action');
-          if (success) {
-            pendingPinRef.current = null;
-            bridgeRef.current.sendPinResponse(approvalId, BRIDGE_PIN);
-            return;
+        try {
+          const biometricAvailable = await canUseBiometric();
+          if (biometricAvailable) {
+            const success = await authenticateWithBiometric('Authorize Action');
+            if (success) {
+              pendingPinRef.current = null;
+              bridgeRef.current.sendPinResponse(approvalId, BRIDGE_PIN);
+              return;
+            }
           }
+        } catch (err) {
+          console.warn("Biometric auth error, falling back to keypad:", err);
         }
-        setShowKeypad(true);
+        if (pendingPinRef.current?.approvalId === approvalId) {
+          setShowKeypad(true);
+        }
       },
       onPinResolved: () => {
-        setShowKeypad(false);
         pendingPinRef.current = null;
+        setShowKeypad(false);
+      },
+      onConnected: async () => {
+        if (cancelled) return;
+        try {
+          const approvals = await fetchPendingApprovals();
+          if (approvals.length === 0 || pendingPinRef.current) return;
+          const approval = approvals[0];
+          pendingPinRef.current = { approvalId: approval.id, restResolve: true };
+          try {
+            const biometricAvailable = await canUseBiometric();
+            if (biometricAvailable) {
+              const success = await authenticateWithBiometric('Authorize Action');
+              if (success) {
+                pendingPinRef.current = null;
+                resolveApproval(approval.id, true, BRIDGE_PIN).catch(() => {});
+                return;
+              }
+            }
+          } catch (err) {
+            console.warn("Biometric auth error, falling back to keypad:", err);
+          }
+          if (pendingPinRef.current?.approvalId === approval.id) {
+            setShowKeypad(true);
+          }
+        } catch (err) {
+          console.warn("[chat] Failed to fetch pending approvals:", err);
+        }
       },
       onShowCamera: () => {},
       onHideCamera: () => {},
@@ -143,7 +179,11 @@ export default function ChatScreen() {
     const pending = pendingPinRef.current;
     if (!pending) return;
     pendingPinRef.current = null;
-    bridgeRef.current.sendPinResponse(pending.approvalId, pin);
+    if (pending.restResolve) {
+      resolveApproval(pending.approvalId, true, pin).catch(() => {});
+    } else {
+      bridgeRef.current.sendPinResponse(pending.approvalId, pin);
+    }
   }, []);
 
   const handleKeypadCancel = useCallback(() => {

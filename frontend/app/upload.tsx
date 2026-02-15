@@ -72,6 +72,7 @@ export default function UploadScreen() {
       onHideCamera: noop,
       onShowContent: noop,
       onHideContent: noop,
+      onConnected: noop,
       onListeningReady: noop,
       onError: (msg) => setError(msg),
     };
