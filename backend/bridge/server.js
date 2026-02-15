@@ -111,6 +111,14 @@ async function routeDirective(directive, type) {
     await orchestrator.handleResponse(directive, response);
   } catch (err) {
     log.directive.error(`Orchestrator routing failed for ${directive.id}: ${err.message} — falling back to direct spawn`);
+    // Log the failure to directive activity for audit
+    const directives = getDirectives();
+    const d = directives.find(x => x.id === directive.id);
+    if (d) {
+      if (!Array.isArray(d.activity_log)) d.activity_log = [];
+      d.activity_log.push({ timestamp: Date.now(), type: "orchestrator_error", message: `Orchestrator failed: ${err.message.slice(0, 200)} — fell back to direct ${type} spawn` });
+      saveDirectives(directives, d, null);
+    }
     if (type === "planning") spawnPlanningAgent(directive);
     else spawnImplementationAgent(directive);
   }
@@ -1532,6 +1540,30 @@ async function handleRequest(req, res) {
     directive.updatedAt = Date.now();
     saveDirectives(directives, directive, null);
     sendJSON(res, 200, { ok: true, entry });
+    return;
+  }
+
+  // POST /directives/:id/activity — Append to activity log (used by orchestrator, agents)
+  const directiveActivityMatch = pathname.match(/^\/directives\/([^/]+)\/activity$/);
+  if (req.method === "POST" && directiveActivityMatch) {
+    const id = directiveActivityMatch[1];
+    const data = await parseBody(req);
+    if (!data.type || !data.message) {
+      sendJSON(res, 400, { error: "type and message required" });
+      return;
+    }
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+    const entry = { timestamp: data.timestamp || Date.now(), type: data.type, message: data.message };
+    directive.activity_log.push(entry);
+    directive.lastActivity = entry.timestamp;
+    saveDirectives(directives, directive, null);
+    sendJSON(res, 200, { ok: true });
     return;
   }
 

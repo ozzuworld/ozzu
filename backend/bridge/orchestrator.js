@@ -209,7 +209,7 @@ async function createSession() {
     "--session-id", id,
     "--model", "opus",
     "--output-format", "json",
-    "--allowedTools", "Read Grep Glob Bash WebSearch WebFetch",
+    "--allowedTools", "Read Grep Glob WebSearch WebFetch",
     "--system-prompt", SYSTEM_PROMPT,
     "-p", bootstrapMsg,
   ];
@@ -285,7 +285,7 @@ async function rotateSession() {
     "--session-id", id,
     "--model", "opus",
     "--output-format", "json",
-    "--allowedTools", "Read Grep Glob Bash WebSearch WebFetch",
+    "--allowedTools", "Read Grep Glob WebSearch WebFetch",
     "--system-prompt", SYSTEM_PROMPT,
     "-p", bootstrapMessage,
   ];
@@ -447,6 +447,24 @@ async function sendMessage(message) {
   });
 }
 
+// Log orchestrator decision to directive's activity_log for audit trail
+function logDecision(directiveId, action, reasoning, extra) {
+  const http = require("http");
+  const entry = {
+    timestamp: Date.now(),
+    type: "orchestrator_decision",
+    message: `Orchestrator: ${action}${extra ? ` (${extra})` : ""} — ${(reasoning || "").slice(0, 200)}`,
+  };
+  const payload = JSON.stringify(entry);
+  const req = http.request(
+    `http://localhost:3333/directives/${directiveId}/activity`,
+    { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+  );
+  req.on("error", () => {}); // fire-and-forget
+  req.write(payload);
+  req.end();
+}
+
 async function handleResponse(directive, response) {
   const { spawnPlanningAgent, spawnImplementationAgent, spawnWorkerWithPrompt } = require("./agent-spawner");
 
@@ -455,10 +473,11 @@ async function handleResponse(directive, response) {
       const workerType = response.worker_type || "implementation";
       if (response.worker_prompt) {
         log(`Orchestrator dispatching ${workerType} worker for "${directive.title}" with custom prompt`);
+        logDecision(directive.id, "spawn_worker", response.reasoning, `${workerType}, custom prompt`);
         spawnWorkerWithPrompt(directive, workerType, response.worker_prompt);
       } else {
-        // No custom prompt — fall back to standard spawn
         log(`Orchestrator dispatching ${workerType} worker for "${directive.title}" (no custom prompt)`);
+        logDecision(directive.id, "spawn_worker", response.reasoning, `${workerType}, generic prompt`);
         if (workerType === "planning") spawnPlanningAgent(directive);
         else spawnImplementationAgent(directive);
       }
@@ -467,20 +486,32 @@ async function handleResponse(directive, response) {
 
     case "handle_directly": {
       log(`Orchestrator returned handle_directly for "${directive.title}": ${response.reasoning}`);
-      // Safety net: if directive needs code work, orchestrator can't handle it — spawn a worker
       const isStatusQuery = /status|info|query|check|what.*running/i.test(directive.title);
       if (!isStatusQuery) {
         log(`handle_directly used for non-status directive — falling back to worker spawn`);
+        logDecision(directive.id, "handle_directly→fallback", response.reasoning, "safety net: non-status directive forced worker spawn");
         const type = directive.status === "approved" ? "implementation" : "planning";
         if (type === "planning") spawnPlanningAgent(directive);
         else spawnImplementationAgent(directive);
+      } else {
+        logDecision(directive.id, "handle_directly", response.reasoning);
       }
       break;
     }
 
+    case "merge_approved": {
+      logDecision(directive.id, "merge_approved", response.merge_feedback || response.reasoning);
+      break;
+    }
+
+    case "needs_changes": {
+      logDecision(directive.id, "needs_changes", response.merge_feedback || response.reasoning);
+      break;
+    }
+
     default: {
-      // Unknown action — fall back to standard spawn
       log(`Orchestrator returned unknown action "${response.action}" — falling back to standard spawn`);
+      logDecision(directive.id, `unknown:${response.action}→fallback`, response.reasoning, "unrecognized action, spawned worker");
       const type = directive.status === "approved" ? "implementation" : "planning";
       if (type === "planning") spawnPlanningAgent(directive);
       else spawnImplementationAgent(directive);
