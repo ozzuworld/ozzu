@@ -18,11 +18,12 @@ RESTART=false
 
 echo "=== OTA Deploy ==="
 
-# Export JS bundles for both platforms
+# Export JS bundles for both platforms (export separately to avoid web bundler failure)
 echo "[1/3] Exporting JS bundles (Android + iOS)..."
 cd "$FRONTEND"
 rm -rf /tmp/ota-export
-npx expo export --platform all --output-dir /tmp/ota-export 2>&1 | tail -5
+npx expo export --platform android --output-dir /tmp/ota-export 2>&1 | tail -5
+npx expo export --platform ios --output-dir /tmp/ota-export 2>&1 | tail -5
 
 # Verify export produced a valid bundle (check Android — both platforms share metadata.json)
 METADATA="/tmp/ota-export/metadata.json"
