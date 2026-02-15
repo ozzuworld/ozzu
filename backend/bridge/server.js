@@ -120,8 +120,8 @@ async function routeDirective(directive, type) {
     const d = directives.find(x => x.id === directive.id);
     if (d) {
       if (!Array.isArray(d.activity_log)) d.activity_log = [];
-      d.activity_log.push({ timestamp: Date.now(), type: "orchestrator_error", message: `Orchestrator failed: ${err.message.slice(0, 200)} — fell back to direct ${type} spawn` });
-      saveDirectives(directives, d, null);
+      d.activity_log.push({ timestamp: Date.now(), type: "orchestrator_error", actor: "system", message: `Orchestrator failed: ${err.message.slice(0, 200)} — fell back to direct ${type} spawn` });
+      saveDirectives(directives, d, null, "system");
     }
     if (type === "planning") spawnPlanningAgent(directive);
     else spawnImplementationAgent(directive);
@@ -435,7 +435,7 @@ function findSimilarDirective(title) {
   }
   return null;
 }
-function saveDirectives(directives, changedDirective = null, oldStatus = null) {
+function saveDirectives(directives, changedDirective = null, oldStatus = null, actor = "system") {
   _directives = directives;
   writeJSON(DIRECTIVES_FILE, directives);
   if (_redisConnected) redis.set("ozzu:directives", JSON.stringify(directives)).catch(err =>
@@ -445,7 +445,7 @@ function saveDirectives(directives, changedDirective = null, oldStatus = null) {
     db.saveDirective(changedDirective).catch(err =>
       log.pg.error("save directive failed:", err.message));
     if (oldStatus !== null && oldStatus !== changedDirective.status) {
-      db.addDirectiveHistory(changedDirective.id, oldStatus, changedDirective.status, "system").catch(err =>
+      db.addDirectiveHistory(changedDirective.id, oldStatus, changedDirective.status, actor).catch(err =>
         log.pg.error("save directive history failed:", err.message));
     }
   }
@@ -892,11 +892,12 @@ async function handleRequest(req, res) {
         directive.activity_log.push({
           timestamp: Date.now(),
           type: "agent_status",
+          actor: "Cipher",
           message: data.message || data.event || "status update",
         });
         directive.lastActivity = Date.now();
         directive.updatedAt = Date.now();
-        saveDirectives(directives, directive, null);
+        saveDirectives(directives, directive, null, "Cipher");
       }
     }
 
@@ -1134,7 +1135,8 @@ async function handleRequest(req, res) {
       failureReason: null,
       priority,
       dependsOn: dependsOn.length > 0 ? dependsOn : null,
-      activity_log: [{ timestamp: Date.now(), type: "status_change", message: "Directive created with status: pending" }],
+      createdBy: "King Kazuma",
+      activity_log: [{ timestamp: Date.now(), type: "status_change", actor: "King Kazuma", message: "Directive created with status: pending" }],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -1160,7 +1162,7 @@ async function handleRequest(req, res) {
       if (evictIdx === -1) break; // all active — allow overflow rather than lose work
       directives.splice(evictIdx, 1);
     }
-    saveDirectives(directives, directive, null);
+    saveDirectives(directives, directive, null, "King Kazuma");
     _directiveCreationTimestamps.push(Date.now());
 
     // Spawn planning agent for quick directives (already in planning status)
@@ -1367,12 +1369,15 @@ async function handleRequest(req, res) {
     directive.updatedAt = Date.now();
     directive.lastActivity = Date.now(); // Track when agent last touched this directive
 
+    // Determine actor: request body can specify, otherwise infer from context
+    const patchActor = data.actor || "Cipher";
+
     // Initialize activity_log if missing (for older directives)
     if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
 
     // Auto-log status changes
     if (data.status && data.status !== prevStatus) {
-      directive.activity_log.push({ timestamp: Date.now(), type: "status_change", message: `Status changed from ${prevStatus} to ${data.status}` });
+      directive.activity_log.push({ timestamp: Date.now(), type: "status_change", actor: patchActor, message: `Status changed from ${prevStatus} to ${data.status}` });
     }
 
     // Track execution timing
@@ -1482,7 +1487,7 @@ async function handleRequest(req, res) {
       });
     }
 
-    saveDirectives(directives, directive, prevStatus);
+    saveDirectives(directives, directive, prevStatus, patchActor);
 
     // ── Dependency resolution ──
     // When a directive completes, unblock any pending directives that depended on it
@@ -1505,7 +1510,7 @@ async function handleRequest(req, res) {
         }
       }
       if (unblockedDirectives.length > 0) {
-        saveDirectives(directives, null, null);
+        saveDirectives(directives, null, null, "system");
       }
     }
 
@@ -1546,11 +1551,59 @@ async function handleRequest(req, res) {
       return;
     }
     if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
-    const entry = { timestamp: Date.now(), type: "comment", message: data.message.trim() };
+    const entry = { timestamp: Date.now(), type: "comment", actor: "King Kazuma", message: data.message.trim() };
     directive.activity_log.push(entry);
     directive.updatedAt = Date.now();
-    saveDirectives(directives, directive, null);
+    saveDirectives(directives, directive, null, "King Kazuma");
     sendJSON(res, 200, { ok: true, entry });
+    return;
+  }
+
+  // GET /directives/:id/history — Merged audit trail (activity_log + PG directive_history)
+  const directiveHistoryMatch = pathname.match(/^\/directives\/([^/]+)\/history$/);
+  if (req.method === "GET" && directiveHistoryMatch) {
+    const id = directiveHistoryMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    // Merge in-memory activity_log with PG directive_history
+    const actLog = Array.isArray(directive.activity_log) ? directive.activity_log : [];
+    const timeline = actLog.map(e => ({
+      timestamp: e.timestamp,
+      type: e.type,
+      actor: e.actor || null,
+      message: e.message,
+      source: "activity_log",
+    }));
+    // Fetch PG history
+    try {
+      const pgHistory = await db.getDirectiveHistory(id);
+      for (const h of pgHistory) {
+        // Avoid duplicating status_change events already in activity_log
+        const pgTs = new Date(h.changed_at).getTime();
+        const isDuplicate = timeline.some(t =>
+          t.type === "status_change" && Math.abs(t.timestamp - pgTs) < 2000 &&
+          t.message.includes(h.new_status)
+        );
+        if (!isDuplicate) {
+          timeline.push({
+            timestamp: pgTs,
+            type: "status_change",
+            actor: h.changed_by || null,
+            message: `${h.old_status || "new"} → ${h.new_status}${h.notes ? ` (${h.notes})` : ""}`,
+            source: "pg_history",
+          });
+        }
+      }
+    } catch (err) {
+      log.pg.error("getDirectiveHistory failed:", err.message);
+    }
+    // Sort by timestamp descending (newest first)
+    timeline.sort((a, b) => b.timestamp - a.timestamp);
+    sendJSON(res, 200, { directive_id: id, createdBy: directive.createdBy || null, timeline });
     return;
   }
 
@@ -1570,10 +1623,10 @@ async function handleRequest(req, res) {
       return;
     }
     if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
-    const entry = { timestamp: data.timestamp || Date.now(), type: data.type, message: data.message };
+    const entry = { timestamp: data.timestamp || Date.now(), type: data.type, actor: data.actor || "Cipher", message: data.message };
     directive.activity_log.push(entry);
     directive.lastActivity = entry.timestamp;
-    saveDirectives(directives, directive, null);
+    saveDirectives(directives, directive, null, data.actor || "Cipher");
     sendJSON(res, 200, { ok: true });
     return;
   }
@@ -1597,8 +1650,8 @@ async function handleRequest(req, res) {
       directive.failureReason = null;
       directive.updatedAt = Date.now();
       if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
-      directive.activity_log.push({ timestamp: Date.now(), type: "unblocked", message: `Unblocked by King Kazuma — retrying implementation` });
-      saveDirectives(directives, directive, prevStatus);
+      directive.activity_log.push({ timestamp: Date.now(), type: "unblocked", actor: "King Kazuma", message: `Unblocked by King Kazuma — retrying implementation` });
+      saveDirectives(directives, directive, prevStatus, "King Kazuma");
       routeDirective(directive, "implementation");
       sendJSON(res, 200, { ok: true, directive, message: "Directive unblocked and moved to approved for retry" });
       return;
@@ -1616,7 +1669,7 @@ async function handleRequest(req, res) {
     directive.dependsOn = null;
     directive.status = "planning";
     directive.updatedAt = Date.now();
-    saveDirectives(directives, directive, "pending");
+    saveDirectives(directives, directive, "pending", "King Kazuma");
     routeDirective(directive, "planning");
     sendJSON(res, 200, { ok: true, directive, message: "Directive unblocked and moved to planning" });
     return;
@@ -1643,7 +1696,9 @@ async function handleRequest(req, res) {
     const prevStatus = directive.status;
     directive.status = "cancelled";
     directive.updatedAt = Date.now();
-    saveDirectives(directives, directive, prevStatus);
+    if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+    directive.activity_log.push({ timestamp: Date.now(), type: "cancelled", actor: "King Kazuma", message: `Cancelled from dashboard (was ${prevStatus})` });
+    saveDirectives(directives, directive, prevStatus, "King Kazuma");
     log.bridge.info(`Directive cancelled: ${id} "${directive.title}" (was ${prevStatus}, agent killed: ${agentKilled})`);
     sendJSON(res, 200, { ok: true, directive, agentKilled });
     return;
@@ -1675,7 +1730,9 @@ async function handleRequest(req, res) {
     directive.retryCount = (directive.retryCount || 0) + 1;
     directive.failureReason = null;
     directive.updatedAt = Date.now();
-    saveDirectives(directives, directive, prevStatus);
+    if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+    directive.activity_log.push({ timestamp: Date.now(), type: "retry", actor: "King Kazuma", message: `Retried from dashboard (was ${prevStatus}, retry #${directive.retryCount})` });
+    saveDirectives(directives, directive, prevStatus, "King Kazuma");
     log.bridge.info(`Directive retried: ${id} "${directive.title}" (${prevStatus} → approved, retry #${directive.retryCount})`);
     sendJSON(res, 200, { ok: true, directive });
     return;
@@ -1740,7 +1797,9 @@ async function handleRequest(req, res) {
         const prevStatus = directive.status;
         directive.status = "cancelled";
         directive.updatedAt = Date.now();
-        saveDirectives(directives, directive, prevStatus);
+        if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+        directive.activity_log.push({ timestamp: Date.now(), type: "cancelled", actor: "King Kazuma", message: `Bulk cancelled from dashboard (was ${prevStatus})` });
+        saveDirectives(directives, directive, prevStatus, "King Kazuma");
         log.bridge.info(`Bulk cancel: ${id} "${directive.title}" (was ${prevStatus}, agent killed: ${agentKilled})`);
         succeeded.push(id);
       } else if (data.action === "retry") {
@@ -1759,7 +1818,9 @@ async function handleRequest(req, res) {
         directive.retryCount = (directive.retryCount || 0) + 1;
         directive.failureReason = null;
         directive.updatedAt = Date.now();
-        saveDirectives(directives, directive, prevStatus);
+        if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+        directive.activity_log.push({ timestamp: Date.now(), type: "retry", actor: "King Kazuma", message: `Bulk retried from dashboard (was ${prevStatus}, retry #${directive.retryCount})` });
+        saveDirectives(directives, directive, prevStatus, "King Kazuma");
         log.bridge.info(`Bulk retry: ${id} "${directive.title}" (${prevStatus} → approved, retry #${directive.retryCount})`);
         succeeded.push(id);
       } else if (data.action === "delete") {
@@ -2058,15 +2119,8 @@ async function handleRequest(req, res) {
       const lastCommentHtml = lastComment
         ? `<div style="font-size:11px;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;" title="${escapeHtml(lastComment.message)}">${escapeHtml(lastComment.message)}</div>`
         : "";
-      const logEntries = actLog.map(e => {
-        const icon = e.type === "status_change" ? "&#9656;" : e.type === "comment" ? "&#9998;" : "&#9670;";
-        const typeColor = e.type === "status_change" ? "#3b82f6" : e.type === "comment" ? "#10b981" : "#f59e0b";
-        return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid #1e293b;">` +
-          `<span style="color:${typeColor};font-size:12px;flex-shrink:0;">${icon}</span>` +
-          `<span style="color:#64748b;font-size:11px;flex-shrink:0;" data-ts="${e.timestamp}">${e.timestamp}</span>` +
-          `<span style="color:#94a3b8;font-size:11px;background:${typeColor}22;padding:1px 6px;border-radius:3px;flex-shrink:0;">${escapeHtml(e.type)}</span>` +
-          `<span style="font-size:12px;color:#e2e8f0;">${escapeHtml(e.message)}</span></div>`;
-      }).join("");
+      const createdByBadge = d.createdBy ? `<span class="actor-badge actor-${(d.createdBy || "").toLowerCase().replace(/\s/g, "-")}">${escapeHtml(d.createdBy)}</span>` : "";
+      const logEntries = ""; // rendered client-side via fetch
       return `<tr class="directive-row" data-status="${escapeHtml(d.status)}" data-title="${escapeHtml((d.title || d.id).toLowerCase())}" data-id="${escapeHtml(d.id)}">
         <td><input type="checkbox" class="directive-check" value="${escapeHtml(d.id)}" onchange="updateBulkBar()"></td>
         <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
@@ -2082,13 +2136,18 @@ async function handleRequest(req, res) {
       <tr class="activity-log-row" id="log-${escapeHtml(d.id)}" style="display:none;" data-parent-status="${escapeHtml(d.status)}" data-parent-title="${escapeHtml((d.title || d.id).toLowerCase())}">
         <td colspan="10" style="padding:8px 16px;background:#0f172a;border-bottom:2px solid #334155;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <strong style="font-size:13px;color:#94a3b8;">Activity Log (${actLog.length} entries)</strong>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <strong style="font-size:13px;color:#94a3b8;">Audit Trail</strong>
+              ${createdByBadge ? '<span style="font-size:11px;color:#64748b;">Created by</span> ' + createdByBadge : ""}
+            </div>
             <div style="display:flex;gap:6px;align-items:center;">
               <input type="text" id="comment-input-${escapeHtml(d.id)}" placeholder="Add a comment..." style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:4px;padding:4px 8px;font-size:12px;font-family:inherit;width:220px;" onkeydown="if(event.key==='Enter'){addComment('${escapeHtml(escapeJsString(d.id))}');}">
               <button onclick="addComment('${escapeHtml(escapeJsString(d.id))}')" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit;">Add</button>
             </div>
           </div>
-          <div style="max-height:200px;overflow-y:auto;">${logEntries || '<span style="color:#475569;font-style:italic;">No activity yet.</span>'}</div>
+          <div id="timeline-${escapeHtml(d.id)}" style="max-height:300px;overflow-y:auto;border-left:2px solid #334155;margin-left:4px;padding-left:12px;">
+            <span style="color:#475569;font-style:italic;">Loading audit trail...</span>
+          </div>
         </td>
       </tr>`;
     }).join("");
@@ -2182,6 +2241,20 @@ async function handleRequest(req, res) {
   .filter-pill { background: #334155; color: #94a3b8; border: 1px solid #475569; border-radius: 16px; padding: 4px 12px; font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.15s; }
   .filter-pill:hover { background: #475569; color: #e2e8f0; }
   .filter-pill.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+  .actor-badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; letter-spacing: 0.5px; white-space: nowrap; }
+  .actor-king-kazuma { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed44; }
+  .actor-june { background: #06b6d422; color: #67e8f9; border: 1px solid #06b6d444; }
+  .actor-cipher { background: #10b98122; color: #6ee7b7; border: 1px solid #10b98144; }
+  .actor-system { background: #6b728022; color: #9ca3af; border: 1px solid #6b728044; }
+  .timeline-entry { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid #1e293b; position: relative; }
+  .timeline-entry::before { content: ""; position: absolute; left: -16px; top: 10px; width: 8px; height: 8px; border-radius: 50%; background: #334155; border: 1px solid #475569; }
+  .timeline-entry.type-status_change::before { background: #3b82f6; border-color: #60a5fa; }
+  .timeline-entry.type-comment::before { background: #10b981; border-color: #34d399; }
+  .timeline-entry.type-cancelled::before { background: #ef4444; border-color: #f87171; }
+  .timeline-entry.type-retry::before { background: #f59e0b; border-color: #fbbf24; }
+  .timeline-entry.type-unblocked::before { background: #8b5cf6; border-color: #a78bfa; }
+  .timeline-entry.type-pm_note::before { background: #06b6d4; border-color: #22d3ee; }
+  .timeline-entry.type-pm_update::before { background: #06b6d4; border-color: #22d3ee; }
   .load-more-wrap { text-align: center; padding: 12px 0; }
   .load-more-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-family: inherit; cursor: pointer; transition: background 0.2s; }
   .load-more-btn:hover { background: #475569; }
@@ -2497,16 +2570,59 @@ function retryDirective(id) {
     .catch(function(err) { alert("Network error: " + err.message); });
 }
 
-// Toggle activity log panel
+// Toggle activity log panel — fetches merged audit trail from API
 function toggleActivityLog(id) {
   var row = document.getElementById("log-" + id);
   if (!row) return;
-  row.style.display = row.style.display === "none" ? "table-row" : "none";
-  // Convert timestamps inside the log panel
-  row.querySelectorAll("[data-ts]").forEach(function(el) {
-    var ts = el.getAttribute("data-ts");
-    if (ts) { el.textContent = timeAgo(ts); el.title = ts; }
-  });
+  var isHidden = row.style.display === "none";
+  row.style.display = isHidden ? "table-row" : "none";
+  if (!isHidden) return; // closing — nothing to do
+
+  var container = document.getElementById("timeline-" + id);
+  if (!container) return;
+  container.innerHTML = '<span style="color:#475569;font-style:italic;">Loading audit trail...</span>';
+
+  fetch("/directives/" + id + "/history")
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.timeline || data.timeline.length === 0) {
+        container.innerHTML = '<span style="color:#475569;font-style:italic;">No activity yet.</span>';
+        return;
+      }
+      var actorColors = { "King Kazuma": "king-kazuma", "June": "june", "Cipher": "cipher", "system": "system" };
+      var typeIcons = {
+        status_change: "&#9656;", comment: "&#128172;", cancelled: "&#10005;",
+        retry: "&#8635;", pm_note: "&#128221;", pm_update: "&#128221;",
+        unblocked: "&#128275;", agent_status: "&#9656;", orchestrator_error: "&#9888;"
+      };
+      var html = data.timeline.map(function(e) {
+        var icon = typeIcons[e.type] || "&#9670;";
+        var actorClass = actorColors[e.actor] || "system";
+        var actorBadge = e.actor
+          ? '<span class="actor-badge actor-' + actorClass + '">' + escapeText(e.actor) + '</span>'
+          : '';
+        var sourceTag = e.source === "pg_history"
+          ? ' <span style="font-size:9px;color:#475569;border:1px solid #334155;padding:0 3px;border-radius:2px;">PG</span>'
+          : '';
+        return '<div class="timeline-entry type-' + escapeText(e.type) + '">' +
+          '<span style="color:#64748b;font-size:11px;flex-shrink:0;">' + timeAgo(e.timestamp) + '</span>' +
+          actorBadge +
+          '<span style="font-size:12px;color:#e2e8f0;flex:1;">' + escapeText(e.message) + '</span>' +
+          sourceTag +
+          '</div>';
+      }).join("");
+      container.innerHTML = html;
+    })
+    .catch(function(err) {
+      container.innerHTML = '<span style="color:#ef4444;">Failed to load: ' + err.message + '</span>';
+    });
+}
+
+function escapeText(str) {
+  if (!str) return "";
+  var div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 // Add comment to a directive
@@ -3766,7 +3882,7 @@ function syncDirectiveFromApproval(approvalId, approved) {
     directive.directiveApprovalId = null;
   }
   directive.updatedAt = Date.now();
-  saveDirectives(directives, directive, prevStatus);
+  saveDirectives(directives, directive, prevStatus, "King Kazuma");
   log.directive.info(`${directive.id} → ${directive.status} (approval ${approvalId} ${approved ? "approved" : "denied"})`);
 
   // Auto-spawn implementation agent when directive is approved via PIN
@@ -4274,12 +4390,14 @@ async function handleToolCall(name, args) {
           description, status: ((type === "quick" || type === "explore") && depsResolved) ? "planning" : "pending",
           plan: null, directiveApprovalId: null, priority,
           dependsOn: dependsOn.length > 0 ? dependsOn : null,
+          createdBy: "June",
+          activity_log: [{ timestamp: Date.now(), type: "status_change", actor: "June", message: `Directive created by June with status: ${((type === "quick" || type === "explore") && depsResolved) ? "planning" : "pending"}` }],
           createdAt: Date.now(), updatedAt: Date.now(),
         };
         const directives = getDirectives();
         directives.push(directive);
         while (directives.length > MAX_DIRECTIVES) directives.shift();
-        saveDirectives(directives, directive, null);
+        saveDirectives(directives, directive, null, "June");
         // Auto-spawn planning agent for quick directives
         if (directive.status === "planning") {
           routeDirective(directive, "planning");
@@ -4455,12 +4573,13 @@ async function handleToolCall(name, args) {
         d.lastActivity = Date.now();
         if (!Array.isArray(d.activity_log)) d.activity_log = [];
         if (args.comment) {
-          d.activity_log.push({ timestamp: Date.now(), type: "pm_note", message: `[June] ${args.comment}` });
+          d.activity_log.push({ timestamp: Date.now(), type: "pm_note", actor: "June", message: `[June] ${args.comment}` });
           changes.push("comment added");
         }
         if (changes.length > 0) {
-          d.activity_log.push({ timestamp: Date.now(), type: "pm_update", message: `June updated: ${changes.join(", ")}` });
+          d.activity_log.push({ timestamp: Date.now(), type: "pm_update", actor: "June", message: `June updated: ${changes.join(", ")}` });
         }
+        saveDirectives(directives, d, null, "June");
         return { success: true, message: `Directive ${args.directive_id} updated: ${changes.join(", ") || "no changes"}` };
       }
 
@@ -4475,8 +4594,8 @@ async function handleToolCall(name, args) {
         d.failureReason = null;
         d.updatedAt = Date.now();
         if (!Array.isArray(d.activity_log)) d.activity_log = [];
-        d.activity_log.push({ timestamp: Date.now(), type: "unblocked", message: `Unblocked by King Kazuma (was: ${prevReason})` });
-        saveDirectives(directives, d, "blocked");
+        d.activity_log.push({ timestamp: Date.now(), type: "unblocked", actor: "June", message: `Unblocked via June (was: ${prevReason})` });
+        saveDirectives(directives, d, "blocked", "June");
         routeDirective(d, "implementation");
         return { success: true, message: `Directive ${args.directive_id} unblocked and retrying. Was blocked because: ${prevReason}` };
       }
@@ -4490,12 +4609,14 @@ async function handleToolCall(name, args) {
         // Kill agent if running
         const { killAgent } = require("./agent-spawner");
         killAgent(args.directive_id);
+        const prevCancelStatus = d.status;
         d.status = "completed";
         d.failureReason = `cancelled: ${reason}`;
         d.completedAt = Date.now();
         d.updatedAt = Date.now();
         if (!Array.isArray(d.activity_log)) d.activity_log = [];
-        d.activity_log.push({ timestamp: Date.now(), type: "cancelled", message: `Cancelled by June: ${reason}` });
+        d.activity_log.push({ timestamp: Date.now(), type: "cancelled", actor: "June", message: `Cancelled by June: ${reason}` });
+        saveDirectives(directives, d, prevCancelStatus, "June");
         return { success: true, message: `Directive ${args.directive_id} cancelled: ${reason}` };
       }
     } catch (err) {

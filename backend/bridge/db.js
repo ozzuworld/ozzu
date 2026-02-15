@@ -188,6 +188,16 @@ async function addDirectiveHistory(directiveId, oldStatus, newStatus, changedBy,
   );
 }
 
+async function getDirectiveHistory(directiveId) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT old_status, new_status, changed_by, changed_at, notes
+     FROM directive_history WHERE directive_id = $1 ORDER BY changed_at ASC`,
+    [directiveId]
+  );
+  return res.rows;
+}
+
 async function getDirectives(statusFilter = null) {
   if (!_pgConnected) return null;
   let res;
@@ -504,6 +514,7 @@ module.exports = {
   // Directives
   saveDirective,
   addDirectiveHistory,
+  getDirectiveHistory,
   getDirectives,
   // Approvals
   saveApproval,
