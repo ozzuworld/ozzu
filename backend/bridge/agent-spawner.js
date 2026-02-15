@@ -1113,10 +1113,11 @@ function smartDeploy(directive) {
   }
 
   // Bridge restart — do this LAST (kills this process, Docker auto-restarts)
+  // IMPORTANT: Must wait long enough for OTA deploy to complete (expo export can take 60s+)
   if (bridgeChanged) {
-    const restartDelay = native.any ? 5000 : 3000; // Wait for deploy to start first
-    log(`Bridge code changed — scheduling restart in ${restartDelay}ms`);
-    notify("Server code changed — restarting in a sec.");
+    const restartDelay = native.any ? 10000 : 90000; // 90s for OTA (export+copy+restart), 10s for native (CI runs async)
+    log(`Bridge code changed — scheduling restart in ${restartDelay / 1000}s (waiting for deploys to finish)`);
+    notify("Server code changed too — will restart after the update finishes.");
     setTimeout(() => {
       log("Triggering bridge restart via POST /restart");
       const payload = JSON.stringify({});
