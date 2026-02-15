@@ -130,6 +130,8 @@ export default function LandingScreen() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const isMutedRef = useRef(false);
   const spotifyEntity = useEntity("media_player.spotify_king_kazuma");
 
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
@@ -167,7 +169,9 @@ export default function LandingScreen() {
         }
       },
       onAudioChunk: (pcm) => {
-        playerRef.current.addChunk(pcm);
+        if (!isMutedRef.current) {
+          playerRef.current.addChunk(pcm);
+        }
       },
       onTranscript: (text) => {
         setResponseText((prev) => prev + text);
@@ -297,6 +301,17 @@ export default function LandingScreen() {
     pendingPinRef.current = null;
   }, []);
 
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      isMutedRef.current = next;
+      if (next) {
+        playerRef.current.flush();
+      }
+      return next;
+    });
+  }, []);
+
   return (
     <View style={{ flex: 1, backgroundColor: "#000000" }}>
       {/* ── HUD decorations (below Lottie layer) ── */}
@@ -413,16 +428,32 @@ export default function LandingScreen() {
         }
       />
 
-      {/* Floating music button */}
-      {spotifyEntity && spotifyEntity.state !== "unavailable" && (
-        <View
+      {/* Floating bottom-right buttons */}
+      <View
+        style={{
+          position: "absolute",
+          bottom: Math.max(24, insets.bottom + 8),
+          right: Math.max(24, insets.right + 8),
+          zIndex: 90,
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        {/* Mute button */}
+        <TVPressable
+          rarity="legendary"
+          onPress={toggleMute}
           style={{
-            position: "absolute",
-            bottom: Math.max(24, insets.bottom + 8),
-            right: Math.max(24, insets.right + 8),
-            zIndex: 90,
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            opacity: isMuted ? 0.5 : 1,
           }}
         >
+          <Text style={{ fontSize: 20 }}>{isMuted ? "🔇" : "🔊"}</Text>
+        </TVPressable>
+
+        {/* Music button */}
+        {spotifyEntity && spotifyEntity.state !== "unavailable" && (
           <TVPressable
             rarity="legendary"
             onPress={() => router.push("/music")}
@@ -430,8 +461,8 @@ export default function LandingScreen() {
           >
             <Text style={{ fontSize: 20 }}>🎵</Text>
           </TVPressable>
-        </View>
-      )}
+        )}
+      </View>
 
       <Keypad
         visible={showKeypad}
