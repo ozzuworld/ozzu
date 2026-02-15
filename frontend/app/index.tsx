@@ -249,55 +249,54 @@ export default function LandingScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000000" }}>
-      {/* ── Subtle background depth ── */}
-      {/* Center glow */}
-      <View
-        pointerEvents="none"
-        style={{
-          position: "absolute",
-          top: "30%",
-          left: "25%",
-          width: "50%",
-          height: "40%",
-          borderRadius: 9999,
-          backgroundColor: "rgba(6,182,212,0.03)",
-        }}
-      />
-      {/* Vignette corners — top-left */}
-      <View
-        pointerEvents="none"
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "40%",
-          height: "30%",
-          backgroundColor: "rgba(0,0,0,0.15)",
-          borderBottomRightRadius: 9999,
-        }}
-      />
-      {/* Vignette corners — bottom-right */}
-      <View
-        pointerEvents="none"
-        style={{
-          position: "absolute",
-          bottom: 0,
-          right: 0,
-          width: "40%",
-          height: "30%",
-          backgroundColor: "rgba(0,0,0,0.15)",
-          borderTopLeftRadius: 9999,
-        }}
-      />
+      {/* ── HUD decorations (below Lottie layer) ── */}
+      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 }}>
+        {/* Center glow */}
+        <View
+          style={{
+            position: "absolute",
+            top: "30%",
+            left: "25%",
+            width: "50%",
+            height: "40%",
+            borderRadius: 9999,
+            backgroundColor: "rgba(6,182,212,0.03)",
+          }}
+        />
+        {/* Vignette corners — top-left */}
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "40%",
+            height: "30%",
+            backgroundColor: "rgba(0,0,0,0.15)",
+            borderBottomRightRadius: 9999,
+          }}
+        />
+        {/* Vignette corners — bottom-right */}
+        <View
+          style={{
+            position: "absolute",
+            bottom: 0,
+            right: 0,
+            width: "40%",
+            height: "30%",
+            backgroundColor: "rgba(0,0,0,0.15)",
+            borderTopLeftRadius: 9999,
+          }}
+        />
 
-      {/* ── HUD corner brackets ── */}
-      <HudCorner top={Math.max(12, insets.top)} left={Math.max(12, insets.left)} />
-      <HudCorner top={Math.max(12, insets.top)} right={Math.max(12, insets.right)} />
-      <HudCorner bottom={Math.max(12, insets.bottom)} left={Math.max(12, insets.left)} />
-      <HudCorner bottom={Math.max(12, insets.bottom)} right={Math.max(12, insets.right)} />
+        {/* ── HUD corner brackets ── */}
+        <HudCorner top={Math.max(12, insets.top)} left={Math.max(12, insets.left)} />
+        <HudCorner top={Math.max(12, insets.top)} right={Math.max(12, insets.right)} />
+        <HudCorner bottom={Math.max(12, insets.bottom)} left={Math.max(12, insets.left)} />
+        <HudCorner bottom={Math.max(12, insets.bottom)} right={Math.max(12, insets.right)} />
 
-      {/* ── Scan line ── */}
-      <ScanLine />
+        {/* ── Scan line ── */}
+        <ScanLine />
+      </View>
 
       {/* Top Bar — hamburger left, status right */}
       <View
@@ -308,21 +307,24 @@ export default function LandingScreen() {
           alignItems: "center",
           justifyContent: "space-between",
           paddingHorizontal: Math.max(20, insets.left, insets.right),
+          backgroundColor: "#000000",
           zIndex: 10,
+          elevation: 10,
         }}
       >
         <HamburgerMenu />
         <StatusBadge />
       </View>
 
-      {/* Center — Lottie talking animation */}
+      {/* Center — Lottie talking animation (above HUD decorations) */}
       <View
         style={{
           flex: 1,
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: "#000000",
-          zIndex: 1,
+          zIndex: 2,
+          elevation: 2,
         }}
       >
         <LottieView
