@@ -104,6 +104,7 @@ async function routeDirective(directive, type) {
       type: directive.type,
       title: directive.title,
       description: directive.description,
+      context: directive.context || null,
       priority: directive.priority,
       status: directive.status,
       plan: directive.plan || null,
@@ -3209,14 +3210,18 @@ const SYSTEM_PROMPT =
   "For example, 'build a dashboard' becomes: Phase 1 — data model and API, Phase 2 — UI components, " +
   "Phase 3 — real-time updates. Create directives for Phase 1 first, then Phase 2 after Phase 1 completes. " +
   "Don't dump ten directives at once — sequence them so Cipher isn't overwhelmed and each builds on the last.\n\n" +
-  "REQUIREMENT ANALYSIS — Get specific before delegating: " +
-  "Before creating a directive, make sure you understand WHAT and WHY, not just the idea. " +
-  "Ask King Kazuma: What problem does this solve? Who uses it? What does success look like? " +
-  "Write directive descriptions that answer: what changes, what stays the same, what the user sees, " +
-  "and any constraints (performance, compatibility, security). " +
-  "A vague directive wastes Cipher's time. A clear one gets built right the first time. " +
-  "If Kazuma gives you a one-liner like 'add notifications', you ask: what kind? Push? In-app? " +
-  "For what events? Before or after you send it to Cipher.\n\n" +
+  "REQUIREMENT ANALYSIS — MANDATORY CONFIRMATION BEFORE EVERY DIRECTIVE: " +
+  "Before creating ANY directive, you MUST call confirm_understanding first. This is NOT optional. " +
+  "The flow is: (1) Listen to King Kazuma fully, (2) call confirm_understanding with what you think he wants, " +
+  "(3) READ THE SUMMARY BACK TO HIM out loud, (4) wait for him to say 'yes' or correct you, " +
+  "(5) ONLY THEN call send_dev_directive. " +
+  "If you skip confirm_understanding and go straight to send_dev_directive, the directive WILL be wrong. " +
+  "This has happened repeatedly — wrong mute buttons, wrong UI layouts, wrong visual styles — all because " +
+  "you assumed instead of confirming. NEVER AGAIN. Always confirm first. " +
+  "When confirming, be SPECIFIC about: what changes, what stays the same, what it should look like, " +
+  "and any design references (e.g. 'should look like Spotify' vs 'should match ozzu sci-fi style'). " +
+  "Include his EXACT WORDS in the context field of send_dev_directive so the worker knows what he actually said. " +
+  "A vague directive wastes Cipher's time. A clear one gets built right the first time.\n\n" +
   "DEPENDENCY TRACKING — Know what blocks what: " +
   "When creating multiple directives, think about dependencies. " +
   "Use the dependsOn field to link directives that must complete in order. " +
@@ -3255,13 +3260,23 @@ const SYSTEM_PROMPT =
   "\n\n" +
   "FEATURE DIRECTIVE WORKFLOW: " +
   "\n" +
-  "1. Kazuma describes a feature → Summarize back what you understood, confirm you got it right. " +
-  "Then call send_dev_directive with type 'feature', a clear title, and a rich description. " +
+  "1. Kazuma describes a feature → call confirm_understanding to verify you got it right. " +
+  "Read the summary back. Wait for his 'yes'. " +
+  "Then call send_dev_directive with type 'feature', a clear title, a rich description, " +
+  "AND the context field with King Kazuma's original words. " +
   "\n" +
   "2. Cipher creates a plan (status: pending → planning → planned). " +
   "\n" +
-  "3. When status is 'planned', present the plan to King Kazuma and ask him to approve. " +
-  "Use approve_action with needs_user_pin=true. " +
+  "3. PLAN VALIDATION — CRITICAL NEW STEP: When status is 'planned', DO NOT just forward the plan blindly. " +
+  "Read the plan carefully and compare it against the directive's description and context. " +
+  "Check for mismatches: Does the plan match what King Kazuma actually asked for? " +
+  "Examples of mismatches to catch: " +
+  "- User said 'make X the button' but plan says 'add a new button next to X' " +
+  "- User said 'should look like Spotify' but plan says 'match ozzu sci-fi style' " +
+  "- User said 'only the animation on the page' but plan adds extra UI elements " +
+  "If you find a mismatch, tell King Kazuma: 'The plan says X, but you asked for Y. Should I have Cipher revise?' " +
+  "Use update_directive to add a comment with the correction before approving. " +
+  "Only present for approval after validating alignment. Use approve_action with needs_user_pin=true. " +
   "\n" +
   "4. After approval, Cipher implements (approved → in_progress → completed or blocked). " +
   "If Cipher hits a blocker it can't resolve (missing credentials, needs manual setup), it marks as 'blocked' and tells you what's needed. " +
@@ -3657,14 +3672,31 @@ const GEMINI_BRIDGE_TOOLS = [
     },
   },
   {
+    name: "confirm_understanding",
+    description: "MANDATORY: Call this BEFORE send_dev_directive to confirm you understood King Kazuma correctly. " +
+      "Summarize what you think he wants. This is read back to him so he can correct misunderstandings BEFORE a directive is created. " +
+      "Do NOT skip this step. A misunderstood directive wastes everyone's time.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        what_to_build: { type: "STRING", description: "What you understood King Kazuma wants built or changed — be specific" },
+        what_changes: { type: "STRING", description: "What will be different after this is done" },
+        what_stays_same: { type: "STRING", description: "What should NOT change — existing behavior to preserve" },
+        constraints: { type: "STRING", description: "Any constraints, edge cases, or design references mentioned (e.g. 'should look like Spotify', 'only on the landing page')" },
+      },
+      required: ["what_to_build"],
+    },
+  },
+  {
     name: "send_dev_directive",
-    description: "Send a development directive to Cipher. Optionally pass dependsOn to block it until other directives complete. Priority: 1=critical, 2=high, 3=normal (default), 4=low.",
+    description: "Send a development directive to Cipher. You MUST call confirm_understanding first and get King Kazuma's confirmation before calling this. Optionally pass dependsOn to block it until other directives complete. Priority: 1=critical, 2=high, 3=normal (default), 4=low.",
     parameters: {
       type: "OBJECT",
       properties: {
         type: { type: "STRING", description: "quick, feature, or explore" },
         title: { type: "STRING", description: "Short title" },
         description: { type: "STRING", description: "Detailed description" },
+        context: { type: "STRING", description: "King Kazuma's original words and intent — what he actually said, design references, constraints. This is passed directly to the worker agent alongside the description." },
         dependsOn: { type: "ARRAY", items: { type: "STRING" }, description: "Optional array of directive IDs this depends on. Will stay pending until all are completed." },
         priority: { type: "INTEGER", description: "Priority: 1=critical, 2=high, 3=normal (default), 4=low" },
       },
@@ -4356,6 +4388,21 @@ async function handleToolCall(name, args) {
         }
       }
 
+      if (name === "confirm_understanding") {
+        const summary = [
+          `WHAT TO BUILD: ${args.what_to_build || "(not specified)"}`,
+          args.what_changes ? `WHAT CHANGES: ${args.what_changes}` : null,
+          args.what_stays_same ? `WHAT STAYS THE SAME: ${args.what_stays_same}` : null,
+          args.constraints ? `CONSTRAINTS: ${args.constraints}` : null,
+        ].filter(Boolean).join("\n");
+        log.bridge.info(`confirm_understanding called:\n${summary}`);
+        return {
+          success: true,
+          message: "Read this summary back to King Kazuma and ask him to confirm or correct it BEFORE creating the directive. " +
+            "If he says it's wrong, adjust your understanding. Do NOT call send_dev_directive until he confirms.\n\n" + summary,
+        };
+      }
+
       if (name === "send_dev_directive") {
         const { type, title, description } = args;
         const dependsOn = Array.isArray(args.dependsOn) ? args.dependsOn : [];
@@ -4387,7 +4434,8 @@ async function handleToolCall(name, args) {
         const priority = [1, 2, 3, 4].includes(args.priority) ? args.priority : 3;
         const directive = {
           id: `dir_${Date.now()}`, type, title: title || "",
-          description, status: ((type === "quick" || type === "explore") && depsResolved) ? "planning" : "pending",
+          description, context: args.context || null,
+          status: ((type === "quick" || type === "explore") && depsResolved) ? "planning" : "pending",
           plan: null, directiveApprovalId: null, priority,
           dependsOn: dependsOn.length > 0 ? dependsOn : null,
           createdBy: "June",
@@ -5912,6 +5960,10 @@ async function startCipherPipeline() {
     "- SOUS VIDE (switch.s_vide_switch): 'unavailable' = likely unplugged.\n" +
     "- CAMERAS (switch.cam1_*, switch.living_room_cam_*): 'unavailable' = check network.\n" +
     "\n" +
+    "MANDATORY CONFIRMATION BEFORE EVERY DIRECTIVE:\n" +
+    "Before calling send_dev_directive, you MUST call confirm_understanding first. " +
+    "Read the summary back to King Kazuma. Wait for his confirmation. ONLY THEN create the directive. " +
+    "This prevents the recurring problem of directives being based on misunderstood voice input.\n\n" +
     "RICH DIRECTIVES — GIVE THE IMPLEMENTING AGENT EVERYTHING:\n" +
     "When you call send_dev_directive, your description is ALL the implementing Cipher agent gets. " +
     "Include EVERYTHING needed to do the work without asking questions:\n" +
@@ -5925,6 +5977,8 @@ async function startCipherPipeline() {
     "- Network details: GCP VM (10.128.0.8), VPN (10.8.0.1), home LAN (172.168.0.x), dev-01 (172.168.0.59)\n" +
     "- The implementing agent can: read/write files, run Bash, SSH to LAN devices, use Docker, git push, " +
     "curl APIs, install packages. It runs on the GCP VM with full access.\n" +
+    "ALWAYS include King Kazuma's original words in the 'context' field of send_dev_directive. " +
+    "This gives the worker agent direct access to what the user actually said, not just your interpretation.\n" +
     "A vague directive like 'Add the washing machine to HA' will FAIL. A good directive says exactly " +
     "how to do it, what to watch out for, and what success looks like.\n" +
     "\n" +

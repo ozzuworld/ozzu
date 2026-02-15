@@ -52,6 +52,7 @@ CREATE TABLE directives (
   type            VARCHAR(20) NOT NULL,
   title           TEXT NOT NULL,
   description     TEXT,
+  context         TEXT,  -- King Kazuma's original words and intent, passed through to worker agents
   status          VARCHAR(20) NOT NULL DEFAULT 'pending',
   plan            TEXT,
   approval_id     VARCHAR(50),

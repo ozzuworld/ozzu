@@ -108,7 +108,7 @@ SYSTEM ARCHITECTURE:
 
 A new ${directive.type} directive:
 - Title: ${directive.title}
-- Description: ${directive.description}
+- Description: ${directive.description}${directive.context ? `\n- User Context (King Kazuma's original words and intent): ${directive.context}` : ""}
 - Directive ID: ${directive.id}
 ${immediateInstructions}
 ${!isImmediate ? `YOUR TASK:
@@ -206,7 +206,7 @@ SYSTEM ARCHITECTURE:
 
 Implement this approved directive:
 - Title: ${directive.title}
-- Directive ID: ${directive.id}
+- Directive ID: ${directive.id}${directive.context ? `\n- User Context (King Kazuma's original words and intent): ${directive.context}` : ""}
 - Approved Plan:
 ${directive.plan || "(no plan — quick directive)"}
 

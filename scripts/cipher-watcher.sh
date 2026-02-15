@@ -236,6 +236,7 @@ print(f'DIR_TYPE={d[\"type\"]}')
         DIR_JSON=$(curl -sf "$BRIDGE/directives/$DIR_ID" 2>/dev/null)
         DIR_TITLE=$(echo "$DIR_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['title'])" 2>/dev/null)
         DIR_DESC=$(echo "$DIR_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['description'])" 2>/dev/null)
+        DIR_CONTEXT=$(echo "$DIR_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('context',''))" 2>/dev/null)
 
         log "Planning directive: $DIR_TITLE ($DIR_ID)"
 
@@ -246,6 +247,12 @@ print(f'DIR_TYPE={d[\"type\"]}')
         curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
           -d "{\"message\":\"Cipher is now planning directive: $DIR_TITLE. I'll let you know when the plan is ready for review.\"}" > /dev/null
 
+        # Build context section if available
+        CONTEXT_SECTION=""
+        if [ -n "$DIR_CONTEXT" ] && [ "$DIR_CONTEXT" != "None" ]; then
+          CONTEXT_SECTION="- User Context (King Kazuma's original words and intent): $DIR_CONTEXT"
+        fi
+
         # Invoke Claude Code to plan
         cd "$WORKDIR"
         claude --allowedTools "Bash Read Write Edit Glob Grep WebFetch WebSearch" -p "You are Cipher, the autonomous dev agent for the ozzu project.
@@ -253,6 +260,7 @@ print(f'DIR_TYPE={d[\"type\"]}')
 A new $DIR_TYPE directive needs planning:
 - Title: $DIR_TITLE
 - Description: $DIR_DESC
+$CONTEXT_SECTION
 - Directive ID: $DIR_ID
 
 Your task:
@@ -290,8 +298,15 @@ print(f'IMPL_ID={d[\"id\"]}')
         IMPL_JSON=$(curl -sf "$BRIDGE/directives/$IMPL_ID" 2>/dev/null)
         IMPL_TITLE=$(echo "$IMPL_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['title'])" 2>/dev/null)
         IMPL_PLAN=$(echo "$IMPL_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('plan',''))" 2>/dev/null)
+        IMPL_CONTEXT=$(echo "$IMPL_JSON" | python3 -c "import sys,json; c=json.load(sys.stdin).get('context',''); print(c if c else '')" 2>/dev/null)
 
         log "Implementing directive: $IMPL_TITLE ($IMPL_ID)"
+
+        # Build context section if available
+        IMPL_CONTEXT_SECTION=""
+        if [ -n "$IMPL_CONTEXT" ] && [ "$IMPL_CONTEXT" != "None" ]; then
+          IMPL_CONTEXT_SECTION="- User Context (King Kazuma's original words and intent): $IMPL_CONTEXT"
+        fi
 
         # Mark as in_progress + notify
         curl -sf -X PATCH "$BRIDGE/directives/$IMPL_ID" \
@@ -307,6 +322,7 @@ print(f'IMPL_ID={d[\"id\"]}')
 Implement this approved directive:
 - Title: $IMPL_TITLE
 - Directive ID: $IMPL_ID
+$IMPL_CONTEXT_SECTION
 - Approved Plan:
 $IMPL_PLAN
 

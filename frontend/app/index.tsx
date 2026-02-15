@@ -386,8 +386,9 @@ export default function LandingScreen() {
         <StatusBadge />
       </View>
 
-      {/* Center — Lottie talking animation (above HUD decorations) */}
-      <View
+      {/* Center — Lottie talking animation (tappable = mute toggle) */}
+      <Pressable
+        onPress={toggleMute}
         style={{
           flex: 1,
           alignItems: "center",
@@ -405,9 +406,22 @@ export default function LandingScreen() {
           style={{
             width: Math.min(screenWidth * 0.85, screenHeight * 0.5, 420),
             height: Math.min(screenWidth * 0.85, screenHeight * 0.5, 420),
+            opacity: isMuted ? 0.4 : 1,
           }}
         />
-      </View>
+        {isMuted && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Ionicons name="volume-mute" size={48} color="rgba(255,255,255,0.6)" />
+          </View>
+        )}
+      </Pressable>
 
       {/* Transcription bubble — bottom-left corner */}
       <TranscriptBubble
@@ -434,55 +448,27 @@ export default function LandingScreen() {
         }
       />
 
-      {/* Floating bottom-right buttons */}
-      <View
-        style={{
-          position: "absolute",
-          bottom: Math.max(24, insets.bottom + 8),
-          right: Math.max(24, insets.right + 8),
-          zIndex: 90,
-          alignItems: "center",
-          gap: 12,
-        }}
-      >
-        {/* Mute button */}
+      {/* Floating bottom-right — music button only */}
+      {spotifyEntity && spotifyEntity.state !== "unavailable" && (
         <Pressable
-          onPress={toggleMute}
+          onPress={() => router.push("/music")}
           style={({ pressed }) => ({
+            position: "absolute",
+            bottom: Math.max(24, insets.bottom + 8),
+            right: Math.max(24, insets.right + 8),
+            zIndex: 90,
             width: 44,
             height: 44,
             borderRadius: 22,
             backgroundColor: "rgba(255,255,255,0.1)",
             alignItems: "center",
             justifyContent: "center",
-            opacity: pressed ? 0.5 : isMuted ? 0.6 : 1,
+            opacity: pressed ? 0.5 : 1,
           })}
         >
-          <Ionicons
-            name={isMuted ? "volume-mute" : "volume-high"}
-            size={22}
-            color="#FFFFFF"
-          />
+          <Ionicons name="musical-notes" size={22} color="#FFFFFF" />
         </Pressable>
-
-        {/* Music button */}
-        {spotifyEntity && spotifyEntity.state !== "unavailable" && (
-          <Pressable
-            onPress={() => router.push("/music")}
-            style={({ pressed }) => ({
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: "rgba(255,255,255,0.1)",
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.5 : 1,
-            })}
-          >
-            <Ionicons name="musical-notes" size={22} color="#FFFFFF" />
-          </Pressable>
-        )}
-      </View>
+      )}
 
       <Keypad
         visible={showKeypad}
