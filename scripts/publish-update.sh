@@ -23,10 +23,10 @@ for arg in "$@"; do
   shift 2>/dev/null || true
 done
 
-echo "Exporting JS bundle..."
+echo "Exporting JS bundles (Android + iOS)..."
 cd "$FRONTEND_DIR"
 rm -rf dist
-npx expo export --platform android --output-dir dist 2>&1 | tail -5
+npx expo export --platform all --output-dir dist 2>&1 | tail -5
 
 if [ ! -f dist/metadata.json ]; then
   echo "FAILED: No metadata.json generated"

@@ -74,18 +74,31 @@ Naming convention: `ozzu-{type}-{location}-{number}`
 ## Dev Workflow — IMPORTANT
 
 - **Bridge server**: runs in Docker (`docker compose restart bridge` to reload code changes)
-- **Frontend deploy** (preferred — builds on GitHub Actions, zero local CPU):
+- **Frontend deploy — Android** (preferred — builds on GitHub Actions, zero local CPU):
   1. Push to `main` → GitHub Actions builds APK automatically (~10 min)
   2. Deploy: `./scripts/deploy.sh` (downloads artifact + installs all devices)
   3. Target specific devices: `./scripts/deploy.sh tab-lroom tv-lroom`
   4. Local build: `./scripts/deploy.sh --local`
+- **Frontend deploy — iOS** (via dev-01 + AltServer):
+  1. Trigger build: `gh workflow run build-ios.yml` (~15 min on macOS runner)
+  2. Deploy: `./scripts/deploy-ios.sh` (downloads IPA, signs + installs via dev-01)
+  3. iPhone must be USB-connected to dev-01 for sideloading
 - **Local build** (only if needed — uses server CPU):
   1. `cd frontend/android && ./gradlew assembleDebug -x lint -x test -PreactNativeArchitectures=armeabi-v7a,arm64-v8a`
   2. `./scripts/deploy.sh --local`
+- **OTA updates** (JS-only changes — both platforms):
+  - `./scripts/ota-deploy.sh --restart` exports bundles for Android + iOS simultaneously
+  - `./scripts/publish-update.sh` also exports both platforms
+  - iOS app picks up OTA updates on next launch (no ADB restart equivalent)
+- **Smart deploy** (cipher-watcher.sh — fully automated):
+  - JS-only changes → OTA update to all devices (both platforms, ~30 seconds)
+  - Native changes → Android APK CI build + iOS IPA CI build triggered in parallel
+  - iOS deploy runs in background alongside Android deploy
 - **Key details**:
   - `debuggableVariants = []` via `plugins/force-bundle-js.js` — JS always embedded, no Metro
   - ABI split: armeabi-v7a + arm64-v8a — APK is ~84MB (down from 165MB)
   - `adb reverse` does NOT work over wireless ADB/VPN — don't waste time on it
+  - iPhone must be on home Wi-Fi (172.168.0.0/24) to reach bridge at `http://10.8.0.1:3333`
 - June talks to Bridge at `http://10.8.0.1:3333` from the devices
 
 ## iOS Sideloading (via dev-01)

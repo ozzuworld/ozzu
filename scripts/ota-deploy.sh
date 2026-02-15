@@ -18,13 +18,13 @@ RESTART=false
 
 echo "=== OTA Deploy ==="
 
-# Export JS bundle
-echo "[1/3] Exporting JS bundle..."
+# Export JS bundles for both platforms
+echo "[1/3] Exporting JS bundles (Android + iOS)..."
 cd "$FRONTEND"
 rm -rf /tmp/ota-export
-npx expo export --platform android --output-dir /tmp/ota-export 2>&1 | tail -5
+npx expo export --platform all --output-dir /tmp/ota-export 2>&1 | tail -5
 
-# Verify export produced a valid bundle
+# Verify export produced a valid bundle (check Android — both platforms share metadata.json)
 METADATA="/tmp/ota-export/metadata.json"
 if [ ! -f "$METADATA" ]; then
   echo "ERROR: Export produced no metadata.json — aborting"
@@ -32,13 +32,22 @@ if [ ! -f "$METADATA" ]; then
 fi
 BUNDLE_REL=$(python3 -c "import json,sys; m=json.load(open('$METADATA')); print(m['fileMetadata']['android']['bundle'])" 2>/dev/null || true)
 if [ -z "$BUNDLE_REL" ] || [ ! -f "/tmp/ota-export/$BUNDLE_REL" ]; then
-  echo "ERROR: Bundle file missing from export — aborting"
+  echo "ERROR: Android bundle file missing from export — aborting"
   exit 1
 fi
 BUNDLE_SIZE=$(stat -c%s "/tmp/ota-export/$BUNDLE_REL" 2>/dev/null || echo 0)
 if [ "$BUNDLE_SIZE" -lt 100000 ]; then
-  echo "ERROR: Bundle too small ($BUNDLE_SIZE bytes), likely corrupt — aborting"
+  echo "ERROR: Android bundle too small ($BUNDLE_SIZE bytes), likely corrupt — aborting"
   exit 1
+fi
+
+# Verify iOS bundle too
+IOS_BUNDLE_REL=$(python3 -c "import json,sys; m=json.load(open('$METADATA')); print(m['fileMetadata']['ios']['bundle'])" 2>/dev/null || true)
+if [ -z "$IOS_BUNDLE_REL" ] || [ ! -f "/tmp/ota-export/$IOS_BUNDLE_REL" ]; then
+  echo "WARNING: iOS bundle not found in export — iOS devices won't get this OTA update"
+else
+  IOS_BUNDLE_SIZE=$(stat -c%s "/tmp/ota-export/$IOS_BUNDLE_REL" 2>/dev/null || echo 0)
+  echo "  iOS bundle: $IOS_BUNDLE_SIZE bytes"
 fi
 
 # Publish to bridge updates directory

@@ -123,10 +123,90 @@ deploy_apk() {
   fi
 }
 
-# Smart deploy: OTA for JS-only, APK for native changes
+# Deploy iOS IPA (triggered separately from Android since it's a manual workflow)
+deploy_ios() {
+  log "Triggering iOS CI build..."
+  curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+    -d '{"message":"iOS build triggered. This takes ~15 minutes (macOS runner). Will install on iPhone when done."}' > /dev/null
+
+  # Trigger the iOS workflow (it's workflow_dispatch, not triggered by push)
+  cd "$WORKDIR"
+  if ! gh workflow run build-ios.yml -R ozzuworld/ozzu >> "$LOGFILE" 2>&1; then
+    log "Failed to trigger iOS build"
+    curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+      -d '{"message":"Failed to trigger iOS build workflow. Check GitHub Actions permissions."}' > /dev/null
+    return
+  fi
+
+  # Wait for the workflow run to appear
+  sleep 15
+
+  # Get the run ID for the iOS build we just triggered
+  local IOS_RUN_ID
+  IOS_RUN_ID=$(gh run list --workflow=build-ios.yml -R ozzuworld/ozzu --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+  if [ -z "$IOS_RUN_ID" ]; then
+    log "Could not find iOS CI run"
+    curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+      -d '{"message":"iOS build was triggered but could not find the run ID. Check GitHub Actions manually."}' > /dev/null
+    return
+  fi
+
+  log "Watching iOS CI run $IOS_RUN_ID..."
+  gh run watch "$IOS_RUN_ID" --exit-status >> "$LOGFILE" 2>&1
+  local EXIT=$?
+
+  if [ $EXIT -eq 0 ]; then
+    log "iOS CI build passed, deploying IPA to iPhone..."
+
+    # Verify IPA artifact exists
+    rm -rf /tmp/ozzu-ipa-verify
+    gh run download "$IOS_RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ipa-verify -R ozzuworld/ozzu >> "$LOGFILE" 2>&1
+    if [ ! -f /tmp/ozzu-ipa-verify/ozzu.ipa ]; then
+      log "IPA artifact not found after download — aborting iOS deploy"
+      curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+        -d '{"message":"iOS build passed but IPA artifact not found. Deploy aborted."}' > /dev/null
+      rm -rf /tmp/ozzu-ipa-verify
+      return
+    fi
+    IPA_SIZE=$(stat -c%s /tmp/ozzu-ipa-verify/ozzu.ipa 2>/dev/null || echo 0)
+    if [ "$IPA_SIZE" -lt 1000000 ]; then
+      log "IPA too small ($IPA_SIZE bytes), likely corrupt — aborting iOS deploy"
+      curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+        -d "{\"message\":\"iOS build passed but IPA is only ${IPA_SIZE} bytes. Deploy aborted — artifact may be corrupt.\"}" > /dev/null
+      rm -rf /tmp/ozzu-ipa-verify
+      return
+    fi
+    rm -rf /tmp/ozzu-ipa-verify
+    log "IPA verified (${IPA_SIZE} bytes), installing on iPhone..."
+
+    curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+      -d '{"message":"iOS build passed and IPA verified. Installing on iPhone via AltServer..."}' > /dev/null
+
+    cd "$WORKDIR" && ./scripts/deploy-ios.sh >> "$LOGFILE" 2>&1
+    local DEPLOY_EXIT=$?
+
+    if [ $DEPLOY_EXIT -eq 0 ]; then
+      log "iOS deploy complete"
+      curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+        -d '{"message":"iOS app deployed! The new version has been installed on iPhone."}' > /dev/null
+    else
+      log "iOS deploy failed (exit=$DEPLOY_EXIT) — iPhone may not be connected to dev-01"
+      curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+        -d '{"message":"iOS build succeeded but deploy failed. Is the iPhone connected via USB to dev-01? Run ./scripts/deploy-ios.sh manually when ready."}' > /dev/null
+    fi
+  else
+    log "iOS CI build failed (exit=$EXIT)"
+    curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+      -d "{\"message\":\"iOS CI build failed (exit code $EXIT). Check the workflow run on GitHub.\"}" > /dev/null
+  fi
+}
+
+# Smart deploy: OTA for JS-only, APK+IPA for native changes
 smart_deploy() {
   if has_native_changes; then
     deploy_apk
+    # Also trigger iOS build in background (runs on separate macOS runner)
+    deploy_ios &
   else
     deploy_ota
   fi
