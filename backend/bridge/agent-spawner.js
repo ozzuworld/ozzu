@@ -309,15 +309,56 @@ Examples of when to post: starting research, reading key files, beginning implem
 // ── Git worktree isolation ──
 // Each agent gets its own worktree so they never conflict with each other or the main tree.
 // Flow: create worktree → agent works in isolation → merge to main → delete worktree
+// CRITICAL: If worktree creation fails, agents must NOT run — they'd commit directly to main.
 
 const WORKTREE_DIR = "/tmp/ozzu-worktrees";
+
+// Prune stale worktree references (dead dirs, orphaned lock files)
+function pruneWorktrees() {
+  const { execSync } = require("child_process");
+  try {
+    execSync("git worktree prune", { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+  } catch (err) {
+    log(`Worktree prune failed: ${err.message}`);
+  }
+}
+
+// Force-remove a branch, even if checked out in a stale worktree
+function forceRemoveBranch(branchName) {
+  const { execSync } = require("child_process");
+  try {
+    execSync(`git branch -D "${branchName}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" });
+  } catch {
+    // Branch might be checked out in a worktree — find and remove that worktree first
+    try {
+      const list = execSync("git worktree list --porcelain", { cwd: WORKDIR, timeout: 10000, encoding: "utf8" });
+      let currentWtDir = null;
+      for (const line of list.split("\n")) {
+        if (line.startsWith("worktree ")) currentWtDir = line.slice(9);
+        if (line.startsWith("branch refs/heads/") && line.slice(18) === branchName && currentWtDir) {
+          log(`Branch ${branchName} checked out in stale worktree ${currentWtDir} — removing`);
+          try { execSync(`git worktree remove --force "${currentWtDir}"`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
+          try { fs.rmSync(currentWtDir, { recursive: true, force: true }); } catch {}
+        }
+      }
+      // Prune after removing stale worktree, then retry branch delete
+      pruneWorktrees();
+      execSync(`git branch -D "${branchName}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" });
+    } catch {
+      // Branch may not exist at all — that's fine
+    }
+  }
+}
 
 function createWorktree(directiveId) {
   const { execSync } = require("child_process");
   const wtDir = path.join(WORKTREE_DIR, directiveId);
 
   try {
-    // Clean up stale worktree if it exists
+    // Prune stale worktree references first
+    pruneWorktrees();
+
+    // Clean up stale worktree directory if it exists
     if (fs.existsSync(wtDir)) {
       try { execSync(`git worktree remove --force "${wtDir}"`, { cwd: WORKDIR, timeout: 10000 }); } catch {}
       try { fs.rmSync(wtDir, { recursive: true, force: true }); } catch {}
@@ -326,28 +367,49 @@ function createWorktree(directiveId) {
     // Ensure worktree parent dir exists
     if (!fs.existsSync(WORKTREE_DIR)) fs.mkdirSync(WORKTREE_DIR, { recursive: true });
 
-    // Create a detached worktree at HEAD (no branch — agents will push to main directly)
+    // Force-remove the branch (handles stale worktree checkouts)
     const branchName = `agent/${directiveId}`;
-    try { execSync(`git branch -D "${branchName}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
-    execSync(`git worktree add -b "${branchName}" "${wtDir}" HEAD`, { cwd: WORKDIR, timeout: 30000 });
+    forceRemoveBranch(branchName);
+
+    // Use --no-checkout to avoid git-crypt smudge filter failures on encrypted files
+    execSync(`git worktree add --no-checkout -b "${branchName}" "${wtDir}" HEAD`, { cwd: WORKDIR, timeout: 30000 });
+    // Checkout with git-crypt filter disabled — agents don't need decrypted secrets
+    execSync(`git -c filter.git-crypt.smudge=cat -c filter.git-crypt.clean=cat -c filter.git-crypt.required=false checkout HEAD -- .`, { cwd: wtDir, timeout: 30000 });
     log(`Worktree created: ${wtDir} (branch: ${branchName})`);
     return { dir: wtDir, branch: branchName };
   } catch (err) {
-    log(`Worktree creation failed for ${directiveId}: ${err.message}`);
-    return null;
+    // Last resort: try with a unique suffix to avoid any name collision
+    const suffix = Date.now().toString(36);
+    const uniqueBranch = `agent/${directiveId}-${suffix}`;
+    const uniqueDir = `${wtDir}-${suffix}`;
+    try {
+      log(`Worktree creation failed for ${directiveId} (${err.message}), retrying with unique name: ${uniqueBranch}`);
+      execSync(`git worktree add --no-checkout -b "${uniqueBranch}" "${uniqueDir}" HEAD`, { cwd: WORKDIR, timeout: 30000 });
+      execSync(`git -c filter.git-crypt.smudge=cat -c filter.git-crypt.clean=cat -c filter.git-crypt.required=false checkout HEAD -- .`, { cwd: uniqueDir, timeout: 30000 });
+      log(`Worktree created (retry): ${uniqueDir} (branch: ${uniqueBranch})`);
+      return { dir: uniqueDir, branch: uniqueBranch };
+    } catch (err2) {
+      log(`Worktree creation FAILED for ${directiveId} (both attempts): ${err.message} / ${err2.message}`);
+      return null;
+    }
   }
 }
 
 function cleanupWorktree(directiveId, branch) {
   const { execSync } = require("child_process");
-  const wtDir = path.join(WORKTREE_DIR, directiveId);
-  try {
-    execSync(`git worktree remove --force "${wtDir}"`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
-  } catch {}
+  // Derive worktree dir from branch name (handles unique suffix: agent/dir_xxx-abc → dir_xxx-abc)
+  const branchSuffix = branch ? branch.replace("agent/", "") : directiveId;
+  const wtDir = path.join(WORKTREE_DIR, branchSuffix);
+  // Also try the base dir (without suffix) in case branch has suffix but dir doesn't
+  const baseDir = path.join(WORKTREE_DIR, directiveId);
+  for (const dir of new Set([wtDir, baseDir])) {
+    try { execSync(`git worktree remove --force "${dir}"`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
   try {
     if (branch) execSync(`git branch -D "${branch}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" });
   } catch {}
-  try { fs.rmSync(wtDir, { recursive: true, force: true }); } catch {}
+  pruneWorktrees();
   log(`Worktree cleaned up: ${wtDir}`);
 }
 
@@ -454,9 +516,16 @@ function spawnAgent(directive, type, customPrompt) {
 
   const logStream = fs.createWriteStream(logFile, { flags: "a" });
 
-  // Create isolated worktree for this agent
+  // Create isolated worktree for this agent — MANDATORY, no fallback to shared dir
   const worktree = createWorktree(directive.id);
-  const agentWorkdir = worktree ? worktree.dir : WORKDIR; // fallback to shared dir if worktree fails
+  if (!worktree) {
+    log(`ABORT: Cannot spawn ${type} agent for ${directive.id} — worktree creation failed. Directive stays queued for retry.`);
+    runningAgents.delete(directive.id); // Release optimistic lock so drainQueue can retry
+    logStream.write(`\n=== ABORT: Worktree creation failed — agent not started ===\n`);
+    logStream.end();
+    return null;
+  }
+  const agentWorkdir = worktree.dir;
 
   const prompt = customPrompt
     ? wrapWorkerPrompt(directive, type, customPrompt)
@@ -470,9 +539,9 @@ function spawnAgent(directive, type, customPrompt) {
     "-p", prompt,
   ];
 
-  log(`Spawning ${type} agent for "${directive.title}" (${directive.id}) [model: ${model}]${worktree ? ` [worktree: ${agentWorkdir}]` : " [WARNING: no worktree, using shared dir]"}`);
+  log(`Spawning ${type} agent for "${directive.title}" (${directive.id}) [model: ${model}] [worktree: ${agentWorkdir}]`);
   logStream.write(`\n=== ${type} agent started at ${new Date().toISOString()} ===\n`);
-  if (worktree) logStream.write(`Worktree: ${agentWorkdir} (branch: ${worktree.branch})\n`);
+  logStream.write(`Worktree: ${agentWorkdir} (branch: ${worktree.branch})\n`);
 
   // Unset CLAUDECODE to prevent nested session issues (same as cipher-watcher.sh line 114)
   const env = { ...process.env };
@@ -1138,6 +1207,10 @@ function smartDeploy(directive) {
 // ── Watchdog: periodic liveness check for running agents ──
 
 function startWatchdog() {
+  // Startup cleanup: prune stale worktree references from previous bridge runs
+  pruneWorktrees();
+  log("Startup: pruned stale worktree references");
+
   log(`Watchdog started (interval: ${_config.WATCHDOG_INTERVAL_MS / 60000}min, stall threshold: ${_config.STALL_THRESHOLD_MS / 60000}min)`);
   setInterval(() => {
     for (const [directiveId, info] of runningAgents) {
