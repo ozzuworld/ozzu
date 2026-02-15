@@ -55,7 +55,17 @@ async function init() {
     await pool.query(`ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS content_type VARCHAR(20) DEFAULT 'text'`);
     await pool.query(`ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_turns_content_type ON conversation_turns(content_type)`);
-    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata)");
+    // Migration: usage_metrics table
+    await pool.query(`CREATE TABLE IF NOT EXISTS usage_metrics (
+      id SERIAL PRIMARY KEY,
+      date DATE NOT NULL DEFAULT CURRENT_DATE,
+      metric_name TEXT NOT NULL,
+      metric_value NUMERIC NOT NULL DEFAULT 0,
+      metadata JSONB DEFAULT '{}',
+      UNIQUE(date, metric_name)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_metrics_date ON usage_metrics(date DESC)`);
+    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata; usage_metrics)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;

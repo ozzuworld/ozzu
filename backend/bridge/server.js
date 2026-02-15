@@ -13,6 +13,7 @@ const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
 const { spawnPlanningAgent, spawnImplementationAgent, spawnWorkerWithPrompt, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, getConfig, setConfig } = require("./agent-spawner");
 const orchestrator = require("./orchestrator");
 const createLogger = require("./logger");
+const metrics = require("./metrics-tracker");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -57,6 +58,7 @@ let _cachedSpotifyToken = null; // { access_token, expires_at }
 async function getSpotifyToken() {
   // Return cached token if still valid (5min buffer)
   if (_cachedSpotifyToken && _cachedSpotifyToken.expires_at > Date.now() / 1000 + 300) {
+    metrics.trackSpotifyCacheHit();
     return _cachedSpotifyToken.access_token;
   }
   try {
@@ -84,6 +86,7 @@ async function getSpotifyToken() {
     if (refreshRes.ok) {
       const refreshData = await refreshRes.json();
       _cachedSpotifyToken = { access_token: refreshData.access_token, expires_at: (Date.now() / 1000) + (refreshData.expires_in || 3600) };
+      metrics.trackSpotifyTokenRefresh();
       return refreshData.access_token;
     }
     return null;
@@ -94,6 +97,7 @@ async function getSpotifyToken() {
 }
 
 async function spotifyFetch(endpoint, opts = {}) {
+  metrics.trackSpotifyApiCall();
   const token = await getSpotifyToken();
   if (!token) throw new Error("no_token");
   const url = endpoint.startsWith("http") ? endpoint : `https://api.spotify.com/v1${endpoint}`;
@@ -924,6 +928,8 @@ function requireAuth(req, res) {
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
+
+  metrics.trackHttpRequest();
 
   // CORS preflight
   if (req.method === "OPTIONS") {
@@ -3391,6 +3397,76 @@ document.getElementById("approval-modal").addEventListener("click", function(e) 
     return;
   }
 
+  // GET /api/usage — aggregated usage metrics for dashboard
+  if (req.method === "GET" && pathname === "/api/usage") {
+    try {
+      const snapshot = metrics.getSnapshot();
+      const history = await metrics.getHistory(7);
+
+      // Gather live stats from existing data
+      const connectedDevices = [...devices.values()];
+      const agents = getRunningAgents();
+      metrics.setActiveAgents(agents.length);
+
+      // Directive stats
+      const dirStats = { completed: 0, failed: 0, totalDuration: 0, durationCount: 0 };
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayDirStats = { submitted: 0, completed: 0, failed: 0 };
+      for (const d of _directives) {
+        if (d.status === "completed") dirStats.completed++;
+        if (d.status === "failed") dirStats.failed++;
+        if (d.duration) { dirStats.totalDuration += d.duration; dirStats.durationCount++; }
+        const dDate = new Date(d.createdAt).toISOString().slice(0, 10);
+        if (dDate === todayStr) {
+          todayDirStats.submitted++;
+          if (d.status === "completed") todayDirStats.completed++;
+          if (d.status === "failed") todayDirStats.failed++;
+        }
+      }
+      const successRate = (dirStats.completed + dirStats.failed) > 0
+        ? Math.round((dirStats.completed / (dirStats.completed + dirStats.failed)) * 100)
+        : null;
+      const avgDurationMs = dirStats.durationCount > 0
+        ? Math.round(dirStats.totalDuration / dirStats.durationCount)
+        : null;
+
+      sendJSON(res, 200, {
+        today: snapshot,
+        history,
+        live: {
+          voiceLatency: _latencyStats,
+          activeDevices: connectedDevices.map(d => ({
+            deviceId: d.deviceId,
+            deviceType: d.deviceType,
+            role: d.role,
+            zone: d.zone,
+          })),
+          memoryMB: {
+            heap: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+            rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
+          },
+          uptimeSeconds: Math.round(process.uptime()),
+          persona: currentPersona,
+          cipherMode,
+          agents: {
+            active: agents.length,
+            max: getConfig().MAX_CONCURRENT_AGENTS,
+            details: agents.map(a => ({ directiveId: a.directiveId, type: a.type, pid: a.pid })),
+          },
+          directives: {
+            successRate,
+            avgDurationMs,
+            today: todayDirStats,
+          },
+        },
+      });
+    } catch (err) {
+      log.bridge.error("Usage metrics error:", err.message);
+      sendJSON(res, 500, { error: "Failed to collect usage metrics" });
+    }
+    return;
+  }
+
   // GET /api/album-color — extract dominant color from album art via HA proxy
   if (req.method === "GET" && pathname === "/api/album-color") {
     const artUrl = url.searchParams.get("url");
@@ -5814,6 +5890,7 @@ async function connectGemini() {
   }
 
   geminiConnecting = true;
+  metrics.trackGeminiSession();
   log.gemini.info("Connecting to Gemini Live API...");
 
   const [entityContext, memoryContext, situationBriefing] = await Promise.all([
@@ -5918,6 +5995,7 @@ async function connectGemini() {
     const wasSpeaking = geminiSpeaking;
     const hadPendingTools = pendingToolResponses !== null;
     log.gemini.info("WebSocket closed (wasSpeaking=%s, hadPendingTools=%s)", wasSpeaking, hadPendingTools);
+    metrics.trackGeminiSessionEnd();
     geminiWs = null;
     geminiConnecting = false;
     geminiReady = false;
@@ -6023,6 +6101,7 @@ function handleGeminiMessage(msg) {
   if (msg.goAway) {
     const timeLeft = msg.goAway.timeLeft ? parseInt(msg.goAway.timeLeft) : 0;
     log.gemini.info(`Server goAway, timeLeft: ${timeLeft}s — proactively reconnecting`);
+    metrics.trackGeminiReconnect();
     goAwayDuringToolCall = pendingToolResponses !== null;
     // Close current connection and immediately reconnect with resume token
     if (geminiWs) {
@@ -6052,6 +6131,7 @@ function handleGeminiMessage(msg) {
     goAwayPartialOutput = ""; // tool call succeeded, no recovery needed
     if (goAwayNudgeTimer) { clearTimeout(goAwayNudgeTimer); goAwayNudgeTimer = null; }
     extendEngagement();
+    metrics.trackGeminiToolCall();
     handleGeminiToolCalls(msg.toolCall.functionCalls);
     return;
   }
@@ -6104,6 +6184,7 @@ function handleGeminiMessage(msg) {
     for (const part of parts) {
       if (part.inlineData?.data) {
         geminiSpeaking = true; // model is outputting audio — gate mic input
+        metrics.trackGeminiAudioReceived();
         if (isEngaged()) {
           routeAudio({ type: "audio", data: part.inlineData.data });
         } else {
@@ -6131,6 +6212,7 @@ function handleGeminiMessage(msg) {
   if (sc.turnComplete) {
     geminiSpeaking = false; // model done speaking — resume mic input
     goAwayPartialOutput = ""; // turn finished cleanly, no recovery needed
+    metrics.trackGeminiTurnComplete();
     inputTranscriptBuffer = "";
     pendingAudioBuffer = []; // discard any unbuffered audio
     if (isEngaged()) {
@@ -6247,6 +6329,7 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
   }
 
   geminiAudioSentCount++;
+  metrics.trackGeminiAudioSent();
   if (geminiAudioSentCount === 1 || geminiAudioSentCount % 2500 === 0) {
     log.gemini.info(`Audio chunk #${geminiAudioSentCount} from ${deviceId}, rawPeak=${peak}, amplified=${peak * AUDIO_GAIN}`);
   }
@@ -6859,6 +6942,7 @@ wss.on("connection", (ws) => {
         const priorityMap = { tv: 1, tablet: 10, phone: 20 };
         const speakerPriority = msg.speakerPriority ?? priorityMap[deviceType] ?? 10;
         devices.set(ws, { role, deviceId, deviceType, zone, capabilities, speakerPriority });
+        metrics.trackWsConnection(deviceId, deviceType);
         log.ws.info(`Device registered: ${deviceId} (${role}, type=${deviceType}, zone=${zone}, caps=${JSON.stringify(capabilities)}, priority=${speakerPriority}), total: ${devices.size}`);
         // Persist device in PG registry
         db.upsertDevice(deviceId, deviceType).catch(err =>
@@ -7129,6 +7213,7 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     const info = devices.get(ws);
+    if (info) metrics.trackWsDisconnection(info.deviceId);
     devices.delete(ws);
     if (ws === activeMic) {
       activeMic = null;
@@ -7183,6 +7268,7 @@ wss.on("connection", (ws) => {
     log.bridge.info(`HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
     startWatchdog();
+    metrics.startFlushTimer();
 
     // Notify June about restart if this isn't the first boot
     if (_restartCount > 0 && _previousStartedAt) {

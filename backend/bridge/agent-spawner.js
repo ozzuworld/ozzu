@@ -4,6 +4,7 @@
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const metrics = require("./metrics-tracker");
 
 const BRIDGE = "http://localhost:3333";
 const WORKDIR = "/home/gcp/ozzu";
@@ -634,6 +635,7 @@ function spawnAgent(directive, type, customPrompt) {
   runningAgents.set(directive.id, agentInfo);
 
   // Broadcast agent spawn event
+  metrics.trackAgentSpawn();
   if (_broadcastToAll) {
     _broadcastToAll({
       type: "agentUpdate",
@@ -668,6 +670,7 @@ function spawnAgent(directive, type, customPrompt) {
 
     // On non-zero exit (crash/timeout), reset directive to recoverable state
     if (code !== 0) {
+      metrics.trackAgentFailure();
       // Clean up worktree on failure (don't merge — work is incomplete)
       if (agentInfo.worktree) {
         log(`Cleaning up worktree for failed agent ${directive.id}`);
@@ -699,6 +702,7 @@ function spawnAgent(directive, type, customPrompt) {
       req.write(payload);
       req.end();
     } else {
+      metrics.trackAgentComplete();
       // Agent exited cleanly (code 0) — verify directive was properly completed.
       // If still in a transient state, the agent forgot to PATCH it.
       const http = require("http");

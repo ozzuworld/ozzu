@@ -135,3 +135,14 @@ CREATE TABLE deployments (
   completed_at    TIMESTAMPTZ,
   notes           TEXT
 );
+
+-- Usage metrics (daily aggregates for dashboard)
+CREATE TABLE usage_metrics (
+  id              SERIAL PRIMARY KEY,
+  date            DATE NOT NULL DEFAULT CURRENT_DATE,
+  metric_name     TEXT NOT NULL,
+  metric_value    NUMERIC NOT NULL DEFAULT 0,
+  metadata        JSONB DEFAULT '{}',
+  UNIQUE(date, metric_name)
+);
+CREATE INDEX idx_usage_metrics_date ON usage_metrics(date DESC);

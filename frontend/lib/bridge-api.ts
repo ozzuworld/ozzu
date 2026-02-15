@@ -169,3 +169,81 @@ export async function fetchApprovalDetails(): Promise<EnrichedApproval[]> {
   if (!res.ok) throw new Error(`Bridge approval details error: ${res.status}`);
   return res.json();
 }
+
+export interface UsageMetrics {
+  today: {
+    date: string;
+    gemini: {
+      sessions: number;
+      sessionDurationMs: number;
+      audioChunksSent: number;
+      audioChunksReceived: number;
+      toolCalls: number;
+      reconnects: number;
+      turnsCompleted: number;
+    };
+    cipher: {
+      agentSpawns: number;
+      agentCompletions: number;
+      agentFailures: number;
+      activeAgents: number;
+    };
+    spotify: {
+      apiCalls: number;
+      tokenRefreshes: number;
+      cacheHits: number;
+    };
+    bridge: {
+      wsConnectionsTotal: number;
+      wsDisconnections: number;
+      httpRequests: number;
+    };
+    connectionHistory: Array<{
+      event: string;
+      deviceId: string;
+      deviceType?: string;
+      timestamp: number;
+    }>;
+  };
+  history: Array<{
+    date: string;
+    metrics: Record<string, number>;
+  }>;
+  live: {
+    voiceLatency: {
+      count: number;
+      avgTotal: number;
+      avgThinking: number;
+      avgTts: number;
+      p95Total: number;
+    };
+    activeDevices: Array<{
+      deviceId: string;
+      deviceType: string;
+      role: string;
+      zone: string;
+    }>;
+    memoryMB: { heap: number; rss: number };
+    uptimeSeconds: number;
+    persona: string;
+    cipherMode: string;
+    agents: {
+      active: number;
+      max: number;
+      details: Array<{ directiveId: string; type: string; pid: number }>;
+    };
+    directives: {
+      successRate: number | null;
+      avgDurationMs: number | null;
+      today: { submitted: number; completed: number; failed: number };
+    };
+  };
+}
+
+export async function fetchUsageMetrics(): Promise<UsageMetrics> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/api/usage`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge usage metrics error: ${res.status}`);
+  return res.json();
+}
