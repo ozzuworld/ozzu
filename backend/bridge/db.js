@@ -50,6 +50,12 @@ async function init() {
     client.release();
     _pgConnected = true;
     console.log("[pg] Connected to PostgreSQL");
+
+    // Migrations: add content_type and metadata to conversation_turns
+    await pool.query(`ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS content_type VARCHAR(20) DEFAULT 'text'`);
+    await pool.query(`ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_turns_content_type ON conversation_turns(content_type)`);
+    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -121,17 +127,75 @@ async function endConversation(conversationId, summary, turnCount, topics = []) 
   );
 }
 
-async function addConversationTurn(conversationId, role, content, turnIndex, toolCalls = null) {
+async function addConversationTurn(conversationId, role, content, turnIndex, toolCalls = null, contentType = 'text', metadata = null) {
   if (!_pgConnected) return null;
   const res = await query(
-    `INSERT INTO conversation_turns (conversation_id, role, content, turn_index, tool_calls)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [conversationId, role, content, turnIndex, toolCalls ? JSON.stringify(toolCalls) : null]
+    `INSERT INTO conversation_turns (conversation_id, role, content, turn_index, tool_calls, content_type, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [conversationId, role, content, turnIndex, toolCalls ? JSON.stringify(toolCalls) : null, contentType, metadata ? JSON.stringify(metadata) : '{}']
   );
   // Increment turn_count on the conversation so it stays accurate even if session drops
   query(`UPDATE conversations SET turn_count = turn_count + 1 WHERE id = $1`, [conversationId])
     .catch(err => console.warn("[pg] increment turn_count:", err.message));
   return res.rows[0]?.id;
+}
+
+async function getConversationHistory({ persona = 'cipher', limit = 100, offset = 0, since = null, contentTypes = null, conversationLimit = 5 } = {}) {
+  if (!_pgConnected) return [];
+  // Get recent conversation IDs for this persona
+  const convoParams = [persona, conversationLimit];
+  let convoSql = `SELECT id, persona, summary, turn_count, topics, started_at, ended_at
+     FROM conversations WHERE persona = $1 ORDER BY started_at DESC LIMIT $2`;
+  if (since) {
+    convoSql = `SELECT id, persona, summary, turn_count, topics, started_at, ended_at
+       FROM conversations WHERE persona = $1 AND started_at >= $3::timestamptz ORDER BY started_at DESC LIMIT $2`;
+    convoParams.push(since);
+  }
+  const convoRes = await query(convoSql, convoParams);
+  if (!convoRes.rows.length) return [];
+
+  const convoIds = convoRes.rows.map(r => r.id);
+
+  // Get turns for those conversations
+  let turnSql = `SELECT conversation_id, role, content, content_type, metadata, turn_index, tool_calls, created_at
+     FROM conversation_turns WHERE conversation_id = ANY($1)`;
+  const turnParams = [convoIds];
+  if (contentTypes && contentTypes.length) {
+    turnSql += ` AND content_type = ANY($2)`;
+    turnParams.push(contentTypes);
+  }
+  turnSql += ` ORDER BY conversation_id, turn_index ASC`;
+  if (limit) {
+    turnParams.push(limit);
+    turnSql += ` LIMIT $${turnParams.length}`;
+  }
+  const turnRes = await query(turnSql, turnParams);
+
+  // Group turns by conversation
+  const turnsByConvo = {};
+  for (const t of turnRes.rows) {
+    if (!turnsByConvo[t.conversation_id]) turnsByConvo[t.conversation_id] = [];
+    turnsByConvo[t.conversation_id].push({
+      role: t.role,
+      content: t.content,
+      contentType: t.content_type,
+      metadata: t.metadata,
+      turnIndex: t.turn_index,
+      toolCalls: t.tool_calls,
+      timestamp: t.created_at,
+    });
+  }
+
+  return convoRes.rows.map(c => ({
+    id: c.id,
+    persona: c.persona,
+    startedAt: c.started_at,
+    endedAt: c.ended_at,
+    summary: c.summary,
+    turnCount: c.turn_count,
+    topics: c.topics || [],
+    turns: turnsByConvo[c.id] || [],
+  }));
 }
 
 async function getRecentSummaries(persona, limit = 5) {
@@ -509,6 +573,7 @@ module.exports = {
   createConversation,
   endConversation,
   addConversationTurn,
+  getConversationHistory,
   getRecentSummaries,
   getRecentConversations,
   // Directives

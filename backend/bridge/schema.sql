@@ -42,9 +42,12 @@ CREATE TABLE conversation_turns (
   content         TEXT NOT NULL,
   turn_index      INTEGER NOT NULL,
   tool_calls      JSONB,
+  content_type    VARCHAR(20) DEFAULT 'text',
+  metadata        JSONB DEFAULT '{}',
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_turns_conversation ON conversation_turns(conversation_id, turn_index);
+CREATE INDEX idx_turns_content_type ON conversation_turns(content_type);
 
 -- Directives with full audit trail
 CREATE TABLE directives (
