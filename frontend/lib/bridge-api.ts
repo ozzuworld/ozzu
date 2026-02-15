@@ -37,14 +37,23 @@ export interface Directive {
   directiveApprovalId: string | null;
   retryCount: number;
   failureReason: string | null;
+  mergeBranch?: string | null;
   priority: number;
   dependsOn: string[] | null;
-  activity_log: Array<{ timestamp: number; type: string; message: string }>;
+  createdBy?: string;
+  activity_log: Array<{ timestamp: number; type: string; actor?: string; message: string }>;
   startedAt?: number;
   completedAt?: number;
   duration?: number;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface EnrichedApproval extends ApprovalRequest {
+  directiveTitle: string | null;
+  directivePlan: string | null;
+  directiveDescription: string | null;
+  directiveId: string | null;
 }
 
 export async function fetchDevStatus(): Promise<StatusEntry[]> {
@@ -110,5 +119,53 @@ export async function updateDirective(
     body: JSON.stringify(updates),
   });
   if (!res.ok) throw new Error(`Bridge update directive error: ${res.status}`);
+  return res.json();
+}
+
+export async function cancelDirective(
+  id: string
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  return res.json();
+}
+
+export async function retryDirective(
+  id: string
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  return res.json();
+}
+
+export async function retryMergeDirective(
+  id: string
+): Promise<{ ok: boolean; error?: string; message?: string }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}/retry-merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  return res.json();
+}
+
+export async function unblockDirective(
+  id: string
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}/unblock`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  return res.json();
+}
+
+export async function fetchApprovalDetails(): Promise<EnrichedApproval[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/approvals/details`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge approval details error: ${res.status}`);
   return res.json();
 }
