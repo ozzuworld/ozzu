@@ -409,6 +409,18 @@ class CipherPipeline extends EventEmitter {
     this._enqueueUserMessage(text);
   }
 
+  async sendImage(base64Data, mediaType, caption) {
+    if (!this.running) return;
+    const label = caption || "Image from King Kazuma";
+    console.log(`[cipher] Image input: "${label}" (${mediaType}, ${Math.round(base64Data.length * 3/4/1024)}KB)`);
+    this.emit("inputTranscript", `[Sent image: ${label}]`);
+    const content = [
+      { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } },
+      { type: "text", text: `[King Kazuma sent this image${caption ? `: ${caption}` : ""}. Describe what you see and respond accordingly.]` },
+    ];
+    this._enqueueUserMessage(content);
+  }
+
   async sendSystemPrompt(text) {
     if (!this.running) return;
     this._enqueueUserMessage(text);

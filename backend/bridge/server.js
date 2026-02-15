@@ -5881,12 +5881,9 @@ wss.on("connection", (ws) => {
             return;
           }
           if (contentType === "image") {
-            const uploadsDir = "/tmp/ozzu-uploads";
-            if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-            const safeName = (filename || "image.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
-            const filePath = path.resolve(uploadsDir, `${Date.now()}-${safeName}`);
-            fs.writeFileSync(filePath, Buffer.from(data, "base64"));
-            cipherPipeline.sendText(`[UPLOAD] Image uploaded by King Kazuma: ${filePath}`);
+            const ext = (filename || "").split(".").pop()?.toLowerCase() || "jpg";
+            const mediaType = ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : ext === "webp" ? "image/webp" : "image/jpeg";
+            cipherPipeline.sendImage(data, mediaType, filename);
           } else {
             const label = filename ? `[UPLOAD] File "${filename}" from King Kazuma:\n${data}` : `[UPLOAD] Content from King Kazuma:\n${data}`;
             cipherPipeline.sendText(label);
