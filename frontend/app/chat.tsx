@@ -10,6 +10,7 @@ import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
+import { canUseBiometric, authenticateWithBiometric, BRIDGE_PIN } from "../lib/biometric-auth";
 import { useKeepAwake } from "expo-keep-awake";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 
@@ -93,8 +94,17 @@ export default function ChatScreen() {
         setResponseText("");
         setIsStreaming(true);
       },
-      onPinRequest: (approvalId, description) => {
+      onPinRequest: async (approvalId, description) => {
         pendingPinRef.current = { approvalId };
+        const biometricAvailable = await canUseBiometric();
+        if (biometricAvailable) {
+          const success = await authenticateWithBiometric('Authorize Action');
+          if (success) {
+            pendingPinRef.current = null;
+            bridgeRef.current.sendPinResponse(approvalId, BRIDGE_PIN);
+            return;
+          }
+        }
         setShowKeypad(true);
       },
       onPinResolved: () => {

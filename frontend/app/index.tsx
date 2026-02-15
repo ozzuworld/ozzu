@@ -10,6 +10,7 @@ import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { StreamingPlayer, MicRecorder } from "../lib/audio";
 import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
+import { canUseBiometric, authenticateWithBiometric, BRIDGE_PIN } from "../lib/biometric-auth";
 import { TVPressable } from "../components/TVPressable";
 import { CameraOverlay } from "../components/CameraOverlay";
 import { ContentPanel } from "../components/ContentPanel";
@@ -191,8 +192,17 @@ export default function LandingScreen() {
         setResponseText("");
         setIsStreaming(true);
       },
-      onPinRequest: (approvalId) => {
+      onPinRequest: async (approvalId) => {
         pendingPinRef.current = { approvalId };
+        const biometricAvailable = await canUseBiometric();
+        if (biometricAvailable) {
+          const success = await authenticateWithBiometric('Authorize Action');
+          if (success) {
+            pendingPinRef.current = null;
+            bridgeRef.current.sendPinResponse(approvalId, BRIDGE_PIN);
+            return;
+          }
+        }
         setShowKeypad(true);
       },
       onPinResolved: () => {

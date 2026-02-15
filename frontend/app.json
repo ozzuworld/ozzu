@@ -17,6 +17,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.ozzu.app",
       "infoPlist": {
+        "NSFaceIDUsageDescription": "Ozzu uses Face ID to authorize high-risk actions",
         "NSMicrophoneUsageDescription": "Ozzu needs microphone access for voice communication",
         "UIBackgroundModes": ["audio"]
       }
@@ -47,6 +48,7 @@
     "plugins": [
       "expo-router",
       "expo-video",
+      "expo-local-authentication",
       [
         "@react-native-tvos/config-tv",
         {
