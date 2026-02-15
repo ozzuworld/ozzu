@@ -1,0 +1,46 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+group = 'expo.modules.glasses'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.glasses"
+  compileSdkVersion safeExtGet("compileSdkVersion", 35)
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 24)
+    targetSdkVersion safeExtGet("targetSdkVersion", 34)
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+}
+
+repositories {
+  maven {
+    url = uri("https://maven.pkg.github.com/anthropics/meta-wearables-dat-android")
+    credentials {
+      username = ""
+      password = System.getenv("GITHUB_TOKEN") ?: ""
+    }
+  }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+  // Meta DAT SDK — uncomment when GITHUB_TOKEN is configured and SDK is available
+  // implementation 'com.meta.wearable:mwdat-core:0.4.0'
+  // implementation 'com.meta.wearable:mwdat-camera:0.4.0'
+  implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+}
+
+int safeExtGet(String prop, Integer fallback) {
+  rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}

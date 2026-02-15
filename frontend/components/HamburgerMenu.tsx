@@ -14,6 +14,7 @@ const staticMenuItems: MenuItem[] = [
   { icon: "🎵", label: "MUSIC", route: "/music" },
   { icon: "📋", label: "DIRECTIVES", route: "/directives" },
   { icon: "📤", label: "UPLOAD", route: "/upload" },
+  { icon: "👓", label: "GLASSES", route: "/glasses" },
 ];
 
 export function HamburgerMenu() {

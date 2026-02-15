@@ -7018,6 +7018,65 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      // ── Glasses integration messages ──
+
+      if (msg.type === "glassesFrame") {
+        const info = devices.get(ws);
+        // Forward camera frame to Gemini for vision analysis (if session is active)
+        if (geminiReady && geminiWs && geminiWs.readyState === 1 && msg.data) {
+          geminiWs.send(JSON.stringify({
+            clientContent: {
+              turns: [{
+                role: "user",
+                parts: [
+                  { text: "[Live glasses camera frame — describe what you see briefly]" },
+                  { inlineData: { mimeType: "image/jpeg", data: msg.data } },
+                ],
+              }],
+              turnComplete: true,
+            },
+          }));
+          log.bridge.debug(`Glasses frame forwarded to Gemini (${msg.width}x${msg.height}) from ${info?.deviceId}`);
+        }
+        return;
+      }
+
+      if (msg.type === "glassesPhoto") {
+        const info = devices.get(ws);
+        log.bridge.info(`Glasses photo captured from ${info?.deviceId}`);
+        // Save to disk
+        try {
+          const uploadsDir = "/tmp/ozzu-bridge/uploads";
+          fs.mkdirSync(uploadsDir, { recursive: true });
+          const ts = Date.now();
+          const savePath = `${uploadsDir}/${ts}-glasses-capture.jpg`;
+          fs.writeFileSync(savePath, Buffer.from(msg.data, "base64"));
+          fs.writeFileSync(`${savePath}.meta.json`, JSON.stringify({
+            timestamp: ts, source: "glasses", contentType: "image",
+            filename: "glasses-capture.jpg", from: info?.deviceId, savedAs: savePath,
+          }, null, 2));
+          log.bridge.info(`Glasses photo saved: ${savePath}`);
+        } catch (persistErr) {
+          log.bridge.warn(`Glasses photo persist failed: ${persistErr.message}`);
+        }
+        // Make available to Cipher
+        if (cipherPipeline && typeof cipherPipeline === "object" && msg.data) {
+          cipherPipeline.sendImage(msg.data, "image/jpeg", "glasses-capture.jpg");
+        }
+        return;
+      }
+
+      if (msg.type === "glassesStatus") {
+        const info = devices.get(ws);
+        if (info) {
+          info.glassesState = msg.state;
+        }
+        log.bridge.info(`Glasses status: ${msg.state} from ${info?.deviceId}`);
+        // Broadcast to all other devices
+        broadcastToAll({ type: "glassesStatus", state: msg.state, from: info?.deviceId });
+        return;
+      }
+
       if (msg.type === "pinResponse") {
         const pending = pendingPinRequests.get(msg.approvalId);
         if (!pending) {

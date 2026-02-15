@@ -243,6 +243,24 @@ export class BridgeSession {
     }
   }
 
+  sendGlassesFrame(data: string, width: number, height: number): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "glassesFrame", data, width, height }));
+    }
+  }
+
+  sendGlassesPhoto(data: string): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "glassesPhoto", data, format: "jpeg" }));
+    }
+  }
+
+  sendGlassesStatus(state: string): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "glassesStatus", state }));
+    }
+  }
+
   close(): void {
     this.intentionallyClosed = true;
     this.pendingMessages = [];
