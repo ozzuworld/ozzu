@@ -321,6 +321,8 @@ export default function LandingScreen() {
           flex: 1,
           alignItems: "center",
           justifyContent: "center",
+          backgroundColor: "#000000",
+          zIndex: 1,
         }}
       >
         <LottieView

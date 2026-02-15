@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { View, Text, Pressable, Animated } from "react-native";
+import { View, Text, Pressable, Animated, Modal } from "react-native";
 import { useRouter } from "expo-router";
 import { TVPressable } from "./TVPressable";
 
@@ -88,16 +88,17 @@ export function HamburgerMenu() {
         </Text>
       </Pressable>
 
-      {/* Menu overlay */}
-      {visible && (
+      {/* Menu overlay — Modal ensures full-screen centering */}
+      <Modal
+        visible={visible}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={() => setVisible(false)}
+      >
         <View
           style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 100,
+            flex: 1,
             alignItems: "center",
             justifyContent: "center",
           }}
@@ -192,7 +193,7 @@ export function HamburgerMenu() {
             ))}
           </Animated.View>
         </View>
-      )}
+      </Modal>
     </>
   );
 }
