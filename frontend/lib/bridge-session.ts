@@ -2,6 +2,7 @@
 // Tablets connect as "mic", TV connects as "speaker"
 
 import { getDeviceType } from "../modules/pcm-player";
+import { Dimensions } from "react-native";
 
 const BRIDGE_WS_URL =
   (process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333").replace(
@@ -32,6 +33,7 @@ export class BridgeSession {
   private callbacks: BridgeCallbacks | null = null;
   private _role: "mic" | "speaker" = "mic";
   private deviceId: string = "unknown";
+  private _deviceType: string = "tablet";
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyClosed = false;
   private reconnectAttempt = 0;
@@ -55,11 +57,19 @@ export class BridgeSession {
     this.intentionallyClosed = false;
 
     // Detect device type
+    let nativeType = "tablet";
     try {
-      const type = getDeviceType();
-      this._role = type === "tv" ? "speaker" : "mic";
+      nativeType = getDeviceType();
+      this._role = nativeType === "tv" ? "speaker" : "mic";
     } catch {
       this._role = "mic";
+    }
+    // Distinguish phone from tablet for mic devices
+    if (nativeType !== "tv") {
+      const { width } = Dimensions.get("screen");
+      this._deviceType = width < 500 ? "phone" : "tablet";
+    } else {
+      this._deviceType = "tv";
     }
     this.deviceId = `${this._role}-${Date.now()}`;
 
@@ -80,6 +90,7 @@ export class BridgeSession {
           type: "register",
           role: this._role,
           deviceId: this.deviceId,
+          deviceType: this._deviceType,
         })
       );
     };

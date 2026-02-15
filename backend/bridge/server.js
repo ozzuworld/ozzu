@@ -1349,7 +1349,7 @@ async function handleRequest(req, res) {
     }
 
     // Apply updates
-    const VALID_STATUSES = new Set(["pending", "planning", "planned", "approved", "in_progress", "completed", "failed", "stale", "cancelled"]);
+    const VALID_STATUSES = new Set(["pending", "planning", "planned", "approved", "in_progress", "completed", "failed", "stale", "cancelled", "blocked"]);
     const prevStatus = directive.status;
     if (data.status) {
       if (!VALID_STATUSES.has(data.status)) {
@@ -1432,6 +1432,13 @@ async function handleRequest(req, res) {
         notifyPersona(
           `[SYSTEM — Brief update, don't read verbatim.]\n` +
           `"${title}" is being built now.`
+        );
+      } else if (directive.status === "blocked") {
+        const reason = data.failureReason || data.blockedReason || "unknown blocker";
+        notifyPersona(
+          `[SYSTEM — Tell King Kazuma this needs his attention.]\n` +
+          `"${title}" hit a blocker and needs your help: ${reason}\n` +
+          `The agent couldn't finish this on its own. Ask King Kazuma if he can resolve it, then the directive can be unblocked.`
         );
       } else if (directive.status === "completed" && prevStatus === "in_progress") {
         // Calculate duration from creation to completion
@@ -1582,8 +1589,22 @@ async function handleRequest(req, res) {
       sendJSON(res, 404, { error: "Directive not found" });
       return;
     }
+    if (directive.status === "blocked") {
+      // Unblock a blocked directive — retry implementation
+      const prevStatus = directive.status;
+      log.bridge.info(`Unblock: ${directive.id} "${directive.title}" — was blocked: ${directive.failureReason || "unknown"}`);
+      directive.status = "approved";
+      directive.failureReason = null;
+      directive.updatedAt = Date.now();
+      if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+      directive.activity_log.push({ timestamp: Date.now(), type: "unblocked", message: `Unblocked by King Kazuma — retrying implementation` });
+      saveDirectives(directives, directive, prevStatus);
+      routeDirective(directive, "implementation");
+      sendJSON(res, 200, { ok: true, directive, message: "Directive unblocked and moved to approved for retry" });
+      return;
+    }
     if (directive.status !== "pending") {
-      sendJSON(res, 400, { error: `Directive is "${directive.status}", not pending — nothing to unblock` });
+      sendJSON(res, 400, { error: `Directive is "${directive.status}", not pending or blocked — nothing to unblock` });
       return;
     }
     if (!directive.dependsOn) {
@@ -1978,7 +1999,7 @@ async function handleRequest(req, res) {
 
     const statusColors = {
       pending: "#6b7280", planning: "#8b5cf6", planned: "#3b82f6",
-      approved: "#06b6d4", in_progress: "#f59e0b", completed: "#10b981",
+      approved: "#06b6d4", in_progress: "#f59e0b", completed: "#10b981", blocked: "#ef4444",
       failed: "#ef4444", stale: "#f97316", cancelled: "#78716c",
     };
 
@@ -2329,7 +2350,7 @@ var currentStatusFilter = "all";
 var pageSize = 20;
 var visibleCount = pageSize;
 
-var activeStatuses = ["pending", "planning", "planned", "approved", "in_progress"];
+var activeStatuses = ["pending", "planning", "planned", "approved", "in_progress", "blocked"];
 var failedStatuses = ["failed", "stale"];
 
 function applyFilters() {
@@ -2744,7 +2765,7 @@ function submitDirective(e) {
     } catch { redisHealthy = false; }
 
     // Directive queue stats from in-memory cache
-    const dirStats = { pending: 0, planning: 0, planned: 0, approved: 0, in_progress: 0, completed: 0, failed: 0, stale: 0 };
+    const dirStats = { pending: 0, planning: 0, planned: 0, approved: 0, in_progress: 0, completed: 0, failed: 0, stale: 0, blocked: 0 };
     const recentFailures = [];
     let totalRetries = 0;
     for (const d of _directives) {
@@ -3101,15 +3122,16 @@ const SYSTEM_PROMPT =
   "3. When status is 'planned', present the plan to King Kazuma and ask him to approve. " +
   "Use approve_action with needs_user_pin=true. " +
   "\n" +
-  "4. After approval, Cipher implements (approved → in_progress → completed). " +
+  "4. After approval, Cipher implements (approved → in_progress → completed or blocked). " +
+  "If Cipher hits a blocker it can't resolve (missing credentials, needs manual setup), it marks as 'blocked' and tells you what's needed. " +
   "AUTO-APPROVE routine Cipher actions during implementation. " +
   "\n" +
   "5. When completed, report the result to Kazuma. " +
   "\n\n" +
   "PM TOOLS: " +
   "get_directives (track all work), update_directive (refine requirements, reprioritize), " +
-  "cancel_directive (kill work that's no longer needed), send_dev_directive (create new tasks), " +
-  "get_dev_status (what's Cipher doing right now), query_history (look at past work). " +
+  "cancel_directive (kill work that's no longer needed), unblock_directive (retry a blocked directive after King Kazuma resolves the blocker), " +
+  "send_dev_directive (create new tasks), get_dev_status (what's Cipher doing right now), query_history (look at past work). " +
   "\n\n" +
   "PERSISTENT MEMORY: You have memory that persists across conversations. " +
   "When King Kazuma shares a preference, makes an important decision, or tells you something " +
@@ -3531,7 +3553,7 @@ const GEMINI_BRIDGE_TOOLS = [
     parameters: {
       type: "OBJECT",
       properties: {
-        status: { type: "STRING", description: "Optional filter: pending, planning, planned, approved, in_progress, completed, failed, stale" },
+        status: { type: "STRING", description: "Optional filter: pending, planning, planned, approved, in_progress, completed, failed, stale, blocked" },
       },
       required: [],
     },
@@ -3559,6 +3581,17 @@ const GEMINI_BRIDGE_TOOLS = [
       properties: {
         directive_id: { type: "STRING", description: "The directive ID to cancel" },
         reason: { type: "STRING", description: "Why it's being cancelled" },
+      },
+      required: ["directive_id"],
+    },
+  },
+  {
+    name: "unblock_directive",
+    description: "Unblock a blocked directive so Cipher can retry it. Use when King Kazuma has resolved the blocker (e.g. set up credentials, completed manual steps).",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        directive_id: { type: "STRING", description: "The blocked directive ID to unblock" },
       },
       required: ["directive_id"],
     },
@@ -3650,7 +3683,7 @@ const GEMINI_BRIDGE_TOOLS = [
           type: "STRING",
           description: "Which data to query: directives, approvals, memories, status, directive_history",
         },
-        status: { type: "STRING", description: "Filter by status (directives: pending/planning/planned/approved/in_progress/completed)" },
+        status: { type: "STRING", description: "Filter by status (directives: pending/planning/planned/approved/in_progress/completed/blocked)" },
         type: { type: "STRING", description: "Filter by type (directives: quick/feature/explore)" },
         risk: { type: "STRING", description: "Filter by risk level (approvals: low/medium/high)" },
         resolved: { type: "BOOLEAN", description: "Filter by resolved state (approvals)" },
@@ -3824,7 +3857,7 @@ async function buildSituationBriefing(persona) {
     lines.push(`Directives: ${statusLine}`);
 
     const active = directives.filter(d =>
-      ["pending", "planning", "in_progress", "planned"].includes(d.status)
+      ["pending", "planning", "in_progress", "planned", "blocked"].includes(d.status)
     );
     for (const d of active.slice(0, 5)) {
       lines.push(`  - [${d.status}] ${d.title}`);
@@ -4140,13 +4173,13 @@ async function handleToolCall(name, args) {
           const pinId = `pin_${Date.now()}`;
           pendingPinRequests.set(pinId, { approvalId, approved, resolve });
 
-          broadcastToAll({ type: "pinRequest", approvalId: pinId, description: `Authorize: ${approvalId}` });
+          broadcastToDeviceType("phone", { type: "pinRequest", approvalId: pinId, description: `Authorize: ${approvalId}` });
 
           // 2 min timeout (user needs to hear June, find tablet, enter PIN)
           setTimeout(() => {
             if (pendingPinRequests.has(pinId)) {
               pendingPinRequests.delete(pinId);
-              broadcastToAll({ type: "pinResolved", approvalId: pinId }); // dismiss keypad on timeout
+              broadcastToDeviceType("phone", { type: "pinResolved", approvalId: pinId }); // dismiss keypad on timeout
               resolve({ success: false, message: "PIN entry timed out (2 min)" });
             }
           }, 120000);
@@ -4404,6 +4437,23 @@ async function handleToolCall(name, args) {
           d.activity_log.push({ timestamp: Date.now(), type: "pm_update", message: `June updated: ${changes.join(", ")}` });
         }
         return { success: true, message: `Directive ${args.directive_id} updated: ${changes.join(", ") || "no changes"}` };
+      }
+
+      if (name === "unblock_directive") {
+        if (!args.directive_id) return { success: false, message: "directive_id is required" };
+        const directives = getDirectives();
+        const d = directives.find(x => x.id === args.directive_id);
+        if (!d) return { success: false, message: `Directive ${args.directive_id} not found` };
+        if (d.status !== "blocked") return { success: false, message: `Directive is "${d.status}", not blocked — nothing to unblock` };
+        const prevReason = d.failureReason || "unknown";
+        d.status = "approved";
+        d.failureReason = null;
+        d.updatedAt = Date.now();
+        if (!Array.isArray(d.activity_log)) d.activity_log = [];
+        d.activity_log.push({ timestamp: Date.now(), type: "unblocked", message: `Unblocked by King Kazuma (was: ${prevReason})` });
+        saveDirectives(directives, d, "blocked");
+        routeDirective(d, "implementation");
+        return { success: true, message: `Directive ${args.directive_id} unblocked and retrying. Was blocked because: ${prevReason}` };
       }
 
       if (name === "cancel_directive") {
@@ -4776,6 +4826,17 @@ function broadcastToRole(role, msg) {
   const data = JSON.stringify(msg);
   for (const [ws, info] of devices) {
     if (info.role === role && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(data); } catch (err) {
+        log.ws.warn(`Send failed to ${info?.deviceId || "unknown"}: ${err.message}`);
+      }
+    }
+  }
+}
+
+function broadcastToDeviceType(type, msg) {
+  const data = JSON.stringify(msg);
+  for (const [ws, info] of devices) {
+    if (info.deviceType === type && ws.readyState === WebSocket.OPEN) {
       try { ws.send(data); } catch (err) {
         log.ws.warn(`Send failed to ${info?.deviceId || "unknown"}: ${err.message}`);
       }
@@ -6049,7 +6110,7 @@ wss.on("connection", (ws) => {
         const pending = pendingPinRequests.get(msg.approvalId);
         if (!pending) {
           // Stale PIN response — dismiss keypad just in case
-          broadcastToAll({ type: "pinResolved", approvalId: msg.approvalId });
+          broadcastToDeviceType("phone", { type: "pinResolved", approvalId: msg.approvalId });
           return;
         }
         pendingPinRequests.delete(msg.approvalId);
@@ -6058,7 +6119,7 @@ wss.on("connection", (ws) => {
         const approvals = getApprovals();
         const approval = approvals.find((a) => a.id === pending.approvalId);
         if (!approval || approval.resolved) {
-          broadcastToAll({ type: "pinResolved", approvalId: msg.approvalId });
+          broadcastToDeviceType("phone", { type: "pinResolved", approvalId: msg.approvalId });
           pending.resolve({
             success: true,
             message: approval?.approved
@@ -6070,7 +6131,7 @@ wss.on("connection", (ws) => {
 
         // Validate PIN
         if (msg.pin !== BRIDGE_PIN) {
-          broadcastToAll({ type: "pinResolved", approvalId: msg.approvalId });
+          broadcastToDeviceType("phone", { type: "pinResolved", approvalId: msg.approvalId });
           pending.resolve({ success: false, message: "Invalid PIN. Authorization denied." });
           return;
         }
@@ -6081,7 +6142,7 @@ wss.on("connection", (ws) => {
         saveApprovals(approvals, approval);
         syncDirectiveFromApproval(pending.approvalId, pending.approved);
         // Tell ALL devices to dismiss their keypads
-        broadcastToAll({ type: "pinResolved", approvalId: msg.approvalId });
+        broadcastToDeviceType("phone", { type: "pinResolved", approvalId: msg.approvalId });
         pending.resolve({
           success: true,
           message: pending.approved

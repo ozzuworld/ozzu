@@ -18,7 +18,7 @@ import { usePhoneLayout } from "../lib/usePhoneLayout";
 export default function ChatScreen() {
   useKeepAwake();
   const router = useRouter();
-  const { insets } = usePhoneLayout();
+  const { insets, isPhone } = usePhoneLayout();
 
   // Detect device role once
   const deviceRole = useRef<"mic" | "speaker">("mic");
@@ -96,6 +96,8 @@ export default function ChatScreen() {
         setIsStreaming(true);
       },
       onPinRequest: async (approvalId, description) => {
+        // Only iPhone handles approvals (Face ID) — tablets/TV ignore pin requests
+        if (!isPhone) return;
         // Ignore if already handling a pin request (prevents stacking)
         if (pendingPinRef.current) return;
         pendingPinRef.current = { approvalId };
@@ -122,6 +124,8 @@ export default function ChatScreen() {
       },
       onConnected: async () => {
         if (cancelled) return;
+        // Only iPhone checks for pending approvals (Face ID approval device)
+        if (!isPhone) return;
         try {
           const approvals = await fetchPendingApprovals();
           if (approvals.length === 0 || pendingPinRef.current) return;

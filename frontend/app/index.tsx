@@ -198,6 +198,8 @@ export default function LandingScreen() {
         setIsStreaming(true);
       },
       onPinRequest: async (approvalId) => {
+        // Only iPhone handles approvals (Face ID) — tablets/TV ignore pin requests
+        if (!isPhone) return;
         // Ignore if already handling a pin request (prevents stacking)
         if (pendingPinRef.current) return;
         pendingPinRef.current = { approvalId };
@@ -214,6 +216,7 @@ export default function LandingScreen() {
         } catch (err) {
           console.warn("Biometric auth error, falling back to keypad:", err);
         }
+        // Face ID failed or unavailable on iPhone — show keypad as fallback
         if (pendingPinRef.current?.approvalId === approvalId) {
           setShowKeypad(true);
         }
@@ -236,6 +239,8 @@ export default function LandingScreen() {
       },
       onConnected: async () => {
         if (cancelled) return;
+        // Only iPhone checks for pending approvals (Face ID approval device)
+        if (!isPhone) return;
         try {
           const approvals = await fetchPendingApprovals();
           if (approvals.length === 0 || pendingPinRef.current) return;

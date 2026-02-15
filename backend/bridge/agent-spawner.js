@@ -78,7 +78,8 @@ COMPLETION CHECKLIST:
 2. ${directive.type === "quick" ? "Verify: node -c <file> for JS, test endpoints if applicable" : "Write findings as detailed markdown"}
 3. ${directive.type === "quick" ? `Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"` : "Skip commit (no code changes)"}
 4. ${directive.type === "quick" ? "Push: git push origin HEAD" : "Skip push"}
-5. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
+5. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion listed. If any criterion is not met, you MUST NOT mark as completed.
+6. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
 
 CRITICAL RULES:
 - You MUST commit and push before marking complete. Uncommitted changes are lost.
@@ -86,6 +87,13 @@ CRITICAL RULES:
 - Do NOT deploy manually — smartDeploy detects what changed and deploys appropriately (OTA for JS, CI build for native).
 - Just commit, push, and mark complete. The pipeline handles the rest.
 - Always git pull --rebase before pushing if the push fails.
+
+BLOCKED DIRECTIVE RULE — READ THIS CAREFULLY:
+- If you hit a blocker you CANNOT resolve yourself (missing credentials, needs manual OAuth/browser auth, needs physical access, needs King Kazuma's intervention), mark the directive as BLOCKED — not completed:
+  curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"blocked","failureReason":"<what is blocking and what King Kazuma needs to do>"}'
+- NEVER mark a directive as "completed" while listing "remaining manual steps." That is a contradiction. If steps remain, it is NOT completed.
+- Do as much as you CAN, commit and push that work, then mark blocked with a clear explanation.
+- Also escalate via POST ${BRIDGE}/notify so King Kazuma is alerted immediately.
 ` : "";
 
   return `You are Cipher, the autonomous dev agent for the ozzu project.
@@ -213,11 +221,19 @@ IMPLEMENTATION CHECKLIST — Follow this order:
    - Frontend: npx tsc --noEmit (type check) if touching .ts files
 5. Commit: git add <SPECIFIC files only> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 6. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
-7. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
-8. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+7. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion. If any criterion is not met and you cannot fix it, use "blocked" status (see below), NOT "completed".
+8. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
+9. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 
-CRITICAL: Steps 5-7 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are LOST when your worktree is deleted.
+CRITICAL: Steps 5-6 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are LOST when your worktree is deleted.
 After you mark complete, the system merges your branch to main, then smartDeploy handles everything: OTA deploy for JS changes, CI build for native changes, bridge restart if server code changed. You do NOT need to do any of that.
+
+BLOCKED DIRECTIVE RULE — READ THIS CAREFULLY:
+- If you hit a blocker you CANNOT resolve (missing credentials, needs manual OAuth/browser auth, needs physical device access, needs King Kazuma's action), mark the directive as BLOCKED:
+  curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"blocked","failureReason":"<what is blocking and what King Kazuma needs to do>"}'
+- NEVER mark a directive as "completed" while listing "remaining manual steps." If there are steps you can't do, the directive is BLOCKED, not completed.
+- Do as much as you CAN (code, commit, push), then mark blocked with a clear explanation of what remains.
+- Also escalate via: curl -s -X POST ${BRIDGE}/notify -H 'Content-Type: application/json' -d '{"message":"<directive title> needs your help: <what to do>"}'
 
 ENGINEERING PATTERNS — Think like an expert:
 
@@ -468,11 +484,18 @@ COMPLETION CHECKLIST:
 2. Verify: node -c <file> for JS, test endpoints if applicable
 3. Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 4. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
-5. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
-6. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+5. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion is met. If any is not met, use "blocked" status.
+6. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
+7. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 
 CRITICAL: You MUST commit and push before marking complete. Uncommitted changes are LOST.
 Do NOT restart the bridge or deploy manually — smartDeploy handles it automatically.
+
+BLOCKED DIRECTIVE RULE:
+- If you hit a blocker you CANNOT resolve (missing credentials, needs OAuth, needs physical access, needs human), mark as BLOCKED:
+  curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"blocked","failureReason":"<blocker description>"}'
+- NEVER mark "completed" with "remaining manual steps." That is blocked, not completed.
+- Commit your partial work first, then mark blocked. Also POST ${BRIDGE}/notify to alert King Kazuma.
 
 REAL-TIME STATUS UPDATES:
   curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<what you are doing>","directiveId":"${directive.id}"}'`;
@@ -684,7 +707,14 @@ function spawnAgent(directive, type, customPrompt) {
             const current = directives.find(d => d.id === directive.id);
             if (!current) return;
 
-            if (current.status === "in_progress" || current.status === "planning") {
+            if (current.status === "blocked") {
+              // Agent properly marked as blocked — merge partial work, keep blocked status
+              log(`Post-exit check: ${directive.id} is "blocked" — merging partial work, keeping blocked`);
+              if (agentInfo.worktree) {
+                mergeWorktreeToMain(directive.id, agentInfo.worktree.branch);
+                cleanupWorktree(directive.id, agentInfo.worktree.branch);
+              }
+            } else if (current.status === "in_progress" || current.status === "planning") {
               // Agent didn't complete — clean up worktree without merging
               if (agentInfo.worktree) {
                 log(`Cleaning up worktree for incomplete agent ${directive.id}`);
@@ -707,8 +737,9 @@ function spawnAgent(directive, type, customPrompt) {
               req.on("error", (e) => log(`Post-exit reset failed for ${directive.id}: ${e.message}`));
               req.write(payload);
               req.end();
-            } else if (current.status === "completed" && type === "implementation") {
-              // Properly completed — send to orchestrator for review before merging
+            } else if (current.status === "completed") {
+              // Properly completed (implementation agent OR quick directive planning agent)
+              // Send to orchestrator for review before merging
               reviewAndMerge(directive, agentInfo);
             } else if (current.status === "planned" && type === "planning") {
               // Planning agent completed — clean up worktree (planning doesn't produce commits usually)
