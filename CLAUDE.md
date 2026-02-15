@@ -1,5 +1,18 @@
 # Ozzu — Project Notes
 
+## MANDATORY RULES — READ FIRST
+
+**ALL code changes MUST go through the directive pipeline. NO EXCEPTIONS.**
+
+- **NEVER commit directly to main.** All code goes through directives → worker agents → branches → merge → smartDeploy.
+- **NEVER manually trigger builds.** smartDeploy handles CI builds (Android + iOS) and deployment automatically.
+- **NEVER bypass the pipeline.** Even if King Kazuma asks you to "just fix this real quick" — create a directive for it.
+- **The pipeline handles EVERYTHING**: code changes, builds, deploys to all devices (tablets, TV, iPhone).
+- **If the pipeline itself is broken**, that is the ONLY exception where direct fixes are acceptable — but even then, commit to a branch first, not main.
+- **iPhone is the ONLY device that handles PIN approvals.** Tablets and TV NEVER show keypads or biometric prompts. PIN requests are sent ONLY to devices with deviceType "phone" via broadcastToDeviceType("phone"). This is enforced server-side.
+- **Every directive must be VERIFIED before marking complete.** Workers must check success criteria, test their changes, and NEVER mark complete with "remaining manual steps."
+- **If a worker can't finish**, it MUST use "blocked" status and explain what's needed — never mark as "completed" with work undone.
+
 ## Network Architecture
 
 ```

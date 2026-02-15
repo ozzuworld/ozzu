@@ -2945,17 +2945,42 @@ function submitDirective(e) {
       return;
     }
 
-    const token = process.env.SPOTIFY_ACCESS_TOKEN || "";
-    if (!token) {
-      // Try to get token from HA config entries
-      try {
-        const entries = await haFetch("/api/config/config_entries/entry");
-        const spotifyEntry = entries.find(e => e.domain === "spotify");
-        if (spotifyEntry) {
-          // HA doesn't expose OAuth tokens directly via REST API
-          // Fall back to graceful empty response
+    // Get Spotify access token from HA's config storage
+    let token = "";
+    try {
+      const fs = require("fs");
+      const haStorage = JSON.parse(fs.readFileSync("/home/gcp/ozzu/backend/config/.storage/core.config_entries", "utf8"));
+      const spotifyEntry = haStorage.data.entries.find(e => e.domain === "spotify");
+      if (spotifyEntry?.data?.token) {
+        const tokenData = spotifyEntry.data.token;
+        // Check if token is expired (with 5min buffer)
+        if (tokenData.expires_at && tokenData.expires_at > Date.now() / 1000 + 300) {
+          token = tokenData.access_token;
+        } else if (tokenData.refresh_token) {
+          // Refresh the token
+          const params = new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: tokenData.refresh_token,
+            client_id: "62ee533a9f2444dfb854cb1293c32cd9",
+            client_secret: "60ca708c676846508251cf2549f26b14",
+          });
+          const refreshRes = await fetch("https://accounts.spotify.com/api/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: params.toString(),
+            signal: AbortSignal.timeout(5000),
+          });
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            token = refreshData.access_token;
+          }
         }
-      } catch { /* ignore */ }
+      }
+    } catch (err) {
+      log.bridge.warn("Failed to read Spotify token from HA storage:", err.message);
+    }
+
+    if (!token) {
       sendJSON(res, 200, { queue: [], reason: "no_token" });
       return;
     }
