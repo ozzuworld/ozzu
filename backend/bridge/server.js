@@ -44,6 +44,10 @@ const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 const _directiveCreationTimestamps = [];
 let _rateLimitHits = 0;
 
+// ── Album color + Spotify queue caches ──
+const _albumColorCache = new Map(); // url -> hex color string (max 100)
+let _spotifyQueueCache = null; // { queue: [...], ts: number } (15s TTL)
+
 // ── Log ring buffer — captures recent console output for GET /logs ──
 const LOG_RING_MAX = 500;
 const _logRing = new Array(LOG_RING_MAX);
@@ -2865,6 +2869,98 @@ function submitDirective(e) {
         rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
       },
     });
+    return;
+  }
+
+  // GET /api/album-color — extract dominant color from album art via HA proxy
+  if (req.method === "GET" && pathname === "/api/album-color") {
+    const artUrl = url.searchParams.get("url");
+    if (!artUrl) {
+      sendJSON(res, 400, { error: "Missing url parameter" });
+      return;
+    }
+
+    // Check cache first
+    const cached = _albumColorCache.get(artUrl);
+    if (cached) {
+      sendJSON(res, 200, { hex: cached });
+      return;
+    }
+
+    try {
+      const imgRes = await fetch(`${HA_URL}${artUrl}`, {
+        headers: { Authorization: `Bearer ${HA_TOKEN}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!imgRes.ok) {
+        sendJSON(res, 502, { error: `HA returned ${imgRes.status}` });
+        return;
+      }
+      const buffer = Buffer.from(await imgRes.arrayBuffer());
+      const sharp = require("sharp");
+      const { data } = await sharp(buffer).resize(1, 1).raw().toBuffer({ resolveWithObject: true });
+      const hex = `#${data[0].toString(16).padStart(2, "0")}${data[1].toString(16).padStart(2, "0")}${data[2].toString(16).padStart(2, "0")}`;
+
+      // Cache (LRU-ish, cap at 100)
+      if (_albumColorCache.size >= 100) {
+        const firstKey = _albumColorCache.keys().next().value;
+        _albumColorCache.delete(firstKey);
+      }
+      _albumColorCache.set(artUrl, hex);
+
+      sendJSON(res, 200, { hex });
+    } catch (err) {
+      log.bridge.error("Album color extraction failed:", err.message);
+      sendJSON(res, 500, { error: "Color extraction failed" });
+    }
+    return;
+  }
+
+  // GET /api/spotify/queue — fetch Spotify queue via Spotify Web API
+  if (req.method === "GET" && pathname === "/api/spotify/queue") {
+    // Check cache
+    if (_spotifyQueueCache && Date.now() - _spotifyQueueCache.ts < 15000) {
+      sendJSON(res, 200, { queue: _spotifyQueueCache.queue });
+      return;
+    }
+
+    const token = process.env.SPOTIFY_ACCESS_TOKEN || "";
+    if (!token) {
+      // Try to get token from HA config entries
+      try {
+        const entries = await haFetch("/api/config/config_entries/entry");
+        const spotifyEntry = entries.find(e => e.domain === "spotify");
+        if (spotifyEntry) {
+          // HA doesn't expose OAuth tokens directly via REST API
+          // Fall back to graceful empty response
+        }
+      } catch { /* ignore */ }
+      sendJSON(res, 200, { queue: [], reason: "no_token" });
+      return;
+    }
+
+    try {
+      const qRes = await fetch("https://api.spotify.com/v1/me/player/queue", {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!qRes.ok) {
+        sendJSON(res, 200, { queue: [], reason: `spotify_api_${qRes.status}` });
+        return;
+      }
+      const data = await qRes.json();
+      const queue = (data.queue || []).slice(0, 3).map(t => ({
+        name: t.name || "",
+        artist: (t.artists || []).map(a => a.name).join(", "),
+        imageUrl: t.album?.images?.[2]?.url || t.album?.images?.[0]?.url || null,
+      }));
+
+      _spotifyQueueCache = { queue, ts: Date.now() };
+      sendJSON(res, 200, { queue });
+    } catch (err) {
+      log.bridge.error("Spotify queue fetch failed:", err.message);
+      sendJSON(res, 200, { queue: [], reason: "fetch_error" });
+    }
     return;
   }
 

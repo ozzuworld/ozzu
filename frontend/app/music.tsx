@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import {
   View,
   Text,
@@ -18,6 +18,9 @@ import { useMediaPlayer } from "../lib/useMediaPlayer";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { HA_URL, HA_TOKEN } from "../lib/config";
 
+const BRIDGE_URL =
+  process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333";
+
 const LEGENDARY = RARITY_COLORS.legendary;
 const SHIMMER_PERIOD = 1500;
 const TOP_BAR_HEIGHT = 48;
@@ -30,15 +33,29 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+interface QueueItem {
+  name: string;
+  artist: string;
+  imageUrl: string | null;
+}
+
 export default function MusicScreen() {
   useKeepAwake();
   const router = useRouter();
   const { state, controls } = useMediaPlayer();
   const { insets, isPhone, screenWidth, screenHeight } = usePhoneLayout();
 
+  // Dominant color state
+  const [dominantColor, setDominantColor] = useState<string | null>(null);
+  const colorFadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Queue state
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+
   // Animations
   const glowAnim = useRef(new Animated.Value(0)).current;
   const artPulseAnim = useRef(new Animated.Value(1)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
   const prevTrackRef = useRef(state.trackName);
   const volumeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -100,6 +117,69 @@ export default function MusicScreen() {
     return () => { if (anim) anim.stop(); };
   }, [state.trackName]);
 
+  // Animated progress bar — smooth interpolation
+  const isSeeking = useRef(false);
+  useEffect(() => {
+    if (isSeeking.current) return;
+    const targetRatio = state.duration > 0 ? state.position / state.duration : 0;
+    const anim = Animated.timing(progressAnim, {
+      toValue: targetRatio,
+      duration: 1000,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [state.position, state.duration]);
+
+  // Dominant color extraction
+  useEffect(() => {
+    if (!state.albumArt) {
+      setDominantColor(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${BRIDGE_URL}/api/album-color?url=${encodeURIComponent(state.albumArt)}`
+        );
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled && data.hex) {
+          setDominantColor(data.hex);
+          // Animate the color fade in
+          colorFadeAnim.setValue(0);
+          Animated.timing(colorFadeAnim, {
+            toValue: 1,
+            duration: 800,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: false,
+          }).start();
+        }
+      } catch {
+        // Silently fail — keep current background
+      }
+    }, 200); // 200ms debounce
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [state.albumArt]);
+
+  // Fetch queue on track change
+  const fetchQueue = useCallback(async () => {
+    try {
+      const res = await fetch(`${BRIDGE_URL}/api/spotify/queue`);
+      if (!res.ok) { setQueue([]); return; }
+      const data = await res.json();
+      setQueue(data.queue || []);
+    } catch {
+      setQueue([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchQueue();
+  }, [state.trackName, fetchQueue]);
+
   // Progress bar seek
   const progressBarWidth = useRef(0);
   const progressResponder = useMemo(
@@ -107,16 +187,25 @@ export default function MusicScreen() {
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onPanResponderGrant: (evt) => {
+          isSeeking.current = true;
           const x = evt.nativeEvent.locationX;
           if (progressBarWidth.current <= 0 || durationRef.current <= 0) return;
           const ratio = Math.max(0, Math.min(1, x / progressBarWidth.current));
+          progressAnim.setValue(ratio);
           seekRef.current(ratio * durationRef.current);
         },
         onPanResponderMove: (evt) => {
           const x = evt.nativeEvent.locationX;
           if (progressBarWidth.current <= 0 || durationRef.current <= 0) return;
           const ratio = Math.max(0, Math.min(1, x / progressBarWidth.current));
+          progressAnim.setValue(ratio);
           seekRef.current(ratio * durationRef.current);
+        },
+        onPanResponderRelease: () => {
+          isSeeking.current = false;
+        },
+        onPanResponderTerminate: () => {
+          isSeeking.current = false;
         },
       }),
     []
@@ -150,7 +239,6 @@ export default function MusicScreen() {
     []
   );
 
-  const progressRatio = state.duration > 0 ? state.position / state.duration : 0;
   const albumArtUrl = state.albumArt ? `${HA_URL}${state.albumArt}` : null;
 
   const glowRadius = glowAnim.interpolate({
@@ -162,14 +250,64 @@ export default function MusicScreen() {
     outputRange: [0.4, 0.9],
   });
 
-  // Layout calculations
+  // Animated progress interpolations
+  const animatedProgressWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+  const animatedThumbLeft = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+
+  // Layout calculations — landscape-aware
+  const isLandscape = screenWidth > screenHeight;
   const contentHeight = screenHeight - TOP_BAR_HEIGHT - insets.top - insets.bottom - 24;
   const artSize = isPhone
     ? Math.min(screenWidth * 0.6, 220)
-    : Math.min(contentHeight * 0.75, 250);
+    : Math.min(contentHeight * 0.85, 350);
+
+  // Background color with dominant color overlay
+  const bgOverlayOpacity = dominantColor
+    ? colorFadeAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 0.35],
+      })
+    : 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000000" }}>
+      {/* Dominant color gradient overlay */}
+      {dominantColor ? (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: dominantColor,
+            opacity: bgOverlayOpacity,
+          }}
+        />
+      ) : null}
+      {/* Gradient fade — darken the bottom half */}
+      {dominantColor ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: "60%",
+            backgroundColor: "#000000",
+            opacity: 0.7,
+          }}
+        />
+      ) : null}
+
       {/* Top Bar */}
       <View
         style={{
@@ -213,7 +351,7 @@ export default function MusicScreen() {
           justifyContent: "center",
           paddingHorizontal: Math.max(24, insets.left, insets.right),
           paddingBottom: Math.max(16, insets.bottom),
-          gap: isPhone ? 20 : 40,
+          gap: isPhone ? 20 : isLandscape ? 48 : 40,
         }}
       >
         {/* Left panel — Album Art */}
@@ -290,51 +428,54 @@ export default function MusicScreen() {
         <View
           style={{
             flex: isPhone ? undefined : 1,
-            maxWidth: isPhone ? screenWidth * 0.85 : 400,
+            maxWidth: isPhone ? screenWidth * 0.85 : 450,
             width: isPhone ? screenWidth * 0.85 : undefined,
             justifyContent: "center",
           }}
         >
-          {/* Track name */}
+          {/* Track name — large, bold, white */}
           <Text
             numberOfLines={1}
             style={{
-              color: LEGENDARY.text,
-              fontSize: 20,
-              fontWeight: "700",
-              fontFamily: MONO,
+              color: "#FFFFFF",
+              fontSize: 24,
+              fontWeight: "800",
             }}
           >
             {state.trackName || "No Track"}
           </Text>
 
-          {/* Artist */}
-          <Text
-            numberOfLines={1}
-            style={{
-              color: "#A3A3A3",
-              fontSize: 14,
-              fontFamily: MONO,
-              marginTop: 4,
-            }}
+          {/* Artist — muted, tappable look */}
+          <TVPressable
+            rarity="common"
+            style={{ alignSelf: "flex-start", marginTop: 4 }}
           >
-            {state.artist || "---"}
-          </Text>
+            <Text
+              numberOfLines={1}
+              style={{
+                color: "#B3B3B3",
+                fontSize: 16,
+                fontWeight: "500",
+              }}
+            >
+              {state.artist || "---"}
+            </Text>
+          </TVPressable>
 
-          {/* Album */}
+          {/* Album — subtle */}
           <Text
             numberOfLines={1}
             style={{
-              color: "#525252",
-              fontSize: 12,
-              fontFamily: MONO,
+              color: "#686868",
+              fontSize: 13,
+              fontWeight: "400",
               marginTop: 2,
             }}
           >
             {state.albumName || ""}
           </Text>
 
-          {/* Progress bar */}
+          {/* Animated Progress bar */}
           <View style={{ marginTop: 20 }}>
             <View
               onLayout={(e) => {
@@ -355,20 +496,20 @@ export default function MusicScreen() {
                   overflow: "hidden",
                 }}
               >
-                <View
+                <Animated.View
                   style={{
                     height: "100%",
-                    width: `${Math.min(100, progressRatio * 100)}%`,
+                    width: animatedProgressWidth,
                     backgroundColor: LEGENDARY.border,
                     borderRadius: 3,
                   }}
                 />
               </View>
-              {/* Thumb */}
-              <View
+              {/* Animated Thumb */}
+              <Animated.View
                 style={{
                   position: "absolute",
-                  left: `${Math.min(100, progressRatio * 100)}%`,
+                  left: animatedThumbLeft,
                   marginLeft: -7,
                   width: 14,
                   height: 14,
@@ -535,6 +676,75 @@ export default function MusicScreen() {
               </View>
             </View>
           </View>
+
+          {/* Queue preview — UP NEXT */}
+          {queue.length > 0 ? (
+            <View style={{ marginTop: 20 }}>
+              <Text
+                style={{
+                  color: "#525252",
+                  fontSize: 10,
+                  fontWeight: "700",
+                  letterSpacing: 2,
+                  fontFamily: MONO,
+                  marginBottom: 8,
+                }}
+              >
+                UP NEXT
+              </Text>
+              {queue.slice(0, 3).map((item, i) => (
+                <View
+                  key={`${item.name}-${i}`}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    marginBottom: 6,
+                  }}
+                >
+                  {item.imageUrl ? (
+                    <Image
+                      source={{ uri: item.imageUrl }}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 4,
+                        backgroundColor: "#1a1a1a",
+                      }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 4,
+                        backgroundColor: "#1a1a1a",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text style={{ fontSize: 14 }}>🎵</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      numberOfLines={1}
+                      style={{ color: "#B3B3B3", fontSize: 13, fontWeight: "500" }}
+                    >
+                      {item.name}
+                    </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={{ color: "#525252", fontSize: 11 }}
+                    >
+                      {item.artist}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null}
 
           {/* Source indicator */}
           {state.source ? (
