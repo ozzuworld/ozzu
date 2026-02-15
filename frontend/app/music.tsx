@@ -7,13 +7,13 @@ import {
   Easing,
   PanResponder,
   Platform,
+  Pressable,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
-import { TVPressable } from "../components/TVPressable";
+import { Ionicons } from "@expo/vector-icons";
 import { StatusBadge } from "../components/StatusBadge";
-import { RARITY_COLORS } from "../lib/rooms";
 import { useMediaPlayer } from "../lib/useMediaPlayer";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { HA_URL, HA_TOKEN } from "../lib/config";
@@ -21,10 +21,10 @@ import { HA_URL, HA_TOKEN } from "../lib/config";
 const BRIDGE_URL =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333";
 
-const LEGENDARY = RARITY_COLORS.legendary;
-const SHIMMER_PERIOD = 1500;
+const ACCENT = "#1DB954"; // Spotify green for active states
+const BAR_COLOR = "#FFFFFF";
+const BAR_BG = "rgba(255,255,255,0.1)";
 const TOP_BAR_HEIGHT = 48;
-const MONO = Platform.OS === "ios" ? "Menlo" : "monospace";
 
 function formatTime(seconds: number): string {
   if (!seconds || seconds < 0) return "0:00";
@@ -53,7 +53,6 @@ export default function MusicScreen() {
   const [queue, setQueue] = useState<QueueItem[]>([]);
 
   // Animations
-  const glowAnim = useRef(new Animated.Value(0)).current;
   const artPulseAnim = useRef(new Animated.Value(1)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
   const prevTrackRef = useRef(state.trackName);
@@ -73,35 +72,13 @@ export default function MusicScreen() {
     };
   }, []);
 
-  // Shimmer glow loop
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, {
-          toValue: 1,
-          duration: SHIMMER_PERIOD / 2,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: false,
-        }),
-        Animated.timing(glowAnim, {
-          toValue: 0,
-          duration: SHIMMER_PERIOD / 2,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: false,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, []);
-
   // Track change pulse
   useEffect(() => {
     let anim: Animated.CompositeAnimation | null = null;
     if (state.trackName && state.trackName !== prevTrackRef.current) {
       anim = Animated.sequence([
         Animated.timing(artPulseAnim, {
-          toValue: 1.05,
+          toValue: 1.03,
           duration: 150,
           useNativeDriver: true,
         }),
@@ -148,7 +125,6 @@ export default function MusicScreen() {
         const data = await res.json();
         if (!cancelled && data.hex) {
           setDominantColor(data.hex);
-          // Animate the color fade in
           colorFadeAnim.setValue(0);
           Animated.timing(colorFadeAnim, {
             toValue: 1,
@@ -160,7 +136,7 @@ export default function MusicScreen() {
       } catch {
         // Silently fail — keep current background
       }
-    }, 200); // 200ms debounce
+    }, 200);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [state.albumArt]);
 
@@ -241,21 +217,8 @@ export default function MusicScreen() {
 
   const albumArtUrl = state.albumArt ? `${HA_URL}${state.albumArt}` : null;
 
-  const glowRadius = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [10, 22],
-  });
-  const glowOpacity = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.4, 0.9],
-  });
-
   // Animated progress interpolations
   const animatedProgressWidth = progressAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0%", "100%"],
-  });
-  const animatedThumbLeft = progressAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ["0%", "100%"],
   });
@@ -264,19 +227,21 @@ export default function MusicScreen() {
   const isLandscape = screenWidth > screenHeight;
   const contentHeight = screenHeight - TOP_BAR_HEIGHT - insets.top - insets.bottom - 24;
   const artSize = isPhone
-    ? Math.min(screenWidth * 0.6, 220)
-    : Math.min(contentHeight * 0.85, 350);
+    ? Math.min(screenWidth * 0.7, 280)
+    : Math.min(contentHeight * 0.85, 380);
 
   // Background color with dominant color overlay
   const bgOverlayOpacity = dominantColor
     ? colorFadeAnim.interpolate({
         inputRange: [0, 1],
-        outputRange: [0, 0.35],
+        outputRange: [0, 0.4],
       })
     : 0;
 
+  const hasTrack = !!state.trackName;
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#000000" }}>
+    <View style={{ flex: 1, backgroundColor: "#121212" }}>
       {/* Dominant color gradient overlay */}
       {dominantColor ? (
         <Animated.View
@@ -286,13 +251,13 @@ export default function MusicScreen() {
             top: 0,
             left: 0,
             right: 0,
-            bottom: 0,
+            height: "60%",
             backgroundColor: dominantColor,
             opacity: bgOverlayOpacity,
           }}
         />
       ) : null}
-      {/* Gradient fade — darken the bottom half */}
+      {/* Gradient fade — darken the bottom */}
       {dominantColor ? (
         <View
           pointerEvents="none"
@@ -300,10 +265,10 @@ export default function MusicScreen() {
             position: "absolute",
             left: 0,
             right: 0,
+            top: "30%",
             bottom: 0,
-            height: "60%",
-            backgroundColor: "#000000",
-            opacity: 0.7,
+            backgroundColor: "#121212",
+            opacity: 0.85,
           }}
         />
       ) : null}
@@ -319,26 +284,28 @@ export default function MusicScreen() {
           paddingHorizontal: Math.max(16, insets.left, insets.right),
         }}
       >
-        <TVPressable
+        <Pressable
           onPress={() => router.back()}
-          style={{
-            paddingHorizontal: 12,
-            paddingVertical: 4,
-            borderRadius: 6,
-          }}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            opacity: pressed ? 0.5 : 1,
+            paddingVertical: 8,
+            paddingRight: 12,
+          })}
         >
+          <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
           <Text
             style={{
-              color: "#A3A3A3",
-              fontSize: 12,
-              fontWeight: "bold",
-              letterSpacing: 1,
-              fontFamily: MONO,
+              color: "#FFFFFF",
+              fontSize: 14,
+              fontWeight: "600",
             }}
           >
-            {"◀ BACK"}
+            Back
           </Text>
-        </TVPressable>
+        </Pressable>
         <StatusBadge />
       </View>
 
@@ -351,50 +318,24 @@ export default function MusicScreen() {
           justifyContent: "center",
           paddingHorizontal: Math.max(24, insets.left, insets.right),
           paddingBottom: Math.max(16, insets.bottom),
-          gap: isPhone ? 20 : isLandscape ? 48 : 40,
+          gap: isPhone ? 24 : isLandscape ? 48 : 40,
         }}
       >
         {/* Left panel — Album Art */}
         <View style={{ alignItems: "center", justifyContent: "center" }}>
-          {/* Glow border */}
-          <Animated.View
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              top: -3,
-              left: -3,
-              right: -3,
-              bottom: -3,
-              borderRadius: 14,
-              borderWidth: 1.5,
-              borderColor: LEGENDARY.border,
-              ...(Platform.OS !== "web"
-                ? {
-                    shadowColor: LEGENDARY.glow,
-                    shadowOpacity: glowOpacity as any,
-                    shadowRadius: glowRadius as any,
-                    shadowOffset: { width: 0, height: 0 },
-                    elevation: 16,
-                  }
-                : {}),
-            }}
-          />
-
           <Animated.View
             style={{
               width: artSize,
               height: artSize,
-              borderRadius: 12,
-              borderWidth: 2,
-              borderColor: LEGENDARY.border,
+              borderRadius: 8,
               overflow: "hidden",
               transform: [{ scale: artPulseAnim }],
               ...(Platform.OS !== "web"
                 ? {
-                    shadowColor: LEGENDARY.glow,
-                    shadowOpacity: 0.6,
-                    shadowRadius: 14,
-                    shadowOffset: { width: 0, height: 0 },
+                    shadowColor: "#000",
+                    shadowOpacity: 0.5,
+                    shadowRadius: 20,
+                    shadowOffset: { width: 0, height: 8 },
                     elevation: 12,
                   }
                 : {}),
@@ -413,12 +354,12 @@ export default function MusicScreen() {
               <View
                 style={{
                   flex: 1,
-                  backgroundColor: "rgba(245,158,11,0.1)",
+                  backgroundColor: "#282828",
                   alignItems: "center",
                   justifyContent: "center",
                 }}
               >
-                <Text style={{ fontSize: 48 }}>🎵</Text>
+                <Ionicons name="musical-notes" size={64} color="#535353" />
               </View>
             )}
           </Animated.View>
@@ -433,50 +374,63 @@ export default function MusicScreen() {
             justifyContent: "center",
           }}
         >
-          {/* Track name — large, bold, white */}
-          <Text
-            numberOfLines={1}
-            style={{
-              color: "#FFFFFF",
-              fontSize: 24,
-              fontWeight: "800",
-            }}
-          >
-            {state.trackName || "No Track"}
-          </Text>
+          {hasTrack ? (
+            <>
+              {/* Track name */}
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: "#FFFFFF",
+                  fontSize: 22,
+                  fontWeight: "700",
+                }}
+              >
+                {state.trackName}
+              </Text>
 
-          {/* Artist — muted, tappable look */}
-          <TVPressable
-            rarity="common"
-            style={{ alignSelf: "flex-start", marginTop: 4 }}
-          >
+              {/* Artist */}
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: "#B3B3B3",
+                  fontSize: 16,
+                  fontWeight: "400",
+                  marginTop: 4,
+                }}
+              >
+                {state.artist || "---"}
+              </Text>
+
+              {/* Album */}
+              {state.albumName ? (
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: "#686868",
+                    fontSize: 14,
+                    fontWeight: "400",
+                    marginTop: 2,
+                  }}
+                >
+                  {state.albumName}
+                </Text>
+              ) : null}
+            </>
+          ) : (
             <Text
-              numberOfLines={1}
               style={{
-                color: "#B3B3B3",
-                fontSize: 16,
+                color: "#686868",
+                fontSize: 18,
                 fontWeight: "500",
+                textAlign: isPhone ? "center" : "left",
               }}
             >
-              {state.artist || "---"}
+              Not Playing
             </Text>
-          </TVPressable>
+          )}
 
-          {/* Album — subtle */}
-          <Text
-            numberOfLines={1}
-            style={{
-              color: "#686868",
-              fontSize: 13,
-              fontWeight: "400",
-              marginTop: 2,
-            }}
-          >
-            {state.albumName || ""}
-          </Text>
-
-          {/* Animated Progress bar */}
-          <View style={{ marginTop: 20 }}>
+          {/* Progress bar */}
+          <View style={{ marginTop: 24 }}>
             <View
               onLayout={(e) => {
                 progressBarWidth.current = e.nativeEvent.layout.width;
@@ -487,12 +441,11 @@ export default function MusicScreen() {
                 justifyContent: "center",
               }}
             >
-              {/* Track background */}
               <View
                 style={{
-                  height: 5,
-                  borderRadius: 3,
-                  backgroundColor: "rgba(245,158,11,0.15)",
+                  height: 3,
+                  borderRadius: 2,
+                  backgroundColor: BAR_BG,
                   overflow: "hidden",
                 }}
               >
@@ -500,32 +453,11 @@ export default function MusicScreen() {
                   style={{
                     height: "100%",
                     width: animatedProgressWidth,
-                    backgroundColor: LEGENDARY.border,
-                    borderRadius: 3,
+                    backgroundColor: BAR_COLOR,
+                    borderRadius: 2,
                   }}
                 />
               </View>
-              {/* Animated Thumb */}
-              <Animated.View
-                style={{
-                  position: "absolute",
-                  left: animatedThumbLeft,
-                  marginLeft: -7,
-                  width: 14,
-                  height: 14,
-                  borderRadius: 7,
-                  backgroundColor: LEGENDARY.border,
-                  ...(Platform.OS !== "web"
-                    ? {
-                        shadowColor: LEGENDARY.glow,
-                        shadowOpacity: 0.8,
-                        shadowRadius: 6,
-                        shadowOffset: { width: 0, height: 0 },
-                        elevation: 6,
-                      }
-                    : {}),
-                }}
-              />
             </View>
             {/* Time labels */}
             <View
@@ -535,104 +467,112 @@ export default function MusicScreen() {
                 marginTop: 4,
               }}
             >
-              <Text style={{ color: "#525252", fontSize: 11, fontFamily: MONO }}>
+              <Text style={{ color: "#A7A7A7", fontSize: 11 }}>
                 {formatTime(state.position)}
               </Text>
-              <Text style={{ color: "#525252", fontSize: 11, fontFamily: MONO }}>
+              <Text style={{ color: "#A7A7A7", fontSize: 11 }}>
                 {formatTime(state.duration)}
               </Text>
             </View>
           </View>
 
-          {/* Controls row */}
+          {/* Transport controls */}
           <View
             style={{
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",
               marginTop: 16,
-              gap: 12,
+              gap: isPhone ? 20 : 28,
             }}
           >
             {/* Shuffle */}
-            <TVPressable
-              rarity="legendary"
+            <Pressable
               onPress={controls.toggleShuffle}
-              style={{ paddingHorizontal: 8, paddingVertical: 6, opacity: state.shuffle ? 1 : 0.4 }}
+              style={({ pressed }) => ({
+                padding: 8,
+                opacity: pressed ? 0.5 : 1,
+              })}
             >
-              <Text style={{ color: LEGENDARY.text, fontSize: 18 }}>🔀</Text>
-            </TVPressable>
+              <Ionicons
+                name="shuffle"
+                size={22}
+                color={state.shuffle ? ACCENT : "#B3B3B3"}
+              />
+            </Pressable>
 
             {/* Previous */}
-            <TVPressable
-              rarity="legendary"
+            <Pressable
               onPress={controls.prevTrack}
-              style={{ paddingHorizontal: 10, paddingVertical: 6 }}
+              style={({ pressed }) => ({
+                padding: 8,
+                opacity: pressed ? 0.5 : 1,
+              })}
             >
-              <Text
-                style={{
-                  color: LEGENDARY.text,
-                  fontSize: 22,
-                  fontWeight: "700",
-                  fontFamily: MONO,
-                }}
-              >
-                ◀◀
-              </Text>
-            </TVPressable>
+              <Ionicons name="play-skip-back" size={24} color="#FFFFFF" />
+            </Pressable>
 
             {/* Play/Pause */}
-            <TVPressable
-              rarity="legendary"
+            <Pressable
               onPress={controls.playPause}
-              style={{
-                paddingHorizontal: 20,
-                paddingVertical: 10,
-              }}
+              style={({ pressed }) => ({
+                padding: 4,
+                opacity: pressed ? 0.5 : 1,
+              })}
             >
-              <Text
-                style={{
-                  color: LEGENDARY.text,
-                  fontSize: 36,
-                  fontWeight: "700",
-                }}
-              >
-                {state.isPlaying ? "⏸" : "▶"}
-              </Text>
-            </TVPressable>
+              <Ionicons
+                name={state.isPlaying ? "pause-circle" : "play-circle"}
+                size={56}
+                color="#FFFFFF"
+              />
+            </Pressable>
 
             {/* Next */}
-            <TVPressable
-              rarity="legendary"
+            <Pressable
               onPress={controls.nextTrack}
-              style={{ paddingHorizontal: 10, paddingVertical: 6 }}
+              style={({ pressed }) => ({
+                padding: 8,
+                opacity: pressed ? 0.5 : 1,
+              })}
             >
-              <Text
-                style={{
-                  color: LEGENDARY.text,
-                  fontSize: 22,
-                  fontWeight: "700",
-                  fontFamily: MONO,
-                }}
-              >
-                ▶▶
-              </Text>
-            </TVPressable>
+              <Ionicons name="play-skip-forward" size={24} color="#FFFFFF" />
+            </Pressable>
 
             {/* Repeat */}
-            <TVPressable
-              rarity="legendary"
+            <Pressable
               onPress={() => {
                 const modes = ["off", "all", "one"];
                 const next = modes[(modes.indexOf(state.repeat) + 1) % modes.length];
                 controls.setRepeat(next);
               }}
-              style={{ paddingHorizontal: 8, paddingVertical: 6, opacity: state.repeat !== "off" ? 1 : 0.4 }}
+              style={({ pressed }) => ({
+                padding: 8,
+                opacity: pressed ? 0.5 : 1,
+              })}
             >
-              <Text style={{ color: LEGENDARY.text, fontSize: 18 }}>
-                {state.repeat === "one" ? "🔂" : "🔁"}
-              </Text>
-            </TVPressable>
+              <Ionicons
+                name="repeat"
+                size={22}
+                color={state.repeat !== "off" ? ACCENT : "#B3B3B3"}
+              />
+              {state.repeat === "one" ? (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 4,
+                    right: 4,
+                    width: 12,
+                    height: 12,
+                    borderRadius: 6,
+                    backgroundColor: ACCENT,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: "#000", fontSize: 8, fontWeight: "700" }}>1</Text>
+                </View>
+              ) : null}
+            </Pressable>
           </View>
 
           {/* Volume slider */}
@@ -640,11 +580,15 @@ export default function MusicScreen() {
             style={{
               flexDirection: "row",
               alignItems: "center",
-              marginTop: 16,
-              gap: 8,
+              marginTop: 20,
+              gap: 10,
             }}
           >
-            <Text style={{ color: "#525252", fontSize: 14 }}>🔊</Text>
+            <Ionicons
+              name={state.volume === 0 ? "volume-mute" : state.volume < 0.5 ? "volume-low" : "volume-high"}
+              size={18}
+              color="#B3B3B3"
+            />
             <View
               onLayout={(e) => {
                 volumeBarWidth.current = e.nativeEvent.layout.width;
@@ -659,9 +603,9 @@ export default function MusicScreen() {
             >
               <View
                 style={{
-                  height: 4,
+                  height: 3,
                   borderRadius: 2,
-                  backgroundColor: "rgba(245,158,11,0.15)",
+                  backgroundColor: BAR_BG,
                   overflow: "hidden",
                 }}
               >
@@ -669,7 +613,7 @@ export default function MusicScreen() {
                   style={{
                     height: "100%",
                     width: `${state.volume * 100}%`,
-                    backgroundColor: LEGENDARY.border,
+                    backgroundColor: BAR_COLOR,
                     borderRadius: 2,
                   }}
                 />
@@ -679,15 +623,14 @@ export default function MusicScreen() {
 
           {/* Queue preview — UP NEXT */}
           {queue.length > 0 ? (
-            <View style={{ marginTop: 20 }}>
+            <View style={{ marginTop: 24 }}>
               <Text
                 style={{
-                  color: "#525252",
-                  fontSize: 10,
+                  color: "#B3B3B3",
+                  fontSize: 12,
                   fontWeight: "700",
-                  letterSpacing: 2,
-                  fontFamily: MONO,
-                  marginBottom: 8,
+                  letterSpacing: 1,
+                  marginBottom: 10,
                 }}
               >
                 UP NEXT
@@ -698,45 +641,45 @@ export default function MusicScreen() {
                   style={{
                     flexDirection: "row",
                     alignItems: "center",
-                    gap: 10,
-                    marginBottom: 6,
+                    gap: 12,
+                    marginBottom: 8,
                   }}
                 >
                   {item.imageUrl ? (
                     <Image
                       source={{ uri: item.imageUrl }}
                       style={{
-                        width: 32,
-                        height: 32,
+                        width: 36,
+                        height: 36,
                         borderRadius: 4,
-                        backgroundColor: "#1a1a1a",
+                        backgroundColor: "#282828",
                       }}
                       resizeMode="cover"
                     />
                   ) : (
                     <View
                       style={{
-                        width: 32,
-                        height: 32,
+                        width: 36,
+                        height: 36,
                         borderRadius: 4,
-                        backgroundColor: "#1a1a1a",
+                        backgroundColor: "#282828",
                         alignItems: "center",
                         justifyContent: "center",
                       }}
                     >
-                      <Text style={{ fontSize: 14 }}>🎵</Text>
+                      <Ionicons name="musical-note" size={16} color="#535353" />
                     </View>
                   )}
                   <View style={{ flex: 1 }}>
                     <Text
                       numberOfLines={1}
-                      style={{ color: "#B3B3B3", fontSize: 13, fontWeight: "500" }}
+                      style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "500" }}
                     >
                       {item.name}
                     </Text>
                     <Text
                       numberOfLines={1}
-                      style={{ color: "#525252", fontSize: 11 }}
+                      style={{ color: "#B3B3B3", fontSize: 11 }}
                     >
                       {item.artist}
                     </Text>
@@ -744,21 +687,6 @@ export default function MusicScreen() {
                 </View>
               ))}
             </View>
-          ) : null}
-
-          {/* Source indicator */}
-          {state.source ? (
-            <Text
-              style={{
-                color: "#333",
-                fontSize: 10,
-                fontFamily: MONO,
-                marginTop: 16,
-                letterSpacing: 2,
-              }}
-            >
-              {"[ "}SOURCE: {state.source.toUpperCase()}{" ]"}
-            </Text>
           ) : null}
         </View>
       </View>

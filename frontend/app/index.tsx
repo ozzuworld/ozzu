@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { View, Text, Animated, Easing, useWindowDimensions, PermissionsAndroid, Platform } from "react-native";
+import { View, Text, Animated, Easing, useWindowDimensions, PermissionsAndroid, Platform, Pressable } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { StatusBadge } from "../components/StatusBadge";
 import { HamburgerMenu } from "../components/HamburgerMenu";
 import LottieView from "lottie-react-native";
@@ -12,7 +13,6 @@ import { getDeviceType } from "../modules/pcm-player";
 import { Keypad } from "../components/Keypad";
 import { canUseBiometric, authenticateWithBiometric, BRIDGE_PIN } from "../lib/biometric-auth";
 import { fetchPendingApprovals, resolveApproval } from "../lib/bridge-api";
-import { TVPressable } from "../components/TVPressable";
 import { CameraOverlay } from "../components/CameraOverlay";
 import { ContentPanel } from "../components/ContentPanel";
 import { useEntity } from "../lib/useEntity";
@@ -401,6 +401,7 @@ export default function LandingScreen() {
           source={require("../assets/talking.json")}
           autoPlay
           loop
+          resizeMode="contain"
           style={{
             width: Math.min(screenWidth * 0.85, screenHeight * 0.5, 420),
             height: Math.min(screenWidth * 0.85, screenHeight * 0.5, 420),
@@ -445,27 +446,41 @@ export default function LandingScreen() {
         }}
       >
         {/* Mute button */}
-        <TVPressable
-          rarity="legendary"
+        <Pressable
           onPress={toggleMute}
-          style={{
-            paddingHorizontal: 10,
-            paddingVertical: 8,
-            opacity: isMuted ? 0.5 : 1,
-          }}
+          style={({ pressed }) => ({
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: "rgba(255,255,255,0.1)",
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: pressed ? 0.5 : isMuted ? 0.6 : 1,
+          })}
         >
-          <Text style={{ fontSize: 20 }}>{isMuted ? "🔇" : "🔊"}</Text>
-        </TVPressable>
+          <Ionicons
+            name={isMuted ? "volume-mute" : "volume-high"}
+            size={22}
+            color="#FFFFFF"
+          />
+        </Pressable>
 
         {/* Music button */}
         {spotifyEntity && spotifyEntity.state !== "unavailable" && (
-          <TVPressable
-            rarity="legendary"
+          <Pressable
             onPress={() => router.push("/music")}
-            style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+            style={({ pressed }) => ({
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: "rgba(255,255,255,0.1)",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: pressed ? 0.5 : 1,
+            })}
           >
-            <Text style={{ fontSize: 20 }}>🎵</Text>
-          </TVPressable>
+            <Ionicons name="musical-notes" size={22} color="#FFFFFF" />
+          </Pressable>
         )}
       </View>
 
