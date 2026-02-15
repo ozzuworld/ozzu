@@ -50,6 +50,7 @@ let _spotifyQueueCache = null; // { queue: [...], ts: number } (15s TTL)
 let _spotifyPlaylistsCache = null; // { playlists: [...], ts: number } (60s TTL)
 const _spotifyTracksCache = new Map(); // "playlistId:offset" -> { tracks, total, ts } (30s TTL)
 let _spotifyNowPlayingCache = null; // { data: {...}, ts: number } (5s TTL)
+let _spotifyLikedCache = null; // { tracks: [...], total: number, ts: number } (2min TTL)
 let _cachedSpotifyToken = null; // { access_token, expires_at }
 
 // ── Spotify API helper ──
@@ -58,15 +59,16 @@ async function getSpotifyToken() {
   if (_cachedSpotifyToken && _cachedSpotifyToken.expires_at > Date.now() / 1000 + 300) {
     return _cachedSpotifyToken.access_token;
   }
-  const haStorage = JSON.parse(fs.readFileSync("/home/gcp/ozzu/backend/config/.storage/core.config_entries", "utf8"));
-  const spotifyEntry = haStorage.data.entries.find(e => e.domain === "spotify");
-  if (!spotifyEntry?.data?.token) return null;
-  const tokenData = spotifyEntry.data.token;
-  if (tokenData.expires_at && tokenData.expires_at > Date.now() / 1000 + 300) {
-    _cachedSpotifyToken = { access_token: tokenData.access_token, expires_at: tokenData.expires_at };
-    return tokenData.access_token;
-  }
-  if (tokenData.refresh_token) {
+  try {
+    const haStorage = JSON.parse(fs.readFileSync("/home/gcp/ozzu/backend/config/.storage/core.config_entries", "utf8"));
+    const spotifyEntry = haStorage.data.entries.find(e => e.domain === "spotify");
+    if (!spotifyEntry?.data?.token) return null;
+    const tokenData = spotifyEntry.data.token;
+    if (tokenData.expires_at && tokenData.expires_at > Date.now() / 1000 + 300) {
+      _cachedSpotifyToken = { access_token: tokenData.access_token, expires_at: tokenData.expires_at };
+      return tokenData.access_token;
+    }
+    if (!tokenData.refresh_token) return null;
     const params = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: tokenData.refresh_token,
@@ -84,8 +86,11 @@ async function getSpotifyToken() {
       _cachedSpotifyToken = { access_token: refreshData.access_token, expires_at: (Date.now() / 1000) + (refreshData.expires_in || 3600) };
       return refreshData.access_token;
     }
+    return null;
+  } catch (err) {
+    log.bridge.warn("Failed to get Spotify token:", err.message);
+    return null;
   }
-  return null;
 }
 
 async function spotifyFetch(endpoint, opts = {}) {
@@ -102,7 +107,6 @@ async function spotifyFetch(endpoint, opts = {}) {
     err.status = res.status;
     throw err;
   }
-  // Some endpoints return 204 No Content
   if (res.status === 204) return null;
   return res.json();
 }
@@ -3555,6 +3559,184 @@ document.getElementById("approval-modal").addEventListener("click", function(e) 
     } catch (err) {
       log.bridge.error("Spotify now-playing fetch failed:", err.message);
       sendJSON(res, 200, { trackId: null, isPlaying: false, error: err.message });
+    }
+    return;
+  }
+
+  // GET /api/spotify/playlists — fetch user's playlists
+  if (req.method === "GET" && pathname === "/api/spotify/playlists") {
+    if (_spotifyPlaylistsCache && Date.now() - _spotifyPlaylistsCache.ts < 300000) {
+      sendJSON(res, 200, { playlists: _spotifyPlaylistsCache.playlists });
+      return;
+    }
+    const token = await getSpotifyToken();
+    if (!token) {
+      sendJSON(res, 500, { error: "No Spotify token available" });
+      return;
+    }
+    try {
+      const spRes = await fetch("https://api.spotify.com/v1/me/playlists?limit=50", {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!spRes.ok) {
+        sendJSON(res, spRes.status, { error: `Spotify API error ${spRes.status}` });
+        return;
+      }
+      const data = await spRes.json();
+      const playlists = (data.items || []).map(p => ({
+        id: p.id,
+        name: p.name,
+        imageUrl: p.images?.[0]?.url || null,
+        trackCount: p.tracks?.total || 0,
+        owner: p.owner?.display_name || "",
+        uri: p.uri,
+      }));
+      _spotifyPlaylistsCache = { playlists, ts: Date.now() };
+      sendJSON(res, 200, { playlists });
+    } catch (err) {
+      log.bridge.error("Spotify playlists fetch failed:", err.message);
+      sendJSON(res, 500, { error: "Failed to fetch playlists" });
+    }
+    return;
+  }
+
+  // GET /api/spotify/playlists/:id/tracks — fetch tracks for a playlist
+  const playlistTracksMatch = pathname.match(/^\/api\/spotify\/playlists\/([^/]+)\/tracks$/);
+  if (req.method === "GET" && playlistTracksMatch) {
+    const playlistId = playlistTracksMatch[1];
+    const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+    const cacheKey = `${playlistId}:${offset}`;
+    const cached = _spotifyTracksCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < 120000) {
+      sendJSON(res, 200, { tracks: cached.tracks, total: cached.total });
+      return;
+    }
+    const token = await getSpotifyToken();
+    if (!token) {
+      sendJSON(res, 500, { error: "No Spotify token available" });
+      return;
+    }
+    try {
+      const spRes = await fetch(
+        `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=100&offset=${offset}&fields=total,items(track(id,name,artists,album,duration_ms,uri))`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000) }
+      );
+      if (!spRes.ok) {
+        sendJSON(res, spRes.status, { error: `Spotify API error ${spRes.status}` });
+        return;
+      }
+      const data = await spRes.json();
+      const tracks = (data.items || [])
+        .filter(item => item.track)
+        .map(item => {
+          const t = item.track;
+          return {
+            id: t.id,
+            name: t.name,
+            artist: (t.artists || []).map(a => a.name).join(", "),
+            albumName: t.album?.name || "",
+            albumArt: t.album?.images?.[1]?.url || t.album?.images?.[0]?.url || null,
+            albumArtSmall: t.album?.images?.[2]?.url || t.album?.images?.[0]?.url || null,
+            durationMs: t.duration_ms || 0,
+            uri: t.uri,
+          };
+        });
+      const total = data.total || tracks.length;
+      _spotifyTracksCache.set(cacheKey, { tracks, total, ts: Date.now() });
+      // Evict old cache entries
+      if (_spotifyTracksCache.size > 50) {
+        const oldest = [..._spotifyTracksCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+        if (oldest) _spotifyTracksCache.delete(oldest[0]);
+      }
+      sendJSON(res, 200, { tracks, total });
+    } catch (err) {
+      log.bridge.error("Spotify playlist tracks fetch failed:", err.message);
+      sendJSON(res, 500, { error: "Failed to fetch tracks" });
+    }
+    return;
+  }
+
+  // GET /api/spotify/liked — fetch user's liked songs
+  if (req.method === "GET" && pathname === "/api/spotify/liked") {
+    const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+    const cacheKey = `liked:${offset}`;
+    const cached = _spotifyTracksCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < 120000) {
+      sendJSON(res, 200, { tracks: cached.tracks, total: cached.total });
+      return;
+    }
+    const token = await getSpotifyToken();
+    if (!token) {
+      sendJSON(res, 500, { error: "No Spotify token available" });
+      return;
+    }
+    try {
+      const spRes = await fetch(
+        `https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000) }
+      );
+      if (!spRes.ok) {
+        sendJSON(res, spRes.status, { error: `Spotify API error ${spRes.status}` });
+        return;
+      }
+      const data = await spRes.json();
+      const tracks = (data.items || [])
+        .filter(item => item.track)
+        .map(item => {
+          const t = item.track;
+          return {
+            id: t.id,
+            name: t.name,
+            artist: (t.artists || []).map(a => a.name).join(", "),
+            albumName: t.album?.name || "",
+            albumArt: t.album?.images?.[1]?.url || t.album?.images?.[0]?.url || null,
+            albumArtSmall: t.album?.images?.[2]?.url || t.album?.images?.[0]?.url || null,
+            durationMs: t.duration_ms || 0,
+            uri: t.uri,
+          };
+        });
+      const total = data.total || 0;
+      _spotifyTracksCache.set(cacheKey, { tracks, total, ts: Date.now() });
+      sendJSON(res, 200, { tracks, total });
+    } catch (err) {
+      log.bridge.error("Spotify liked songs fetch failed:", err.message);
+      sendJSON(res, 500, { error: "Failed to fetch liked songs" });
+    }
+    return;
+  }
+
+  // POST /api/spotify/play — start playback on active device
+  if (req.method === "POST" && pathname === "/api/spotify/play") {
+    const token = await getSpotifyToken();
+    if (!token) {
+      sendJSON(res, 500, { error: "No Spotify token available" });
+      return;
+    }
+    try {
+      const body = await parseBody(req);
+      const payload = {};
+      if (body.contextUri) payload.context_uri = body.contextUri;
+      if (body.uri) payload.uris = [body.uri];
+      if (body.offset) payload.offset = body.offset;
+      const spRes = await fetch("https://api.spotify.com/v1/me/player/play", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (spRes.status === 204 || spRes.ok) {
+        sendJSON(res, 200, { ok: true });
+      } else {
+        const errText = await spRes.text().catch(() => "");
+        sendJSON(res, spRes.status, { error: `Spotify play error ${spRes.status}`, detail: errText });
+      }
+    } catch (err) {
+      log.bridge.error("Spotify play failed:", err.message);
+      sendJSON(res, 500, { error: "Failed to start playback" });
     }
     return;
   }
