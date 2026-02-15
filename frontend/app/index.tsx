@@ -198,28 +198,9 @@ export default function LandingScreen() {
         setIsStreaming(true);
       },
       onPinRequest: async (approvalId) => {
-        // Only iPhone handles approvals (Face ID) — tablets/TV ignore pin requests
-        if (!isPhone) return;
-        // Ignore if already handling a pin request (prevents stacking)
-        if (pendingPinRef.current) return;
-        pendingPinRef.current = { approvalId };
-        try {
-          const biometricAvailable = await canUseBiometric();
-          if (biometricAvailable) {
-            const success = await authenticateWithBiometric('Authorize Action');
-            if (success) {
-              pendingPinRef.current = null;
-              bridgeRef.current.sendPinResponse(approvalId, BRIDGE_PIN);
-              return;
-            }
-          }
-        } catch (err) {
-          console.warn("Biometric auth error, falling back to keypad:", err);
-        }
-        // Face ID failed or unavailable on iPhone — show keypad as fallback
-        if (pendingPinRef.current?.approvalId === approvalId) {
-          setShowKeypad(true);
-        }
+        // Approvals are now handled via the dashboard — no auto-biometric popups
+        console.log("[index] pinRequest received for", approvalId, "— handled via dashboard");
+        return;
       },
       onPinResolved: () => {
         pendingPinRef.current = null;
@@ -239,32 +220,7 @@ export default function LandingScreen() {
       },
       onConnected: async () => {
         if (cancelled) return;
-        // Only iPhone checks for pending approvals (Face ID approval device)
-        if (!isPhone) return;
-        try {
-          const approvals = await fetchPendingApprovals();
-          if (approvals.length === 0 || pendingPinRef.current) return;
-          const approval = approvals[0];
-          pendingPinRef.current = { approvalId: approval.id, restResolve: true };
-          try {
-            const biometricAvailable = await canUseBiometric();
-            if (biometricAvailable) {
-              const success = await authenticateWithBiometric('Authorize Action');
-              if (success) {
-                pendingPinRef.current = null;
-                resolveApproval(approval.id, true, BRIDGE_PIN).catch(() => {});
-                return;
-              }
-            }
-          } catch (err) {
-            console.warn("Biometric auth error, falling back to keypad:", err);
-          }
-          if (pendingPinRef.current?.approvalId === approval.id) {
-            setShowKeypad(true);
-          }
-        } catch (err) {
-          console.warn("[index] Failed to fetch pending approvals:", err);
-        }
+        // Approvals are now handled via the dashboard — no auto-biometric on connect
       },
       onListeningReady: () => {
         // Cipher finished speaking — show listening state on orb

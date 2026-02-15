@@ -1352,7 +1352,7 @@ async function handleRequest(req, res) {
     }
 
     // Apply updates
-    const VALID_STATUSES = new Set(["pending", "planning", "planned", "approved", "in_progress", "completed", "failed", "stale", "cancelled", "blocked"]);
+    const VALID_STATUSES = new Set(["pending", "planning", "planned", "approved", "in_progress", "completed", "failed", "stale", "cancelled", "blocked", "deploy_failed"]);
     const prevStatus = directive.status;
     if (data.status) {
       if (!VALID_STATUSES.has(data.status)) {
@@ -1366,6 +1366,7 @@ async function handleRequest(req, res) {
     if (data.type) directive.type = data.type;
     if (data.failureReason !== undefined) directive.failureReason = data.failureReason;
     if (data.retryCount !== undefined) directive.retryCount = data.retryCount;
+    if (data.mergeBranch !== undefined) directive.mergeBranch = data.mergeBranch;
     if (data.priority !== undefined && [1, 2, 3, 4].includes(data.priority)) directive.priority = data.priority;
     directive.updatedAt = Date.now();
     directive.lastActivity = Date.now(); // Track when agent last touched this directive
@@ -1721,7 +1722,7 @@ async function handleRequest(req, res) {
       sendJSON(res, 409, { error: `Directive is "${directive.status}" — already active, cannot retry` });
       return;
     }
-    const retryableStatuses = ["failed", "stale", "cancelled"];
+    const retryableStatuses = ["failed", "stale", "cancelled", "deploy_failed"];
     if (!retryableStatuses.includes(directive.status)) {
       sendJSON(res, 409, { error: `Directive is "${directive.status}" — cannot retry from this state` });
       return;
@@ -1736,6 +1737,75 @@ async function handleRequest(req, res) {
     saveDirectives(directives, directive, prevStatus, "King Kazuma");
     log.bridge.info(`Directive retried: ${id} "${directive.title}" (${prevStatus} → approved, retry #${directive.retryCount})`);
     sendJSON(res, 200, { ok: true, directive });
+    return;
+  }
+
+  // POST /directives/:id/retry-merge — Re-attempt merge for deploy_failed directives
+  const retryMergeMatch = pathname.match(/^\/directives\/([^/]+)\/retry-merge$/);
+  if (req.method === "POST" && retryMergeMatch) {
+    const id = retryMergeMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    if (directive.status !== "deploy_failed") {
+      sendJSON(res, 409, { error: `Directive is "${directive.status}" — retry-merge only works for deploy_failed` });
+      return;
+    }
+    const branch = directive.mergeBranch;
+    if (!branch) {
+      sendJSON(res, 400, { error: "No mergeBranch recorded — cannot retry merge" });
+      return;
+    }
+    try {
+      const agentSpawner = require("./agent-spawner");
+      const mergeOk = agentSpawner.mergeWorktreeToMain(id, branch);
+      if (mergeOk) {
+        const prevStatus = directive.status;
+        directive.status = "completed";
+        directive.completedAt = Date.now();
+        if (directive.startedAt) directive.duration = directive.completedAt - directive.startedAt;
+        directive.failureReason = null;
+        directive.updatedAt = Date.now();
+        if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+        directive.activity_log.push({ timestamp: Date.now(), type: "status_change", actor: "King Kazuma", message: `Merge retried successfully from dashboard (branch ${branch})` });
+        saveDirectives(directives, directive, prevStatus, "King Kazuma");
+        agentSpawner.smartDeploy(directive);
+        log.bridge.info(`Merge retry succeeded for ${id} — deploying`);
+        sendJSON(res, 200, { ok: true, message: "Merge succeeded, deploying now" });
+      } else {
+        directive.updatedAt = Date.now();
+        directive.failureReason = `Merge retry failed for branch ${branch}`;
+        if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+        directive.activity_log.push({ timestamp: Date.now(), type: "status_change", actor: "King Kazuma", message: `Merge retry failed again (branch ${branch})` });
+        saveDirectives(directives, directive, directive.status, "King Kazuma");
+        sendJSON(res, 500, { ok: false, error: "Merge failed again — branch preserved for manual resolution" });
+      }
+    } catch (err) {
+      log.bridge.error(`Merge retry error for ${id}: ${err.message}`);
+      sendJSON(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
+  // GET /approvals/details — Pending approvals enriched with directive info
+  if (req.method === "GET" && pathname === "/approvals/details") {
+    const approvals = expireApprovals(getApprovals());
+    const pending = approvals.filter((a) => !a.resolved);
+    const directives = getDirectives();
+    const enriched = pending.map((a) => {
+      const directive = directives.find((d) => d.directiveApprovalId === a.id);
+      return {
+        ...a,
+        directiveTitle: directive ? directive.title : null,
+        directivePlan: directive ? directive.plan : null,
+        directiveDescription: directive ? directive.description : null,
+        directiveId: directive ? directive.id : null,
+      };
+    });
+    sendJSON(res, 200, enriched);
     return;
   }
 
@@ -2062,7 +2132,7 @@ async function handleRequest(req, res) {
     const statusColors = {
       pending: "#6b7280", planning: "#8b5cf6", planned: "#3b82f6",
       approved: "#06b6d4", in_progress: "#f59e0b", completed: "#10b981", blocked: "#ef4444",
-      failed: "#ef4444", stale: "#f97316", cancelled: "#78716c",
+      failed: "#ef4444", stale: "#f97316", cancelled: "#78716c", deploy_failed: "#dc2626",
     };
 
     const agentRows = agents.map(a => {
@@ -2088,7 +2158,7 @@ async function handleRequest(req, res) {
 
     // Summary stats
     const completedDirectives = directives.filter(d => d.status === "completed");
-    const failedDirectives = directives.filter(d => d.status === "failed");
+    const failedDirectives = directives.filter(d => d.status === "failed" || d.status === "deploy_failed");
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const completedToday = completedDirectives.filter(d => d.completedAt && d.completedAt >= todayStart.getTime()).length;
     const completedWithDuration = completedDirectives.filter(d => d.duration);
@@ -2098,66 +2168,115 @@ async function handleRequest(req, res) {
     const totalFinished = completedDirectives.length + failedDirectives.length;
     const successRate = totalFinished > 0 ? Math.round((completedDirectives.length / totalFinished) * 100) : null;
 
-    // Build directive lookup map (O(1) instead of O(n) per dependency)
+    // Pending approvals for banner
+    const pendingApprovals = expireApprovals(getApprovals()).filter(a => !a.resolved);
+    const plannedDirectives = directives.filter(d => d.status === "planned");
+    const approvalBannerItems = pendingApprovals.map(a => {
+      const directive = directives.find(d => d.directiveApprovalId === a.id);
+      return { approval: a, directive };
+    }).filter(item => item.directive);
+
+    // Needs-action directives: planned, blocked, deploy_failed
+    const needsActionStatuses = ["planned", "blocked", "deploy_failed"];
+    const needsActionCount = directives.filter(d => needsActionStatuses.includes(d.status)).length;
+
+    // Build directive lookup map
     const directiveMap = new Map(directives.map(d => [d.id, d]));
-    const directiveRows = [...directives].reverse().map(d => {
+
+    // Build directive cards (newest first)
+    const directiveCards = [...directives].reverse().map(d => {
       const color = statusColors[d.status] || "#6b7280";
       const pri = d.priority || 3;
       const priLabel = priorityLabels[pri] || "normal";
       const priColor = priorityColors[pri] || "#6b7280";
-      let depsHtml = "-";
+      const createdByBadge = d.createdBy ? `<span class="actor-badge actor-${(d.createdBy || "").toLowerCase().replace(/\s/g, "-")}">${escapeHtml(d.createdBy)}</span>` : "";
+
+      // Latest activity message
+      const actLog = Array.isArray(d.activity_log) ? d.activity_log : [];
+      const lastEntry = actLog.length > 0 ? actLog[actLog.length - 1] : null;
+      const lastActivityHtml = lastEntry
+        ? `<div class="card-activity">${escapeHtml(lastEntry.message)}</div>`
+        : "";
+
+      // Inline audit trail for active directives (last 5 entries)
+      const isActive = !["completed", "cancelled"].includes(d.status);
+      let inlineAuditHtml = "";
+      if (isActive && actLog.length > 0) {
+        const recentEntries = actLog.slice(-5).reverse();
+        const entriesHtml = recentEntries.map(e => {
+          const actorClass = ({ "King Kazuma": "king-kazuma", "June": "june", "Cipher": "cipher" })[e.actor] || "system";
+          const actorBadge = e.actor ? `<span class="actor-badge actor-${actorClass}">${escapeHtml(e.actor)}</span>` : "";
+          return `<div class="inline-trail-entry"><span class="trail-time" data-ts="${e.timestamp}">${escapeHtml(String(e.timestamp))}</span>${actorBadge}<span class="trail-msg">${escapeHtml(e.message)}</span></div>`;
+        }).join("");
+        const showAllBtn = actLog.length > 5 ? `<div class="trail-show-all"><a href="#" onclick="toggleActivityLog('${escapeHtml(escapeJsString(d.id))}');return false;">Show all ${actLog.length} entries</a></div>` : "";
+        inlineAuditHtml = `<div class="inline-audit-trail">${entriesHtml}${showAllBtn}</div>`;
+      }
+
+      // Dependencies
+      let depsHtml = "";
       if (d.dependsOn && d.dependsOn.length > 0) {
-        depsHtml = d.dependsOn.map(depId => {
+        depsHtml = `<div class="card-deps">${d.dependsOn.map(depId => {
           const dep = directiveMap.get(depId);
           const depColor = dep ? (dep.status === "completed" ? "#10b981" : "#f59e0b") : "#6b7280";
-          const depLabel = dep ? (dep.title || depId) : depId;
-          const checkmark = dep && dep.status === "completed" ? "&#10003; " : "&#9679; ";
-          return `<span style="color:${depColor};font-size:11px;" title="${escapeHtml(depId)}">${checkmark}${escapeHtml(depLabel)}</span>`;
-        }).join("<br>");
+          const checkmark = dep && dep.status === "completed" ? "&#10003;" : "&#9679;";
+          return `<span style="color:${depColor};font-size:11px;" title="${escapeHtml(depId)}">${checkmark} ${escapeHtml(dep ? (dep.title || depId) : depId)}</span>`;
+        }).join(" ")}</div>`;
       }
-      const actLog = Array.isArray(d.activity_log) ? d.activity_log : [];
-      const lastComment = [...actLog].reverse().find(e => e.type === "comment");
-      const lastCommentHtml = lastComment
-        ? `<div style="font-size:11px;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;" title="${escapeHtml(lastComment.message)}">${escapeHtml(lastComment.message)}</div>`
-        : "";
-      const createdByBadge = d.createdBy ? `<span class="actor-badge actor-${(d.createdBy || "").toLowerCase().replace(/\s/g, "-")}">${escapeHtml(d.createdBy)}</span>` : "";
-      const logEntries = ""; // rendered client-side via fetch
-      return `<tr class="directive-row" data-status="${escapeHtml(d.status)}" data-title="${escapeHtml((d.title || d.id).toLowerCase())}" data-id="${escapeHtml(d.id)}">
-        <td><input type="checkbox" class="directive-check" value="${escapeHtml(d.id)}" onchange="updateBulkBar()"></td>
-        <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
-        <td><a href="#" onclick="toggleActivityLog('${escapeHtml(escapeJsString(d.id))}');return false;" style="color:#e2e8f0;text-decoration:none;border-bottom:1px dashed #475569;">${escapeHtml(d.title || d.id)}</a>${lastCommentHtml}</td>
-        <td style="font-size:12px;color:#9ca3af;">${escapeHtml(d.type || "-")}</td>
-        <td style="font-size:12px;"><span style="color:${priColor};font-weight:${pri <= 2 ? "bold" : "normal"};">${priLabel}</span></td>
-        <td style="font-size:12px;">${depsHtml}</td>
-        <td style="font-size:12px;color:#9ca3af;" data-ts="${d.createdAt}">${escapeHtml(d.createdAt)}</td>
-        <td style="font-size:12px;color:#9ca3af;" data-ts="${d.updatedAt}">${escapeHtml(d.updatedAt)}</td>
-        <td style="font-size:12px;color:#9ca3af;">${formatDuration(d.duration)}</td>
-        <td>${!["completed","failed","cancelled"].includes(d.status) ? `<button onclick="cancelDirective('${escapeHtml(escapeJsString(d.id))}')" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Cancel directive">&times;</button>` : ""}${["failed","stale","cancelled"].includes(d.status) ? ` <button onclick="retryDirective('${escapeHtml(escapeJsString(d.id))}')" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:inherit;" title="Retry directive">&#8635;</button>` : ""}</td>
-      </tr>
-      <tr class="activity-log-row" id="log-${escapeHtml(d.id)}" style="display:none;" data-parent-status="${escapeHtml(d.status)}" data-parent-title="${escapeHtml((d.title || d.id).toLowerCase())}">
-        <td colspan="10" style="padding:8px 16px;background:#0f172a;border-bottom:2px solid #334155;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <div style="display:flex;align-items:center;gap:8px;">
-              <strong style="font-size:13px;color:#94a3b8;">Audit Trail</strong>
-              ${createdByBadge ? '<span style="font-size:11px;color:#64748b;">Created by</span> ' + createdByBadge : ""}
-            </div>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <input type="text" id="comment-input-${escapeHtml(d.id)}" placeholder="Add a comment..." style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:4px;padding:4px 8px;font-size:12px;font-family:inherit;width:220px;" onkeydown="if(event.key==='Enter'){addComment('${escapeHtml(escapeJsString(d.id))}');}">
-              <button onclick="addComment('${escapeHtml(escapeJsString(d.id))}')" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit;">Add</button>
-            </div>
+
+      // Contextual action buttons
+      let actionsHtml = "";
+      const eid = escapeHtml(escapeJsString(d.id));
+      if (d.status === "planned") {
+        actionsHtml = `<button class="card-btn btn-approve" onclick="openApprovalModal('${eid}')">Approve</button>
+          <button class="card-btn btn-deny" onclick="denyDirective('${eid}')">Deny</button>`;
+      } else if (d.status === "deploy_failed") {
+        actionsHtml = `<button class="card-btn btn-retry-merge" onclick="retryMerge('${eid}')">Retry Merge</button>
+          <button class="card-btn btn-retry" onclick="retryDirective('${eid}')">Retry Full</button>`;
+      } else if (d.status === "blocked") {
+        actionsHtml = `<button class="card-btn btn-unblock" onclick="unblockDirective('${eid}')">Unblock</button>
+          <button class="card-btn btn-cancel" onclick="cancelDirective('${eid}')">Cancel</button>`;
+      } else if (["failed", "stale", "cancelled"].includes(d.status)) {
+        actionsHtml = `<button class="card-btn btn-retry" onclick="retryDirective('${eid}')">Retry</button>`;
+      } else if (!["completed"].includes(d.status)) {
+        actionsHtml = `<button class="card-btn btn-cancel" onclick="cancelDirective('${eid}')">Cancel</button>`;
+      }
+      actionsHtml += ` <button class="card-btn btn-comment" onclick="toggleCommentInput('${eid}')">Comment</button>`;
+      actionsHtml += ` <button class="card-btn btn-log" onclick="toggleActivityLog('${eid}')">Log</button>`;
+
+      return `<div class="directive-card" data-status="${escapeHtml(d.status)}" data-title="${escapeHtml((d.title || d.id).toLowerCase())}" data-id="${escapeHtml(d.id)}" style="border-left:4px solid ${color};">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="status-badge" style="background:${color};">${escapeHtml(d.status.replace("_", " "))}</span>
+            <span class="card-title">${escapeHtml(d.title || d.id)}</span>
+            ${createdByBadge}
           </div>
-          <div id="timeline-${escapeHtml(d.id)}" style="max-height:300px;overflow-y:auto;border-left:2px solid #334155;margin-left:4px;padding-left:12px;">
-            <span style="color:#475569;font-style:italic;">Loading audit trail...</span>
+          <div class="card-header-right">
+            <span class="card-meta" style="color:${priColor};font-weight:${pri <= 2 ? "bold" : "normal"};">${priLabel}</span>
+            <span class="card-meta">${escapeHtml(d.type || "-")}</span>
+            <span class="card-meta card-time" data-ts="${d.createdAt}">${escapeHtml(String(d.createdAt))}</span>
+            ${d.duration ? `<span class="card-meta">${formatDuration(d.duration)}</span>` : ""}
           </div>
-        </td>
-      </tr>`;
+        </div>
+        ${d.failureReason ? `<div class="card-failure">${escapeHtml(d.failureReason)}</div>` : ""}
+        ${lastActivityHtml}
+        ${depsHtml}
+        ${inlineAuditHtml}
+        <div class="card-actions">${actionsHtml}</div>
+        <div class="card-comment-input" id="comment-wrap-${escapeHtml(d.id)}" style="display:none;">
+          <input type="text" id="comment-input-${escapeHtml(d.id)}" placeholder="Add a comment..." onkeydown="if(event.key==='Enter'){addComment('${eid}');}">
+          <button onclick="addComment('${eid}')">Add</button>
+        </div>
+        <div class="card-full-log" id="log-${escapeHtml(d.id)}" style="display:none;">
+          <div id="timeline-${escapeHtml(d.id)}" class="full-timeline"><span style="color:#475569;font-style:italic;">Loading...</span></div>
+        </div>
+      </div>`;
     }).join("");
 
     // ── Execution Timeline (last 24h) ──
     const now24 = Date.now();
     const h24ago = now24 - 24 * 60 * 60 * 1000;
     const timelineDirectives = directives.filter(d => d.startedAt && d.startedAt >= h24ago);
-    const tlBarColors = { completed: "#10b981", failed: "#ef4444", in_progress: "#3b82f6", stale: "#f59e0b" };
+    const tlBarColors = { completed: "#10b981", failed: "#ef4444", in_progress: "#3b82f6", stale: "#f59e0b", deploy_failed: "#dc2626" };
     const timelineBars = timelineDirectives.map(d => {
       const endTs = d.completedAt || now24;
       const leftPct = Math.max(0, ((d.startedAt - h24ago) / (now24 - h24ago)) * 100);
@@ -2174,7 +2293,6 @@ async function handleRequest(req, res) {
       </div>`;
     }).join("");
 
-    // Hour markers for timeline
     const tlHourMarkers = [];
     for (let h = 0; h < 24; h++) {
       const markerTs = h24ago + h * 60 * 60 * 1000;
@@ -2183,17 +2301,6 @@ async function handleRequest(req, res) {
       tlHourMarkers.push(`<span style="position:absolute;left:${pct}%;transform:translateX(-50%);font-size:10px;color:#475569;white-space:nowrap;">${hLabel}</span>`);
     }
     const tlHourMarkersHtml = tlHourMarkers.join("");
-
-    const failures = directives.filter(d => d.failureReason).reverse().slice(0, 5);
-    const failureRows = failures.map(d => {
-      const color = statusColors[d.status] || "#6b7280";
-      return `<tr>
-        <td><span style="background:${color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(d.status)}</span></td>
-        <td>${escapeHtml(d.title || d.id)}</td>
-        <td style="color:#f87171;font-size:13px;">${escapeHtml(d.failureReason)}</td>
-        <td>${d.retryCount || 0}</td>
-      </tr>`;
-    }).join("");
 
     const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2208,13 +2315,13 @@ async function handleRequest(req, res) {
   .refresh-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 6px 14px; font-size: 12px; font-family: inherit; cursor: pointer; transition: background 0.2s; }
   .refresh-btn:hover { background: #475569; }
   .refresh-btn:active { background: #1e293b; }
-  .cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
-  .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px 20px; min-width: 160px; }
-  .card .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
-  .card .value { font-size: 24px; font-weight: bold; margin-top: 4px; }
-  .card .value.ok { color: #10b981; }
-  .card .value.warn { color: #f59e0b; }
-  .card .value.bad { color: #ef4444; }
+  .stat-cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .stat-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px 20px; min-width: 140px; }
+  .stat-card .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+  .stat-card .value { font-size: 24px; font-weight: bold; margin-top: 4px; }
+  .stat-card .value.ok { color: #10b981; }
+  .stat-card .value.warn { color: #f59e0b; }
+  .stat-card .value.bad { color: #ef4444; }
   section { margin-bottom: 28px; }
   h2 { font-size: 16px; margin-bottom: 10px; border-bottom: 1px solid #334155; padding-bottom: 6px; }
   table { width: 100%; border-collapse: collapse; }
@@ -2222,6 +2329,125 @@ async function handleRequest(req, res) {
   th { color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
   tr:hover { background: #1e293b; }
   .empty { color: #475569; font-style: italic; padding: 12px; }
+  .updating { opacity: 0.6; transition: opacity 0.15s; }
+
+  /* Approval banner */
+  .approval-banner { background: linear-gradient(135deg, #1e3a5f 0%, #1e293b 100%); border: 1px solid #3b82f6; border-radius: 10px; padding: 16px 20px; margin-bottom: 24px; }
+  .approval-banner h3 { color: #60a5fa; font-size: 14px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .approval-item { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .approval-item:last-child { margin-bottom: 0; }
+  .approval-info { flex: 1; }
+  .approval-title { font-size: 14px; font-weight: 600; color: #e2e8f0; }
+  .approval-desc { font-size: 12px; color: #94a3b8; margin-top: 4px; max-width: 600px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .approval-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .approval-actions button { padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer; font-weight: 600; }
+  .approval-actions .btn-approve-banner { background: #10b981; color: #fff; }
+  .approval-actions .btn-approve-banner:hover { background: #059669; }
+  .approval-actions .btn-deny-banner { background: #475569; color: #e2e8f0; }
+  .approval-actions .btn-deny-banner:hover { background: #64748b; }
+
+  /* Approval modal */
+  .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: #1e293b; border: 1px solid #475569; border-radius: 12px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
+  .modal h3 { font-size: 16px; margin-bottom: 16px; color: #e2e8f0; }
+  .modal .plan-text { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 16px; font-size: 13px; color: #94a3b8; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; margin-bottom: 16px; line-height: 1.5; }
+  .modal .pin-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .modal .pin-row label { font-size: 13px; color: #94a3b8; flex-shrink: 0; }
+  .modal .pin-row input { background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 8px 12px; font-family: inherit; font-size: 16px; width: 120px; text-align: center; letter-spacing: 4px; }
+  .modal .modal-actions { display: flex; gap: 12px; justify-content: flex-end; }
+  .modal .modal-actions button { padding: 10px 20px; border: none; border-radius: 6px; font-size: 14px; font-family: inherit; cursor: pointer; font-weight: 600; }
+  .modal .btn-approve-modal { background: #10b981; color: #fff; }
+  .modal .btn-approve-modal:hover { background: #059669; }
+  .modal .btn-cancel-modal { background: #475569; color: #e2e8f0; }
+  .modal .btn-cancel-modal:hover { background: #64748b; }
+  .modal .modal-error { color: #f87171; font-size: 13px; margin-top: 8px; }
+
+  /* Filter bar */
+  .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-bar input[type="text"] { background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 6px 12px; font-family: inherit; font-size: 13px; width: 240px; }
+  .filter-bar input[type="text"]::placeholder { color: #475569; }
+  .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filter-pill { background: #334155; color: #94a3b8; border: 1px solid #475569; border-radius: 16px; padding: 4px 12px; font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.15s; }
+  .filter-pill:hover { background: #475569; color: #e2e8f0; }
+  .filter-pill.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+  .filter-pill .pill-count { background: rgba(255,255,255,0.2); padding: 1px 5px; border-radius: 8px; font-size: 10px; margin-left: 4px; }
+
+  /* Directive cards */
+  .directive-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; margin-bottom: 10px; transition: border-color 0.15s; }
+  .directive-card:hover { border-color: #475569; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .card-header-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .card-header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .status-badge { color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; text-transform: capitalize; white-space: nowrap; }
+  .card-title { font-size: 14px; font-weight: 600; color: #e2e8f0; }
+  .card-meta { font-size: 12px; color: #64748b; }
+  .card-time { }
+  .card-failure { margin-top: 8px; padding: 8px 12px; background: #450a0a; border: 1px solid #7f1d1d; border-radius: 6px; color: #fca5a5; font-size: 12px; }
+  .card-activity { margin-top: 6px; font-size: 12px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-deps { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .card-actions { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .card-btn { padding: 4px 10px; border: 1px solid #475569; border-radius: 4px; font-size: 11px; font-family: inherit; cursor: pointer; background: #334155; color: #e2e8f0; transition: all 0.15s; }
+  .card-btn:hover { background: #475569; }
+  .btn-approve { background: #065f46; border-color: #10b981; color: #6ee7b7; }
+  .btn-approve:hover { background: #10b981; color: #fff; }
+  .btn-deny { background: #450a0a; border-color: #ef4444; color: #fca5a5; }
+  .btn-deny:hover { background: #ef4444; color: #fff; }
+  .btn-retry { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
+  .btn-retry:hover { background: #3b82f6; color: #fff; }
+  .btn-retry-merge { background: #422006; border-color: #f59e0b; color: #fcd34d; }
+  .btn-retry-merge:hover { background: #f59e0b; color: #000; }
+  .btn-unblock { background: #2e1065; border-color: #8b5cf6; color: #c4b5fd; }
+  .btn-unblock:hover { background: #8b5cf6; color: #fff; }
+  .btn-cancel { background: #450a0a; border-color: #dc2626; color: #fca5a5; }
+  .btn-cancel:hover { background: #dc2626; color: #fff; }
+  .btn-comment { background: transparent; border-color: #475569; color: #64748b; }
+  .btn-comment:hover { color: #e2e8f0; }
+  .btn-log { background: transparent; border-color: #475569; color: #64748b; }
+  .btn-log:hover { color: #e2e8f0; }
+
+  /* Inline audit trail */
+  .inline-audit-trail { margin-top: 8px; padding: 8px 0 0; border-top: 1px solid #334155; }
+  .inline-trail-entry { display: flex; gap: 6px; align-items: baseline; font-size: 11px; padding: 2px 0; color: #94a3b8; }
+  .trail-time { color: #475569; flex-shrink: 0; min-width: 50px; }
+  .trail-msg { color: #94a3b8; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trail-show-all { margin-top: 4px; }
+  .trail-show-all a { color: #3b82f6; font-size: 11px; text-decoration: none; }
+  .trail-show-all a:hover { text-decoration: underline; }
+
+  /* Card comment input */
+  .card-comment-input { margin-top: 8px; display: flex; gap: 6px; }
+  .card-comment-input input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 4px; padding: 6px 10px; font-size: 12px; font-family: inherit; }
+  .card-comment-input button { background: #10b981; color: #fff; border: none; border-radius: 4px; padding: 6px 12px; font-size: 12px; font-family: inherit; cursor: pointer; }
+  .card-comment-input button:hover { background: #059669; }
+
+  /* Full log panel inside card */
+  .card-full-log { margin-top: 8px; padding-top: 8px; border-top: 1px solid #334155; }
+  .full-timeline { max-height: 300px; overflow-y: auto; border-left: 2px solid #334155; margin-left: 4px; padding-left: 12px; }
+
+  .load-more-wrap { text-align: center; padding: 12px 0; }
+  .load-more-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-family: inherit; cursor: pointer; transition: background 0.2s; }
+  .load-more-btn:hover { background: #475569; }
+
+  /* Actor badges */
+  .actor-badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; letter-spacing: 0.5px; white-space: nowrap; }
+  .actor-king-kazuma { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed44; }
+  .actor-june { background: #06b6d422; color: #67e8f9; border: 1px solid #06b6d444; }
+  .actor-cipher { background: #10b98122; color: #6ee7b7; border: 1px solid #10b98144; }
+  .actor-system { background: #6b728022; color: #9ca3af; border: 1px solid #6b728044; }
+
+  /* Timeline entries in full log */
+  .timeline-entry { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid #1e293b; position: relative; }
+  .timeline-entry::before { content: ""; position: absolute; left: -16px; top: 10px; width: 8px; height: 8px; border-radius: 50%; background: #334155; border: 1px solid #475569; }
+  .timeline-entry.type-status_change::before { background: #3b82f6; border-color: #60a5fa; }
+  .timeline-entry.type-comment::before { background: #10b981; border-color: #34d399; }
+  .timeline-entry.type-cancelled::before { background: #ef4444; border-color: #f87171; }
+  .timeline-entry.type-retry::before { background: #f59e0b; border-color: #fbbf24; }
+  .timeline-entry.type-unblocked::before { background: #8b5cf6; border-color: #a78bfa; }
+  .timeline-entry.type-pm_note::before { background: #06b6d4; border-color: #22d3ee; }
+  .timeline-entry.type-pm_update::before { background: #06b6d4; border-color: #22d3ee; }
+
+  /* New directive form */
   .new-directive { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 20px; }
   .new-directive h2 { border-color: #475569; }
   .new-directive label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; margin-top: 12px; text-transform: uppercase; letter-spacing: 1px; }
@@ -2234,52 +2460,25 @@ async function handleRequest(req, res) {
   .new-directive .form-msg { margin-top: 10px; font-size: 13px; padding: 8px 12px; border-radius: 6px; }
   .new-directive .form-msg.ok { background: #064e3b; color: #6ee7b7; }
   .new-directive .form-msg.err { background: #450a0a; color: #fca5a5; }
-  .updating { opacity: 0.6; transition: opacity 0.15s; }
-  .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
-  .filter-bar input[type="text"] { background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 6px 12px; font-family: inherit; font-size: 13px; width: 240px; }
-  .filter-bar input[type="text"]::placeholder { color: #475569; }
-  .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
-  .filter-pill { background: #334155; color: #94a3b8; border: 1px solid #475569; border-radius: 16px; padding: 4px 12px; font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.15s; }
-  .filter-pill:hover { background: #475569; color: #e2e8f0; }
-  .filter-pill.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
-  .actor-badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; letter-spacing: 0.5px; white-space: nowrap; }
-  .actor-king-kazuma { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed44; }
-  .actor-june { background: #06b6d422; color: #67e8f9; border: 1px solid #06b6d444; }
-  .actor-cipher { background: #10b98122; color: #6ee7b7; border: 1px solid #10b98144; }
-  .actor-system { background: #6b728022; color: #9ca3af; border: 1px solid #6b728044; }
-  .timeline-entry { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid #1e293b; position: relative; }
-  .timeline-entry::before { content: ""; position: absolute; left: -16px; top: 10px; width: 8px; height: 8px; border-radius: 50%; background: #334155; border: 1px solid #475569; }
-  .timeline-entry.type-status_change::before { background: #3b82f6; border-color: #60a5fa; }
-  .timeline-entry.type-comment::before { background: #10b981; border-color: #34d399; }
-  .timeline-entry.type-cancelled::before { background: #ef4444; border-color: #f87171; }
-  .timeline-entry.type-retry::before { background: #f59e0b; border-color: #fbbf24; }
-  .timeline-entry.type-unblocked::before { background: #8b5cf6; border-color: #a78bfa; }
-  .timeline-entry.type-pm_note::before { background: #06b6d4; border-color: #22d3ee; }
-  .timeline-entry.type-pm_update::before { background: #06b6d4; border-color: #22d3ee; }
-  .load-more-wrap { text-align: center; padding: 12px 0; }
-  .load-more-btn { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-family: inherit; cursor: pointer; transition: background 0.2s; }
-  .load-more-btn:hover { background: #475569; }
 
   /* Mobile responsive */
   @media (max-width: 768px) {
     body { padding: 12px; }
     h1 { font-size: 18px; }
-    .cards { flex-direction: column; gap: 10px; }
-    .card { min-width: unset; padding: 12px 16px; }
-    .card .value { font-size: 20px; }
-    .card .label { font-size: 13px; }
+    .stat-cards { gap: 8px; }
+    .stat-card { min-width: unset; padding: 10px 14px; flex: 1; }
+    .stat-card .value { font-size: 18px; }
     section { margin-bottom: 20px; }
-    h2 { font-size: 15px; }
-    table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
-    th, td { padding: 8px 10px; font-size: 13px; }
+    .card-header { flex-direction: column; align-items: flex-start; }
+    .card-header-right { gap: 8px; }
+    .approval-item { flex-direction: column; gap: 8px; }
     .filter-bar { gap: 8px; }
     .filter-bar input[type="text"] { width: 100%; }
+    .modal { width: 95%; padding: 16px; }
     .new-directive { padding: 14px; }
     .new-directive input, .new-directive textarea, .new-directive select { font-size: 16px; padding: 10px 12px; }
     .new-directive .submit-btn { width: 100%; padding: 12px; font-size: 16px; }
     .refresh-bar { flex-wrap: wrap; gap: 8px; }
-    /* Timeline horizontal scroll on mobile */
-    section:has(h2) > div { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   }
 </style>
 </head><body>
@@ -2293,20 +2492,30 @@ async function handleRequest(req, res) {
 </div>
 
 <div id="dashboard-content">
-<div class="cards">
-  <div class="card"><div class="label">Uptime</div><div class="value">${uptimeStr}</div></div>
-  <div class="card"><div class="label">PostgreSQL</div><div class="value ${pgHealth.connected ? "ok" : "bad"}">${pgHealth.connected ? "Connected" : "Down"}</div></div>
-  <div class="card"><div class="label">Redis</div><div class="value ${redisHealthy ? "ok" : "bad"}">${redisHealthy ? "Connected" : "Down"}</div></div>
-  <div class="card"><div class="label">Gemini</div><div class="value ${geminiReady ? "ok" : "warn"}">${geminiReady ? "Connected" : "Down"}</div></div>
-  <div class="card"><div class="label">Active Agents</div><div class="value ${agents.length > 0 ? "warn" : "ok"}">${agents.length}</div></div>
-  <div class="card"><div class="label">Directives</div><div class="value">${directives.length}</div></div>
-</div>
 
-<div class="cards">
-  <div class="card"><div class="label">Completed Today</div><div class="value ok">${completedToday}</div></div>
-  <div class="card"><div class="label">Avg Duration</div><div class="value">${avgDuration !== null ? formatDuration(avgDuration) : "N/A"}</div></div>
-  <div class="card"><div class="label">Success Rate</div><div class="value ${successRate !== null && successRate >= 80 ? "ok" : successRate !== null && successRate >= 50 ? "warn" : successRate !== null ? "bad" : ""}">${successRate !== null ? successRate + "%" : "N/A"}</div></div>
-  <div class="card"><div class="label">Rate Limit</div><div class="value ${_directiveCreationTimestamps.filter(t => t > Date.now() - RATE_LIMIT_WINDOW_MS).length >= RATE_LIMIT_MAX ? "bad" : _directiveCreationTimestamps.filter(t => t > Date.now() - RATE_LIMIT_WINDOW_MS).length >= RATE_LIMIT_MAX - 2 ? "warn" : "ok"}">${_directiveCreationTimestamps.filter(t => t > Date.now() - RATE_LIMIT_WINDOW_MS).length}/${RATE_LIMIT_MAX}</div></div>
+${approvalBannerItems.length > 0 ? `<div class="approval-banner">
+<h3>Pending Approvals (${approvalBannerItems.length})</h3>
+${approvalBannerItems.map(item => `<div class="approval-item">
+  <div class="approval-info">
+    <div class="approval-title">${escapeHtml(item.directive.title || item.directive.id)}</div>
+    <div class="approval-desc">${escapeHtml(item.directive.plan ? item.directive.plan.slice(0, 200) : item.directive.description || "")}</div>
+  </div>
+  <div class="approval-actions">
+    <button class="btn-approve-banner" onclick="openApprovalModal('${escapeHtml(escapeJsString(item.directive.id))}')">Approve</button>
+    <button class="btn-deny-banner" onclick="denyDirective('${escapeHtml(escapeJsString(item.directive.id))}')">Deny</button>
+  </div>
+</div>`).join("")}
+</div>` : ""}
+
+<div class="stat-cards">
+  <div class="stat-card"><div class="label">Uptime</div><div class="value">${uptimeStr}</div></div>
+  <div class="stat-card"><div class="label">PostgreSQL</div><div class="value ${pgHealth.connected ? "ok" : "bad"}">${pgHealth.connected ? "Connected" : "Down"}</div></div>
+  <div class="stat-card"><div class="label">Redis</div><div class="value ${redisHealthy ? "ok" : "bad"}">${redisHealthy ? "Connected" : "Down"}</div></div>
+  <div class="stat-card"><div class="label">Gemini</div><div class="value ${geminiReady ? "ok" : "warn"}">${geminiReady ? "Connected" : "Down"}</div></div>
+  <div class="stat-card"><div class="label">Active Agents</div><div class="value ${agents.length > 0 ? "warn" : "ok"}">${agents.length}</div></div>
+  <div class="stat-card"><div class="label">Completed Today</div><div class="value ok">${completedToday}</div></div>
+  <div class="stat-card"><div class="label">Success Rate</div><div class="value ${successRate !== null && successRate >= 80 ? "ok" : successRate !== null && successRate >= 50 ? "warn" : successRate !== null ? "bad" : ""}">${successRate !== null ? successRate + "%" : "N/A"}</div></div>
+  <div class="stat-card"><div class="label">Avg Duration</div><div class="value">${avgDuration !== null ? formatDuration(avgDuration) : "N/A"}</div></div>
 </div>
 
 <section>
@@ -2321,6 +2530,7 @@ ${timelineDirectives.length > 0 ? `<section>
   <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#ef4444;display:inline-block;"></span> Failed</span>
   <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#3b82f6;display:inline-block;"></span> In Progress</span>
   <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#f59e0b;display:inline-block;"></span> Stale</span>
+  <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#dc2626;display:inline-block;"></span> Deploy Failed</span>
 </div>
 <div style="display:flex;gap:8px;">
   <div style="width:180px;flex-shrink:0;"></div>
@@ -2336,30 +2546,36 @@ ${timelineDirectives.length > 0 ? `<section>
 <div class="filter-bar">
   <input type="text" id="directive-search" placeholder="Search directives..." oninput="applyFilters()">
   <div class="filter-pills">
-    <button class="filter-pill active" data-filter="all" onclick="setStatusFilter('all',this)">All</button>
+    <button class="filter-pill active" data-filter="all" onclick="setStatusFilter('all',this)">All <span class="pill-count">${directives.length}</span></button>
     <button class="filter-pill" data-filter="active" onclick="setStatusFilter('active',this)">Active</button>
+    <button class="filter-pill" data-filter="needs_action" onclick="setStatusFilter('needs_action',this)">Needs Action${needsActionCount > 0 ? ` <span class="pill-count">${needsActionCount}</span>` : ""}</button>
     <button class="filter-pill" data-filter="completed" onclick="setStatusFilter('completed',this)">Completed</button>
     <button class="filter-pill" data-filter="failed" onclick="setStatusFilter('failed',this)">Failed</button>
   </div>
 </div>
-<div id="bulk-bar" style="display:none;background:#1e293b;border:1px solid #475569;border-radius:8px;padding:10px 16px;margin-bottom:12px;align-items:center;gap:12px;">
-  <span id="bulk-count" style="font-size:13px;color:#94a3b8;">0 selected</span>
-  <select id="bulk-action" style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:6px 12px;font-family:inherit;font-size:13px;">
-    <option value="">— Bulk Action —</option>
-    <option value="cancel">Cancel Selected</option>
-    <option value="retry">Retry Selected</option>
-    <option value="delete">Delete Selected</option>
-  </select>
-  <button onclick="executeBulkAction()" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer;">Apply</button>
-  <span id="bulk-msg" style="font-size:12px;"></span>
+<div id="directive-list">
+${directives.length > 0 ? directiveCards : `<p class="empty">No directives.</p>`}
 </div>
-${directives.length > 0 ? `<table id="directives-table"><tr><th><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th><th>Status</th><th>Title</th><th>Type</th><th>Priority</th><th>Deps</th><th>Created</th><th>Last Activity</th><th>Duration</th><th></th></tr>${directiveRows}</table><div class="load-more-wrap" id="load-more-wrap"><button class="load-more-btn" id="load-more-btn" onclick="loadMore()">Load More</button><span id="load-more-count" style="color:#64748b;font-size:12px;margin-left:8px;"></span></div>` : `<p class="empty">No directives.</p>`}
+<div class="load-more-wrap" id="load-more-wrap"><button class="load-more-btn" id="load-more-btn" onclick="loadMore()">Load More</button><span id="load-more-count" style="color:#64748b;font-size:12px;margin-left:8px;"></span></div>
 </section>
 
-<section>
-<h2>Recent Failures</h2>
-${failures.length > 0 ? `<table><tr><th>Status</th><th>Title</th><th>Reason</th><th>Retries</th></tr>${failureRows}</table>` : `<p class="empty">No failures. All clear.</p>`}
-</section>
+</div>
+
+<!-- Approval Modal -->
+<div class="modal-overlay" id="approval-modal">
+  <div class="modal">
+    <h3 id="modal-title">Approve Directive</h3>
+    <div class="plan-text" id="modal-plan">Loading plan...</div>
+    <div class="pin-row">
+      <label for="modal-pin">PIN</label>
+      <input type="password" id="modal-pin" maxlength="8" placeholder="Enter PIN" onkeydown="if(event.key==='Enter')submitApproval();">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel-modal" onclick="closeApprovalModal()">Cancel</button>
+      <button class="btn-approve-modal" id="modal-approve-btn" onclick="submitApproval()">Approve</button>
+    </div>
+    <div class="modal-error" id="modal-error"></div>
+  </div>
 </div>
 
 <section class="new-directive">
@@ -2393,11 +2609,11 @@ ${DIRECTIVE_TEMPLATES.map((t, i) => `    <option value="${i}">${escapeHtml(t.nam
 </section>
 
 <script>
-// Relative time conversion
+// ── Utilities ──
 function timeAgo(dateStr) {
   if (!dateStr) return "-";
-  var d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
+  var d = new Date(typeof dateStr === "number" ? dateStr : dateStr);
+  if (isNaN(d.getTime())) return String(dateStr);
   var now = Date.now();
   var diff = Math.floor((now - d.getTime()) / 1000);
   if (diff < 5) return "just now";
@@ -2407,64 +2623,63 @@ function timeAgo(dateStr) {
   return Math.floor(diff / 86400) + "d ago";
 }
 
-// Convert all timestamps on load
 function convertTimestamps() {
   document.querySelectorAll("[data-ts]").forEach(function(el) {
     var ts = el.getAttribute("data-ts");
-    if (ts) {
-      el.textContent = timeAgo(ts);
-      el.title = ts;
-    }
+    if (ts) { el.textContent = timeAgo(ts); el.title = ts; }
   });
 }
 convertTimestamps();
 
-// Directive search, filter, pagination
+function escapeText(str) {
+  if (!str) return "";
+  var div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ── Filtering ──
 var currentStatusFilter = "all";
 var pageSize = 20;
 var visibleCount = pageSize;
 
 var activeStatuses = ["pending", "planning", "planned", "approved", "in_progress", "blocked"];
-var failedStatuses = ["failed", "stale"];
+var failedStatuses = ["failed", "stale", "deploy_failed"];
+var needsActionStatuses = ["planned", "blocked", "deploy_failed"];
 
 function applyFilters() {
   var searchEl = document.getElementById("directive-search");
   var query = searchEl ? searchEl.value.toLowerCase().trim() : "";
-  var rows = document.querySelectorAll(".directive-row");
+  var cards = document.querySelectorAll(".directive-card");
   var matchCount = 0;
   var shownCount = 0;
 
-  rows.forEach(function(row) {
-    var status = row.getAttribute("data-status");
-    var title = row.getAttribute("data-title") || "";
+  cards.forEach(function(card) {
+    var status = card.getAttribute("data-status");
+    var title = card.getAttribute("data-title") || "";
 
-    // Status filter
     var statusMatch = false;
     if (currentStatusFilter === "all") statusMatch = true;
     else if (currentStatusFilter === "active") statusMatch = activeStatuses.indexOf(status) !== -1;
     else if (currentStatusFilter === "completed") statusMatch = status === "completed";
     else if (currentStatusFilter === "failed") statusMatch = failedStatuses.indexOf(status) !== -1;
+    else if (currentStatusFilter === "needs_action") statusMatch = needsActionStatuses.indexOf(status) !== -1;
 
-    // Search filter
     var searchMatch = !query || title.indexOf(query) !== -1;
 
-    var logRow = document.getElementById("log-" + row.getAttribute("data-id"));
     if (statusMatch && searchMatch) {
       matchCount++;
       if (matchCount <= visibleCount) {
-        row.style.display = "";
+        card.style.display = "";
         shownCount++;
       } else {
-        row.style.display = "none";
-        if (logRow) logRow.style.display = "none";
+        card.style.display = "none";
       }
     } else {
-      row.style.display = "none";
-      if (logRow) logRow.style.display = "none";
+      card.style.display = "none";
     }
   });
 
-  // Update load more button
   var wrap = document.getElementById("load-more-wrap");
   var countEl = document.getElementById("load-more-count");
   if (wrap) {
@@ -2485,15 +2700,10 @@ function setStatusFilter(filter, btn) {
   applyFilters();
 }
 
-function loadMore() {
-  visibleCount += pageSize;
-  applyFilters();
-}
-
-// Initial filter application
+function loadMore() { visibleCount += pageSize; applyFilters(); }
 applyFilters();
 
-// Auto-refresh via fetch (no full reload)
+// ── Auto-refresh ──
 var refreshInterval = 10;
 var countdown = refreshInterval;
 var countdownEl = document.getElementById("countdown");
@@ -2510,29 +2720,25 @@ function refreshNow() {
       var doc = parser.parseFromString(html, "text/html");
       var newContent = doc.getElementById("dashboard-content");
       var newRefreshed = doc.getElementById("refreshed-at");
-      // Preserve search/filter state across refresh
       var searchVal = "";
       var searchEl = document.getElementById("directive-search");
       if (searchEl) searchVal = searchEl.value;
-      // Preserve open activity log panels
+      // Preserve open log panels
       var openLogs = [];
-      document.querySelectorAll(".activity-log-row").forEach(function(r) {
-        if (r.style.display === "table-row") openLogs.push(r.id);
+      document.querySelectorAll(".card-full-log").forEach(function(el) {
+        if (el.style.display !== "none") openLogs.push(el.id);
       });
       if (newContent) contentEl.innerHTML = newContent.innerHTML;
       if (newRefreshed) refreshedEl.textContent = newRefreshed.textContent;
-      // Restore search value
       var newSearchEl = document.getElementById("directive-search");
       if (newSearchEl) newSearchEl.value = searchVal;
-      // Restore active filter pill
       document.querySelectorAll(".filter-pill").forEach(function(p) {
         p.classList.remove("active");
         if (p.getAttribute("data-filter") === currentStatusFilter) p.classList.add("active");
       });
-      // Restore open activity log panels
       openLogs.forEach(function(logId) {
         var el = document.getElementById(logId);
-        if (el) el.style.display = "table-row";
+        if (el) el.style.display = "";
       });
       convertTimestamps();
       applyFilters();
@@ -2543,21 +2749,16 @@ function refreshNow() {
 
 setInterval(function() {
   countdown--;
-  if (countdown <= 0) {
-    refreshNow();
-  } else {
-    countdownEl.textContent = "Next refresh in " + countdown + "s";
-  }
+  if (countdown <= 0) { refreshNow(); }
+  else { countdownEl.textContent = "Next refresh in " + countdown + "s"; }
 }, 1000);
 
-// Cancel a directive
+// ── Directive Actions ──
 function cancelDirective(id) {
   if (!confirm("Cancel this directive?")) return;
   fetch("/directives/" + id + "/cancel", { method: "POST" })
     .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.ok) { refreshNow(); } else { alert("Error: " + (data.error || "Unknown")); }
-    })
+    .then(function(data) { if (data.ok) refreshNow(); else alert("Error: " + (data.error || "Unknown")); })
     .catch(function(err) { alert("Network error: " + err.message); });
 }
 
@@ -2565,68 +2766,40 @@ function retryDirective(id) {
   if (!confirm("Retry this directive?")) return;
   fetch("/directives/" + id + "/retry", { method: "POST" })
     .then(function(r) { return r.json(); })
+    .then(function(data) { if (data.ok) refreshNow(); else alert("Error: " + (data.error || "Unknown")); })
+    .catch(function(err) { alert("Network error: " + err.message); });
+}
+
+function retryMerge(id) {
+  if (!confirm("Retry merge for this directive?")) return;
+  fetch("/directives/" + id + "/retry-merge", { method: "POST" })
+    .then(function(r) { return r.json(); })
     .then(function(data) {
-      if (data.ok) { refreshNow(); } else { alert("Error: " + (data.error || "Unknown")); }
+      if (data.ok) { alert("Merge succeeded! Deploying now."); refreshNow(); }
+      else { alert("Merge failed: " + (data.error || "Unknown")); refreshNow(); }
     })
     .catch(function(err) { alert("Network error: " + err.message); });
 }
 
-// Toggle activity log panel — fetches merged audit trail from API
-function toggleActivityLog(id) {
-  var row = document.getElementById("log-" + id);
-  if (!row) return;
-  var isHidden = row.style.display === "none";
-  row.style.display = isHidden ? "table-row" : "none";
-  if (!isHidden) return; // closing — nothing to do
-
-  var container = document.getElementById("timeline-" + id);
-  if (!container) return;
-  container.innerHTML = '<span style="color:#475569;font-style:italic;">Loading audit trail...</span>';
-
-  fetch("/directives/" + id + "/history")
+function unblockDirective(id) {
+  if (!confirm("Unblock this directive?")) return;
+  fetch("/directives/" + id + "/unblock", { method: "POST" })
     .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (!data.timeline || data.timeline.length === 0) {
-        container.innerHTML = '<span style="color:#475569;font-style:italic;">No activity yet.</span>';
-        return;
-      }
-      var actorColors = { "King Kazuma": "king-kazuma", "June": "june", "Cipher": "cipher", "system": "system" };
-      var typeIcons = {
-        status_change: "&#9656;", comment: "&#128172;", cancelled: "&#10005;",
-        retry: "&#8635;", pm_note: "&#128221;", pm_update: "&#128221;",
-        unblocked: "&#128275;", agent_status: "&#9656;", orchestrator_error: "&#9888;"
-      };
-      var html = data.timeline.map(function(e) {
-        var icon = typeIcons[e.type] || "&#9670;";
-        var actorClass = actorColors[e.actor] || "system";
-        var actorBadge = e.actor
-          ? '<span class="actor-badge actor-' + actorClass + '">' + escapeText(e.actor) + '</span>'
-          : '';
-        var sourceTag = e.source === "pg_history"
-          ? ' <span style="font-size:9px;color:#475569;border:1px solid #334155;padding:0 3px;border-radius:2px;">PG</span>'
-          : '';
-        return '<div class="timeline-entry type-' + escapeText(e.type) + '">' +
-          '<span style="color:#64748b;font-size:11px;flex-shrink:0;">' + timeAgo(e.timestamp) + '</span>' +
-          actorBadge +
-          '<span style="font-size:12px;color:#e2e8f0;flex:1;">' + escapeText(e.message) + '</span>' +
-          sourceTag +
-          '</div>';
-      }).join("");
-      container.innerHTML = html;
-    })
-    .catch(function(err) {
-      container.innerHTML = '<span style="color:#ef4444;">Failed to load: ' + err.message + '</span>';
-    });
+    .then(function(data) { if (data.ok) refreshNow(); else alert("Error: " + (data.error || "Unknown")); })
+    .catch(function(err) { alert("Network error: " + err.message); });
 }
 
-function escapeText(str) {
-  if (!str) return "";
-  var div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+// ── Comments ──
+function toggleCommentInput(id) {
+  var wrap = document.getElementById("comment-wrap-" + id);
+  if (!wrap) return;
+  wrap.style.display = wrap.style.display === "none" ? "flex" : "none";
+  if (wrap.style.display === "flex") {
+    var input = document.getElementById("comment-input-" + id);
+    if (input) input.focus();
+  }
 }
 
-// Add comment to a directive
 function addComment(id) {
   var input = document.getElementById("comment-input-" + id);
   if (!input) return;
@@ -2642,83 +2815,154 @@ function addComment(id) {
     .then(function(data) {
       input.disabled = false;
       if (data.ok) { input.value = ""; refreshNow(); }
-      else { alert("Error: " + (data.error || "Unknown")); }
+      else alert("Error: " + (data.error || "Unknown"));
     })
     .catch(function(err) { input.disabled = false; alert("Network error: " + err.message); });
 }
 
-// Bulk selection
-function toggleSelectAll(el) {
-  var checked = el.checked;
-  document.querySelectorAll(".directive-check").forEach(function(cb) {
-    if (cb.closest(".directive-row").style.display !== "none") cb.checked = checked;
-  });
-  updateBulkBar();
-}
+// ── Activity Log ──
+function toggleActivityLog(id) {
+  var panel = document.getElementById("log-" + id);
+  if (!panel) return;
+  var isHidden = panel.style.display === "none";
+  panel.style.display = isHidden ? "" : "none";
+  if (!isHidden) return;
 
-function getSelectedIds() {
-  var ids = [];
-  document.querySelectorAll(".directive-check:checked").forEach(function(cb) {
-    ids.push(cb.value);
-  });
-  return ids;
-}
+  var container = document.getElementById("timeline-" + id);
+  if (!container) return;
+  container.innerHTML = '<span style="color:#475569;font-style:italic;">Loading audit trail...</span>';
 
-function updateBulkBar() {
-  var ids = getSelectedIds();
-  var bar = document.getElementById("bulk-bar");
-  var countEl = document.getElementById("bulk-count");
-  if (ids.length > 0) {
-    bar.style.display = "flex";
-    countEl.textContent = ids.length + " selected";
-  } else {
-    bar.style.display = "none";
-  }
-  // Sync select-all checkbox
-  var allBoxes = document.querySelectorAll(".directive-check");
-  var visibleBoxes = [];
-  allBoxes.forEach(function(cb) { if (cb.closest(".directive-row").style.display !== "none") visibleBoxes.push(cb); });
-  var selectAll = document.getElementById("select-all");
-  if (selectAll && visibleBoxes.length > 0) {
-    selectAll.checked = visibleBoxes.every(function(cb) { return cb.checked; });
-  }
-}
-
-function executeBulkAction() {
-  var action = document.getElementById("bulk-action").value;
-  if (!action) { alert("Select a bulk action first."); return; }
-  var ids = getSelectedIds();
-  if (ids.length === 0) { alert("No directives selected."); return; }
-  var labels = { cancel: "Cancel", retry: "Retry", "delete": "Delete" };
-  if (!confirm(labels[action] + " " + ids.length + " directive(s)?")) return;
-  var msgEl = document.getElementById("bulk-msg");
-  msgEl.textContent = "Processing...";
-  msgEl.style.color = "#94a3b8";
-  fetch("/directives/bulk", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: action, ids: ids })
-  })
+  fetch("/directives/" + id + "/history")
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      if (data.ok) {
-        var msg = data.succeeded.length + " succeeded";
-        if (data.failed.length > 0) msg += ", " + data.failed.length + " failed";
-        msgEl.textContent = msg;
-        msgEl.style.color = data.failed.length > 0 ? "#f59e0b" : "#10b981";
-        setTimeout(refreshNow, 1000);
-      } else {
-        msgEl.textContent = "Error: " + (data.error || "Unknown");
-        msgEl.style.color = "#ef4444";
+      if (!data.timeline || data.timeline.length === 0) {
+        container.innerHTML = '<span style="color:#475569;font-style:italic;">No activity yet.</span>';
+        return;
       }
+      var actorColors = { "King Kazuma": "king-kazuma", "June": "june", "Cipher": "cipher", "system": "system" };
+      var html = data.timeline.map(function(e) {
+        var actorClass = actorColors[e.actor] || "system";
+        var actorBadge = e.actor ? '<span class="actor-badge actor-' + actorClass + '">' + escapeText(e.actor) + '</span>' : '';
+        var sourceTag = e.source === "pg_history" ? ' <span style="font-size:9px;color:#475569;border:1px solid #334155;padding:0 3px;border-radius:2px;">PG</span>' : '';
+        return '<div class="timeline-entry type-' + escapeText(e.type) + '">' +
+          '<span style="color:#64748b;font-size:11px;flex-shrink:0;">' + timeAgo(e.timestamp) + '</span>' +
+          actorBadge +
+          '<span style="font-size:12px;color:#e2e8f0;flex:1;">' + escapeText(e.message) + '</span>' +
+          sourceTag + '</div>';
+      }).join("");
+      container.innerHTML = html;
     })
     .catch(function(err) {
-      msgEl.textContent = "Network error: " + err.message;
-      msgEl.style.color = "#ef4444";
+      container.innerHTML = '<span style="color:#ef4444;">Failed to load: ' + err.message + '</span>';
     });
 }
 
-// Template pre-fill
+// ── Approval Modal ──
+var currentApprovalDirectiveId = null;
+
+function openApprovalModal(directiveId) {
+  currentApprovalDirectiveId = directiveId;
+  var modal = document.getElementById("approval-modal");
+  var titleEl = document.getElementById("modal-title");
+  var planEl = document.getElementById("modal-plan");
+  var pinEl = document.getElementById("modal-pin");
+  var errEl = document.getElementById("modal-error");
+
+  titleEl.textContent = "Loading...";
+  planEl.textContent = "Loading plan details...";
+  pinEl.value = "";
+  errEl.textContent = "";
+  modal.classList.add("active");
+
+  // Fetch enriched approval details
+  fetch("/approvals/details")
+    .then(function(r) { return r.json(); })
+    .then(function(approvals) {
+      var match = approvals.find(function(a) { return a.directiveId === directiveId; });
+      if (match) {
+        titleEl.textContent = "Approve: " + (match.directiveTitle || directiveId);
+        planEl.textContent = match.directivePlan || match.directiveDescription || "No plan text available.";
+      } else {
+        titleEl.textContent = "Approve: " + directiveId;
+        planEl.textContent = "Could not load plan details. The directive may already be resolved.";
+      }
+      pinEl.focus();
+    })
+    .catch(function() {
+      titleEl.textContent = "Approve: " + directiveId;
+      planEl.textContent = "Failed to load plan details.";
+      pinEl.focus();
+    });
+}
+
+function closeApprovalModal() {
+  document.getElementById("approval-modal").classList.remove("active");
+  currentApprovalDirectiveId = null;
+}
+
+function submitApproval() {
+  var pin = document.getElementById("modal-pin").value;
+  var errEl = document.getElementById("modal-error");
+  var btn = document.getElementById("modal-approve-btn");
+  if (!pin) { errEl.textContent = "PIN is required."; return; }
+
+  btn.disabled = true;
+  btn.textContent = "Approving...";
+  errEl.textContent = "";
+
+  // Find the approval ID for this directive
+  fetch("/approvals/details")
+    .then(function(r) { return r.json(); })
+    .then(function(approvals) {
+      var match = approvals.find(function(a) { return a.directiveId === currentApprovalDirectiveId; });
+      if (!match) { throw new Error("Approval not found — may already be resolved"); }
+      return fetch("/approvals/" + match.id + "/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved: true, pin: pin })
+      });
+    })
+    .then(function(r) { return r.json().then(function(d) { return { status: r.status, data: d }; }); })
+    .then(function(res) {
+      if (res.data.ok) {
+        closeApprovalModal();
+        refreshNow();
+      } else {
+        errEl.textContent = res.data.error || "Approval failed";
+      }
+    })
+    .catch(function(err) { errEl.textContent = err.message; })
+    .finally(function() { btn.disabled = false; btn.textContent = "Approve"; });
+}
+
+function denyDirective(directiveId) {
+  if (!confirm("Deny this directive plan?")) return;
+  fetch("/approvals/details")
+    .then(function(r) { return r.json(); })
+    .then(function(approvals) {
+      var match = approvals.find(function(a) { return a.directiveId === directiveId; });
+      if (!match) { alert("No pending approval found for this directive."); return; }
+      // Deny doesn't require PIN — use a dummy to satisfy the endpoint
+      return fetch("/approvals/" + match.id + "/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved: false, pin: "" })
+      })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.ok || data.error === "Invalid PIN") {
+            // For deny, we also need the PIN — cancel the directive instead
+            return fetch("/directives/" + directiveId + "/cancel", { method: "POST" })
+              .then(function(r) { return r.json(); })
+              .then(function() { refreshNow(); });
+          }
+          refreshNow();
+        });
+    })
+    .catch(function(err) { alert("Error: " + err.message); });
+}
+
+// ── Template + Submit ──
 var directiveTemplates = ${JSON.stringify(DIRECTIVE_TEMPLATES)};
 function applyTemplate(idx) {
   if (idx === "") return;
@@ -2729,7 +2973,6 @@ function applyTemplate(idx) {
   document.getElementById("d-type").value = t.type;
 }
 
-// Submit directive form
 function submitDirective(e) {
   e.preventDefault();
   var title = document.getElementById("d-title").value.trim();
@@ -2776,6 +3019,14 @@ function submitDirective(e) {
 
   return false;
 }
+
+// Close modal on escape key or clicking overlay
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") closeApprovalModal();
+});
+document.getElementById("approval-modal").addEventListener("click", function(e) {
+  if (e.target === this) closeApprovalModal();
+});
 </script>
 
 </body></html>`;
@@ -4346,7 +4597,24 @@ async function handleToolCall(name, args) {
           const pinId = `pin_${Date.now()}`;
           pendingPinRequests.set(pinId, { approvalId, approved, resolve });
 
-          broadcastToDeviceType("phone", { type: "pinRequest", approvalId: pinId, description: `Authorize: ${approvalId}` });
+          // Enrich pinRequest with directive context for future dashboard use
+          let pinDescription = `Authorize: ${approvalId}`;
+          let pinDirectiveTitle = null;
+          let pinPlanSummary = null;
+          {
+            const approvals = getApprovals();
+            const relatedApproval = approvals.find((a) => a.id === approvalId);
+            if (relatedApproval) {
+              const directives = getDirectives();
+              const relatedDirective = directives.find((d) => d.directiveApprovalId === approvalId);
+              if (relatedDirective) {
+                pinDirectiveTitle = relatedDirective.title;
+                pinPlanSummary = relatedDirective.plan ? relatedDirective.plan.slice(0, 500) : null;
+                pinDescription = `Approve plan: ${relatedDirective.title}`;
+              }
+            }
+          }
+          broadcastToDeviceType("phone", { type: "pinRequest", approvalId: pinId, description: pinDescription, directiveTitle: pinDirectiveTitle, planSummary: pinPlanSummary });
 
           // 2 min timeout (user needs to hear June, find tablet, enter PIN)
           setTimeout(() => {

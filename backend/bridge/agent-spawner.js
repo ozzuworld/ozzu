@@ -894,6 +894,40 @@ function doMergeAndDeploy(directive, agentInfo) {
       log(`WARNING: Merge failed for ${directive.id} — branch ${agentInfo.worktree.branch} preserved for manual merge`);
       const wtDir = path.join(WORKTREE_DIR, directive.id);
       try { require("child_process").execSync(`git worktree remove --force "${wtDir}"`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
+
+      // PATCH directive to deploy_failed so dashboard shows it + enables retry
+      const http = require("http");
+      const patchData = JSON.stringify({
+        status: "deploy_failed",
+        failureReason: `Merge failed for branch ${agentInfo.worktree.branch} — manual merge or retry needed`,
+        mergeBranch: agentInfo.worktree.branch,
+        actor: "Cipher",
+      });
+      const patchReq = http.request(`${BRIDGE}/directives/${directive.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_SECRET || ""}`, "Content-Length": Buffer.byteLength(patchData) },
+      }, (res) => {
+        let body = "";
+        res.on("data", (d) => body += d);
+        res.on("end", () => {
+          if (res.statusCode !== 200) log(`Failed to PATCH deploy_failed for ${directive.id}: ${body}`);
+        });
+      });
+      patchReq.on("error", (err) => log(`PATCH error for ${directive.id}: ${err.message}`));
+      patchReq.write(patchData);
+      patchReq.end();
+
+      // Notify June so King Kazuma knows about the failure
+      const notifyData = JSON.stringify({
+        message: `Merge failed for directive "${directive.title || directive.id}" on branch ${agentInfo.worktree.branch}. The code is ready but couldn't be merged to main. King Kazuma can retry from the dashboard.`,
+      });
+      const notifyReq = http.request(`${BRIDGE}/notify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(notifyData) },
+      }, () => {});
+      notifyReq.on("error", (err) => log(`Notify error for merge failure ${directive.id}: ${err.message}`));
+      notifyReq.write(notifyData);
+      notifyReq.end();
     }
   }
   if (mergeOk) {
@@ -1325,4 +1359,6 @@ module.exports = {
   setBroadcast,
   getConfig,
   setConfig,
+  mergeWorktreeToMain,
+  smartDeploy,
 };
