@@ -21,11 +21,27 @@ echo "=== OTA Deploy ==="
 # Export JS bundles for both platforms (export separately to avoid web bundler failure)
 echo "[1/3] Exporting JS bundles (Android + iOS)..."
 cd "$FRONTEND"
-rm -rf /tmp/ota-export
-npx expo export --platform android --output-dir /tmp/ota-export 2>&1 | tail -5
-npx expo export --platform ios --output-dir /tmp/ota-export 2>&1 | tail -5
+rm -rf /tmp/ota-export /tmp/ota-android /tmp/ota-ios
+npx expo export --platform android --output-dir /tmp/ota-android 2>&1 | tail -5
+npx expo export --platform ios --output-dir /tmp/ota-ios 2>&1 | tail -5
 
-# Verify export produced a valid bundle (check Android — both platforms share metadata.json)
+# Merge: start with Android, overlay iOS bundles + merge metadata
+cp -r /tmp/ota-android /tmp/ota-export
+cp -r /tmp/ota-ios/_expo/static/js/ios /tmp/ota-export/_expo/static/js/ 2>/dev/null || true
+
+# Merge metadata.json from both platforms
+python3 -c "
+import json
+a = json.load(open('/tmp/ota-android/metadata.json'))
+b = json.load(open('/tmp/ota-ios/metadata.json'))
+a['fileMetadata']['ios'] = b['fileMetadata']['ios']
+json.dump(a, open('/tmp/ota-export/metadata.json', 'w'), indent=2)
+print('Merged metadata: android + ios')
+" 2>&1
+
+rm -rf /tmp/ota-android /tmp/ota-ios
+
+# Verify export produced a valid bundle
 METADATA="/tmp/ota-export/metadata.json"
 if [ ! -f "$METADATA" ]; then
   echo "ERROR: Export produced no metadata.json — aborting"
