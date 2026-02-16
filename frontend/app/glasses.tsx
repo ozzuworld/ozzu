@@ -185,12 +185,15 @@ export default function GlassesScreen() {
   const isConnecting = connectionState === "connecting";
   const isStreaming = streamState === "started";
 
-  // Unavailable on this device
+  // Unavailable — native module not in binary or device unsupported
   if (available === false) {
+    const needsRebuild = !Glasses.nativeAvailable;
     return (
       <View style={{ flex: 1, backgroundColor: "#111111", justifyContent: "center", alignItems: "center" }}>
         <Text style={{ color: "#525252", fontSize: 14, fontFamily: "monospace", textAlign: "center" }}>
-          {"GLASSES NOT AVAILABLE\non this device"}
+          {needsRebuild
+            ? "GLASSES MODULE NOT INSTALLED\nA native rebuild is required"
+            : "GLASSES NOT AVAILABLE\non this device"}
         </Text>
         <TVPressable
           onPress={() => router.back()}
