@@ -25,7 +25,7 @@ android {
 
 repositories {
   maven {
-    url = uri("https://maven.pkg.github.com/anthropics/meta-wearables-dat-android")
+    url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
     credentials {
       username = ""
       password = System.getenv("GITHUB_TOKEN") ?: ""
