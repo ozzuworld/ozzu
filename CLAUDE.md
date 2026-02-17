@@ -125,3 +125,24 @@ dev-01 has no DNS — all downloads must go through GCP VM and be SCPed over.
 | Anisette errors / 502 | Anisette container down on GCP VM | `docker compose restart anisette` then retry. |
 | "AltServer not found" | AltServer-Linux not installed on dev-01 | Run `./scripts/setup-ios-sideloading.sh` from GCP VM. |
 | Build artifact not found | iOS CI hasn't run or failed | Trigger: `gh workflow run build-ios.yml`, then wait ~20 min. Check: `gh run list --workflow=build-ios.yml -R ozzuworld/ozzu --limit 3` |
+
+## Verification Commands by Change Type
+
+**Verification is BLOCKING — workers MUST run these checks before marking a directive as completed.**
+Skipping verification has broken CI builds. The pipeline also runs automated post-completion checks and will auto-revert to "blocked" if they fail.
+
+| Change Type | Verification Command | What It Checks |
+|-------------|---------------------|----------------|
+| Frontend JS/TS | `cd frontend && npx expo export --platform android` | Metro bundler can resolve all imports, no syntax errors |
+| Frontend native (android/, ios/, plugins/, app.json) | `gh run list --workflow=build-android.yml -L 1 --json status,conclusion` | Latest CI build passed |
+| Frontend native (iOS) | `gh run list --workflow=build-ios.yml -L 1 --json status,conclusion` | Latest iOS CI build passed |
+| Backend/bridge JS | `node -c <file>` (for each modified .js file) | No syntax errors in server code |
+| Backend Docker | `docker compose config -q` | Docker Compose config is valid |
+| Config plugins | `node -c frontend/plugins/<file>.js` | Plugin syntax is valid (breaks native builds if wrong) |
+| Any JS file | `node -c <file>` | Basic syntax check — catches most errors |
+
+**Failure handling:**
+- If verification fails, workers MUST use `"blocked"` status with `failureReason` explaining what failed
+- Workers should NOT mark as `"completed"` with "remaining manual steps" — that is `"blocked"`
+- The pipeline's post-completion hook runs `node -c` and `expo export` automatically and will revert to `"blocked"` if they fail
+- Verification results are logged to `activity_log` for debugging
