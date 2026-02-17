@@ -9,6 +9,7 @@ const {
   withAndroidManifest,
   withInfoPlist,
   withProjectBuildGradle,
+  withGradleProperties,
 } = require("expo/config-plugins");
 
 function withMetaDATAndroid(config) {
@@ -143,9 +144,25 @@ function withMetaDATiOS(config) {
   });
 }
 
+function withMetaDATMinSdk(config) {
+  return withGradleProperties(config, (config) => {
+    const props = config.modResults;
+    const idx = props.findIndex(
+      (p) => p.type === "property" && p.key === "android.minSdkVersion"
+    );
+    if (idx >= 0) {
+      props[idx].value = "29";
+    } else {
+      props.push({ type: "property", key: "android.minSdkVersion", value: "29" });
+    }
+    return config;
+  });
+}
+
 module.exports = function withMetaDAT(config) {
   config = withMetaDATAndroid(config);
   config = withMetaDATMaven(config);
+  config = withMetaDATMinSdk(config);
   config = withMetaDATiOS(config);
   return config;
 };
