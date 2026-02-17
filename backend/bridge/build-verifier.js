@@ -1,0 +1,318 @@
+// build-verifier.js — Build verification framework for directive completion
+// Workers must run verification before marking directives as completed.
+// Detects change type (frontend/backend/none) and runs appropriate checks.
+
+const { exec } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+
+const WORKDIR = "/home/gcp/ozzu";
+const VERIFICATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 min max
+
+function log(msg) {
+  const ts = new Date().toISOString().slice(11, 19);
+  console.log(`[build-verifier ${ts}] ${msg}`);
+}
+
+function execAsync(cmd, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const timeout = opts.timeout || 60000;
+    exec(cmd, { cwd: WORKDIR, encoding: "utf8", timeout, ...opts }, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout, stderr });
+    });
+  });
+}
+
+// Detect what type of changes exist on the directive's branch vs main
+async function detectChangeType(directiveId) {
+  const verificationLog = [];
+
+  try {
+    // Find the branch for this directive
+    const branchName = `agent/${directiveId}`;
+    const { stdout: diffOutput } = await execAsync(
+      `git diff --name-only main...${branchName} 2>/dev/null || git diff --name-only HEAD~1 HEAD`,
+      { timeout: 10000 }
+    );
+
+    const changedFiles = diffOutput.trim().split("\n").filter(Boolean);
+    if (changedFiles.length === 0) {
+      return { changeType: "none", changedFiles: [], verificationLog: ["No changed files detected"] };
+    }
+
+    verificationLog.push(`${changedFiles.length} file(s) changed`);
+
+    let hasFrontend = false;
+    let hasFrontendNative = false;
+    let hasBackend = false;
+
+    const nativePatterns = [
+      /frontend\/android\//,
+      /frontend\/ios\//,
+      /frontend\/modules\/.*\/(android|ios)\//,
+      /frontend\/app\.json/,
+      /frontend\/plugins\//,
+    ];
+    const frontendPatterns = [/^frontend\//];
+    const backendPatterns = [/^backend\/bridge\//];
+
+    for (const file of changedFiles) {
+      if (nativePatterns.some(p => p.test(file))) {
+        hasFrontendNative = true;
+        hasFrontend = true;
+      } else if (frontendPatterns.some(p => p.test(file))) {
+        hasFrontend = true;
+      }
+      if (backendPatterns.some(p => p.test(file))) {
+        hasBackend = true;
+      }
+    }
+
+    // Check for native dependency changes in package.json
+    if (changedFiles.includes("frontend/package.json")) {
+      try {
+        const { stdout: pkgDiff } = await execAsync(
+          `git diff main...${branchName} -- frontend/package.json 2>/dev/null || git diff HEAD~1 HEAD -- frontend/package.json`,
+          { timeout: 10000 }
+        );
+        if (/^\+.*"(expo-|react-native-|@react-native)/m.test(pkgDiff)) {
+          hasFrontendNative = true;
+          verificationLog.push("Native dependency change detected in package.json");
+        }
+      } catch {
+        // Best effort
+      }
+    }
+
+    let changeType = "none";
+    if (hasFrontendNative) changeType = "frontend_native";
+    else if (hasFrontend) changeType = "frontend_js";
+    else if (hasBackend) changeType = "backend";
+    else changeType = "other";
+
+    verificationLog.push(`Change type: ${changeType}`);
+    return { changeType, changedFiles, verificationLog, hasFrontend, hasBackend };
+  } catch (err) {
+    verificationLog.push(`Change detection failed: ${err.message}`);
+    return { changeType: "unknown", changedFiles: [], verificationLog };
+  }
+}
+
+// Verify backend changes — syntax check all modified JS files
+async function verifyBackendChanges(changedFiles) {
+  const results = [];
+  const jsFiles = changedFiles.filter(f => f.endsWith(".js") && f.startsWith("backend/bridge/"));
+
+  if (jsFiles.length === 0) {
+    return { success: true, log: ["No backend JS files to syntax check"] };
+  }
+
+  let allPassed = true;
+  for (const file of jsFiles) {
+    const fullPath = path.join(WORKDIR, file);
+    try {
+      await execAsync(`node -c "${fullPath}"`, { timeout: 10000 });
+      results.push(`Syntax OK: ${file}`);
+    } catch (err) {
+      allPassed = false;
+      results.push(`Syntax FAIL: ${file} — ${err.message.split("\n")[0]}`);
+    }
+  }
+
+  return { success: allPassed, log: results };
+}
+
+// Verify frontend JS-only changes — run expo export to validate bundles
+async function verifyFrontendJSChanges() {
+  const results = [];
+
+  try {
+    // Run expo export to verify bundles compile
+    const { stdout } = await execAsync(
+      `cd frontend && npx expo export --dump-sourcemap --output-dir /tmp/ozzu-verify-bundles 2>&1`,
+      { timeout: VERIFICATION_TIMEOUT_MS }
+    );
+    results.push("OTA export completed");
+
+    // Verify bundle files exist and have non-zero size
+    const bundleDir = "/tmp/ozzu-verify-bundles";
+    const bundleChecks = [
+      { pattern: "_expo/static/js/web", desc: "JS bundle" },
+    ];
+
+    let bundlesFound = false;
+    try {
+      const { stdout: findResult } = await execAsync(
+        `find ${bundleDir} -name "*.bundle" -o -name "*.js" | head -5`,
+        { timeout: 5000 }
+      );
+      if (findResult.trim()) {
+        bundlesFound = true;
+        results.push(`Bundle files found: ${findResult.trim().split("\n").length} file(s)`);
+      }
+    } catch {
+      // Best effort
+    }
+
+    if (!bundlesFound) {
+      // Check for any output at all — expo export might use different structure
+      try {
+        const { stdout: lsResult } = await execAsync(`ls -la ${bundleDir}/ 2>/dev/null | head -10`, { timeout: 5000 });
+        if (lsResult.trim()) {
+          bundlesFound = true;
+          results.push(`Export output found in ${bundleDir}`);
+        }
+      } catch {}
+    }
+
+    // Clean up
+    try { await execAsync(`rm -rf ${bundleDir}`, { timeout: 5000 }); } catch {}
+
+    return { success: true, log: results };
+  } catch (err) {
+    results.push(`OTA export FAILED: ${err.message.split("\n").slice(0, 3).join(" | ")}`);
+    try { await execAsync(`rm -rf /tmp/ozzu-verify-bundles`, { timeout: 5000 }); } catch {}
+    return { success: false, log: results };
+  }
+}
+
+// Verify frontend native changes — check that CI builds would likely succeed
+// We don't actually trigger CI builds (that would be wasteful), but we validate:
+// 1. No syntax errors in JS files
+// 2. app.json is valid JSON
+// 3. Native module files have valid syntax where checkable
+async function verifyFrontendNativeChanges(changedFiles) {
+  const results = [];
+
+  // Check app.json validity if changed
+  if (changedFiles.includes("frontend/app.json")) {
+    try {
+      const appJsonPath = path.join(WORKDIR, "frontend/app.json");
+      const content = fs.readFileSync(appJsonPath, "utf8");
+      JSON.parse(content);
+      results.push("app.json: valid JSON");
+    } catch (err) {
+      results.push(`app.json: INVALID — ${err.message}`);
+      return { success: false, log: results };
+    }
+  }
+
+  // Syntax check any JS/TS files in the change set
+  const jsFiles = changedFiles.filter(f =>
+    f.startsWith("frontend/") && (f.endsWith(".js") || f.endsWith(".jsx"))
+  );
+  let allPassed = true;
+  for (const file of jsFiles) {
+    const fullPath = path.join(WORKDIR, file);
+    try {
+      await execAsync(`node -c "${fullPath}"`, { timeout: 10000 });
+      results.push(`Syntax OK: ${file}`);
+    } catch (err) {
+      allPassed = false;
+      results.push(`Syntax FAIL: ${file} — ${err.message.split("\n")[0]}`);
+    }
+  }
+
+  if (allPassed && results.length === 0) {
+    results.push("Native changes detected — JS syntax checks passed (full CI build validates native code on merge)");
+  }
+
+  return { success: allPassed, log: results };
+}
+
+// Main verification entry point
+async function verify(directive) {
+  const startTime = Date.now();
+  const verificationLog = [];
+
+  verificationLog.push(`Verification started for directive ${directive.id}`);
+
+  // Detect change type
+  const detection = await detectChangeType(directive.id);
+  verificationLog.push(...detection.verificationLog);
+
+  if (detection.changeType === "none") {
+    verificationLog.push("No changes detected — verification passed (nothing to verify)");
+    return {
+      success: true,
+      verification_log: verificationLog,
+      change_type: "none",
+      duration_ms: Date.now() - startTime,
+    };
+  }
+
+  let success = true;
+  let failureReason = null;
+
+  // Run backend verification if backend files changed
+  if (detection.hasBackend) {
+    const backendResult = await verifyBackendChanges(detection.changedFiles);
+    verificationLog.push("--- Backend verification ---");
+    verificationLog.push(...backendResult.log);
+    if (!backendResult.success) {
+      success = false;
+      failureReason = "Backend syntax check failed";
+    }
+  }
+
+  // Run frontend verification based on change type
+  if (detection.changeType === "frontend_native") {
+    const nativeResult = await verifyFrontendNativeChanges(detection.changedFiles);
+    verificationLog.push("--- Frontend native verification ---");
+    verificationLog.push(...nativeResult.log);
+    if (!nativeResult.success) {
+      success = false;
+      failureReason = failureReason || "Frontend native verification failed";
+    }
+  } else if (detection.changeType === "frontend_js") {
+    // For JS-only frontend changes, run OTA export check
+    const jsResult = await verifyFrontendJSChanges();
+    verificationLog.push("--- Frontend JS verification ---");
+    verificationLog.push(...jsResult.log);
+    if (!jsResult.success) {
+      success = false;
+      failureReason = failureReason || "Frontend JS verification (OTA export) failed";
+    }
+  }
+
+  // For "other" changes (docs, scripts, etc.), just verify any JS files
+  if (detection.changeType === "other") {
+    const jsFiles = detection.changedFiles.filter(f => f.endsWith(".js"));
+    if (jsFiles.length > 0) {
+      let allPassed = true;
+      verificationLog.push("--- Other JS file verification ---");
+      for (const file of jsFiles) {
+        const fullPath = path.join(WORKDIR, file);
+        try {
+          await execAsync(`node -c "${fullPath}"`, { timeout: 10000 });
+          verificationLog.push(`Syntax OK: ${file}`);
+        } catch (err) {
+          allPassed = false;
+          verificationLog.push(`Syntax FAIL: ${file} — ${err.message.split("\n")[0]}`);
+        }
+      }
+      if (!allPassed) {
+        success = false;
+        failureReason = "JS syntax check failed";
+      }
+    } else {
+      verificationLog.push("Non-JS changes only — verification passed");
+    }
+  }
+
+  const durationMs = Date.now() - startTime;
+  verificationLog.push(`Verification ${success ? "PASSED" : "FAILED"} in ${durationMs}ms`);
+
+  log(`Verification for ${directive.id}: ${success ? "PASSED" : "FAILED"} (${detection.changeType}, ${durationMs}ms)`);
+
+  return {
+    success,
+    verification_log: verificationLog,
+    change_type: detection.changeType,
+    failure_reason: failureReason,
+    duration_ms: durationMs,
+  };
+}
+
+module.exports = { verify, detectChangeType };

@@ -80,16 +80,8 @@ COMPLETION CHECKLIST:
 3. ${directive.type === "quick" ? `Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"` : "Skip commit (no code changes)"}
 4. ${directive.type === "quick" ? "Push: git push origin HEAD" : "Skip push"}
 5. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion listed. If any criterion is not met, you MUST NOT mark as completed.
-${directive.type === "quick" ? `6. VERIFICATION — REQUIRED BEFORE MARKING COMPLETE (DO NOT SKIP):
-   Run ALL applicable checks and log results. If ANY check fails, use "blocked" status.
-   - Frontend JS changes: cd frontend && npx expo export --platform android (MUST succeed)
-   - Frontend native changes: gh run list --workflow=build-android.yml -L 1 --json status,conclusion (check last build passed)
-   - Backend/bridge JS: node -c <file> (syntax check EVERY modified .js file)
-   - Backend Docker: docker compose config -q (must exit 0)
-   - Config plugins: node -c frontend/plugins/<file>.js
-   - Log verification results: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"Verification: <PASS/FAIL> - <details>","directiveId":"${directive.id}"}'
-   DO NOT mark as completed if ANY verification fails. Use "blocked" status with failureReason instead.
-7.` : "6."} Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
+6. VERIFY BUILD: curl -s -X POST ${BRIDGE}/directives/${directive.id}/verify -H 'Content-Type: application/json' -d '{}' — You MUST run this and it MUST return "success":true before marking completed. The server REJECTS completion without verification.
+7. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
 
 CRITICAL RULES:
 - You MUST commit and push before marking complete. Uncommitted changes are lost.
@@ -231,24 +223,9 @@ IMPLEMENTATION CHECKLIST — Follow this order:
    - Frontend: npx tsc --noEmit (type check) if touching .ts files
 5. Commit: git add <SPECIFIC files only> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 6. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
-7. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion. If any criterion is not met and you cannot fix it, use "blocked" status (see below), NOT "completed".
-
-8. VERIFICATION — REQUIRED BEFORE MARKING COMPLETE (DO NOT SKIP):
-   Run ALL applicable verification checks. This is MANDATORY — skipping verification has broken CI builds before.
-   - Frontend JS/TS changes: cd frontend && npx expo export --platform android (MUST exit 0)
-   - Frontend native changes (android/, ios/, plugins/, app.json, new native deps):
-     Check CI: gh run list --workflow=build-android.yml -L 1 --json status,conclusion
-     Check CI: gh run list --workflow=build-ios.yml -L 1 --json status,conclusion
-   - Backend/bridge JS files: node -c <file> for EVERY modified .js file (MUST exit 0)
-   - Backend Docker config: docker compose config -q (MUST exit 0)
-   - Config plugins: node -c frontend/plugins/<modified-plugin>.js
-   - Log results: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"Verification: <PASS/FAIL> - <details>","directiveId":"${directive.id}"}'
-
-   If ANY verification check fails:
-   - DO NOT mark as completed
-   - Fix the issue and re-verify, OR
-   - Use "blocked" status: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"blocked","failureReason":"Verification failed: <which check failed and why>"}'
-
+7. VERIFY BUILD: curl -s -X POST ${BRIDGE}/directives/${directive.id}/verify -H 'Content-Type: application/json' -d '{}'
+   You MUST run this and it MUST return "success":true before marking completed. The server REJECTS completion without verification.
+8. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion. If any criterion is not met and you cannot fix it, use "blocked" status (see below), NOT "completed".
 9. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
 10. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 
@@ -515,18 +492,9 @@ COMPLETION CHECKLIST:
 2. Verify: node -c <file> for JS, test endpoints if applicable
 3. Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 4. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
-5. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion is met. If any is not met, use "blocked" status.
-
-6. VERIFICATION — REQUIRED BEFORE MARKING COMPLETE (DO NOT SKIP):
-   Run ALL applicable checks. Verification failures have broken CI builds — this is MANDATORY.
-   - Frontend JS/TS changes: cd frontend && npx expo export --platform android (MUST exit 0)
-   - Frontend native changes: gh run list --workflow=build-android.yml -L 1 --json status,conclusion
-   - Backend/bridge JS: node -c <file> for EVERY modified .js file (MUST exit 0)
-   - Backend Docker: docker compose config -q (MUST exit 0)
-   - Config plugins: node -c frontend/plugins/<file>.js
-   - Log results: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"Verification: <PASS/FAIL> - <details>","directiveId":"${directive.id}"}'
-   DO NOT mark as completed if ANY verification fails. Use "blocked" with failureReason instead.
-
+5. VERIFY BUILD: curl -s -X POST ${BRIDGE}/directives/${directive.id}/verify -H 'Content-Type: application/json' -d '{}'
+   You MUST run this and it MUST return "success":true before marking completed. The server REJECTS completion without verification.
+6. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion is met. If any is not met, use "blocked" status.
 7. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
 8. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 

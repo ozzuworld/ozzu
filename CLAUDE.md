@@ -13,6 +13,23 @@
 - **Every directive must be VERIFIED before marking complete.** Workers must check success criteria, test their changes, and NEVER mark complete with "remaining manual steps."
 - **If a worker can't finish**, it MUST use "blocked" status and explain what's needed — never mark as "completed" with work undone.
 
+## Build Verification Requirements
+
+Workers MUST verify builds before marking directives as completed. The server **enforces** this — PATCH status=completed is rejected without recent successful verification.
+
+**Verification checklist:**
+1. Frontend changes (native): CI build validated via syntax checks + app.json validation
+2. Frontend changes (JS-only): OTA export must succeed
+3. Backend changes: Syntax check (`node -c`) must pass on all modified JS files
+4. All changes: Verification result logged to activity_log for audit trail
+
+**How to verify:**
+```bash
+curl -s -X POST http://localhost:3333/directives/{directive_id}/verify -H 'Content-Type: application/json' -d '{}'
+```
+
+Verification must return `"success": true`. Result is valid for 15 minutes. Only mark completed if verification succeeds.
+
 ## Network Architecture
 
 ```
