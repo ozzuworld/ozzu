@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Pipeline bypass detection — pre-commit hook
+# Blocks direct commits to main that don't reference a directive ID or exception tag.
+# Install: git config core.hooksPath .githooks
+
+set -e
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+
+# Agent worktree branches are always allowed
+if [[ "$BRANCH" == agent/* ]]; then
+  exit 0
+fi
+
+# Only enforce on main
+if [[ "$BRANCH" != "main" ]]; then
+  exit 0
+fi
+
+# Read the commit message from the file git provides
+COMMIT_MSG_FILE="$1"
+if [[ -z "$COMMIT_MSG_FILE" || ! -f "$COMMIT_MSG_FILE" ]]; then
+  # pre-commit hook doesn't receive the message file — that's commit-msg hook.
+  # For pre-commit, we check what files are staged and auto-detect exceptions.
+
+  # Auto-detect: only .md files changed
+  STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || echo "")
+  if [[ -z "$STAGED_FILES" ]]; then
+    exit 0 # nothing staged
+  fi
+
+  NON_MD=$(echo "$STAGED_FILES" | grep -v '\.md$' || true)
+  if [[ -z "$NON_MD" ]]; then
+    # Only markdown files — auto-allowed
+    exit 0
+  fi
+
+  NON_ENV=$(echo "$STAGED_FILES" | grep -v '\.env' || true)
+  if [[ -z "$NON_ENV" ]]; then
+    # Only .env files — auto-allowed
+    exit 0
+  fi
+
+  # If we're in pre-commit, we can't check the message yet.
+  # The commit-msg hook below handles message-based exceptions.
+  # Block direct-to-main commits that aren't auto-excepted.
+  echo ""
+  echo "=========================================="
+  echo "  PIPELINE BYPASS DETECTED"
+  echo "=========================================="
+  echo ""
+  echo "  You are committing directly to 'main'."
+  echo "  ALL code changes must go through the directive pipeline."
+  echo ""
+  echo "  To fix:"
+  echo "    1. Create a directive via POST /directives or the dashboard"
+  echo "    2. Let the pipeline handle implementation on an agent/* branch"
+  echo ""
+  echo "  Exceptions (add to commit message via commit-msg hook):"
+  echo "    [pipeline-fix] — infrastructure fixes when pipeline is broken"
+  echo "    [config]        — config-only changes"
+  echo "    [docs]          — documentation-only changes"
+  echo "    [security]      — emergency security patches"
+  echo ""
+  echo "  Or auto-detected:"
+  echo "    - Only .md files changed"
+  echo "    - Only .env* files changed"
+  echo ""
+
+  # Fire-and-forget violation report to bridge
+  AUTHOR=$(git config user.name 2>/dev/null || echo "unknown")
+  curl -s -X POST http://localhost:3333/api/pipeline-violations \
+    -H 'Content-Type: application/json' \
+    -d "{\"branch\":\"$BRANCH\",\"author\":\"$AUTHOR\",\"message\":\"(pre-commit blocked)\",\"violationType\":\"direct_commit_main\"}" \
+    >/dev/null 2>&1 &
+
+  exit 1
+fi

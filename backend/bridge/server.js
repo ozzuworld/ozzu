@@ -47,6 +47,11 @@ const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 const _directiveCreationTimestamps = [];
 let _rateLimitHits = 0;
 
+// ── Pipeline violations (in-memory, capped at 100) ──
+const MAX_PIPELINE_VIOLATIONS = 100;
+const _pipelineViolations = [];
+let _pipelineViolationIdCounter = 1;
+
 // ── Album color + Spotify caches ──
 const _albumColorCache = new Map(); // url -> hex color string (max 100)
 let _spotifyQueueCache = null; // { queue: [...], ts: number } (15s TTL)
@@ -521,6 +526,72 @@ function saveDirectives(directives, changedDirective = null, oldStatus = null, a
   }
 }
 
+// ── Orphan commit scanner — detects commits on main without directive linkage ──
+async function scanOrphanCommits() {
+  const { exec } = require("child_process");
+  const { promisify } = require("util");
+  const execAsync = promisify(exec);
+
+  try {
+    const { stdout } = await execAsync("git log main --oneline -20", {
+      cwd: "/home/gcp/ozzu",
+      timeout: 10000,
+    });
+    if (!stdout.trim()) return;
+
+    const directives = getDirectives();
+    const lines = stdout.trim().split("\n");
+    const exceptionTags = ["[pipeline-fix]", "[config]", "[docs]", "[security]"];
+
+    for (const line of lines) {
+      const spaceIdx = line.indexOf(" ");
+      if (spaceIdx < 0) continue;
+      const hash = line.slice(0, spaceIdx);
+      const msg = line.slice(spaceIdx + 1);
+
+      // Skip if already recorded
+      if (_pipelineViolations.some(v => v.commitHash === hash)) continue;
+
+      // Check if message contains a directive ID
+      if (/dir_/.test(msg)) continue;
+
+      // Check for exception tags
+      if (exceptionTags.some(tag => msg.toLowerCase().includes(tag.toLowerCase()))) continue;
+
+      // Check if commit hash appears in any directive's activity_log (linked via merge)
+      const linkedByMerge = directives.some(d => {
+        if (!Array.isArray(d.activity_log)) return false;
+        return d.activity_log.some(e => e.message && e.message.includes(hash));
+      });
+      if (linkedByMerge) continue;
+
+      // Check if this is a merge commit from an agent branch
+      if (/^Merge branch 'agent\//.test(msg)) continue;
+
+      // This commit is an orphan — no directive linkage found
+      const violation = {
+        id: _pipelineViolationIdCounter++,
+        timestamp: Date.now(),
+        commitHash: hash,
+        branch: "main",
+        author: "unknown",
+        message: msg,
+        violationType: "orphan_commit",
+        directiveId: null,
+        resolved: false,
+      };
+      _pipelineViolations.push(violation);
+      if (_pipelineViolations.length > MAX_PIPELINE_VIOLATIONS) {
+        _pipelineViolations.shift();
+      }
+      metrics.trackPipelineViolation();
+      log.directive.warn(`Orphan commit detected: ${hash} "${msg}"`);
+    }
+  } catch (err) {
+    log.directive.error("scanOrphanCommits error:", err.message);
+  }
+}
+
 async function initStorage() {
   ensureDataDir();
 
@@ -706,6 +777,16 @@ async function initStorage() {
       } catch (err) { log.pg.error("conversation cleanup:", err.message); }
     }, 60 * 60 * 1000));
   }
+
+  // ── Orphan commit scanner — every 30 minutes ──
+  _intervals.push(setInterval(async () => {
+    try { await scanOrphanCommits(); }
+    catch (err) { log.directive.error("orphan commit scanner:", err.message); }
+  }, 30 * 60 * 1000));
+  // Run once on startup after 2 minutes
+  setTimeout(() => {
+    scanOrphanCommits().catch(err => log.directive.error("orphan commit scanner (startup):", err.message));
+  }, 2 * 60 * 1000);
 }
 
 async function migrateRedisToPostgres() {
@@ -2338,6 +2419,25 @@ async function handleRequest(req, res) {
     const needsActionStatuses = ["planned", "blocked", "deploy_failed"];
     const needsActionCount = directives.filter(d => needsActionStatuses.includes(d.status)).length;
 
+    // Build pipeline violations section (only shown when unresolved violations exist)
+    const unresolvedViolations = _pipelineViolations.filter(v => !v.resolved);
+    const violationsHtml = unresolvedViolations.length > 0 ? unresolvedViolations.slice(-10).reverse().map(v => {
+      const typeClass = escapeHtml(v.violationType || "unknown");
+      const hashStr = v.commitHash ? v.commitHash.slice(0, 8) : "-";
+      return `<div class="violation-item">
+        <div class="violation-info">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="violation-type ${typeClass}">${escapeHtml((v.violationType || "unknown").replace(/_/g, " "))}</span>
+            <code style="color:#64748b;font-size:11px;">${escapeHtml(hashStr)}</code>
+            <span style="font-size:11px;color:#94a3b8;">${escapeHtml(v.author || "unknown")}</span>
+          </div>
+          <div class="violation-msg">${escapeHtml(v.message || "")}</div>
+          <div class="violation-meta"><span data-ts="${v.timestamp}">${escapeHtml(String(v.timestamp))}</span></div>
+        </div>
+        <button class="btn-resolve" onclick="resolveViolation(${v.id})">Resolve</button>
+      </div>`;
+    }).join("") : "";
+
     // Build directive lookup map
     const directiveMap = new Map(directives.map(d => [d.id, d]));
 
@@ -2619,6 +2719,22 @@ async function handleRequest(req, res) {
   .new-directive .form-msg.ok { background: #064e3b; color: #6ee7b7; }
   .new-directive .form-msg.err { background: #450a0a; color: #fca5a5; }
 
+  /* Pipeline violations */
+  .violations-section { background: #1e293b; border: 2px solid #ef4444; border-radius: 10px; padding: 16px 20px; margin-bottom: 24px; }
+  .violations-section h3 { color: #f87171; font-size: 14px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+  .violations-count { background: #ef4444; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .violation-item { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .violation-item:last-child { margin-bottom: 0; }
+  .violation-info { flex: 1; }
+  .violation-type { font-size: 11px; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+  .violation-type.direct_commit_main { background: #ef444422; color: #fca5a5; border: 1px solid #ef444444; }
+  .violation-type.orphan_commit { background: #f59e0b22; color: #fcd34d; border: 1px solid #f59e0b44; }
+  .violation-type.hook_bypassed { background: #8b5cf622; color: #c4b5fd; border: 1px solid #8b5cf644; }
+  .violation-msg { font-size: 12px; color: #94a3b8; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 500px; }
+  .violation-meta { font-size: 11px; color: #475569; margin-top: 2px; }
+  .btn-resolve { padding: 4px 10px; border: 1px solid #475569; border-radius: 4px; font-size: 11px; font-family: inherit; cursor: pointer; background: #334155; color: #e2e8f0; transition: all 0.15s; }
+  .btn-resolve:hover { background: #10b981; color: #fff; border-color: #10b981; }
+
   /* Mobile responsive */
   @media (max-width: 768px) {
     body { padding: 12px; }
@@ -2675,6 +2791,11 @@ ${approvalBannerItems.map(item => `<div class="approval-item">
   <div class="stat-card"><div class="label">Success Rate</div><div class="value ${successRate !== null && successRate >= 80 ? "ok" : successRate !== null && successRate >= 50 ? "warn" : successRate !== null ? "bad" : ""}">${successRate !== null ? successRate + "%" : "N/A"}</div></div>
   <div class="stat-card"><div class="label">Avg Duration</div><div class="value">${avgDuration !== null ? formatDuration(avgDuration) : "N/A"}</div></div>
 </div>
+
+${unresolvedViolations.length > 0 ? `<div class="violations-section">
+<h3>Pipeline Violations <span class="violations-count">${unresolvedViolations.length}</span></h3>
+${violationsHtml}
+</div>` : ""}
 
 <section>
 <h2>Running Agents</h2>
@@ -2912,6 +3033,13 @@ setInterval(function() {
 }, 1000);
 
 // ── Directive Actions ──
+function resolveViolation(id) {
+  fetch("/api/pipeline-violations/" + id + "/resolve", { method: "POST" })
+    .then(function(r) { return r.json(); })
+    .then(function(data) { if (data.ok) refreshNow(); else alert("Error: " + (data.error || "Unknown")); })
+    .catch(function(err) { alert("Network error: " + err.message); });
+}
+
 function cancelDirective(id) {
   if (!confirm("Cancel this directive?")) return;
   fetch("/directives/" + id + "/cancel", { method: "POST" })
@@ -3974,6 +4102,88 @@ document.getElementById("approval-modal").addEventListener("click", function(e) 
       log.bridge.error("Spotify play failed:", err.message);
       sendJSON(res, 500, { error: "Failed to start playback" });
     }
+    return;
+  }
+
+  // ── Pipeline Violations API ──
+
+  // POST /api/pipeline-violations — Record a violation (called by git hook or scanner)
+  if (req.method === "POST" && pathname === "/api/pipeline-violations") {
+    const data = await parseBody(req);
+    const violation = {
+      id: _pipelineViolationIdCounter++,
+      timestamp: Date.now(),
+      commitHash: data.commitHash || null,
+      branch: data.branch || "unknown",
+      author: data.author || "unknown",
+      message: data.message || "",
+      violationType: data.violationType || "unknown",
+      directiveId: data.directiveId || null,
+      resolved: false,
+    };
+    _pipelineViolations.push(violation);
+    if (_pipelineViolations.length > MAX_PIPELINE_VIOLATIONS) {
+      _pipelineViolations.shift();
+    }
+    metrics.trackPipelineViolation();
+    log.directive.warn(`Pipeline violation: ${violation.violationType} by ${violation.author} on ${violation.branch}`);
+
+    // Log to directive activity_log if we can infer one
+    if (violation.directiveId) {
+      const directives = getDirectives();
+      const dir = directives.find(d => d.id === violation.directiveId);
+      if (dir) {
+        if (!Array.isArray(dir.activity_log)) dir.activity_log = [];
+        dir.activity_log.push({
+          timestamp: Date.now(),
+          type: "pipeline_violation",
+          actor: "system",
+          message: `Pipeline violation detected: ${violation.violationType} by ${violation.author}`,
+        });
+        saveDirectives(directives);
+      }
+    }
+
+    // Notify King Kazuma
+    setTimeout(() => {
+      try {
+        engage("system notification");
+        sendNotification(
+          `[SYSTEM — Tell King Kazuma casually.]\nPipeline bypass detected: ${violation.violationType} by ${violation.author} on branch "${violation.branch}". Message: "${(violation.message || "").slice(0, 80)}"`
+        );
+      } catch {}
+    }, 500);
+
+    sendJSON(res, 200, { ok: true, violation });
+    return;
+  }
+
+  // GET /api/pipeline-violations — List violations
+  if (req.method === "GET" && pathname === "/api/pipeline-violations") {
+    const resolved = url.searchParams.get("resolved");
+    let results = [..._pipelineViolations].reverse();
+    if (resolved === "false") {
+      results = results.filter(v => !v.resolved);
+    } else if (resolved === "true") {
+      results = results.filter(v => v.resolved);
+    }
+    sendJSON(res, 200, results);
+    return;
+  }
+
+  // POST /api/pipeline-violations/:id/resolve — Mark a violation as resolved
+  if (req.method === "POST" && pathname.match(/^\/api\/pipeline-violations\/(\d+)\/resolve$/)) {
+    if (!requireAuth(req, res)) return;
+    const violationId = parseInt(RegExp.$1, 10);
+    const violation = _pipelineViolations.find(v => v.id === violationId);
+    if (!violation) {
+      sendJSON(res, 404, { error: "Violation not found" });
+      return;
+    }
+    violation.resolved = true;
+    violation.resolvedAt = Date.now();
+    metrics.trackPipelineViolationResolved();
+    sendJSON(res, 200, { ok: true, violation });
     return;
   }
 
