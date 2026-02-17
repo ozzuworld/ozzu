@@ -162,8 +162,12 @@ function withMetaDATMinSdk(config) {
 
 function withMetaDATDisableDuplicateCheck(config) {
   return withAppBuildGradle(config, (config) => {
-    if (!config.modResults.contents.includes("checkDuplicateClasses")) {
-      config.modResults.contents += `\n// Meta DAT SDK is a fat AAR — disable false-positive duplicate class check\ngradle.taskGraph.whenReady {\n  tasks.matching { it.name.contains("checkDuplicateClasses") }.configureEach {\n    enabled = false\n  }\n}\n`;
+    if (!config.modResults.contents.includes("com.facebook.fbjni")) {
+      // mwdat-core is a fat AAR that physically bundles Facebook classes
+      // (fbjni, fbcore, proguard-annotations) which React Native also pulls
+      // in as standalone Maven artifacts. Exclude the standalone artifacts
+      // from :app so D8 only sees these classes once (from mwdat-core).
+      config.modResults.contents += `\n// Meta DAT SDK fat AAR conflict: exclude standalone Facebook artifacts\n// that are already bundled inside mwdat-core to prevent DEX merge errors.\nconfigurations.all {\n  exclude group: "com.facebook.fresco", module: "fbcore"\n  exclude group: "com.facebook.fbjni", module: "fbjni"\n  exclude group: "com.facebook.yoga", module: "proguard-annotations"\n}\n`;
     }
     return config;
   });
