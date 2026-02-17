@@ -148,10 +148,13 @@ COMPLETION REVIEW — CRITICAL:
   - "remaining manual steps" or "manual steps for King Kazuma" → worker did NOT finish, should be BLOCKED
   - "needs manual" or "requires manual" → incomplete work
   - Worker listing things it couldn't do → should have used "blocked" status
+  - No verification run — worker must call POST /directives/{id}/verify before marking completed
+  - "verification failed" or "verification_failure" in the log → worker should fix and re-verify
 - If you see these red flags, set merge_approved: false and action: "needs_changes"
 - Include merge_feedback explaining that the worker should mark as "blocked" not "completed"
 - A directive is only truly complete when ALL success criteria from the description are met
 - Workers that mark directives as "completed" with unfinished work are making a pipeline error
+- BUILD VERIFICATION is MANDATORY. The server enforces this — PATCH status=completed is rejected without recent successful verification. If a worker skipped verification, instruct them to run it.
 
 WORKER PROMPT CRAFTING:
 When crafting worker_prompt, include:

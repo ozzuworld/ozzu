@@ -12,6 +12,7 @@ const db = require("./db");
 const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
 const { spawnPlanningAgent, spawnImplementationAgent, spawnWorkerWithPrompt, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, getConfig, setConfig } = require("./agent-spawner");
 const orchestrator = require("./orchestrator");
+const buildVerifier = require("./build-verifier");
 const createLogger = require("./logger");
 const metrics = require("./metrics-tracker");
 const anthropicUsage = require("./anthropic-usage");
@@ -1447,6 +1448,26 @@ async function handleRequest(req, res) {
     // Initialize activity_log if missing (for older directives)
     if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
 
+    // Enforce build verification before marking completed
+    if (data.status === "completed" && prevStatus !== "completed") {
+      const vr = directive.verification_result;
+      const VERIFICATION_VALIDITY_MS = 15 * 60 * 1000; // 15 minutes
+      if (!vr || !vr.success || (Date.now() - vr.verified_at) > VERIFICATION_VALIDITY_MS) {
+        const reason = !vr ? "no verification run"
+          : !vr.success ? `verification failed: ${vr.failure_reason}`
+          : "verification expired (older than 15 minutes)";
+        directive.activity_log.push({ timestamp: Date.now(), type: "completion_blocked", actor: "system", message: `Completion blocked — ${reason}` });
+        saveDirectives(directives, directive, null, "system");
+        sendJSON(res, 400, {
+          error: `Cannot mark completed without successful build verification. ${reason}. Run POST /directives/${id}/verify first.`,
+          verification_required: true,
+        });
+        // Reset status back since we set it above
+        directive.status = prevStatus;
+        return;
+      }
+    }
+
     // Auto-log status changes
     if (data.status && data.status !== prevStatus) {
       directive.activity_log.push({ timestamp: Date.now(), type: "status_change", actor: patchActor, message: `Status changed from ${prevStatus} to ${data.status}` });
@@ -1700,6 +1721,57 @@ async function handleRequest(req, res) {
     directive.lastActivity = entry.timestamp;
     saveDirectives(directives, directive, null, data.actor || "Cipher");
     sendJSON(res, 200, { ok: true });
+    return;
+  }
+
+  // POST /directives/:id/verify — Run build verification before marking completed
+  const directiveVerifyMatch = pathname.match(/^\/directives\/([^/]+)\/verify$/);
+  if (req.method === "POST" && directiveVerifyMatch) {
+    const id = directiveVerifyMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+
+    if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+    directive.activity_log.push({ timestamp: Date.now(), type: "verification_started", actor: "Cipher", message: "Running build verification" });
+    saveDirectives(directives, directive, null, "Cipher");
+
+    try {
+      const result = await buildVerifier.verify(directive);
+
+      // Store verification result on directive (in-memory)
+      directive.verification_result = {
+        verified_at: Date.now(),
+        success: result.success,
+        verification_log: result.verification_log,
+        change_type: result.change_type,
+        failure_reason: result.failure_reason || null,
+      };
+
+      const logType = result.success ? "verification_success" : "verification_failure";
+      const logMsg = result.success
+        ? `Build verification passed (${result.change_type}, ${result.duration_ms}ms)`
+        : `Build verification failed: ${result.failure_reason} (${result.duration_ms}ms)`;
+      directive.activity_log.push({ timestamp: Date.now(), type: logType, actor: "system", message: logMsg });
+      saveDirectives(directives, directive, null, "system");
+
+      sendJSON(res, 200, {
+        success: result.success,
+        verification_log: result.verification_log,
+        can_complete: result.success,
+        failure_reason: result.failure_reason || null,
+        change_type: result.change_type,
+        duration_ms: result.duration_ms,
+      });
+    } catch (err) {
+      log.directive.error(`Verification error for ${id}: ${err.message}`);
+      directive.activity_log.push({ timestamp: Date.now(), type: "verification_failure", actor: "system", message: `Verification error: ${err.message}` });
+      saveDirectives(directives, directive, null, "system");
+      sendJSON(res, 500, { success: false, error: err.message });
+    }
     return;
   }
 

@@ -80,7 +80,8 @@ COMPLETION CHECKLIST:
 3. ${directive.type === "quick" ? `Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"` : "Skip commit (no code changes)"}
 4. ${directive.type === "quick" ? "Push: git push origin HEAD" : "Skip push"}
 5. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion listed. If any criterion is not met, you MUST NOT mark as completed.
-6. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
+6. VERIFY BUILD: curl -s -X POST ${BRIDGE}/directives/${directive.id}/verify -H 'Content-Type: application/json' -d '{}' — You MUST run this and it MUST return "success":true before marking completed. The server REJECTS completion without verification.
+7. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"${directive.type === "explore" ? ',"plan":"<your findings in markdown>"' : ""}}'
 
 CRITICAL RULES:
 - You MUST commit and push before marking complete. Uncommitted changes are lost.
@@ -222,9 +223,11 @@ IMPLEMENTATION CHECKLIST — Follow this order:
    - Frontend: npx tsc --noEmit (type check) if touching .ts files
 5. Commit: git add <SPECIFIC files only> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 6. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
-7. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion. If any criterion is not met and you cannot fix it, use "blocked" status (see below), NOT "completed".
-8. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
-9. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+7. VERIFY BUILD: curl -s -X POST ${BRIDGE}/directives/${directive.id}/verify -H 'Content-Type: application/json' -d '{}'
+   You MUST run this and it MUST return "success":true before marking completed. The server REJECTS completion without verification.
+8. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion. If any criterion is not met and you cannot fix it, use "blocked" status (see below), NOT "completed".
+9. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
+10. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 
 CRITICAL: Steps 5-6 are MANDATORY. You MUST commit and push before marking complete. Uncommitted changes are LOST when your worktree is deleted.
 After you mark complete, the system merges your branch to main, then smartDeploy handles everything: OTA deploy for JS changes, CI build for native changes, bridge restart if server code changed. You do NOT need to do any of that.
@@ -489,9 +492,11 @@ COMPLETION CHECKLIST:
 2. Verify: node -c <file> for JS, test endpoints if applicable
 3. Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 4. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
-5. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion is met. If any is not met, use "blocked" status.
-6. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
-7. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
+5. VERIFY BUILD: curl -s -X POST ${BRIDGE}/directives/${directive.id}/verify -H 'Content-Type: application/json' -d '{}'
+   You MUST run this and it MUST return "success":true before marking completed. The server REJECTS completion without verification.
+6. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion is met. If any is not met, use "blocked" status.
+7. Post status: curl -s -X POST ${BRIDGE}/status -H 'Content-Type: application/json' -d '{"message":"<summary>","directiveId":"${directive.id}"}'
+8. Mark complete: curl -s -X PATCH ${BRIDGE}/directives/${directive.id} -H 'Content-Type: application/json' -d '{"status":"completed"}'
 
 CRITICAL: You MUST commit and push before marking complete. Uncommitted changes are LOST.
 Do NOT restart the bridge or deploy manually — smartDeploy handles it automatically.
@@ -836,9 +841,132 @@ function notifyOrchestratorFailure(directive, exitCode, failureReason, logFile) 
   });
 }
 
+// ── Post-completion verification ──
+// Runs automated smoke tests on the worker's branch BEFORE merge.
+// If verification fails, auto-reverts to "blocked" with failure reason.
+
+async function runPostCompletionVerification(directive, agentInfo) {
+  if (!agentInfo.worktree) return { passed: true, details: "No worktree (nothing to verify)" };
+
+  const { execSync } = require("child_process");
+  const wtDir = agentInfo.worktree.dir;
+  const results = [];
+  let allPassed = true;
+
+  try {
+    // Determine what files changed on this branch
+    const changed = execSync(`git diff --name-only main...HEAD`, {
+      cwd: wtDir, encoding: "utf8", timeout: 10000,
+    }).trim();
+
+    if (!changed) return { passed: true, details: "No files changed" };
+
+    const files = changed.split("\n");
+    const hasFrontendJS = files.some(f => f.startsWith("frontend/") && (f.endsWith(".js") || f.endsWith(".ts") || f.endsWith(".tsx") || f.endsWith(".jsx")));
+    const hasFrontendNative = files.some(f => /^frontend\/(android|ios|plugins\/|app\.json)/.test(f));
+    const hasBridgeJS = files.some(f => f.startsWith("backend/bridge/") && f.endsWith(".js"));
+    const hasPlugins = files.some(f => f.startsWith("frontend/plugins/") && f.endsWith(".js"));
+
+    // 1. Syntax-check all modified JS files
+    const jsFiles = files.filter(f => f.endsWith(".js"));
+    for (const file of jsFiles) {
+      try {
+        execSync(`node -c "${file}"`, { cwd: wtDir, timeout: 10000, stdio: "pipe" });
+        results.push(`PASS: node -c ${file}`);
+      } catch (err) {
+        results.push(`FAIL: node -c ${file}: ${err.stderr?.toString().trim() || err.message}`);
+        allPassed = false;
+      }
+    }
+
+    // 2. Frontend JS changes: verify expo export
+    if (hasFrontendJS && !hasFrontendNative) {
+      try {
+        execSync("npx expo export --platform android", {
+          cwd: path.join(wtDir, "frontend"), timeout: 120000, stdio: "pipe",
+        });
+        results.push("PASS: expo export (frontend JS)");
+      } catch (err) {
+        results.push(`FAIL: expo export: ${err.stderr?.toString().trim().slice(-200) || err.message}`);
+        allPassed = false;
+      }
+    }
+
+    // 3. Config plugins: syntax-check
+    if (hasPlugins) {
+      const pluginFiles = files.filter(f => f.startsWith("frontend/plugins/") && f.endsWith(".js"));
+      for (const pf of pluginFiles) {
+        try {
+          execSync(`node -c "${pf}"`, { cwd: wtDir, timeout: 10000, stdio: "pipe" });
+          results.push(`PASS: plugin ${pf}`);
+        } catch (err) {
+          results.push(`FAIL: plugin ${pf}: ${err.stderr?.toString().trim() || err.message}`);
+          allPassed = false;
+        }
+      }
+    }
+
+    if (results.length === 0) {
+      return { passed: true, details: "No verifiable changes detected" };
+    }
+
+    return { passed: allPassed, details: results.join("\n") };
+  } catch (err) {
+    // Verification infrastructure error — log warning but don't block
+    log(`Verification error for ${directive.id}: ${err.message}`);
+    return { passed: true, details: `Verification skipped (error: ${err.message})` };
+  }
+}
+
 // Send completed worker results to orchestrator for review, then merge if approved
 async function reviewAndMerge(directive, agentInfo) {
   const orchestrator = require("./orchestrator");
+
+  // ── Post-completion verification: run smoke tests BEFORE merge ──
+  const verification = await runPostCompletionVerification(directive, agentInfo);
+  log(`Post-completion verification for ${directive.id}: ${verification.passed ? "PASSED" : "FAILED"}\n${verification.details}`);
+
+  if (!verification.passed) {
+    log(`Verification FAILED for ${directive.id} — auto-reverting to "blocked"`);
+
+    // Log verification failure to activity_log
+    const http = require("http");
+    const statusPayload = JSON.stringify({
+      message: `Verification FAILED for "${directive.title}": ${verification.details.split("\n").filter(l => l.startsWith("FAIL")).join("; ")}`,
+      directiveId: directive.id,
+    });
+    const statusReq = http.request(`${BRIDGE}/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(statusPayload) },
+    });
+    statusReq.on("error", () => {});
+    statusReq.write(statusPayload);
+    statusReq.end();
+
+    // Revert directive to "blocked" with failure reason
+    const failureReason = `Post-completion verification failed: ${verification.details.split("\n").filter(l => l.startsWith("FAIL")).join("; ")}`;
+    const payload = JSON.stringify({ status: "blocked", failureReason });
+    const req = http.request(`${BRIDGE}/directives/${directive.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+    }, (res) => {
+      let body = "";
+      res.on("data", (d) => body += d);
+      res.on("end", () => log(`Auto-reverted ${directive.id} to blocked: ${res.statusCode}`));
+    });
+    req.on("error", (e) => log(`Failed to revert ${directive.id}: ${e.message}`));
+    req.write(payload);
+    req.end();
+
+    // Clean up worktree (don't merge broken code)
+    if (agentInfo.worktree) {
+      cleanupWorktree(directive.id, agentInfo.worktree.branch);
+    }
+
+    // Notify orchestrator about verification failure
+    notifyOrchestratorFailure(directive, 0, failureReason, agentInfo.logFile);
+    return;
+  }
 
   // Capture git diff and log tail for orchestrator review
   let gitDiff = "";
