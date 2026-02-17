@@ -95,37 +95,6 @@ function withMetaDATMaven(config) {
         `allprojects {\n  repositories {\n${mavenBlock}`
       );
     }
-    // Force consistent Facebook dep versions to resolve duplicates from Meta DAT SDK
-    if (!contents.includes("resolutionStrategy")) {
-      const forceBlock = [
-        "  configurations.all {",
-        "    resolutionStrategy {",
-        '      force "com.facebook.fbjni:fbjni:0.7.0"',
-        '      force "com.facebook.fresco:fbcore:3.6.0"',
-        '      force "com.facebook.yoga:proguard-annotations:1.19.0"',
-        "    }",
-        "  }",
-      ].join("\n");
-      // Inject inside allprojects, after the repositories { ... } block
-      const allprojMatch = contents.match(/allprojects\s*\{/);
-      if (allprojMatch) {
-        const repoMatch = contents.indexOf("repositories {", allprojMatch.index);
-        if (repoMatch !== -1) {
-          let depth = 0;
-          let repoEnd = -1;
-          for (let i = contents.indexOf("{", repoMatch); i < contents.length; i++) {
-            if (contents[i] === "{") depth++;
-            else if (contents[i] === "}") {
-              depth--;
-              if (depth === 0) { repoEnd = i; break; }
-            }
-          }
-          if (repoEnd !== -1) {
-            contents = contents.slice(0, repoEnd + 1) + "\n" + forceBlock + contents.slice(repoEnd + 1);
-          }
-        }
-      }
-    }
     config.modResults.contents = contents;
     return config;
   });
