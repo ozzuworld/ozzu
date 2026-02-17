@@ -342,33 +342,35 @@ function DirectiveCard({
         </Text>
       ) : null}
 
-      {/* Action buttons — always visible */}
-      <View style={{ flexDirection: "row", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-        {directive.status === "planned" ? (
-          <>
-            <ActionButton label="APPROVE" color="#22C55E" onPress={() => onAction("approve", directive.id)} />
-            <ActionButton label="DENY" color="#EF4444" onPress={() => onAction("deny", directive.id)} />
-          </>
-        ) : null}
-        {directive.status === "deploy_failed" ? (
-          <>
-            <ActionButton label="RETRY MERGE" color="#F59E0B" onPress={() => onAction("retry_merge", directive.id)} />
-            <ActionButton label="RETRY FULL" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
-          </>
-        ) : null}
-        {directive.status === "blocked" ? (
-          <>
-            <ActionButton label="UNBLOCK" color="#A855F7" onPress={() => onAction("unblock", directive.id)} />
+      {/* Action buttons — shown when expanded to avoid blocking tap-to-expand */}
+      {expanded && (
+        <View style={{ flexDirection: "row", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          {directive.status === "planned" ? (
+            <>
+              <ActionButton label="APPROVE" color="#22C55E" onPress={() => onAction("approve", directive.id)} />
+              <ActionButton label="DENY" color="#EF4444" onPress={() => onAction("deny", directive.id)} />
+            </>
+          ) : null}
+          {directive.status === "deploy_failed" ? (
+            <>
+              <ActionButton label="RETRY MERGE" color="#F59E0B" onPress={() => onAction("retry_merge", directive.id)} />
+              <ActionButton label="RETRY FULL" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
+            </>
+          ) : null}
+          {directive.status === "blocked" ? (
+            <>
+              <ActionButton label="UNBLOCK" color="#A855F7" onPress={() => onAction("unblock", directive.id)} />
+              <ActionButton label="CANCEL" color="#EF4444" onPress={() => onAction("cancel", directive.id)} />
+            </>
+          ) : null}
+          {["failed", "stale", "cancelled"].includes(directive.status) ? (
+            <ActionButton label="RETRY" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
+          ) : null}
+          {!["completed", "failed", "cancelled", "stale", "planned", "blocked", "deploy_failed"].includes(directive.status) ? (
             <ActionButton label="CANCEL" color="#EF4444" onPress={() => onAction("cancel", directive.id)} />
-          </>
-        ) : null}
-        {["failed", "stale", "cancelled"].includes(directive.status) ? (
-          <ActionButton label="RETRY" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
-        ) : null}
-        {!["completed", "failed", "cancelled", "stale", "planned", "blocked", "deploy_failed"].includes(directive.status) ? (
-          <ActionButton label="CANCEL" color="#EF4444" onPress={() => onAction("cancel", directive.id)} />
-        ) : null}
-      </View>
+          ) : null}
+        </View>
+      )}
 
       {/* Inline audit trail for active (last 3 entries) */}
       {isActive && actLog.length > 1 ? (

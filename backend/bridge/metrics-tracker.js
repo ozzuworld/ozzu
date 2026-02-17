@@ -34,6 +34,15 @@ const _counters = {
     wsDisconnections: 0,
     httpRequests: 0,
   },
+  tokens: {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalCostUsd: 0,
+    requests: 0,
+    modelBreakdown: {}, // { 'claude-opus-4': { inputTokens, outputTokens, costUSD } }
+  },
 };
 
 // ── Connection history ring buffer (last 50 events) ──
@@ -69,6 +78,13 @@ function checkMidnightRollover() {
     _counters.bridge.wsConnectionsTotal = 0;
     _counters.bridge.wsDisconnections = 0;
     _counters.bridge.httpRequests = 0;
+    _counters.tokens.inputTokens = 0;
+    _counters.tokens.outputTokens = 0;
+    _counters.tokens.cacheReadTokens = 0;
+    _counters.tokens.cacheCreationTokens = 0;
+    _counters.tokens.totalCostUsd = 0;
+    _counters.tokens.requests = 0;
+    _counters.tokens.modelBreakdown = {};
     _today = now;
   }
 }
@@ -175,6 +191,31 @@ function trackHttpRequest() {
   _counters.bridge.httpRequests++;
 }
 
+// ── Token usage tracking ──
+
+function trackTokenUsage(usage, modelUsage, costUsd) {
+  checkMidnightRollover();
+  _counters.tokens.requests++;
+  if (costUsd) _counters.tokens.totalCostUsd += costUsd;
+  if (usage) {
+    _counters.tokens.inputTokens += usage.inputTokens || 0;
+    _counters.tokens.outputTokens += usage.outputTokens || 0;
+    _counters.tokens.cacheReadTokens += usage.cacheReadInputTokens || 0;
+    _counters.tokens.cacheCreationTokens += usage.cacheCreationInputTokens || 0;
+  }
+  if (modelUsage) {
+    for (const [model, data] of Object.entries(modelUsage)) {
+      if (!_counters.tokens.modelBreakdown[model]) {
+        _counters.tokens.modelBreakdown[model] = { inputTokens: 0, outputTokens: 0, costUSD: 0 };
+      }
+      const m = _counters.tokens.modelBreakdown[model];
+      m.inputTokens += data.inputTokens || 0;
+      m.outputTokens += data.outputTokens || 0;
+      m.costUSD += data.costUSD || 0;
+    }
+  }
+}
+
 // ── Snapshot: return all current metrics ──
 
 function getSnapshot() {
@@ -214,6 +255,15 @@ function getSnapshot() {
       httpRequests: _counters.bridge.httpRequests,
     },
     connectionHistory: _connectionHistory.slice(-20),
+    tokens: {
+      inputTokens: _counters.tokens.inputTokens,
+      outputTokens: _counters.tokens.outputTokens,
+      cacheReadTokens: _counters.tokens.cacheReadTokens,
+      cacheCreationTokens: _counters.tokens.cacheCreationTokens,
+      totalCostUsd: _counters.tokens.totalCostUsd,
+      requests: _counters.tokens.requests,
+      modelBreakdown: { ..._counters.tokens.modelBreakdown },
+    },
   };
 }
 
@@ -240,7 +290,23 @@ async function flushToDb() {
     ["bridge_ws_connections", _counters.bridge.wsConnectionsTotal],
     ["bridge_ws_disconnections", _counters.bridge.wsDisconnections],
     ["bridge_http_requests", _counters.bridge.httpRequests],
+    ["claude_input_tokens", _counters.tokens.inputTokens],
+    ["claude_output_tokens", _counters.tokens.outputTokens],
+    ["claude_cache_read_tokens", _counters.tokens.cacheReadTokens],
+    ["claude_cache_creation_tokens", _counters.tokens.cacheCreationTokens],
+    ["claude_total_cost_usd", _counters.tokens.totalCostUsd],
+    ["claude_requests", _counters.tokens.requests],
   ];
+
+  // Also flush per-model breakdown
+  for (const [model, data] of Object.entries(_counters.tokens.modelBreakdown)) {
+    const safeModel = model.replace(/[^a-zA-Z0-9_-]/g, "_");
+    metrics.push(
+      [`claude_model_${safeModel}_input_tokens`, data.inputTokens],
+      [`claude_model_${safeModel}_output_tokens`, data.outputTokens],
+      [`claude_model_${safeModel}_cost_usd`, data.costUSD],
+    );
+  }
 
   for (const [name, value] of metrics) {
     try {
@@ -327,6 +393,8 @@ module.exports = {
   trackWsConnection,
   trackWsDisconnection,
   trackHttpRequest,
+  // Tokens
+  trackTokenUsage,
   // Queries
   getSnapshot,
   getHistory,

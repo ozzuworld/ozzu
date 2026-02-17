@@ -8,6 +8,7 @@
 const { EventEmitter } = require("events");
 const { createClient, LiveTranscriptionEvents, LiveTTSEvents } = require("@deepgram/sdk");
 
+const metrics = require("./metrics-tracker");
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY || "";
 const CIPHER_VOICE = process.env.CIPHER_VOICE || "aura-2-orion-en"; // Approachable, Comfortable, Calm
 
@@ -665,6 +666,15 @@ class CipherPipeline extends EventEmitter {
         console.warn("[cipher] Max turns reached");
       } else if (message.is_error) {
         console.error("[cipher] SDK result error:", message.subtype, message.errors?.join(", "));
+      }
+
+      // Extract token usage data from SDK result
+      if (message.usage || message.total_cost_usd || message.modelUsage) {
+        metrics.trackTokenUsage(message.usage, message.modelUsage, message.total_cost_usd);
+        const cost = message.total_cost_usd ? `$${message.total_cost_usd.toFixed(4)}` : "N/A";
+        const input = message.usage?.inputTokens || 0;
+        const output = message.usage?.outputTokens || 0;
+        console.log(`[cipher] Tokens: in=${input} out=${output} cost=${cost}`);
       }
       // If Claude ran tools but didn't speak (no TTS), open mic
       // Don't open if TTS is still flushing — Flushed handler will do it

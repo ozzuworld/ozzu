@@ -596,6 +596,17 @@ function spawnAgent(directive, type, customPrompt) {
     logStream.write(`\n=== Spawn error: ${err.message} ===\n`);
   });
 
+  // Buffer stdout to capture final JSON result (contains token usage)
+  let stdoutBuffer = "";
+  child.stdout.on("data", (chunk) => {
+    const str = chunk.toString();
+    stdoutBuffer += str;
+    // Keep only last 8KB to avoid memory growth on long-running agents
+    if (stdoutBuffer.length > 8192) {
+      stdoutBuffer = stdoutBuffer.slice(-8192);
+    }
+  });
+
   // Pipe output to log file
   child.stdout.pipe(logStream, { end: false });
   child.stderr.pipe(logStream, { end: false });
@@ -703,6 +714,26 @@ function spawnAgent(directive, type, customPrompt) {
       req.end();
     } else {
       metrics.trackAgentComplete();
+
+      // Parse token usage from claude CLI stdout (JSON result at end of output)
+      try {
+        // Claude CLI outputs a JSON result as the last line(s) of stdout
+        const lines = stdoutBuffer.trim().split("\n");
+        for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
+          const line = lines[i].trim();
+          if (line.startsWith("{") && line.includes("total_cost")) {
+            const result = JSON.parse(line);
+            if (result.total_cost_usd || result.usage) {
+              metrics.trackTokenUsage(result.usage, result.model_usage, result.total_cost_usd);
+              log(`Token usage for ${directive.id}: cost=$${(result.total_cost_usd || 0).toFixed(4)} in=${result.usage?.input_tokens || 0} out=${result.usage?.output_tokens || 0}`);
+            }
+            break;
+          }
+        }
+      } catch (e) {
+        // Token parsing is best-effort — don't fail on parse errors
+      }
+
       // Agent exited cleanly (code 0) — verify directive was properly completed.
       // If still in a transient state, the agent forgot to PATCH it.
       const http = require("http");
@@ -750,10 +781,12 @@ function spawnAgent(directive, type, customPrompt) {
               // Send to orchestrator for review before merging
               reviewAndMerge(directive, agentInfo);
             } else if (current.status === "planned" && type === "planning") {
-              // Planning agent completed — clean up worktree (planning doesn't produce commits usually)
+              // Planning agent completed — clean up worktree
+              // IMPORTANT: Do NOT merge planning agent commits to main.
+              // Planning agents should only produce plans, not code.
+              // If a planning agent committed code, it stays on the branch
+              // until the directive is approved and an implementation agent runs.
               if (agentInfo.worktree) {
-                // Try to merge in case the agent committed research notes or exploration results
-                mergeWorktreeToMain(directive.id, agentInfo.worktree.branch);
                 cleanupWorktree(directive.id, agentInfo.worktree.branch);
               }
             } else {
