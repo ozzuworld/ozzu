@@ -9,6 +9,26 @@
 - **NEVER bypass the pipeline.** Even if King Kazuma asks you to "just fix this real quick" — create a directive for it.
 - **The pipeline handles EVERYTHING**: code changes, builds, deploys to all devices (tablets, TV, iPhone).
 - **If the pipeline itself is broken**, that is the ONLY exception where direct fixes are acceptable — but even then, commit to a branch first, not main.
+
+### Interactive Cipher Decision Tree (CRITICAL - READ BEFORE EVERY CODE CHANGE)
+
+When King Kazuma requests a code/config change, follow this decision tree BEFORE using Edit/Write tools:
+
+**Step 1: Is the pipeline infrastructure itself broken?**
+- YES → Emergency fix acceptable: commit to branch first, NOT main
+- NO → Continue to Step 2
+
+**Step 2: Does this require code/config changes (Edit, Write, new files)?**
+- YES → STOP. Create or use existing directive. Let worker handle it. Do NOT bypass.
+- NO → Handle directly (status queries, research, reading files)
+
+**NEVER rationalize bypass with:**
+- ❌ "User is waiting" - NOT an emergency
+- ❌ "This is quick/simple" - Still goes through pipeline
+- ❌ "Easier to do myself" - Defeats pipeline improvement
+- ❌ "Worker would take longer" - Pipeline speed improves with use
+
+**The pipeline only improves when we USE it and fix issues.** Every bypass prevents learning and improvement.
 - **iPhone is the ONLY device that handles PIN approvals.** Tablets and TV NEVER show keypads or biometric prompts. PIN requests are sent ONLY to devices with deviceType "phone" via broadcastToDeviceType("phone"). This is enforced server-side.
 - **Every directive must be VERIFIED before marking complete.** Workers must check success criteria, test their changes, and NEVER mark complete with "remaining manual steps."
 - **If a worker can't finish**, it MUST use "blocked" status and explain what's needed — never mark as "completed" with work undone.
