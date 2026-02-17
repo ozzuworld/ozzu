@@ -35,9 +35,9 @@ repositories {
 
 dependencies {
   implementation project(':expo-modules-core')
-  // Meta DAT SDK — uncomment when GITHUB_TOKEN is configured and SDK is available
-  // implementation 'com.meta.wearable:mwdat-core:0.4.0'
-  // implementation 'com.meta.wearable:mwdat-camera:0.4.0'
+  // Meta DAT SDK — now configured with GITHUB_TOKEN
+  implementation 'com.meta.wearable:mwdat-core:0.4.0'
+  implementation 'com.meta.wearable:mwdat-camera:0.4.0'
   implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
 }
 
