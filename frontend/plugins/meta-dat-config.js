@@ -9,7 +9,6 @@ const {
   withAndroidManifest,
   withInfoPlist,
   withProjectBuildGradle,
-  withAppBuildGradle,
   withGradleProperties,
 } = require("expo/config-plugins");
 
@@ -160,27 +159,14 @@ function withMetaDATMinSdk(config) {
   });
 }
 
-function withMetaDATDisableDuplicateCheck(config) {
-  return withAppBuildGradle(config, (config) => {
-    if (!config.modResults.contents.includes("com.facebook.fbjni")) {
-      // mwdat-core is a fat AAR that physically bundles Facebook classes
-      // (fbjni, fbcore, proguard-annotations) already present as standalone
-      // Maven artifacts in React Native's dependency tree. Excluding from
-      // ALL configurations breaks CMake's find_package(fbjni) because prefab
-      // needs fbjni on the compile classpath. So we only exclude from
-      // *RuntimeClasspath (which drives DEX merge), keeping fbjni on the
-      // compile classpath for CMake prefab discovery.
-      config.modResults.contents += `\n// Meta DAT SDK fat AAR: exclude standalone Facebook artifacts from runtime\n// classpath only (D8 DEX merge), keeping them on compile classpath for CMake.\nconfigurations.matching { it.name.contains("RuntimeClasspath") }.configureEach {\n  exclude group: "com.facebook.fresco", module: "fbcore"\n  exclude group: "com.facebook.fbjni", module: "fbjni"\n  exclude group: "com.facebook.yoga", module: "proguard-annotations"\n}\n`;
-    }
-    return config;
-  });
-}
+// No longer needed — mwdat-core AAR has been stripped of duplicate
+// Facebook classes (fbjni, fbcore, proguard-annotations) and is
+// included as a local file in expo-glasses/android/libs/.
 
 module.exports = function withMetaDAT(config) {
   config = withMetaDATAndroid(config);
   config = withMetaDATMaven(config);
   config = withMetaDATMinSdk(config);
-  config = withMetaDATDisableDuplicateCheck(config);
   config = withMetaDATiOS(config);
   return config;
 };
