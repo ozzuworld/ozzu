@@ -34,6 +34,10 @@ const _counters = {
     wsDisconnections: 0,
     httpRequests: 0,
   },
+  pipeline: {
+    violationsDetected: 0,
+    violationsResolved: 0,
+  },
   tokens: {
     inputTokens: 0,
     outputTokens: 0,
@@ -78,6 +82,8 @@ function checkMidnightRollover() {
     _counters.bridge.wsConnectionsTotal = 0;
     _counters.bridge.wsDisconnections = 0;
     _counters.bridge.httpRequests = 0;
+    _counters.pipeline.violationsDetected = 0;
+    _counters.pipeline.violationsResolved = 0;
     _counters.tokens.inputTokens = 0;
     _counters.tokens.outputTokens = 0;
     _counters.tokens.cacheReadTokens = 0;
@@ -191,6 +197,17 @@ function trackHttpRequest() {
   _counters.bridge.httpRequests++;
 }
 
+// ── Pipeline tracking ──
+
+function trackPipelineViolation() {
+  checkMidnightRollover();
+  _counters.pipeline.violationsDetected++;
+}
+
+function trackPipelineViolationResolved() {
+  _counters.pipeline.violationsResolved++;
+}
+
 // ── Token usage tracking ──
 
 function trackTokenUsage(usage, modelUsage, costUsd) {
@@ -254,6 +271,10 @@ function getSnapshot() {
       wsDisconnections: _counters.bridge.wsDisconnections,
       httpRequests: _counters.bridge.httpRequests,
     },
+    pipeline: {
+      violationsDetected: _counters.pipeline.violationsDetected,
+      violationsResolved: _counters.pipeline.violationsResolved,
+    },
     connectionHistory: _connectionHistory.slice(-20),
     tokens: {
       inputTokens: _counters.tokens.inputTokens,
@@ -290,6 +311,8 @@ async function flushToDb() {
     ["bridge_ws_connections", _counters.bridge.wsConnectionsTotal],
     ["bridge_ws_disconnections", _counters.bridge.wsDisconnections],
     ["bridge_http_requests", _counters.bridge.httpRequests],
+    ["pipeline_violations_detected", _counters.pipeline.violationsDetected],
+    ["pipeline_violations_resolved", _counters.pipeline.violationsResolved],
     ["claude_input_tokens", _counters.tokens.inputTokens],
     ["claude_output_tokens", _counters.tokens.outputTokens],
     ["claude_cache_read_tokens", _counters.tokens.cacheReadTokens],
@@ -393,6 +416,9 @@ module.exports = {
   trackWsConnection,
   trackWsDisconnection,
   trackHttpRequest,
+  // Pipeline
+  trackPipelineViolation,
+  trackPipelineViolationResolved,
   // Tokens
   trackTokenUsage,
   // Queries

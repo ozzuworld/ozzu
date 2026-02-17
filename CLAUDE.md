@@ -33,6 +33,34 @@ When King Kazuma requests a code/config change, follow this decision tree BEFORE
 - **Every directive must be VERIFIED before marking complete.** Workers must check success criteria, test their changes, and NEVER mark complete with "remaining manual steps."
 - **If a worker can't finish**, it MUST use "blocked" status and explain what's needed — never mark as "completed" with work undone.
 
+## Pipeline Enforcement
+
+The pipeline is protected by automated bypass detection. A pre-commit hook and server-side orphan scanner enforce these rules:
+
+- **All commits must reference a directive ID** in the commit message (e.g., `dir_1234567890`) or be on an `agent/*` branch
+- **Direct commits to `main`** are blocked by the pre-commit hook unless they match an exception
+- **Commit messages should include** `Directive: <directive_id>` for audit trail linkage
+- **Orphan commits** (on main without directive linkage) are detected every 30 minutes and flagged on the dashboard
+
+**Exception tags** (add to commit message to bypass on main):
+| Tag | Use Case |
+|-----|----------|
+| `[pipeline-fix]` | Infrastructure fixes when the pipeline itself is broken |
+| `[config]` | `.env` or config-only changes |
+| `[docs]` | Documentation-only changes (`*.md` files) |
+| `[security]` | Emergency security patches |
+
+**Auto-detected exceptions** (no tag needed):
+- Only `.md` files are staged
+- Only `.env*` files are staged
+
+**Hook installation:** `git config core.hooksPath .githooks` (hooks live in `.githooks/` tracked in git)
+
+**Violations API:**
+- `GET /api/pipeline-violations` — list all violations
+- `POST /api/pipeline-violations` — record a violation (called by git hooks)
+- `POST /api/pipeline-violations/:id/resolve` — dismiss a violation (requires auth)
+
 ## Build Verification Requirements
 
 Workers MUST verify builds before marking directives as completed. The server **enforces** this — PATCH status=completed is rejected without recent successful verification.

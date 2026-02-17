@@ -77,7 +77,7 @@ ${directive.type === "quick"
 COMPLETION CHECKLIST:
 1. ${directive.type === "quick" ? "Implement the changes" : "Research and gather findings"}
 2. ${directive.type === "quick" ? "Verify: node -c <file> for JS, test endpoints if applicable" : "Write findings as detailed markdown"}
-3. ${directive.type === "quick" ? `Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"` : "Skip commit (no code changes)"}
+3. ${directive.type === "quick" ? `Commit: git add <specific files> && git commit -m "descriptive message\\n\\nDirective: ${directive.id}\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"` : "Skip commit (no code changes)"}
 4. ${directive.type === "quick" ? "Push: git push origin HEAD" : "Skip push"}
 5. VERIFY SUCCESS CRITERIA: Re-read the directive description. Check EVERY success criterion listed. If any criterion is not met, you MUST NOT mark as completed.
 6. VERIFY BUILD: curl -s -X POST ${BRIDGE}/directives/${directive.id}/verify -H 'Content-Type: application/json' -d '{}' — You MUST run this and it MUST return "success":true before marking completed. The server REJECTS completion without verification.
@@ -221,7 +221,7 @@ IMPLEMENTATION CHECKLIST — Follow this order:
    - JS files: node -c <file> (syntax check — catches most errors)
    - Bridge endpoints: curl -s localhost:3333/<endpoint> (smoke test)
    - Frontend: npx tsc --noEmit (type check) if touching .ts files
-5. Commit: git add <SPECIFIC files only> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+5. Commit: git add <SPECIFIC files only> && git commit -m "descriptive message\\n\\nDirective: ${directive.id}\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 6. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
 7. VERIFY BUILD: curl -s -X POST ${BRIDGE}/directives/${directive.id}/verify -H 'Content-Type: application/json' -d '{}'
    You MUST run this and it MUST return "success":true before marking completed. The server REJECTS completion without verification.
@@ -490,7 +490,7 @@ GIT WORKTREE — You are running in an ISOLATED worktree with your own branch:
 COMPLETION CHECKLIST:
 1. Implement the changes as instructed above
 2. Verify: node -c <file> for JS, test endpoints if applicable
-3. Commit: git add <specific files> && git commit -m "descriptive message\\n\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+3. Commit: git add <specific files> && git commit -m "descriptive message\\n\\nDirective: ${directive.id}\\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 4. Push: git push origin HEAD (if fails: git pull --rebase && git push origin HEAD)
 5. VERIFY BUILD: curl -s -X POST ${BRIDGE}/directives/${directive.id}/verify -H 'Content-Type: application/json' -d '{}'
    You MUST run this and it MUST return "success":true before marking completed. The server REJECTS completion without verification.
