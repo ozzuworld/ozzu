@@ -16,6 +16,7 @@ jobs:
       EXPO_PUBLIC_BRIDGE_URL: ${{ secrets.EXPO_PUBLIC_BRIDGE_URL }}
       EXPO_PUBLIC_BRIDGE_PIN: ${{ secrets.EXPO_PUBLIC_BRIDGE_PIN }}
       EXPO_PUBLIC_META_APP_ID: ${{ secrets.EXPO_PUBLIC_META_APP_ID }}
+      GITHUB_TOKEN: ${{ secrets.META_GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
