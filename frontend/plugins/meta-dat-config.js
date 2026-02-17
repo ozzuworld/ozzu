@@ -67,7 +67,17 @@ function withMetaDATAndroid(config) {
 
 function withMetaDATMaven(config) {
   return withProjectBuildGradle(config, (config) => {
-    const contents = config.modResults.contents;
+    let contents = config.modResults.contents;
+    // Meta DAT SDK requires minSdkVersion 29 (Android 10+)
+    contents = contents.replace(
+      /minSdkVersion\s*=\s*Integer\.parseInt\(findProperty\('android\.minSdkVersion'\)\s*\?\:\s*'(\d+)'\)/,
+      (match, currentMin) => {
+        if (parseInt(currentMin, 10) < 29) {
+          return match.replace(`'${currentMin}'`, "'29'");
+        }
+        return match;
+      }
+    );
     // Add Meta DAT SDK Maven repo to allprojects.repositories if not already present
     if (!contents.includes("meta-wearables-dat-android")) {
       const mavenBlock = [
@@ -79,11 +89,12 @@ function withMetaDATMaven(config) {
         "      }",
         "    }",
       ].join("\n");
-      config.modResults.contents = contents.replace(
+      contents = contents.replace(
         /allprojects\s*\{\s*\n\s*repositories\s*\{/,
         `allprojects {\n  repositories {\n${mavenBlock}`
       );
     }
+    config.modResults.contents = contents;
     return config;
   });
 }
