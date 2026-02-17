@@ -163,7 +163,7 @@ function withMetaDATMinSdk(config) {
 function withMetaDATDisableDuplicateCheck(config) {
   return withAppBuildGradle(config, (config) => {
     if (!config.modResults.contents.includes("checkDuplicateClasses")) {
-      config.modResults.contents += `\n// Meta DAT SDK is a fat AAR — disable false-positive duplicate class check\ntasks.configureEach { task ->\n  if (task.name.contains("checkDuplicateClasses")) {\n    task.enabled = false\n  }\n}\n`;
+      config.modResults.contents += `\n// Meta DAT SDK is a fat AAR — disable false-positive duplicate class check\ngradle.taskGraph.whenReady {\n  tasks.matching { it.name.contains("checkDuplicateClasses") }.configureEach {\n    enabled = false\n  }\n}\n`;
     }
     return config;
   });
