@@ -33,15 +33,17 @@ function withMetaDATAndroid(config) {
       const metaData = mainApp["meta-data"] || [];
       const existingMeta = new Set(metaData.map((m) => m.$?.["android:name"]));
 
-      if (!existingMeta.has("com.meta.wearable.mwdat.APPLICATION_ID")) {
-        // Use env var or placeholder - Meta DAT SDK requires this even if unused
-        const metaAppId = process.env.EXPO_PUBLIC_META_APP_ID || "NOT_CONFIGURED";
-        metaData.push({
-          $: {
-            "android:name": "com.meta.wearable.mwdat.APPLICATION_ID",
-            "android:value": metaAppId,
-          },
-        });
+      // Only add Meta DAT manifest entries if SDK is actually configured
+      const metaAppId = process.env.EXPO_PUBLIC_META_APP_ID;
+      if (metaAppId && metaAppId !== "NOT_CONFIGURED" && metaAppId !== "") {
+        if (!existingMeta.has("com.meta.wearable.mwdat.APPLICATION_ID")) {
+          metaData.push({
+            $: {
+              "android:name": "com.meta.wearable.mwdat.APPLICATION_ID",
+              "android:value": metaAppId,
+            },
+          });
+        }
       }
       if (!existingMeta.has("com.meta.wearable.mwdat.ANALYTICS_OPT_OUT")) {
         metaData.push({
