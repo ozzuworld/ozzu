@@ -5,7 +5,11 @@
  * iOS: Adds MWDAT config, Bluetooth description, background modes, URL schemes,
  *      and external accessory protocols to Info.plist.
  */
-const { withAndroidManifest, withInfoPlist } = require("expo/config-plugins");
+const {
+  withAndroidManifest,
+  withInfoPlist,
+  withProjectBuildGradle,
+} = require("expo/config-plugins");
 
 function withMetaDATAndroid(config) {
   return withAndroidManifest(config, (config) => {
@@ -61,6 +65,29 @@ function withMetaDATAndroid(config) {
   });
 }
 
+function withMetaDATMaven(config) {
+  return withProjectBuildGradle(config, (config) => {
+    const contents = config.modResults.contents;
+    // Add Meta DAT SDK Maven repo to allprojects.repositories if not already present
+    if (!contents.includes("meta-wearables-dat-android")) {
+      const mavenBlock = [
+        "    maven {",
+        '      url "https://maven.pkg.github.com/facebook/meta-wearables-dat-android"',
+        "      credentials {",
+        "        username = System.getenv('GITHUB_USER') ?: 'github'",
+        "        password = System.getenv('GITHUB_TOKEN') ?: ''",
+        "      }",
+        "    }",
+      ].join("\n");
+      config.modResults.contents = contents.replace(
+        /allprojects\s*\{\s*\n\s*repositories\s*\{/,
+        `allprojects {\n  repositories {\n${mavenBlock}`
+      );
+    }
+    return config;
+  });
+}
+
 function withMetaDATiOS(config) {
   return withInfoPlist(config, (config) => {
     const plist = config.modResults;
@@ -107,6 +134,7 @@ function withMetaDATiOS(config) {
 
 module.exports = function withMetaDAT(config) {
   config = withMetaDATAndroid(config);
+  config = withMetaDATMaven(config);
   config = withMetaDATiOS(config);
   return config;
 };
