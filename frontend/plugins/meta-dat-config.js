@@ -79,9 +79,11 @@ function withMetaDATMaven(config) {
         return match;
       }
     );
-    // Add Meta DAT SDK Maven repo to allprojects.repositories if not already present
+    // Add Meta DAT SDK Maven repo + flatDir for stripped local AAR
     if (!contents.includes("meta-wearables-dat-android")) {
-      const mavenBlock = [
+      const reposBlock = [
+        '    // Stripped mwdat-core AAR (duplicate Facebook classes removed)',
+        '    flatDir { dirs "${rootProject.projectDir}/../modules/expo-glasses/android/libs" }',
         "    maven {",
         '      url "https://maven.pkg.github.com/facebook/meta-wearables-dat-android"',
         "      credentials {",
@@ -92,7 +94,7 @@ function withMetaDATMaven(config) {
       ].join("\n");
       contents = contents.replace(
         /allprojects\s*\{\s*\n\s*repositories\s*\{/,
-        `allprojects {\n  repositories {\n${mavenBlock}`
+        `allprojects {\n  repositories {\n${reposBlock}`
       );
     }
     config.modResults.contents = contents;
