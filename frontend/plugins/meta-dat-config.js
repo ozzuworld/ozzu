@@ -34,10 +34,12 @@ function withMetaDATAndroid(config) {
       const existingMeta = new Set(metaData.map((m) => m.$?.["android:name"]));
 
       if (!existingMeta.has("com.meta.wearable.mwdat.APPLICATION_ID")) {
+        // Use env var or placeholder - Meta DAT SDK requires this even if unused
+        const metaAppId = process.env.EXPO_PUBLIC_META_APP_ID || "NOT_CONFIGURED";
         metaData.push({
           $: {
             "android:name": "com.meta.wearable.mwdat.APPLICATION_ID",
-            "android:value": "${EXPO_PUBLIC_META_APP_ID}",
+            "android:value": metaAppId,
           },
         });
       }
