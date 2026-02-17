@@ -95,17 +95,18 @@ function withMetaDATMaven(config) {
         `allprojects {\n  repositories {\n${mavenBlock}`
       );
     }
-    // Exclude duplicate Facebook deps pulled transitively by Meta DAT SDK
-    if (!contents.includes("configurations.all")) {
-      const excludeBlock = [
+    // Force consistent Facebook dep versions to resolve duplicates from Meta DAT SDK
+    if (!contents.includes("resolutionStrategy")) {
+      const forceBlock = [
         "  configurations.all {",
-        "    exclude group: 'com.facebook.fresco', module: 'fbcore'",
-        "    exclude group: 'com.facebook.fbjni', module: 'fbjni'",
-        "    exclude group: 'com.facebook.yoga', module: 'proguard-annotations'",
+        "    resolutionStrategy {",
+        '      force "com.facebook.fbjni:fbjni:0.7.0"',
+        '      force "com.facebook.fresco:fbcore:3.6.0"',
+        '      force "com.facebook.yoga:proguard-annotations:1.19.0"',
+        "    }",
         "  }",
       ].join("\n");
       // Inject inside allprojects, after the repositories { ... } block
-      // Find the closing brace of repositories (track brace depth)
       const allprojMatch = contents.match(/allprojects\s*\{/);
       if (allprojMatch) {
         const repoMatch = contents.indexOf("repositories {", allprojMatch.index);
@@ -120,7 +121,7 @@ function withMetaDATMaven(config) {
             }
           }
           if (repoEnd !== -1) {
-            contents = contents.slice(0, repoEnd + 1) + "\n" + excludeBlock + contents.slice(repoEnd + 1);
+            contents = contents.slice(0, repoEnd + 1) + "\n" + forceBlock + contents.slice(repoEnd + 1);
           }
         }
       }
