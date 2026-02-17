@@ -9,6 +9,7 @@ const {
   withAndroidManifest,
   withInfoPlist,
   withProjectBuildGradle,
+  withAppBuildGradle,
   withGradleProperties,
 } = require("expo/config-plugins");
 
@@ -159,10 +160,20 @@ function withMetaDATMinSdk(config) {
   });
 }
 
+function withMetaDATDisableDuplicateCheck(config) {
+  return withAppBuildGradle(config, (config) => {
+    if (!config.modResults.contents.includes("checkDuplicateClasses")) {
+      config.modResults.contents += `\n// Meta DAT SDK is a fat AAR bundling Facebook libs already in RN.\n// Classes are identical — disable false-positive duplicate check.\nafterEvaluate {\n  tasks.matching { it.name.contains("checkDuplicateClasses") }.configureEach {\n    enabled = false\n  }\n}\n`;
+    }
+    return config;
+  });
+}
+
 module.exports = function withMetaDAT(config) {
   config = withMetaDATAndroid(config);
   config = withMetaDATMaven(config);
   config = withMetaDATMinSdk(config);
+  config = withMetaDATDisableDuplicateCheck(config);
   config = withMetaDATiOS(config);
   return config;
 };

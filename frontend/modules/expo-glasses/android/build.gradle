@@ -33,14 +33,6 @@ repositories {
   }
 }
 
-// Exclude Facebook libs that Meta DAT SDK bundles but React Native already provides.
-// Module-level so it only affects expo-glasses deps (not other modules like worklets).
-configurations.all {
-  exclude group: "com.facebook.fresco", module: "fbcore"
-  exclude group: "com.facebook.fbjni", module: "fbjni"
-  exclude group: "com.facebook.yoga", module: "proguard-annotations"
-}
-
 dependencies {
   implementation project(':expo-modules-core')
   implementation 'com.meta.wearable:mwdat-core:0.4.0'
