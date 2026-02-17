@@ -130,7 +130,7 @@ class GlassesModule : Module() {
                     "code" to "NOT_INITIALIZED",
                     "message" to "Call initialize() first"
                 ))
-                return@AsyncFunction
+                return@AsyncFunction Unit
             }
 
             try {
