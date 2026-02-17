@@ -95,6 +95,36 @@ function withMetaDATMaven(config) {
         `allprojects {\n  repositories {\n${mavenBlock}`
       );
     }
+    // Exclude duplicate Facebook deps pulled transitively by Meta DAT SDK
+    if (!contents.includes("configurations.all")) {
+      const excludeBlock = [
+        "  configurations.all {",
+        "    exclude group: 'com.facebook.fresco', module: 'fbcore'",
+        "    exclude group: 'com.facebook.fbjni', module: 'fbjni'",
+        "    exclude group: 'com.facebook.yoga', module: 'proguard-annotations'",
+        "  }",
+      ].join("\n");
+      // Inject inside allprojects, after the repositories { ... } block
+      // Find the closing brace of repositories (track brace depth)
+      const allprojMatch = contents.match(/allprojects\s*\{/);
+      if (allprojMatch) {
+        const repoMatch = contents.indexOf("repositories {", allprojMatch.index);
+        if (repoMatch !== -1) {
+          let depth = 0;
+          let repoEnd = -1;
+          for (let i = contents.indexOf("{", repoMatch); i < contents.length; i++) {
+            if (contents[i] === "{") depth++;
+            else if (contents[i] === "}") {
+              depth--;
+              if (depth === 0) { repoEnd = i; break; }
+            }
+          }
+          if (repoEnd !== -1) {
+            contents = contents.slice(0, repoEnd + 1) + "\n" + excludeBlock + contents.slice(repoEnd + 1);
+          }
+        }
+      }
+    }
     config.modResults.contents = contents;
     return config;
   });
