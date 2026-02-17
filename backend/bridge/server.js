@@ -14,6 +14,7 @@ const { spawnPlanningAgent, spawnImplementationAgent, spawnWorkerWithPrompt, get
 const orchestrator = require("./orchestrator");
 const createLogger = require("./logger");
 const metrics = require("./metrics-tracker");
+const anthropicUsage = require("./anthropic-usage");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -3463,6 +3464,42 @@ document.getElementById("approval-modal").addEventListener("click", function(e) 
     } catch (err) {
       log.bridge.error("Usage metrics error:", err.message);
       sendJSON(res, 500, { error: "Failed to collect usage metrics" });
+    }
+    return;
+  }
+
+  // GET /api/anthropic-usage — Anthropic Admin API usage data
+  if (req.method === "GET" && pathname === "/api/anthropic-usage") {
+    try {
+      if (!anthropicUsage.isConfigured()) {
+        sendJSON(res, 200, {
+          isConfigured: false,
+          rateLimits: null,
+          daily: null,
+          hourly: null,
+          costs: null,
+        });
+        return;
+      }
+
+      const [daily, hourly, costs] = await Promise.all([
+        anthropicUsage.fetchDailyUsage(),
+        anthropicUsage.fetchHourlyUsage(),
+        anthropicUsage.fetchCostReport(),
+      ]);
+
+      const rateLimits = anthropicUsage.getRateLimits();
+
+      sendJSON(res, 200, {
+        isConfigured: true,
+        rateLimits,
+        daily,
+        hourly,
+        costs,
+      });
+    } catch (err) {
+      log.bridge.error("Anthropic usage fetch error:", err.message);
+      sendJSON(res, 500, { error: "Failed to fetch Anthropic usage data" });
     }
     return;
   }

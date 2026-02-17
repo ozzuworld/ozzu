@@ -11,7 +11,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
-import { fetchUsageMetrics, type UsageMetrics } from "../lib/bridge-api";
+import { fetchUsageMetrics, fetchAnthropicUsage, type UsageMetrics, type AnthropicUsageData } from "../lib/bridge-api";
 
 const TOP_BAR_HEIGHT = 48;
 const CYAN = "#06B6D4";
@@ -310,13 +310,18 @@ export default function MetricsScreen() {
   const router = useRouter();
   const { insets } = usePhoneLayout();
   const [data, setData] = useState<UsageMetrics | null>(null);
+  const [anthropicData, setAnthropicData] = useState<AnthropicUsageData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
-      const result = await fetchUsageMetrics();
-      setData(result);
+      const [metricsResult, anthropicResult] = await Promise.all([
+        fetchUsageMetrics(),
+        fetchAnthropicUsage(),
+      ]);
+      setData(metricsResult);
+      setAnthropicData(anthropicResult);
       setError(null);
     } catch (err: any) {
       setError(err.message || "Failed to fetch metrics");
@@ -868,6 +873,343 @@ export default function MetricsScreen() {
                 valueColor="#22C55E"
               />
             </View>
+
+            {/* Anthropic Usage */}
+            <SectionHeader title="ANTHROPIC USAGE" />
+            {!anthropicData?.isConfigured ? (
+              <View
+                style={{
+                  backgroundColor: CARD_BG,
+                  borderWidth: 1,
+                  borderColor: BORDER,
+                  borderRadius: 8,
+                  padding: 16,
+                }}
+              >
+                <Text
+                  style={{
+                    color: "#737373",
+                    fontSize: 12,
+                    fontFamily: "monospace",
+                    textAlign: "center",
+                  }}
+                >
+                  Admin API not configured
+                </Text>
+                <Text
+                  style={{
+                    color: "#525252",
+                    fontSize: 10,
+                    fontFamily: "monospace",
+                    textAlign: "center",
+                    marginTop: 4,
+                  }}
+                >
+                  Set ANTHROPIC_ADMIN_KEY to view usage
+                </Text>
+              </View>
+            ) : (
+              <>
+                {/* Rate Limits */}
+                {anthropicData?.rateLimits && (
+                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+                    <View style={{ flex: 1 }}>
+                      <View
+                        style={{
+                          backgroundColor: CARD_BG,
+                          borderWidth: 1,
+                          borderColor: BORDER,
+                          borderRadius: 8,
+                          padding: 12,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "#525252",
+                            fontSize: 10,
+                            fontFamily: "monospace",
+                            marginBottom: 6,
+                          }}
+                        >
+                          REQUESTS
+                        </Text>
+                        <Text
+                          style={{
+                            color: CYAN,
+                            fontSize: 18,
+                            fontFamily: "monospace",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          {formatNumber(anthropicData.rateLimits.requestsRemaining)}
+                        </Text>
+                        <Text
+                          style={{
+                            color: "#525252",
+                            fontSize: 10,
+                            fontFamily: "monospace",
+                            marginTop: 2,
+                          }}
+                        >
+                          / {formatNumber(anthropicData.rateLimits.requestsLimit)} remaining
+                        </Text>
+                        <View style={{ marginTop: 8 }}>
+                          <Bar
+                            value={anthropicData.rateLimits.requestsLimit - anthropicData.rateLimits.requestsRemaining}
+                            max={anthropicData.rateLimits.requestsLimit}
+                            color={
+                              (anthropicData.rateLimits.requestsRemaining / anthropicData.rateLimits.requestsLimit) < 0.2
+                                ? "#EF4444"
+                                : CYAN
+                            }
+                          />
+                        </View>
+                      </View>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View
+                        style={{
+                          backgroundColor: CARD_BG,
+                          borderWidth: 1,
+                          borderColor: BORDER,
+                          borderRadius: 8,
+                          padding: 12,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "#525252",
+                            fontSize: 10,
+                            fontFamily: "monospace",
+                            marginBottom: 6,
+                          }}
+                        >
+                          TOKENS
+                        </Text>
+                        <Text
+                          style={{
+                            color: CYAN,
+                            fontSize: 18,
+                            fontFamily: "monospace",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          {formatNumber(anthropicData.rateLimits.tokensRemaining)}
+                        </Text>
+                        <Text
+                          style={{
+                            color: "#525252",
+                            fontSize: 10,
+                            fontFamily: "monospace",
+                            marginTop: 2,
+                          }}
+                        >
+                          / {formatNumber(anthropicData.rateLimits.tokensLimit)} remaining
+                        </Text>
+                        <View style={{ marginTop: 8 }}>
+                          <Bar
+                            value={anthropicData.rateLimits.tokensLimit - anthropicData.rateLimits.tokensRemaining}
+                            max={anthropicData.rateLimits.tokensLimit}
+                            color={
+                              (anthropicData.rateLimits.tokensRemaining / anthropicData.rateLimits.tokensLimit) < 0.2
+                                ? "#EF4444"
+                                : CYAN
+                            }
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Today's Token Usage & Cost */}
+                {anthropicData?.daily && anthropicData.daily.length > 0 && (
+                  <View
+                    style={{
+                      backgroundColor: CARD_BG,
+                      borderWidth: 1,
+                      borderColor: BORDER,
+                      borderRadius: 8,
+                      padding: 12,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#525252",
+                        fontSize: 10,
+                        fontFamily: "monospace",
+                        marginBottom: 8,
+                      }}
+                    >
+                      TODAY'S TOKENS
+                    </Text>
+                    {(() => {
+                      const todayStr = new Date().toISOString().slice(0, 10);
+                      const todayBuckets = anthropicData.daily.filter(b => b.date === todayStr);
+                      const totals = todayBuckets.reduce(
+                        (acc, b) => ({
+                          input: acc.input + b.inputTokens,
+                          output: acc.output + b.outputTokens,
+                          cacheRead: acc.cacheRead + b.cacheReadTokens,
+                          cacheCreation: acc.cacheCreation + b.cacheCreationTokens,
+                        }),
+                        { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
+                      );
+                      return (
+                        <>
+                          <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+                            <StatCard
+                              value={formatNumber(totals.input)}
+                              label="INPUT"
+                              color="#A78BFA"
+                            />
+                            <StatCard
+                              value={formatNumber(totals.output)}
+                              label="OUTPUT"
+                              color="#FBBF24"
+                            />
+                          </View>
+                          <View style={{ flexDirection: "row", gap: 8 }}>
+                            <StatCard
+                              value={formatNumber(totals.cacheRead)}
+                              label="CACHE READ"
+                              color="#22C55E"
+                            />
+                            <StatCard
+                              value={formatNumber(totals.cacheCreation)}
+                              label="CACHE CREATE"
+                              color="#6EE7B7"
+                            />
+                          </View>
+                        </>
+                      );
+                    })()}
+                  </View>
+                )}
+
+                {/* 7-Day Cost History */}
+                {anthropicData?.costs && anthropicData.costs.length > 0 && (
+                  <View
+                    style={{
+                      backgroundColor: CARD_BG,
+                      borderWidth: 1,
+                      borderColor: BORDER,
+                      borderRadius: 8,
+                      padding: 12,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#525252",
+                        fontSize: 10,
+                        fontFamily: "monospace",
+                        marginBottom: 8,
+                      }}
+                    >
+                      COST BREAKDOWN
+                    </Text>
+                    {(() => {
+                      const todayStr = new Date().toISOString().slice(0, 10);
+                      const todayCost = anthropicData.costs
+                        .filter(c => c.date === todayStr)
+                        .reduce((sum, c) => sum + c.amountCents, 0);
+                      const weekCost = anthropicData.costs.reduce((sum, c) => sum + c.amountCents, 0);
+                      return (
+                        <View style={{ flexDirection: "row", gap: 8 }}>
+                          <StatCard
+                            value={`$${(todayCost / 100).toFixed(2)}`}
+                            label="TODAY"
+                            color="#FBBF24"
+                          />
+                          <StatCard
+                            value={`$${(weekCost / 100).toFixed(2)}`}
+                            label="7-DAY TOTAL"
+                            color={CYAN}
+                          />
+                        </View>
+                      );
+                    })()}
+                  </View>
+                )}
+
+                {/* Per-Model Breakdown */}
+                {anthropicData?.daily && anthropicData.daily.length > 0 && (
+                  <View
+                    style={{
+                      backgroundColor: CARD_BG,
+                      borderWidth: 1,
+                      borderColor: BORDER,
+                      borderRadius: 8,
+                      padding: 12,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#525252",
+                        fontSize: 10,
+                        fontFamily: "monospace",
+                        marginBottom: 8,
+                      }}
+                    >
+                      MODEL BREAKDOWN (7-DAY)
+                    </Text>
+                    {(() => {
+                      const modelTotals: Record<string, { input: number; output: number }> = {};
+                      anthropicData.daily.forEach(b => {
+                        if (!modelTotals[b.model]) {
+                          modelTotals[b.model] = { input: 0, output: 0 };
+                        }
+                        modelTotals[b.model].input += b.inputTokens;
+                        modelTotals[b.model].output += b.outputTokens;
+                      });
+                      return Object.entries(modelTotals).map(([model, tokens]) => (
+                        <View
+                          key={model}
+                          style={{
+                            paddingVertical: 6,
+                            borderBottomWidth: 1,
+                            borderBottomColor: "#1A1A1A",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: "#A3A3A3",
+                              fontSize: 11,
+                              fontFamily: "monospace",
+                              marginBottom: 4,
+                            }}
+                          >
+                            {model}
+                          </Text>
+                          <View style={{ flexDirection: "row", gap: 12 }}>
+                            <Text
+                              style={{
+                                color: "#525252",
+                                fontSize: 10,
+                                fontFamily: "monospace",
+                              }}
+                            >
+                              In: {formatNumber(tokens.input)}
+                            </Text>
+                            <Text
+                              style={{
+                                color: "#525252",
+                                fontSize: 10,
+                                fontFamily: "monospace",
+                              }}
+                            >
+                              Out: {formatNumber(tokens.output)}
+                            </Text>
+                          </View>
+                        </View>
+                      ));
+                    })()}
+                  </View>
+                )}
+              </>
+            )}
           </>
         )}
       </ScrollView>

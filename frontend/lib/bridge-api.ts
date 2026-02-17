@@ -247,3 +247,49 @@ export async function fetchUsageMetrics(): Promise<UsageMetrics> {
   if (!res.ok) throw new Error(`Bridge usage metrics error: ${res.status}`);
   return res.json();
 }
+
+export interface AnthropicRateLimits {
+  requestsLimit: number;
+  requestsRemaining: number;
+  requestsReset: string;
+  tokensLimit: number;
+  tokensRemaining: number;
+  tokensReset: string;
+}
+
+export interface AnthropicDailyBucket {
+  date: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
+export interface AnthropicHourlyBucket {
+  hour: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface AnthropicCostEntry {
+  date: string;
+  amountCents: number;
+  description: string;
+}
+
+export interface AnthropicUsageData {
+  isConfigured: boolean;
+  rateLimits: AnthropicRateLimits | null;
+  daily: AnthropicDailyBucket[] | null;
+  hourly: AnthropicHourlyBucket[] | null;
+  costs: AnthropicCostEntry[] | null;
+}
+
+export async function fetchAnthropicUsage(): Promise<AnthropicUsageData> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/api/anthropic-usage`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge Anthropic usage error: ${res.status}`);
+  return res.json();
+}
