@@ -24,6 +24,7 @@ android {
 }
 
 repositories {
+  flatDir { dirs 'libs' }
   maven {
     url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
     credentials {
@@ -37,7 +38,7 @@ dependencies {
   implementation project(':expo-modules-core')
   // Use stripped local AAR — duplicate Facebook classes (fbjni, fbcore, proguard-annotations)
   // removed to prevent DEX merge conflicts with React Native's standalone copies.
-  implementation files('libs/mwdat-core-0.4.0.aar')
+  implementation(name: 'mwdat-core-0.4.0', ext: 'aar')
   implementation('com.meta.wearable:mwdat-camera:0.4.0') {
     exclude group: 'com.meta.wearable', module: 'mwdat-core'
   }
