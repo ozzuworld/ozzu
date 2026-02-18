@@ -14,7 +14,7 @@ public class CipherVoiceModule: Module {
     // TTS
     private var synthesizer: AVSpeechSynthesizer?
     private var ttsDelegate: TTSDelegate?
-    private var selectedVoiceId: String = "com.apple.voice.premium.en-US.Aaron"
+    private var selectedVoiceId: String = "com.apple.voice.premium.en-US.Evan"
     private var speaking = false
 
     // TTS audio capture: captures synthesized audio as PCM for relay to bridge
@@ -235,12 +235,12 @@ public class CipherVoiceModule: Module {
 
         let utterance = AVSpeechUtterance(string: text)
 
-        // Voice fallback chain: selected → Evan premium → Aaron enhanced → Aaron compact → system default
+        // Voice fallback chain: selected (Evan) → Aaron premium → Evan enhanced → system default
         let fallbackIds = [
             selectedVoiceId,
-            "com.apple.voice.premium.en-US.Evan",
-            "com.apple.voice.enhanced.en-US.Aaron",
-            "com.apple.voice.compact.en-US.Aaron"
+            "com.apple.voice.premium.en-US.Aaron",
+            "com.apple.voice.enhanced.en-US.Evan",
+            "com.apple.voice.compact.en-US.Evan"
         ]
         utterance.voice = fallbackIds.lazy
             .compactMap { AVSpeechSynthesisVoice(identifier: $0) }
