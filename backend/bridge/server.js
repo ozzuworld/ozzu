@@ -663,6 +663,15 @@ async function initStorage() {
       log.bridge.info(`Restored persona: ${persona}${mode ? ` (${mode})` : ""}`);
     }
 
+    // Restore audio preferences from Redis
+    const savedAudioPrefs = await redis.get("ozzu:audioPreferences");
+    if (savedAudioPrefs) {
+      const { preferredInput, preferredOutputs } = JSON.parse(savedAudioPrefs);
+      preferredInputDeviceId = preferredInput || null;
+      preferredOutputDeviceIds = preferredOutputs || null;
+      log.audio.info(`Restored audio preferences: input=${preferredInputDeviceId}, outputs=${JSON.stringify(preferredOutputDeviceIds)}`);
+    }
+
     // ── Uptime & restart tracking ──
     const prevStartedAt = await redis.get("ozzu:serverStartedAt");
     const prevCount = await redis.get("ozzu:restartCount");
@@ -1185,6 +1194,54 @@ async function handleRequest(req, res) {
       activeMicZone: activeMic ? devices.get(activeMic)?.zone : null,
       selectedSpeaker: target ? target.info.deviceId : null,
       selectedSpeakerZone: target ? target.info.zone : null,
+    });
+    return;
+  }
+
+  // GET /audio-preferences — Audio routing preferences + live device state
+  if (req.method === "GET" && pathname === "/audio-preferences") {
+    const deviceList = [...devices.entries()].map(([ws, info]) => ({
+      deviceId: info.deviceId, role: info.role, deviceType: info.deviceType,
+      zone: info.zone, capabilities: info.capabilities,
+      speakerPriority: info.speakerPriority, online: ws.readyState === WebSocket.OPEN,
+      isActiveMic: ws === activeMic,
+      isSelectedSpeaker: false,
+    }));
+    const target = selectSpeaker();
+    if (target) {
+      const entry = deviceList.find(d => d.deviceId === target.info.deviceId);
+      if (entry) entry.isSelectedSpeaker = true;
+    }
+    sendJSON(res, 200, {
+      preferredInput: preferredInputDeviceId,
+      preferredOutputs: preferredOutputDeviceIds,
+      devices: deviceList,
+      activeMic: activeMic ? devices.get(activeMic)?.deviceId : null,
+      autoSelectedSpeaker: target ? target.info.deviceId : null,
+      mode: cipherPipeline ? "cipher" : (geminiWs ? "june" : "idle"),
+    });
+    return;
+  }
+
+  // POST /audio-preferences — Set audio routing preferences
+  if (req.method === "POST" && pathname === "/audio-preferences") {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      try {
+        const { preferredInput, preferredOutputs } = JSON.parse(body);
+        preferredInputDeviceId = preferredInput === undefined ? preferredInputDeviceId : (preferredInput || null);
+        preferredOutputDeviceIds = preferredOutputs === undefined ? preferredOutputDeviceIds : (preferredOutputs || null);
+        saveAudioPreferences();
+        log.audio.info(`Audio preferences updated: input=${preferredInputDeviceId}, outputs=${JSON.stringify(preferredOutputDeviceIds)}`);
+        broadcastAudioRoutingState();
+        sendJSON(res, 200, {
+          ok: true,
+          preferences: { preferredInput: preferredInputDeviceId, preferredOutputs: preferredOutputDeviceIds },
+        });
+      } catch (err) {
+        sendJSON(res, 400, { error: "Invalid JSON" });
+      }
     });
     return;
   }
@@ -3654,16 +3711,16 @@ document.getElementById("approval-modal").addEventListener("click", function(e) 
     const execFileAsync = promisify(execFile);
     try {
       const { stdout } = await execFileAsync("bash", [
-        `${WORKDIR}/scripts/deploy-ios.sh`, "--check",
+        "/home/gcp/ozzu/scripts/deploy-ios.sh", "--check",
       ], { timeout: 15000, env: { ...process.env, PATH: process.env.PATH } });
       // deploy-ios.sh --check outputs JSON on the last line
       const lines = stdout.trim().split("\n");
       const jsonLine = lines[lines.length - 1];
       const health = JSON.parse(jsonLine);
-      const ready = health.ssh && health.altserver && health.iphone_usb;
+      const ready = health.ssh && health.altserver;
       sendJSON(res, ready ? 200 : 503, { ready, ...health });
     } catch (err) {
-      sendJSON(res, 503, { ready: false, ssh: false, altserver: false, iphone_usb: false, error: err.message });
+      sendJSON(res, 503, { ready: false, ssh: false, altserver: false, iphone: false, error: err.message });
     }
     return;
   }
@@ -6187,6 +6244,47 @@ function recordLatency(metrics) {
   };
 }
 
+// ── Audio device preferences (override auto-routing when set) ──
+let preferredInputDeviceId = null;   // deviceId or null (auto)
+let preferredOutputDeviceIds = null; // string[] or null (auto)
+
+async function saveAudioPreferences() {
+  const data = { preferredInput: preferredInputDeviceId, preferredOutputs: preferredOutputDeviceIds };
+  if (_redisConnected) {
+    redis.set("ozzu:audioPreferences", JSON.stringify(data)).catch(err =>
+      log.redis.error("save audio preferences failed:", err.message));
+  }
+}
+
+function broadcastAudioRoutingState() {
+  const deviceList = [...devices.entries()].map(([ws, info]) => ({
+    deviceId: info.deviceId, role: info.role, deviceType: info.deviceType,
+    zone: info.zone, capabilities: info.capabilities,
+    speakerPriority: info.speakerPriority, online: ws.readyState === WebSocket.OPEN,
+    isActiveMic: ws === activeMic,
+    isSelectedSpeaker: false, // filled in below
+  }));
+  const target = selectSpeaker();
+  if (target) {
+    const entry = deviceList.find(d => d.deviceId === target.info.deviceId);
+    if (entry) entry.isSelectedSpeaker = true;
+  }
+  const msg = JSON.stringify({
+    type: "audioRoutingUpdate",
+    preferredInput: preferredInputDeviceId,
+    preferredOutputs: preferredOutputDeviceIds,
+    devices: deviceList,
+    activeMic: activeMic ? devices.get(activeMic)?.deviceId : null,
+    autoSelectedSpeaker: target ? target.info.deviceId : null,
+    mode: cipherPipeline ? "cipher" : (geminiWs ? "june" : "idle"),
+  });
+  for (const [ws] of devices) {
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.send(msg); } catch {}
+    }
+  }
+}
+
 // Amplitude-based mic switching: only forward audio from the mic with detected speech.
 // When multiple mics send simultaneously, interleaved audio confuses Gemini's VAD.
 let activeMic = null; // ws of the currently forwarding mic
@@ -6340,6 +6438,15 @@ function selectSpeaker() {
     }
   }
   if (speakers.length === 0) return null;
+
+  // Preferred output override: return first online preferred device
+  if (preferredOutputDeviceIds && preferredOutputDeviceIds.length > 0) {
+    for (const prefId of preferredOutputDeviceIds) {
+      const match = speakers.find(s => s.info.deviceId === prefId);
+      if (match) return match;
+    }
+    // All preferred outputs offline — fall through to auto
+  }
 
   const activeMicInfo = activeMic ? devices.get(activeMic) : null;
   const micZone = activeMicInfo?.zone || null;
@@ -6825,6 +6932,17 @@ function sendToGeminiAudio(pcmBase64, ws, deviceId) {
   if (!geminiReady || !geminiWs || geminiWs.readyState !== 1) return;
   // Don't forward mic audio while model is speaking — prevents TV speaker echo from interrupting
   if (geminiSpeaking) return;
+
+  // Preferred input override: reject audio from non-preferred mics (if preferred is online)
+  if (preferredInputDeviceId && deviceId !== preferredInputDeviceId) {
+    // Check if preferred device is actually connected
+    let preferredOnline = false;
+    for (const [, info] of devices) {
+      if (info.deviceId === preferredInputDeviceId) { preferredOnline = true; break; }
+    }
+    if (preferredOnline) return; // Drop audio — preferred mic is online
+    // Preferred offline → fall through to auto
+  }
 
   const peak = getPeakAmplitude(pcmBase64);
   const now = Date.now();
@@ -7526,6 +7644,8 @@ wss.on("connection", (ws) => {
           // Session already active, tell this device
           ws.send(JSON.stringify({ type: "ready" }));
         }
+        // Notify all devices about new routing state
+        broadcastAudioRoutingState();
         return;
       }
 
@@ -7599,14 +7719,17 @@ wss.on("connection", (ws) => {
         const info = devices.get(ws);
         if (!info || info.deviceType !== "phone") return;
         if (!msg.data) return;
-        // Broadcast to all non-phone speaker devices (tablets + TV)
+        // Broadcast to preferred output devices, or all non-phone speakers if no preference
         const audioMsg = JSON.stringify({ type: "audio", data: msg.data });
         for (const [clientWs, clientInfo] of devices) {
           if (clientWs === ws) continue; // Don't send back to iPhone
           if (!clientInfo.capabilities?.speaker) continue;
-          if (clientWs.readyState === WebSocket.OPEN) {
-            try { clientWs.send(audioMsg); } catch {}
+          if (clientWs.readyState !== WebSocket.OPEN) continue;
+          // If preferred outputs set, only send to those devices
+          if (preferredOutputDeviceIds && preferredOutputDeviceIds.length > 0) {
+            if (!preferredOutputDeviceIds.includes(clientInfo.deviceId)) continue;
           }
+          try { clientWs.send(audioMsg); } catch {}
         }
         return;
       }
@@ -7846,6 +7969,8 @@ wss.on("connection", (ws) => {
       }
     }
     disconnectGeminiIfEmpty();
+    // Notify remaining devices about routing change
+    if (devices.size > 0) broadcastAudioRoutingState();
   });
 
   ws.on("error", (err) => {

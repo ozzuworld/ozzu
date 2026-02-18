@@ -3,6 +3,7 @@
 
 import { getDeviceType } from "../modules/pcm-player";
 import { Dimensions } from "react-native";
+import * as FileSystem from "expo-file-system";
 
 const BRIDGE_WS_URL =
   (process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333").replace(
@@ -26,6 +27,7 @@ export interface BridgeCallbacks {
   onConnected: () => void;
   onListeningReady: () => void;
   onCipherResponse?: (text: string) => void; // Phone-mode: Claude response text for on-device TTS
+  onAudioRoutingUpdate?: (data: any) => void; // Audio routing state changed
   onError: (message: string) => void;
 }
 
@@ -62,7 +64,7 @@ export class BridgeSession {
     this._cipherVoice = enabled;
   }
 
-  connect(callbacks: BridgeCallbacks): void {
+  async connect(callbacks: BridgeCallbacks): Promise<void> {
     if (this.ws) return;
     this.callbacks = callbacks;
     this.intentionallyClosed = false;
@@ -82,7 +84,21 @@ export class BridgeSession {
     } else {
       this._deviceType = "tv";
     }
-    this.deviceId = `${this._role}-${Date.now()}`;
+
+    // Stable deviceId: persist a UUID so preferences survive reconnects
+    const idFile = `${FileSystem.documentDirectory}ozzu-device-id.txt`;
+    let storedId: string | null = null;
+    try {
+      const info = await FileSystem.getInfoAsync(idFile);
+      if (info.exists) storedId = await FileSystem.readAsStringAsync(idFile);
+    } catch {}
+    if (storedId) {
+      this.deviceId = storedId;
+    } else {
+      const uuid = "xxxx-xxxx".replace(/x/g, () => Math.floor(Math.random() * 16).toString(16));
+      this.deviceId = `ozzu-${this._deviceType}-${uuid}`;
+      try { await FileSystem.writeAsStringAsync(idFile, this.deviceId); } catch {}
+    }
 
     this._connect();
   }
@@ -214,6 +230,9 @@ export class BridgeSession {
           break;
         case "cipherResponse":
           this.callbacks?.onCipherResponse?.(msg.text);
+          break;
+        case "audioRoutingUpdate":
+          this.callbacks?.onAudioRoutingUpdate?.(msg);
           break;
         case "error":
           this.callbacks?.onError(msg.message);

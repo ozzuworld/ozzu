@@ -293,3 +293,47 @@ export async function fetchAnthropicUsage(): Promise<AnthropicUsageData> {
   if (!res.ok) throw new Error(`Bridge Anthropic usage error: ${res.status}`);
   return res.json();
 }
+
+// ── Audio Preferences ──
+
+export interface AudioDevice {
+  deviceId: string;
+  role: string;
+  deviceType: string;
+  zone: string;
+  capabilities: { mic?: boolean; speaker?: boolean; cipherVoice?: boolean };
+  speakerPriority: number;
+  online: boolean;
+  isActiveMic: boolean;
+  isSelectedSpeaker: boolean;
+}
+
+export interface AudioPreferences {
+  preferredInput: string | null;
+  preferredOutputs: string[] | null;
+  devices: AudioDevice[];
+  activeMic: string | null;
+  autoSelectedSpeaker: string | null;
+  mode: "cipher" | "june" | "idle";
+}
+
+export async function fetchAudioPreferences(): Promise<AudioPreferences> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/audio-preferences`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge audio preferences error: ${res.status}`);
+  return res.json();
+}
+
+export async function setAudioPreferences(prefs: {
+  preferredInput?: string | null;
+  preferredOutputs?: string[] | null;
+}): Promise<{ ok: boolean; preferences: { preferredInput: string | null; preferredOutputs: string[] | null } }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/audio-preferences`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(prefs),
+  });
+  if (!res.ok) throw new Error(`Bridge set audio preferences error: ${res.status}`);
+  return res.json();
+}
