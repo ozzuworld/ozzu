@@ -32,6 +32,7 @@ export interface Directive {
   type: "quick" | "feature" | "explore";
   title: string;
   description: string;
+  emoji?: string | null;
   status: string;
   plan: string | null;
   directiveApprovalId: string | null;

@@ -5,9 +5,6 @@ import { AuditTrail } from "./AuditTrail";
 import {
   STATUS_EMOJI,
   STATUS_COLORS,
-  TYPE_EMOJI,
-  PRIORITY_EMOJI,
-  ACTOR_COLORS,
   relativeTime,
   formatTimestamp,
   humanDuration,
@@ -16,30 +13,6 @@ import {
 import type { Directive, BuildStatus } from "../../lib/bridge-api";
 
 // ── Subcomponents ──
-
-function ActorBadge({ actor }: { actor?: string }) {
-  if (!actor) return null;
-  const color = ACTOR_COLORS[actor] || "#9CA3AF";
-  return (
-    <Text
-      style={{
-        color,
-        fontSize: 9,
-        fontFamily: "monospace",
-        fontWeight: "bold",
-        backgroundColor: `${color}18`,
-        borderWidth: 1,
-        borderColor: `${color}33`,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: 3,
-        overflow: "hidden",
-      }}
-    >
-      {actor}
-    </Text>
-  );
-}
 
 function ActionButton({
   label,
@@ -119,8 +92,6 @@ export function DirectiveCard({
   const [expanded, setExpanded] = useState(false);
   const statusColor = STATUS_COLORS[directive.status] || "#737373";
   const statusEmoji = STATUS_EMOJI[directive.status] || "•";
-  const typeEmoji = TYPE_EMOJI[directive.type] || "⚡";
-  const priorityEmoji = PRIORITY_EMOJI[directive.priority ?? 3] || "⚪";
   const actLog = directive.activity_log || [];
 
   const toggle = useCallback(() => {
@@ -144,7 +115,7 @@ export function DirectiveCard({
     >
       {/* Header row */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Text style={{ fontSize: 14 }}>{statusEmoji}</Text>
+        <Text style={{ fontSize: 14 }}>{directive.emoji || statusEmoji}</Text>
         <Text
           style={{
             flex: 1,
@@ -157,63 +128,54 @@ export function DirectiveCard({
         >
           {directive.title}
         </Text>
-        <Text style={{ color: "#525252", fontSize: 12, fontFamily: "monospace" }}>
+        <Text style={{ color: "#3A3A3A", fontSize: 10, fontFamily: "monospace" }}>
           {expanded ? "▲" : "▶"}
         </Text>
       </View>
 
-      {/* Meta row with emojis */}
-      <View
+      {/* Meta row — clean single line */}
+      <Text
         style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 8,
-          marginTop: 5,
+          color: "#737373",
+          fontSize: 10,
+          fontFamily: "monospace",
+          marginTop: 4,
           marginLeft: 24,
-          flexWrap: "wrap",
         }}
+        numberOfLines={1}
       >
-        <Text style={{ fontSize: 10 }}>
-          {typeEmoji}{" "}
-          <Text
-            style={{
-              color: "#06B6D4",
-              fontSize: 10,
-              fontFamily: "monospace",
-              fontWeight: "bold",
-            }}
-          >
-            {directive.type?.toUpperCase() || "QUICK"}
-          </Text>
+        <Text style={{ color: "#06B6D4", fontWeight: "bold" }}>
+          {directive.type?.toUpperCase() || "QUICK"}
         </Text>
-        <Text style={{ fontSize: 10 }}>
-          {priorityEmoji}{" "}
-          <Text
-            style={{
-              color:
-                directive.priority <= 1
-                  ? "#EF4444"
-                  : directive.priority <= 2
-                    ? "#F59E0B"
-                    : "#737373",
-              fontSize: 10,
-              fontFamily: "monospace",
-              fontWeight: "bold",
-            }}
-          >
-            {priorityLabel(directive.priority ?? 3)}
-          </Text>
+        <Text style={{ color: "#525252" }}> · </Text>
+        <Text
+          style={{
+            color:
+              directive.priority <= 1
+                ? "#EF4444"
+                : directive.priority <= 2
+                  ? "#F59E0B"
+                  : "#737373",
+            fontWeight: "bold",
+          }}
+        >
+          {priorityLabel(directive.priority ?? 3)}
         </Text>
-        {directive.createdBy ? <ActorBadge actor={directive.createdBy} /> : null}
-        <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
-          {relativeTime(directive.updatedAt)}
-        </Text>
-        {directive.duration ? (
-          <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
-            🕒 {humanDuration(directive.duration)}
-          </Text>
+        {directive.createdBy ? (
+          <>
+            <Text style={{ color: "#525252" }}> · </Text>
+            <Text style={{ color: "#9CA3AF" }}>{directive.createdBy}</Text>
+          </>
         ) : null}
-      </View>
+        <Text style={{ color: "#525252" }}> · </Text>
+        <Text style={{ color: "#525252" }}>{relativeTime(directive.updatedAt)}</Text>
+        {directive.duration ? (
+          <>
+            <Text style={{ color: "#525252" }}> · </Text>
+            <Text style={{ color: "#525252" }}>{humanDuration(directive.duration)}</Text>
+          </>
+        ) : null}
+      </Text>
 
       {/* Failure reason */}
       {directive.failureReason ? (
@@ -309,10 +271,6 @@ export function DirectiveCard({
         </View>
       ) : null}
 
-      {/* Collapsed audit trail */}
-      {actLog.length > 1 && !expanded ? (
-        <AuditTrail entries={actLog} collapsed maxCollapsed={3} />
-      ) : null}
 
       {/* Expanded content */}
       {expanded ? (

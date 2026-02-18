@@ -26,8 +26,9 @@ Cipher does all work directly — no worker agents, no orchestrator. Directives 
 **Step 2: Create or find an existing directive**
 ```bash
 curl -s -X POST http://localhost:3333/directives -H 'Content-Type: application/json' \
-  -d '{"title":"...", "description":"...", "type":"quick|feature", "createdBy":"cipher"}'
+  -d '{"title":"...", "description":"...", "type":"quick|feature", "emoji":"🔧", "createdBy":"cipher"}'
 ```
+Pick 1 emoji that represents the work — 🔧 fix, 🎨 UI, 🚀 deploy, 📦 deps, 🧹 cleanup, etc.
 
 **Step 3: Is this a new feature (type=feature)?**
 - YES → Set status to `planned` with a plan. Wait for King Kazuma's PIN approval before implementing.

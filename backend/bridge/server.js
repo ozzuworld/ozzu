@@ -1425,6 +1425,7 @@ async function handleRequest(req, res) {
       type: data.type,
       title: data.title || "",
       description: data.description,
+      emoji: data.emoji || null,
       status: "pending",
       plan: null,
       directiveApprovalId: null,
@@ -1665,6 +1666,7 @@ async function handleRequest(req, res) {
     if (data.mergeBranch !== undefined) directive.mergeBranch = data.mergeBranch;
     if (data.priority !== undefined && [1, 2, 3, 4].includes(data.priority)) directive.priority = data.priority;
     if (data.buildRuns !== undefined) directive.buildRuns = data.buildRuns;
+    if (data.emoji !== undefined) directive.emoji = data.emoji;
     directive.updatedAt = Date.now();
     directive.lastActivity = Date.now(); // Track when agent last touched this directive
 
