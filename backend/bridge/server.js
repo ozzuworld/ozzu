@@ -4590,10 +4590,10 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
               }
             } else {
               errors++;
-              // If rate limited, wait longer
+              // If rate limited, wait longer and retry once
               if (resp.status === 429) {
-                log.memory.info("Backfill: rate limited, waiting 5s...");
-                await new Promise(r => setTimeout(r, 5000));
+                log.memory.info("Backfill: rate limited, waiting 30s...");
+                await new Promise(r => setTimeout(r, 30000));
               }
             }
           } catch (err) {
@@ -4601,11 +4601,11 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
           }
 
           processed++;
-          if (processed % 20 === 0) {
+          if (processed % 10 === 0) {
             log.memory.info(`Backfill progress: ${processed}/${convos.length} conversations, ${totalFacts} facts extracted, ${errors} errors`);
           }
-          // Rate limit: 1 request per second
-          await new Promise(r => setTimeout(r, 1000));
+          // Rate limit: 4 seconds between requests to stay under Gemini quota
+          await new Promise(r => setTimeout(r, 4000));
         }
 
         log.memory.info(`Backfill complete: ${processed} conversations processed, ${totalFacts} facts extracted, ${errors} errors`);
