@@ -22,5 +22,5 @@ EOF
   echo "WARNING: Bridge unreachable at ${BRIDGE_URL} — launching with minimal context"
 fi
 
-# Launch Claude Code with all passed arguments
-exec claude "$@"
+# Launch Claude Code fully autonomous — directive pipeline + PIN approval is the safety layer
+exec claude --dangerously-skip-permissions "$@"
