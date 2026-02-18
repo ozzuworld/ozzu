@@ -18,7 +18,12 @@ When King Kazuma requests a code/config change, follow this decision tree BEFORE
 - YES → Emergency fix acceptable: commit to branch first, NOT main
 - NO → Continue to Step 2
 
-**Step 2: Does this require code/config changes (Edit, Write, new files)?**
+**Step 2: Is this an ESCALATED directive?** (check `escalatedAt` on directive)
+- YES → Cipher direct takeover authorized. Commit with `Directive: <id>` and `[escalated]` tag.
+         Log actions to directive activity_log. Mark completed when done.
+- NO → Continue to Step 3
+
+**Step 3: Does this require code/config changes (Edit, Write, new files)?**
 - YES → STOP. Create or use existing directive. Let worker handle it. Do NOT bypass.
 - NO → Handle directly (status queries, research, reading files)
 
@@ -49,12 +54,22 @@ The pipeline is protected by automated bypass detection. A pre-commit hook and s
 | `[config]` | `.env` or config-only changes |
 | `[docs]` | Documentation-only changes (`*.md` files) |
 | `[security]` | Emergency security patches |
+| `[escalated]` | Cipher takeover of escalated directives (after worker retries exhausted) |
 
 **Auto-detected exceptions** (no tag needed):
 - Only `.md` files are staged
 - Only `.env*` files are staged
 
 **Hook installation:** `git config core.hooksPath .githooks` (hooks live in `.githooks/` tracked in git)
+
+**Escalation Path:**
+When workers fail repeatedly on a directive (default: 2+ retries), the system auto-escalates to Cipher:
+1. Worker attempts are preserved in `workerAttempts[]` on the directive
+2. Directive transitions to `in_progress` with `escalatedAt` set
+3. Cipher gets direct takeover authority — commits with `Directive: <id>` and `[escalated]` tag
+4. King Kazuma is notified via `/notify`
+5. Manual escalation is also available from the dashboard ("Escalate to Cipher" button)
+6. The orchestrator can also trigger escalation via `escalate_to_cipher` action
 
 **Violations API:**
 - `GET /api/pipeline-violations` — list all violations

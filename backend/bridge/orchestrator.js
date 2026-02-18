@@ -124,7 +124,7 @@ ECOSYSTEM KNOWLEDGE (always growing):
 
 RESPONSE FORMAT — You MUST respond with valid JSON (no markdown fences, no text outside the JSON):
 {
-  "action": "spawn_worker | handle_directly | merge_approved | needs_changes | request_info",
+  "action": "spawn_worker | handle_directly | merge_approved | needs_changes | request_info | escalate_to_cipher",
   "reasoning": "Brief explanation of your decision",
   "worker_prompt": "Precise worker instructions (only if action=spawn_worker)",
   "worker_type": "planning | implementation (only if action=spawn_worker)",
@@ -141,6 +141,7 @@ DECISION GUIDELINES:
 - When reviewing worker results: check the diff for obvious issues, approve if reasonable
 - If you see patterns from past failures, include warnings in worker_prompt
 - handle_directly is ONLY for pure status/info queries (e.g. "what's running?"). NEVER use handle_directly for any directive that requires code changes, file edits, bug fixes, or feature work — those MUST be spawn_worker.
+- If a worker has failed 2+ times on the same directive (check retryCount), consider escalate_to_cipher. This hands the directive to Cipher for direct takeover with the full failure history preserved.
 - You CANNOT write or edit code yourself. You have no Write or Edit tools. Always delegate coding to workers.
 
 COMPLETION REVIEW — CRITICAL:
@@ -519,6 +520,27 @@ async function handleResponse(directive, response) {
 
     case "needs_changes": {
       logDecision(directive.id, "needs_changes", response.merge_feedback || response.reasoning);
+      break;
+    }
+
+    case "escalate_to_cipher": {
+      log(`Orchestrator escalating "${directive.title}" to Cipher for direct takeover`);
+      logDecision(directive.id, "escalate_to_cipher", response.reasoning);
+      // Call the escalate endpoint
+      const http = require("http");
+      const escalatePayload = JSON.stringify({
+        escalatedBy: "orchestrator",
+        reason: response.reasoning || "Orchestrator determined worker approach is insufficient",
+      });
+      const escalateReq = http.request(
+        `http://localhost:3333/directives/${directive.id}/escalate`,
+        { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(escalatePayload) } },
+      );
+      escalateReq.on("error", (err) => {
+        log(`Escalation request failed for ${directive.id}: ${err.message}`);
+      });
+      escalateReq.write(escalatePayload);
+      escalateReq.end();
       break;
     }
 

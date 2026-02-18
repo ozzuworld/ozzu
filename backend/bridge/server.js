@@ -203,6 +203,58 @@ async function routeDirective(directive, type) {
   }
 }
 
+// ── Auto-escalation for exhausted directives ──
+const ESCALATION_THRESHOLD = 2; // Worker retries before auto-escalation to Cipher
+
+async function autoEscalate(directiveId, reason) {
+  const http = require("http");
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({
+      escalatedBy: "auto",
+      reason: reason || `exhausted: ${ESCALATION_THRESHOLD}+ worker failures`,
+    });
+    const req = http.request(
+      `http://localhost:3333/directives/${directiveId}/escalate`,
+      { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+      (res) => {
+        let body = "";
+        res.on("data", (d) => { body += d; });
+        res.on("end", () => {
+          try {
+            const data = JSON.parse(body);
+            if (data.ok) {
+              log.directive.info(`Auto-escalated ${directiveId} to Cipher: ${reason}`);
+              // Notify King Kazuma via /notify
+              const notifyPayload = JSON.stringify({
+                message: `[SYSTEM — Tell King Kazuma briefly.]\nCipher is taking over directive "${data.directive?.title || directiveId}" after ${ESCALATION_THRESHOLD}+ worker failures. Reason: ${reason}`,
+              });
+              const notifyReq = http.request(
+                "http://localhost:3333/notify",
+                { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(notifyPayload) } },
+              );
+              notifyReq.on("error", () => {}); // fire-and-forget
+              notifyReq.write(notifyPayload);
+              notifyReq.end();
+              resolve(data);
+            } else {
+              log.directive.warn(`Auto-escalation failed for ${directiveId}: ${data.error}`);
+              reject(new Error(data.error));
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+    );
+    req.on("error", (err) => {
+      log.directive.error(`Auto-escalation request failed for ${directiveId}: ${err.message}`);
+      reject(err);
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
 const BRIDGE_PIN = process.env.BRIDGE_PIN || "1234";
 const HA_URL = process.env.HA_URL || "http://localhost:8123";
 const HA_TOKEN = process.env.HA_TOKEN || "";
@@ -541,7 +593,7 @@ async function scanOrphanCommits() {
 
     const directives = getDirectives();
     const lines = stdout.trim().split("\n");
-    const exceptionTags = ["[pipeline-fix]", "[config]", "[docs]", "[security]"];
+    const exceptionTags = ["[pipeline-fix]", "[config]", "[docs]", "[security]", "[escalated]"];
 
     for (const line of lines) {
       const spaceIdx = line.indexOf(" ");
@@ -699,23 +751,38 @@ async function initStorage() {
         retryCount++;
         log.directive.info(`Auto-retry: ${d.id} "${d.title}" (${oldStatus} → approved, retry #${d.retryCount})`);
       } else if (isStale) {
+        // Preserve current failure into workerAttempts before overwriting
+        if (!Array.isArray(d.workerAttempts)) d.workerAttempts = [];
+        if (d.failureReason) {
+          d.workerAttempts.push({
+            attempt: d.workerAttempts.length + 1,
+            failureReason: d.failureReason,
+            timestamp: d.updatedAt || Date.now(),
+          });
+        }
+
         d.status = "failed";
         d.failureReason = d.failureReason || `exhausted: failed after ${rc} retries`;
         d.updatedAt = new Date().toISOString();
         failedCount++;
         log.directive.warn(`Stale exhausted: ${d.id} "${d.title}" (stale → failed, retries: ${rc})`);
 
-        // Notify June about the failure so she can inform King Kazuma
-        const failedTitle = d.title || d.description?.substring(0, 80) || d.id;
-        const failReason = d.failureReason;
+        // Auto-escalate to Cipher instead of just notifying about failure
+        const escalateId = d.id;
+        const escalateReason = `exhausted: ${rc} worker failures`;
         setTimeout(() => {
-          engage("directive failure notification");
-          sendNotification(
-            `[SYSTEM — Tell King Kazuma briefly, don't dump details.]\n` +
-            `"${failedTitle}" failed after multiple tries. Reason: ${failReason}. ` +
-            `Might need a different approach.`
-          );
-        }, 10000); // Longer delay — this runs at startup before connections are ready
+          autoEscalate(escalateId, escalateReason).catch(err => {
+            // Fallback: notify June if escalation fails
+            log.directive.warn(`Auto-escalation failed for ${escalateId}, falling back to notification: ${err.message}`);
+            const failedTitle = d.title || d.description?.substring(0, 80) || escalateId;
+            engage("directive failure notification");
+            sendNotification(
+              `[SYSTEM — Tell King Kazuma briefly, don't dump details.]\n` +
+              `"${failedTitle}" failed after ${rc} tries and auto-escalation failed. ` +
+              `Might need manual intervention.`
+            );
+          });
+        }, 15000); // 15s delay — let server finish startup
       }
     }
   }
@@ -1963,6 +2030,60 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // POST /directives/:id/escalate — Escalate a failing directive to Cipher for direct takeover
+  const directiveEscalateMatch = pathname.match(/^\/directives\/([^/]+)\/escalate$/);
+  if (req.method === "POST" && directiveEscalateMatch) {
+    const id = directiveEscalateMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    const escalatableStatuses = ["failed", "stale", "blocked", "deploy_failed"];
+    if (!escalatableStatuses.includes(directive.status)) {
+      sendJSON(res, 409, { error: `Directive is "${directive.status}" — can only escalate from: ${escalatableStatuses.join(", ")}` });
+      return;
+    }
+    const body = await readBody(req);
+    const { escalatedBy, reason } = body || {};
+    const prevStatus = directive.status;
+
+    // Preserve current failure into workerAttempts history
+    if (!Array.isArray(directive.workerAttempts)) directive.workerAttempts = [];
+    if (directive.failureReason) {
+      directive.workerAttempts.push({
+        attempt: directive.workerAttempts.length + 1,
+        failureReason: directive.failureReason,
+        timestamp: directive.updatedAt || Date.now(),
+      });
+    }
+
+    // Set escalation fields
+    directive.escalatedAt = Date.now();
+    directive.escalatedBy = escalatedBy || "King Kazuma";
+    directive.escalationReason = reason || `escalated from ${prevStatus} (${directive.workerAttempts.length} worker attempt(s))`;
+
+    // Transition to in_progress, clear failure
+    directive.status = "in_progress";
+    directive.failureReason = null;
+    directive.updatedAt = Date.now();
+
+    // Activity log
+    if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+    directive.activity_log.push({
+      timestamp: Date.now(),
+      type: "escalation",
+      actor: directive.escalatedBy,
+      message: `Escalated to Cipher: ${directive.escalationReason} (was ${prevStatus}, ${directive.workerAttempts.length} worker attempt(s))`,
+    });
+
+    saveDirectives(directives, directive, prevStatus, directive.escalatedBy);
+    log.bridge.info(`Directive escalated: ${id} "${directive.title}" (${prevStatus} → in_progress, by ${directive.escalatedBy})`);
+    sendJSON(res, 200, { ok: true, directive, workerHistory: directive.workerAttempts });
+    return;
+  }
+
   // POST /directives/:id/retry-merge — Re-attempt merge for deploy_failed directives
   const retryMergeMatch = pathname.match(/^\/directives\/([^/]+)\/retry-merge$/);
   if (req.method === "POST" && retryMergeMatch) {
@@ -2489,11 +2610,16 @@ async function handleRequest(req, res) {
           <button class="card-btn btn-deny" onclick="denyDirective('${eid}')">Deny</button>`;
       } else if (d.status === "deploy_failed") {
         actionsHtml = `<button class="card-btn btn-retry-merge" onclick="retryMerge('${eid}')">Retry Merge</button>
-          <button class="card-btn btn-retry" onclick="retryDirective('${eid}')">Retry Full</button>`;
+          <button class="card-btn btn-retry" onclick="retryDirective('${eid}')">Retry Full</button>
+          <button class="card-btn btn-escalate" onclick="escalateDirective('${eid}')">Escalate to Cipher</button>`;
       } else if (d.status === "blocked") {
         actionsHtml = `<button class="card-btn btn-unblock" onclick="unblockDirective('${eid}')">Unblock</button>
+          <button class="card-btn btn-escalate" onclick="escalateDirective('${eid}')">Escalate to Cipher</button>
           <button class="card-btn btn-cancel" onclick="cancelDirective('${eid}')">Cancel</button>`;
-      } else if (["failed", "stale", "cancelled"].includes(d.status)) {
+      } else if (["failed", "stale"].includes(d.status)) {
+        actionsHtml = `<button class="card-btn btn-retry" onclick="retryDirective('${eid}')">Retry</button>
+          <button class="card-btn btn-escalate" onclick="escalateDirective('${eid}')">Escalate to Cipher</button>`;
+      } else if (d.status === "cancelled") {
         actionsHtml = `<button class="card-btn btn-retry" onclick="retryDirective('${eid}')">Retry</button>`;
       } else if (!["completed"].includes(d.status)) {
         actionsHtml = `<button class="card-btn btn-cancel" onclick="cancelDirective('${eid}')">Cancel</button>`;
@@ -2505,6 +2631,7 @@ async function handleRequest(req, res) {
         <div class="card-header">
           <div class="card-header-left">
             <span class="status-badge" style="background:${color};">${escapeHtml(d.status.replace("_", " "))}</span>
+            ${d.escalatedAt ? '<span class="status-badge escalated-badge" style="background:#dc2626;">ESCALATED</span>' : ""}
             <span class="card-title">${escapeHtml(d.title || d.id)}</span>
             ${createdByBadge}
           </div>
@@ -2657,6 +2784,10 @@ async function handleRequest(req, res) {
   .btn-retry-merge:hover { background: #f59e0b; color: #000; }
   .btn-unblock { background: #2e1065; border-color: #8b5cf6; color: #c4b5fd; }
   .btn-unblock:hover { background: #8b5cf6; color: #fff; }
+  .btn-escalate { background: #7f1d1d; border-color: #dc2626; color: #fca5a5; }
+  .btn-escalate:hover { background: #dc2626; color: #fff; }
+  .escalated-badge { animation: escalated-pulse 2s ease-in-out infinite; }
+  @keyframes escalated-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
   .btn-cancel { background: #450a0a; border-color: #dc2626; color: #fca5a5; }
   .btn-cancel:hover { background: #dc2626; color: #fff; }
   .btn-comment { background: transparent; border-color: #475569; color: #64748b; }
@@ -3063,6 +3194,21 @@ function retryMerge(id) {
     .then(function(data) {
       if (data.ok) { alert("Merge succeeded! Deploying now."); refreshNow(); }
       else { alert("Merge failed: " + (data.error || "Unknown")); refreshNow(); }
+    })
+    .catch(function(err) { alert("Network error: " + err.message); });
+}
+
+function escalateDirective(id) {
+  if (!confirm("Escalate this directive to Cipher for direct takeover?")) return;
+  fetch("/directives/" + id + "/escalate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ escalatedBy: "King Kazuma", reason: "Manual escalation from dashboard" })
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) { alert("Escalated to Cipher! Worker history preserved."); refreshNow(); }
+      else { alert("Escalation failed: " + (data.error || "Unknown")); }
     })
     .catch(function(err) { alert("Network error: " + err.message); });
 }
