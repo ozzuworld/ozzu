@@ -2862,7 +2862,7 @@ async function handleRequest(req, res) {
           const label = run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : escapeHtml(run.platform);
           const statusText = isActive ? (run.status === "in_progress" ? "building" : "queued") : run.conclusion || run.status;
           const dot = isActive ? "&#9679;" : succeeded ? "&#10003;" : failed ? "&#10007;" : "&#9679;";
-          return `<a href="${escapeHtml(run.url)}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:${badgeColor}18;border:1px solid ${badgeColor};color:${badgeColor};font-size:11px;font-weight:bold;text-decoration:none;" title="Run #${run.runId}">${dot} ${label}: ${escapeHtml(statusText)}</a>`;
+          return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:${badgeColor}18;border:1px solid ${badgeColor};color:${badgeColor};font-size:11px;font-weight:bold;" title="Run #${run.runId}">${dot} ${label}: ${escapeHtml(statusText)}</span>`;
         }).join(" ");
         buildStatusHtml = `<div class="card-build-status" data-directive-id="${escapeHtml(d.id)}" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">${badges}</div>`;
       }
@@ -3810,7 +3810,7 @@ function pollDirectiveBuildStatus() {
           var label = run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : escapeText(run.platform);
           var statusText = isActive ? (run.status === "in_progress" ? "building" : "queued") : (run.conclusion || run.status);
           var dot = isActive ? "&#9679;" : succeeded ? "&#10003;" : failed ? "&#10007;" : "&#9679;";
-          html += '<a href="' + escapeText(run.url) + '" target="_blank" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:' + badgeColor + '18;border:1px solid ' + badgeColor + ';color:' + badgeColor + ';font-size:11px;font-weight:bold;text-decoration:none;" title="Run #' + run.runId + '">' + dot + ' ' + label + ': ' + escapeText(statusText) + '</a> ';
+          html += '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:' + badgeColor + '18;border:1px solid ' + badgeColor + ';color:' + badgeColor + ';font-size:11px;font-weight:bold;" title="Run #' + run.runId + '">' + dot + ' ' + label + ': ' + escapeText(statusText) + '</span> ';
         });
         el.innerHTML = html;
       })

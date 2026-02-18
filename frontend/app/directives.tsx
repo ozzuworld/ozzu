@@ -11,7 +11,6 @@ import {
   TextInput,
   Modal,
   Alert,
-  Linking,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
@@ -342,8 +341,7 @@ function DirectiveCard({
             const label = run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : run.platform;
             const statusText = isRunActive ? (run.status === "in_progress" ? "building" : "queued") : (run.conclusion || run.status);
             return (
-              <Pressable key={i} onPress={() => run.url && Linking.openURL(run.url)}>
-                <View style={{
+              <View key={i} style={{
                   flexDirection: "row", alignItems: "center", gap: 4,
                   paddingHorizontal: 8, paddingVertical: 2,
                   borderRadius: 4, borderWidth: 1, borderColor: badgeColor,
@@ -353,8 +351,7 @@ function DirectiveCard({
                   <Text style={{ color: badgeColor, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
                     {label}: {statusText}
                   </Text>
-                </View>
-              </Pressable>
+              </View>
             );
           })}
         </View>
@@ -392,11 +389,9 @@ function DirectiveCard({
               : liveStatus === "in_progress" ? "#3B82F6"
               : liveStatus === "queued" ? "#F59E0B"
               : "#6B7280";
-            const runUrl = br.runId ? `https://github.com/ozzuworld/ozzu/actions/runs/${br.runId}` : null;
             return (
-              <Pressable
+              <View
                 key={`${br.platform}-${br.runId}-${i}`}
-                onPress={() => runUrl && Linking.openURL(runUrl)}
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
@@ -419,7 +414,7 @@ function DirectiveCard({
                 <Text style={{ color: "#525252", fontSize: 8, fontFamily: "monospace" }}>
                   {relativeTime(br.triggeredAt)}
                 </Text>
-              </Pressable>
+              </View>
             );
           })}
         </View>
@@ -567,25 +562,23 @@ function DirectiveCard({
                 const failed = run.status === "completed" && (run.conclusion === "failure" || run.conclusion === "cancelled");
                 const color = isRunActive ? "#3B82F6" : succeeded ? "#10B981" : failed ? "#EF4444" : "#6B7280";
                 return (
-                  <Pressable key={i} onPress={() => run.url && Linking.openURL(run.url)}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 8, marginBottom: 4 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
-                      <Text style={{ color: "#A3A3A3", fontSize: 11, fontFamily: "monospace" }}>
-                        {run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : run.platform}
+                  <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 8, marginBottom: 4 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+                    <Text style={{ color: "#A3A3A3", fontSize: 11, fontFamily: "monospace" }}>
+                      {run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : run.platform}
+                    </Text>
+                    <Text style={{ color, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                      {isRunActive ? (run.status === "in_progress" ? "building" : "queued") : (run.conclusion || run.status)}
+                    </Text>
+                    <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
+                      Run #{run.runId}
+                    </Text>
+                    {run.triggeredAt ? (
+                      <Text style={{ color: "#3A3A3A", fontSize: 9, fontFamily: "monospace" }}>
+                        {relativeTime(run.triggeredAt)}
                       </Text>
-                      <Text style={{ color, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-                        {isRunActive ? (run.status === "in_progress" ? "building" : "queued") : (run.conclusion || run.status)}
-                      </Text>
-                      <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
-                        Run #{run.runId}
-                      </Text>
-                      {run.triggeredAt ? (
-                        <Text style={{ color: "#3A3A3A", fontSize: 9, fontFamily: "monospace" }}>
-                          {relativeTime(run.triggeredAt)}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </Pressable>
+                    ) : null}
+                  </View>
                 );
               })}
             </View>
@@ -1006,9 +999,8 @@ export default function DirectivesScreen() {
               ? (latest.status === "in_progress" ? "building" : "queued")
               : (latest.conclusion || latest.status);
             return (
-              <Pressable
+              <View
                 key={label}
-                onPress={() => latest.url && Linking.openURL(latest.url)}
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
@@ -1031,7 +1023,7 @@ export default function DirectivesScreen() {
                 <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
                   {relativeTime(new Date(latest.createdAt).getTime())}
                 </Text>
-              </Pressable>
+              </View>
             );
           })}
         </View>
