@@ -7,8 +7,8 @@ set -e
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-# Agent worktree branches are always allowed
-if [[ "$BRANCH" == agent/* ]]; then
+# Cipher-direct and agent branches are always allowed
+if [[ "$BRANCH" == cipher/* ]] || [[ "$BRANCH" == agent/* ]]; then
   exit 0
 fi
 

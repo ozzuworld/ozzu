@@ -2,53 +2,63 @@
 
 ## MANDATORY RULES — READ FIRST
 
-**ALL code changes MUST go through the directive pipeline. NO EXCEPTIONS.**
+**ALL code changes MUST go through the directive pipeline. Cipher does all work directly.**
 
-- **NEVER commit directly to main.** All code goes through directives → worker agents → branches → merge → smartDeploy.
-- **NEVER manually trigger builds.** smartDeploy handles CI builds (Android + iOS) and deployment automatically.
-- **NEVER bypass the pipeline.** Even if King Kazuma asks you to "just fix this real quick" — create a directive for it.
+- **NEVER commit directly to main.** Cipher works on `cipher/dir_xxx` branches, then merges after verification.
+- **NEVER manually trigger builds.** smartDeploy handles CI builds (Android + iOS) and deployment automatically after merge to main.
+- **Every change needs a directive** for tracking, audit trail, and dashboard visibility — even quick fixes.
 - **The pipeline handles EVERYTHING**: code changes, builds, deploys to all devices (tablets, TV, iPhone).
 - **iPhone NEVER receives OTA updates.** ALL iPhone changes (JS or native) require a full iOS CI build (`gh workflow run build-ios.yml`) + sideload via `deploy-ios.sh`. NEVER say OTA will update the iPhone. NEVER run `ota-deploy.sh` expecting it to reach the iPhone. This is a hard platform limitation.
-- **If the pipeline itself is broken or a directive is blocked**, that is the ONLY exception where direct/emergency fixes are acceptable — but ALL actions MUST be documented on the directive dashboard (activity_log). Create a directive if one doesn't exist.
 - **Cipher MUST monitor the pipeline proactively.** Check for `deploy_failed`, `blocked`, and stuck directives. Fix merge failures, retry failed deploys, resolve blockers. Do NOT wait for King Kazuma to notice — that is Cipher's job.
-- **Every direct commit MUST be linked to a directive.** If emergency changes bypass the worker, log them in the directive's activity_log and mark the directive completed only when verified.
-
-### Interactive Cipher Decision Tree (CRITICAL - READ BEFORE EVERY CODE CHANGE)
-
-When King Kazuma requests a code/config change, follow this decision tree BEFORE using Edit/Write tools:
-
-**Step 1: Is the pipeline infrastructure itself broken?**
-- YES → Emergency fix acceptable: commit to branch first, NOT main
-- NO → Continue to Step 2
-
-**Step 2: Is this an ESCALATED directive?** (check `escalatedAt` on directive)
-- YES → Cipher direct takeover authorized. Commit with `Directive: <id>` and `[escalated]` tag.
-         Log actions to directive activity_log. Mark completed when done.
-- NO → Continue to Step 3
-
-**Step 3: Does this require code/config changes (Edit, Write, new files)?**
-- YES → STOP. Create or use existing directive. Let worker handle it. Do NOT bypass.
-- NO → Handle directly (status queries, research, reading files)
-
-**NEVER rationalize bypass with:**
-- ❌ "User is waiting" - NOT an emergency
-- ❌ "This is quick/simple" - Still goes through pipeline
-- ❌ "Easier to do myself" - Defeats pipeline improvement
-- ❌ "Worker would take longer" - Pipeline speed improves with use
-
-**The pipeline only improves when we USE it and fix issues.** Every bypass prevents learning and improvement.
+- **Every commit MUST reference a directive ID** in the commit message (e.g., `Directive: dir_1234567890`).
 - **iPhone is the ONLY device that handles PIN approvals.** Tablets and TV NEVER show keypads or biometric prompts. PIN requests are sent ONLY to devices with deviceType "phone" via broadcastToDeviceType("phone"). This is enforced server-side.
-- **Every directive must be VERIFIED before marking complete.** Workers must check success criteria, test their changes, and NEVER mark complete with "remaining manual steps."
-- **If a worker can't finish**, it MUST use "blocked" status and explain what's needed — never mark as "completed" with work undone.
+- **Ozzu is a React Native app — there is NO website.** ALL user-facing UI lives in `frontend/`. The bridge server's `/dashboard` endpoint is an internal dev tool only — NEVER build features, redesigns, or user-facing UI there. When King Kazuma says "dashboard", "UI", "screen", or "layout", he means the **React Native app in `frontend/`**, NEVER the bridge web page. Do NOT propose or implement web-based solutions.
+- **Cipher MUST use the memory system.** Launch Cipher via `./scripts/cipher.sh` to load context from past sessions. Session transcripts are auto-saved via the SessionEnd hook. If context seems missing, check `/cipher/context` and the session-save hook logs at `/tmp/ozzu-bridge/cipher-session-save.log`.
+
+### Cipher Workflow (CRITICAL - READ BEFORE EVERY CODE CHANGE)
+
+Cipher does all work directly — no worker agents, no orchestrator. Directives are for tracking and audit.
+
+**Step 1: Does this require code/config changes?**
+- NO → Handle directly (status queries, research, reading files, answering questions)
+- YES → Continue to Step 2
+
+**Step 2: Create or find an existing directive**
+```bash
+curl -s -X POST http://localhost:3333/directives -H 'Content-Type: application/json' \
+  -d '{"title":"...", "description":"...", "type":"quick|feature", "createdBy":"cipher"}'
+```
+
+**Step 3: Is this a new feature (type=feature)?**
+- YES → Set status to `planned` with a plan. Wait for King Kazuma's PIN approval before implementing.
+- NO (fix/debug/config/refactor) → Set status to `in_progress` and proceed immediately.
+
+**Step 4: Do the work**
+1. Create branch: `git checkout -b cipher/dir_xxx`
+2. Make changes, commit with `Directive: dir_xxx` in message
+3. Run verification (see Verification Commands below)
+4. Call `POST /directives/{id}/merge-and-deploy` to merge + deploy
+5. Directive is auto-completed on successful merge
+
+**If something goes wrong:**
+- Verification fails → Fix it on the branch and retry
+- Merge conflict → Resolve it, don't force-push
+- Deploy fails → Check logs, fix, re-deploy
+- Stuck/blocked → Set directive to `blocked` with `failureReason` and tell King Kazuma
+
+**Key principles:**
+- Cipher has full project context (memories, briefing, CLAUDE.md) — use it
+- Work on branches, never directly on main
+- Verify before merging — broken code should never reach main
+- Log activity to the directive for dashboard visibility
 
 ## Pipeline Enforcement
 
-The pipeline is protected by automated bypass detection. A pre-commit hook and server-side orphan scanner enforce these rules:
+The pipeline is protected by automated bypass detection. A pre-commit hook ensures audit trail integrity:
 
-- **All commits must reference a directive ID** in the commit message (e.g., `dir_1234567890`) or be on an `agent/*` branch
+- **All commits must reference a directive ID** in the commit message (e.g., `dir_1234567890`) or be on a `cipher/*` or `agent/*` branch
 - **Direct commits to `main`** are blocked by the pre-commit hook unless they match an exception
 - **Commit messages should include** `Directive: <directive_id>` for audit trail linkage
-- **Orphan commits** (on main without directive linkage) are detected every 30 minutes and flagged on the dashboard
 
 **Exception tags** (add to commit message to bypass on main):
 | Tag | Use Case |
@@ -57,22 +67,12 @@ The pipeline is protected by automated bypass detection. A pre-commit hook and s
 | `[config]` | `.env` or config-only changes |
 | `[docs]` | Documentation-only changes (`*.md` files) |
 | `[security]` | Emergency security patches |
-| `[escalated]` | Cipher takeover of escalated directives (after worker retries exhausted) |
 
 **Auto-detected exceptions** (no tag needed):
 - Only `.md` files are staged
 - Only `.env*` files are staged
 
 **Hook installation:** `git config core.hooksPath .githooks` (hooks live in `.githooks/` tracked in git)
-
-**Escalation Path:**
-When workers fail repeatedly on a directive (default: 2+ retries), the system auto-escalates to Cipher:
-1. Worker attempts are preserved in `workerAttempts[]` on the directive
-2. Directive transitions to `in_progress` with `escalatedAt` set
-3. Cipher gets direct takeover authority — commits with `Directive: <id>` and `[escalated]` tag
-4. King Kazuma is notified via `/notify`
-5. Manual escalation is also available from the dashboard ("Escalate to Cipher" button)
-6. The orchestrator can also trigger escalation via `escalate_to_cipher` action
 
 **Violations API:**
 - `GET /api/pipeline-violations` — list all violations
@@ -81,20 +81,13 @@ When workers fail repeatedly on a directive (default: 2+ retries), the system au
 
 ## Build Verification Requirements
 
-Workers MUST verify builds before marking directives as completed. The server **enforces** this — PATCH status=completed is rejected without recent successful verification.
+Cipher MUST verify before merging to main. The `POST /directives/:id/merge-and-deploy` endpoint runs verification automatically, but Cipher can also verify manually:
 
-**Verification checklist:**
-1. Frontend changes (native): CI build validated via syntax checks + app.json validation
-2. Frontend changes (JS-only): OTA export must succeed
-3. Backend changes: Syntax check (`node -c`) must pass on all modified JS files
-4. All changes: Verification result logged to activity_log for audit trail
-
-**How to verify:**
 ```bash
 curl -s -X POST http://localhost:3333/directives/{directive_id}/verify -H 'Content-Type: application/json' -d '{}'
 ```
 
-Verification must return `"success": true`. Result is valid for 15 minutes. Only mark completed if verification succeeds.
+Verification must return `"success": true`. The merge-and-deploy endpoint will reject the merge if verification fails.
 
 ## Network Architecture
 
@@ -172,7 +165,7 @@ Naming convention: `ozzu-{type}-{location}-{number}`
 - **OTA updates** (JS-only changes — **ANDROID ONLY**):
   - `./scripts/ota-deploy.sh --restart` exports bundles and restarts Android devices
   - **iOS DOES NOT receive OTA updates.** The iPhone never requests the OTA manifest. ALL iPhone changes (JS or native) require a full IPA build + sideload via `deploy-ios.sh`. Do NOT tell King Kazuma that OTA will update the iPhone — it will not.
-- **Smart deploy** (cipher-watcher.sh — fully automated):
+- **Smart deploy** (triggered automatically after merge to main):
   - JS-only changes → OTA update to **Android devices only** (~30 seconds). iPhone requires native build.
   - Native changes → Android APK CI build + iOS IPA CI build triggered in parallel
   - iOS deploy runs in background alongside Android deploy
@@ -210,8 +203,8 @@ dev-01 has no DNS — all downloads must go through GCP VM and be SCPed over.
 
 ## Verification Commands by Change Type
 
-**Verification is BLOCKING — workers MUST run these checks before marking a directive as completed.**
-Skipping verification has broken CI builds. The pipeline also runs automated post-completion checks and will auto-revert to "blocked" if they fail.
+**Verification is BLOCKING — Cipher MUST run these checks before merging to main.**
+Skipping verification has broken CI builds. The merge-and-deploy endpoint also runs automated checks and will reject the merge if they fail.
 
 | Change Type | Verification Command | What It Checks |
 |-------------|---------------------|----------------|
@@ -224,7 +217,6 @@ Skipping verification has broken CI builds. The pipeline also runs automated pos
 | Any JS file | `node -c <file>` | Basic syntax check — catches most errors |
 
 **Failure handling:**
-- If verification fails, workers MUST use `"blocked"` status with `failureReason` explaining what failed
-- Workers should NOT mark as `"completed"` with "remaining manual steps" — that is `"blocked"`
-- The pipeline's post-completion hook runs `node -c` and `expo export` automatically and will revert to `"blocked"` if they fail
+- If verification fails, fix the issue on the branch and retry
+- If stuck, set directive to `blocked` with `failureReason` and tell King Kazuma
 - Verification results are logged to `activity_log` for debugging

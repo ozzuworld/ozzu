@@ -4055,6 +4055,310 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
+  // GET /cipher/context — assemble full Cipher context for CLAUDE.local.md
+  if (req.method === "GET" && pathname === "/cipher/context") {
+    try {
+      const [briefing, memory] = await Promise.all([
+        buildSituationBriefing("cipher"),
+        buildMemoryContext("cipher"),
+      ]);
+
+      // Recent pipeline activity
+      const directives = getDirectives();
+      const recentFinished = directives
+        .filter(d => ["completed", "failed", "deploy_failed", "blocked"].includes(d.status))
+        .sort((a, b) => (b.endedAt || b.createdAt || 0) - (a.endedAt || a.createdAt || 0))
+        .slice(0, 5);
+      let pipelineSection = "";
+      if (recentFinished.length > 0) {
+        pipelineSection = "\n## Recent Pipeline Activity\n" +
+          recentFinished.map(d => {
+            const date = d.endedAt ? new Date(d.endedAt).toLocaleDateString() : "unknown";
+            return `- [${d.status}] ${d.title} (${date})`;
+          }).join("\n");
+      }
+
+      // Include actual conversation turns from recent Cipher sessions
+      let recentTurnsSection = "";
+      try {
+        const conversations = await db.getConversationHistory({
+          persona: "cipher", limit: 80, conversationLimit: 3, contentTypes: null,
+        });
+        if (conversations && conversations.length > 0) {
+          const parts = [];
+          for (const c of conversations) {
+            const startDate = c.startedAt ? new Date(c.startedAt).toLocaleString() : "?";
+            let sesText = `### Session ${c.id} (${startDate})\n`;
+            if (c.summary && !c.summary.startsWith("CLI session:")) sesText += `Summary: ${c.summary}\n`;
+            const userTurns = (c.turns || []).filter(t => t.role === "user");
+            for (const t of userTurns.slice(0, 15)) {
+              const preview = t.content && t.content.length > 300 ? t.content.substring(0, 300) + "..." : t.content;
+              sesText += `- King Kazuma: ${preview}\n`;
+            }
+            parts.push(sesText);
+          }
+          if (parts.length > 0) {
+            recentTurnsSection = "\n## Recent Cipher Sessions (what King Kazuma said to you)\n" + parts.join("\n");
+          }
+        }
+      } catch (err) {
+        recentTurnsSection = "\n## Recent Cipher Sessions\n_Could not load conversation history._";
+      }
+
+      // Include recent June (voice) conversations — so Cipher knows what was discussed verbally
+      let juneTurnsSection = "";
+      try {
+        const juneConvos = await db.getConversationHistory({
+          persona: "june", limit: 40, conversationLimit: 3, contentTypes: null,
+        });
+        if (juneConvos && juneConvos.length > 0) {
+          const parts = [];
+          for (const c of juneConvos) {
+            const startDate = c.startedAt ? new Date(c.startedAt).toLocaleString() : "?";
+            let sesText = `### Voice session ${c.id} (${startDate})\n`;
+            if (c.summary) sesText += `Summary: ${c.summary}\n`;
+            const userTurns = (c.turns || []).filter(t => t.role === "user");
+            for (const t of userTurns.slice(0, 10)) {
+              const preview = t.content && t.content.length > 200 ? t.content.substring(0, 200) + "..." : t.content;
+              sesText += `- King Kazuma (voice): ${preview}\n`;
+            }
+            parts.push(sesText);
+          }
+          if (parts.length > 0) {
+            juneTurnsSection = "\n## Recent June Voice Sessions (what King Kazuma said to June)\n" + parts.join("\n");
+          }
+        }
+      } catch (err) { /* June history unavailable — not critical */ }
+
+      // Critical reminders
+      const decisionMemories = await getMemories("cipher", 50);
+      const critical = decisionMemories
+        .filter(m => m.category === "decision" || m.category === "project")
+        .map(m => `- ${m.fact}`);
+      let criticalSection = "\n## Critical Reminders\n" +
+        "- NEVER build web dashboards or websites — Ozzu is a React Native app, ALL UI lives in frontend/\n" +
+        "- NEVER bypass the directive pipeline\n" +
+        "- iPhone NEVER receives OTA updates — always requires native build + sideload\n" +
+        "- When King Kazuma says 'dashboard' he means the React Native app UI, NOT the bridge web page";
+      if (critical.length > 0) criticalSection += "\n" + critical.join("\n");
+
+      const timestamp = new Date().toISOString();
+      const markdown = [
+        `# Cipher Context — Auto-generated (do not edit)`,
+        `# Generated: ${timestamp}`,
+        ``,
+        `## You are Cipher`,
+        `You are Cipher, the autonomous dev agent for the ozzu project. You are NOT a generic Claude Code assistant.`,
+        `You have persistent memory and ongoing context from past sessions with King Kazuma.`,
+        ``,
+        `## Situation Briefing`,
+        briefing.trim(),
+        ``,
+        `## Your Memories`,
+        memory.trim(),
+        pipelineSection,
+        recentTurnsSection,
+        juneTurnsSection,
+        criticalSection,
+      ].join("\n");
+
+      res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
+      res.end(markdown);
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /cipher/session-save — save CLI session transcript to conversation DB
+  if (req.method === "POST" && pathname === "/cipher/session-save") {
+    try {
+      const body = await parseBody(req);
+      const { sessionId, turns } = body;
+
+      if (!Array.isArray(turns) || turns.length < 4) {
+        sendJSON(res, 200, { success: false, reason: "skipped — fewer than 4 turns" });
+        return;
+      }
+
+      // Summarize via Gemini Flash — cap transcript to avoid timeout
+      let summary = null;
+      if (GEMINI_API_KEY) {
+        const fullTranscript = turns
+          .map(t => `${t.role === "user" ? "King Kazuma" : "Cipher"}: ${t.content}`)
+          .join("\n");
+        const transcript = fullTranscript.length > 12000
+          ? fullTranscript.substring(0, 4000) + "\n\n[... middle truncated ...]\n\n" + fullTranscript.substring(fullTranscript.length - 6000)
+          : fullTranscript;
+        try {
+          const summaryController = new AbortController();
+          const summaryTimeout = setTimeout(() => summaryController.abort(), 25000);
+          const resp = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: summaryController.signal,
+              body: JSON.stringify({
+                contents: [{ parts: [{ text:
+                  `Summarize this CLI conversation between Cipher (Claude Code dev agent) and King Kazuma (the user/architect) in 3-5 sentences. ` +
+                  `Focus on: what was discussed, what decisions were made, what the user's preferences are, what was built or changed, and any unfinished work or issues. ` +
+                  `Include specific details (feature names, file names, design choices) — not vague generalities. ` +
+                  `This summary will be used to give Cipher persistent memory across sessions.\n\n${transcript}`
+                }] }],
+              }),
+            }
+          );
+          clearTimeout(summaryTimeout);
+          if (resp.ok) {
+            const data = await resp.json();
+            summary = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          } else {
+            log.memory.error("Gemini summary request failed:", resp.status, resp.statusText);
+          }
+        } catch (err) {
+          log.memory.error("Gemini summarization error:", err.message);
+        }
+      }
+
+      if (!summary) {
+        // Fallback: combine first user message + last user message for basic context
+        const userTurns = turns.filter(t => t.role === "user");
+        const first = userTurns[0]?.content?.substring(0, 150) || "no content";
+        const last = userTurns.length > 1 ? userTurns[userTurns.length - 1]?.content?.substring(0, 150) : "";
+        summary = `CLI session (${turns.length} turns): Started with: ${first}` + (last ? ` | Ended with: ${last}` : "");
+      }
+
+      // Store conversation with individual turns + summary
+      if (db.isConnected()) {
+        const convId = await db.createConversation("cipher");
+        if (convId) {
+          for (let i = 0; i < turns.length; i++) {
+            const t = turns[i];
+            await db.addConversationTurn(
+              convId, t.role === "user" ? "user" : "cipher",
+              t.content?.substring(0, 5000) || "", i, null, "text",
+              { source: "cli", sessionId }
+            ).catch(() => {});
+          }
+          await db.endConversation(convId, summary, turns.length).catch(() => {});
+        }
+      }
+      // Write-through to Redis
+      if (_redisConnected) {
+        const entry = JSON.stringify({ summary, timestamp: Date.now(), turns: turns.length });
+        await redis.lpush("cipher:summaries", entry);
+        await redis.ltrim("cipher:summaries", 0, 19);
+      }
+
+      log.memory.info(`Cipher CLI session saved (${turns.length} turns, session: ${sessionId || "unknown"})`);
+      sendJSON(res, 200, { success: true, summary });
+    } catch (err) {
+      log.memory.error("cipher session-save failed:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── Real-time Cipher live sync (CLI ↔ Voice) ──
+
+  // POST /cipher/live-push — CLI pushes a turn to the live context + notifies active voice session
+  if (req.method === "POST" && pathname === "/cipher/live-push") {
+    try {
+      const body = await parseBody(req);
+      const { source, role, content } = body;
+      if (!content || !source) {
+        sendJSON(res, 400, { error: "source and content required" });
+        return;
+      }
+      const entry = { source: source || "cli", role: role || "user", content: content.substring(0, 2000), timestamp: Date.now() };
+      // Store in Redis live feed
+      if (_redisConnected) {
+        await redis.lpush("cipher:live:turns", JSON.stringify(entry));
+        await redis.ltrim("cipher:live:turns", 0, 49); // keep last 50
+        await redis.expire("cipher:live:turns", 7200); // 2 hour TTL
+      }
+      // If a voice session is active, inject a concise context update
+      let voiceNotified = false;
+      if (source === "cli" && role === "user" && (geminiReady || cipherPipeline)) {
+        const shortContent = content.length > 300 ? content.substring(0, 300) + "..." : content;
+        sendNotification(`[SYSTEM — CLI Context] King Kazuma just said to CLI-Cipher: "${shortContent}"`);
+        voiceNotified = true;
+      }
+      sendJSON(res, 200, { ok: true, voiceNotified });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /cipher/live-feed — CLI fetches recent voice/live turns for context injection
+  if (req.method === "GET" && pathname === "/cipher/live-feed") {
+    try {
+      const since = parseInt(url.searchParams.get("since") || "0", 10);
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "20", 10), 50);
+      const sourceFilter = url.searchParams.get("source"); // "voice" or "cli" or null (all)
+
+      // Combine: in-memory voice transcript + Redis live turns (CLI pushes)
+      let turns = [];
+
+      // Voice transcript (in-memory, real-time)
+      if (!sourceFilter || sourceFilter === "voice") {
+        const voiceTurns = conversationTranscript
+          .filter(t => t.timestamp && t.timestamp > since)
+          .map(t => ({
+            source: "voice",
+            role: t.role === "model" ? currentPersona : "user",
+            content: t.text,
+            timestamp: t.timestamp,
+          }));
+        turns.push(...voiceTurns);
+      }
+
+      // Redis live turns (CLI pushes + voice pushes)
+      if (_redisConnected) {
+        try {
+          const raw = await redis.lrange("cipher:live:turns", 0, 49);
+          for (const r of raw) {
+            const entry = JSON.parse(r);
+            if (entry.timestamp > since && (!sourceFilter || entry.source === sourceFilter)) {
+              turns.push(entry);
+            }
+          }
+        } catch (err) { /* Redis read failure — non-critical */ }
+      }
+
+      // Sort by timestamp, newest first, apply limit
+      turns.sort((a, b) => b.timestamp - a.timestamp);
+      turns = turns.slice(0, limit);
+
+      // If requested as text format (for hook injection)
+      const format = url.searchParams.get("format");
+      if (format === "text") {
+        if (turns.length === 0) {
+          res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
+          res.end(""); // empty = no voice context
+          return;
+        }
+        const lines = turns.reverse().map(t => {
+          const ago = Math.round((Date.now() - t.timestamp) / 60000);
+          const agoStr = ago < 1 ? "just now" : ago < 60 ? `${ago}m ago` : `${Math.round(ago / 60)}h ago`;
+          const who = t.role === "user" ? "King Kazuma" : "Cipher";
+          const preview = t.content.length > 200 ? t.content.substring(0, 200) + "..." : t.content;
+          return `[${agoStr}] ${who} (${t.source}): ${preview}`;
+        });
+        res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
+        res.end(lines.join("\n"));
+        return;
+      }
+
+      sendJSON(res, 200, { turns, persona: currentPersona, voiceActive: !!(geminiReady || cipherPipeline) });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
   // GET /entities/stats — entity snapshot analytics for HA integration monitoring
   if (req.method === "GET" && pathname === "/entities/stats") {
     try {
@@ -5593,9 +5897,12 @@ async function haFetch(urlPath, options = {}) {
 }
 
 async function buildMemoryContext(persona) {
-  const [facts, summaries] = await Promise.all([
+  const otherPersona = persona === "june" ? "cipher" : "june";
+  const otherName = persona === "june" ? "Cipher" : "June";
+  const [facts, summaries, crossSummaries] = await Promise.all([
     getMemories(persona, 30),
     getRecentSummaries(persona, 5),
+    getRecentSummaries(otherPersona, 3),
   ]);
   let ctx = "";
   if (facts.length > 0) {
@@ -5615,6 +5922,14 @@ async function buildMemoryContext(persona) {
   if (summaries.length > 0) {
     ctx += "\n\nRECENT CONVERSATION HISTORY:\n";
     ctx += summaries.map(s => {
+      const ts = s.started_at || s.timestamp;
+      return `[${new Date(ts).toLocaleDateString()}] ${s.summary}`;
+    }).join("\n\n");
+  }
+  // Cross-persona: what King Kazuma discussed with the other AI
+  if (crossSummaries.length > 0) {
+    ctx += `\n\nWHAT KING KAZUMA DISCUSSED WITH ${otherName.toUpperCase()} RECENTLY:\n`;
+    ctx += crossSummaries.map(s => {
       const ts = s.started_at || s.timestamp;
       return `[${new Date(ts).toLocaleDateString()}] ${s.summary}`;
     }).join("\n\n");
@@ -7108,6 +7423,11 @@ function handleGeminiMessage(msg) {
     if (currentConversationId) {
       db.addConversationTurn(currentConversationId, "user", text, turnIndex++, null, 'text', { source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
     }
+    // Push to Redis live feed for CLI sync
+    if (_redisConnected && text.length > 3) {
+      redis.lpush("cipher:live:turns", JSON.stringify({ source: "voice", role: "user", content: text.substring(0, 2000), timestamp: Date.now() })).catch(() => {});
+      redis.ltrim("cipher:live:turns", 0, 49).catch(() => {});
+    }
 
     // Check for wake word — strip spaces so fragmented "Ju" + "ne" still matches
     // Also match common Latin accent transcriptions: juno, hune, youne, dune, etc.
@@ -7155,6 +7475,11 @@ function handleGeminiMessage(msg) {
     // Log turn to PG
     if (currentConversationId) {
       db.addConversationTurn(currentConversationId, currentPersona, sc.outputTranscription.text, turnIndex++, null, 'text', { source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
+    }
+    // Push to Redis live feed for CLI sync
+    if (_redisConnected && sc.outputTranscription.text.length > 3) {
+      redis.lpush("cipher:live:turns", JSON.stringify({ source: "voice", role: currentPersona, content: sc.outputTranscription.text.substring(0, 2000), timestamp: Date.now() })).catch(() => {});
+      redis.ltrim("cipher:live:turns", 0, 49).catch(() => {});
     }
     if (isEngaged()) {
       broadcastToAll({ type: "transcript", text: sc.outputTranscription.text });
@@ -7775,9 +8100,14 @@ async function startCipherPipeline() {
     extendEngagement();
     broadcastToAll({ type: "inputTranscript", text });
     // Log to conversation transcript
-    conversationTranscript.push({ role: "user", text });
+    conversationTranscript.push({ role: "user", text, timestamp: Date.now() });
     if (currentConversationId) {
       db.addConversationTurn(currentConversationId, "user", text, turnIndex++, null, 'text', { source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
+    }
+    // Push to Redis live feed for CLI sync
+    if (_redisConnected && text.length > 3) {
+      redis.lpush("cipher:live:turns", JSON.stringify({ source: "voice", role: "user", content: text.substring(0, 2000), timestamp: Date.now() })).catch(() => {});
+      redis.ltrim("cipher:live:turns", 0, 49).catch(() => {});
     }
   });
 
@@ -7787,6 +8117,11 @@ async function startCipherPipeline() {
     pushTranscript({ role: "cipher", text });
     if (currentConversationId) {
       db.addConversationTurn(currentConversationId, "cipher", text, turnIndex++, null, 'text', { source: 'voice' }).catch(err => log.pg.warn("turn log:", err.message));
+    }
+    // Push to Redis live feed for CLI sync
+    if (_redisConnected && text.length > 3) {
+      redis.lpush("cipher:live:turns", JSON.stringify({ source: "voice", role: "cipher", content: text.substring(0, 2000), timestamp: Date.now() })).catch(() => {});
+      redis.ltrim("cipher:live:turns", 0, 49).catch(() => {});
     }
   });
 

@@ -27,6 +27,9 @@ backend/config/home-assistant.log.*
 # Root config (HA data outside backend/)
 config/
 
+# Auto-generated Cipher context (local-only)
+CLAUDE.local.md
+
 # OS
 .DS_Store
 Thumbs.db

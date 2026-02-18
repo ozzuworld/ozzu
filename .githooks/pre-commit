@@ -7,8 +7,8 @@ set -e
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-# Agent worktree branches are always allowed
-if [[ "$BRANCH" == agent/* ]]; then
+# Cipher-direct and agent branches are always allowed
+if [[ "$BRANCH" == cipher/* ]] || [[ "$BRANCH" == agent/* ]]; then
   exit 0
 fi
 
@@ -54,7 +54,7 @@ if [[ -z "$COMMIT_MSG_FILE" || ! -f "$COMMIT_MSG_FILE" ]]; then
   echo ""
   echo "  To fix:"
   echo "    1. Create a directive via POST /directives or the dashboard"
-  echo "    2. Let the pipeline handle implementation on an agent/* branch"
+  echo "    2. Work on a cipher/* or agent/* branch, then merge via merge-and-deploy"
   echo ""
   echo "  Exceptions (add to commit message via commit-msg hook):"
   echo "    [pipeline-fix] — infrastructure fixes when pipeline is broken"
