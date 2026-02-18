@@ -47,6 +47,7 @@ has_native_changes() {
 
 # Deploy via OTA (JS-only changes — seconds, not minutes)
 deploy_ota() {
+  local DIRECTIVE_ID="$1"
   log "JS-only changes detected — deploying via OTA..."
   curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
     -d '{"message":"JS-only changes — deploying instantly via OTA update..."}' > /dev/null
@@ -67,6 +68,7 @@ deploy_ota() {
 
 # Deploy via full APK build (native changes — ~10 min CI build)
 deploy_apk() {
+  local DIRECTIVE_ID="$1"
   log "Native changes detected — waiting for CI build..."
   curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
     -d '{"message":"Native changes detected — a full APK rebuild is needed. CI build started, this will take about 10 minutes."}' > /dev/null
@@ -74,12 +76,19 @@ deploy_apk() {
   # Give GitHub Actions a moment to register the push
   sleep 15
 
-  # Get the latest run ID
+  # Get the latest run ID (filter by workflow to avoid picking up iOS runs)
   local RUN_ID
-  RUN_ID=$(cd "$WORKDIR" && gh run list --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+  RUN_ID=$(cd "$WORKDIR" && gh run list --workflow=build-android.yml --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
   if [ -z "$RUN_ID" ]; then
     log "Could not find CI run, skipping deploy"
     return
+  fi
+
+  # Register build run on the directive
+  if [ -n "$DIRECTIVE_ID" ] && [ -n "$RUN_ID" ]; then
+    curl -sf -X POST "$BRIDGE/directives/$DIRECTIVE_ID/build-run" \
+      -H 'Content-Type: application/json' \
+      -d "{\"platform\":\"android\",\"runId\":$RUN_ID}" > /dev/null 2>&1
   fi
 
   log "Watching CI run $RUN_ID..."
@@ -125,6 +134,7 @@ deploy_apk() {
 
 # Deploy iOS IPA (triggered separately from Android since it's a manual workflow)
 deploy_ios() {
+  local DIRECTIVE_ID="$1"
   log "Triggering iOS CI build..."
   curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
     -d '{"message":"iOS build triggered. This takes ~15 minutes (macOS runner). Will install on iPhone when done."}' > /dev/null
@@ -144,6 +154,14 @@ deploy_ios() {
   # Get the run ID for the iOS build we just triggered
   local IOS_RUN_ID
   IOS_RUN_ID=$(gh run list --workflow=build-ios.yml -R ozzuworld/ozzu --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+
+  # Register build run on the directive
+  if [ -n "$DIRECTIVE_ID" ] && [ -n "$IOS_RUN_ID" ]; then
+    curl -sf -X POST "$BRIDGE/directives/$DIRECTIVE_ID/build-run" \
+      -H 'Content-Type: application/json' \
+      -d "{\"platform\":\"ios\",\"runId\":$IOS_RUN_ID}" > /dev/null 2>&1
+  fi
+
   if [ -z "$IOS_RUN_ID" ]; then
     log "Could not find iOS CI run"
     curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
@@ -207,12 +225,13 @@ deploy_ios() {
 
 # Smart deploy: OTA for JS-only, APK+IPA for native changes
 smart_deploy() {
+  local DIRECTIVE_ID="$1"
   if has_native_changes; then
-    deploy_apk
+    deploy_apk "$DIRECTIVE_ID"
     # Also trigger iOS build in background (runs on separate macOS runner)
-    deploy_ios &
+    deploy_ios "$DIRECTIVE_ID" &
   else
-    deploy_ota
+    deploy_ota "$DIRECTIVE_ID"
   fi
 }
 
@@ -392,7 +411,7 @@ For escalations, post to $BRIDGE/notify with a clear description of what you nee
         fi
 
         # Wait for CI and auto-deploy
-        smart_deploy
+        smart_deploy "$IMPL_ID"
       fi
     fi
   fi

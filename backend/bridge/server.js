@@ -868,6 +868,50 @@ async function initStorage() {
     scanOrphanCommits().catch(err => log.directive.error("orphan commit scanner (startup):", err.message));
   }, 2 * 60 * 1000);
 
+  // ── Background build status updater — every 60 seconds ──
+  _intervals.push(setInterval(async () => {
+    try {
+      const { execFile } = require("child_process");
+      const { promisify } = require("util");
+      const execFileAsync = promisify(execFile);
+      const directives = getDirectives();
+      const TERMINAL_STATUSES = new Set(["completed"]);
+      let updated = false;
+
+      for (const directive of directives) {
+        if (!Array.isArray(directive.buildRuns) || directive.buildRuns.length === 0) continue;
+        for (const run of directive.buildRuns) {
+          if (TERMINAL_STATUSES.has(run.status) && run.conclusion) continue;
+          try {
+            const result = await execFileAsync("gh", ["run", "view", String(run.runId), "--json", "status,conclusion,url", "-R", "ozzuworld/ozzu"], { timeout: 10000 });
+            const ghData = JSON.parse(result.stdout);
+            const prevStatus = run.status;
+            run.status = ghData.status || run.status;
+            run.conclusion = ghData.conclusion || null;
+            if (ghData.url) run.url = ghData.url;
+            run.lastChecked = Date.now();
+            updated = true;
+
+            // Log completion to activity_log
+            if (prevStatus !== "completed" && run.status === "completed") {
+              if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+              directive.activity_log.push({ timestamp: Date.now(), type: "ci_build", actor: "system", message: `CI build completed: ${run.platform} — ${run.conclusion}` });
+              // If build failed, mark directive as deploy_failed
+              if (run.conclusion === "failure" && ["in_progress", "completed"].includes(directive.status)) {
+                directive.status = "deploy_failed";
+                directive.failureReason = `CI build failed: ${run.platform} (run #${run.runId})`;
+                directive.activity_log.push({ timestamp: Date.now(), type: "status_change", actor: "system", message: `Status changed to deploy_failed: CI ${run.platform} build failed` });
+              }
+            }
+          } catch (err) {
+            // Silently ignore per-run errors in background updater
+          }
+        }
+      }
+      if (updated) saveDirectives(directives);
+    } catch (err) { log.directive.error("build status updater:", err.message); }
+  }, 60 * 1000));
+
   // ── Stale branch cleanup — every 60 minutes ──
   _intervals.push(setInterval(() => {
     try {
@@ -1665,6 +1709,7 @@ async function handleRequest(req, res) {
     if (data.retryCount !== undefined) directive.retryCount = data.retryCount;
     if (data.mergeBranch !== undefined) directive.mergeBranch = data.mergeBranch;
     if (data.priority !== undefined && [1, 2, 3, 4].includes(data.priority)) directive.priority = data.priority;
+    if (data.buildRuns !== undefined) directive.buildRuns = data.buildRuns;
     directive.updatedAt = Date.now();
     directive.lastActivity = Date.now(); // Track when agent last touched this directive
 
@@ -1947,6 +1992,81 @@ async function handleRequest(req, res) {
     directive.lastActivity = entry.timestamp;
     saveDirectives(directives, directive, null, data.actor || "Cipher");
     sendJSON(res, 200, { ok: true });
+    return;
+  }
+
+  // POST /directives/:id/build-run — Register a CI build run on a directive
+  const buildRunMatch = pathname.match(/^\/directives\/([^/]+)\/build-run$/);
+  if (req.method === "POST" && buildRunMatch) {
+    const id = buildRunMatch[1];
+    const data = await parseBody(req);
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    if (!data.platform || !data.runId) {
+      sendJSON(res, 400, { error: "platform and runId are required" });
+      return;
+    }
+    if (!Array.isArray(directive.buildRuns)) directive.buildRuns = [];
+    directive.buildRuns.push({
+      platform: data.platform,
+      runId: data.runId,
+      triggeredAt: Date.now(),
+      status: "queued",
+      conclusion: null,
+      url: `https://github.com/ozzuworld/ozzu/actions/runs/${data.runId}`,
+      lastChecked: null,
+    });
+    if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+    directive.activity_log.push({ timestamp: Date.now(), type: "ci_build", actor: "system", message: `CI build triggered: ${data.platform} (run #${data.runId})` });
+    directive.updatedAt = Date.now();
+    saveDirectives(directives, directive);
+    sendJSON(res, 200, { ok: true, buildRuns: directive.buildRuns });
+    return;
+  }
+
+  // GET /directives/:id/build-status — Get fresh build status for a directive's CI runs
+  const directiveBuildStatusMatch = pathname.match(/^\/directives\/([^/]+)\/build-status$/);
+  if (req.method === "GET" && directiveBuildStatusMatch) {
+    const id = directiveBuildStatusMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    if (!Array.isArray(directive.buildRuns) || directive.buildRuns.length === 0) {
+      sendJSON(res, 200, { buildRuns: [] });
+      return;
+    }
+
+    const { execFile } = require("child_process");
+    const { promisify } = require("util");
+    const execFileAsync = promisify(execFile);
+    const TERMINAL_STATUSES = new Set(["completed"]);
+
+    for (const run of directive.buildRuns) {
+      // Skip terminal runs or recently checked runs (within 30s)
+      if (TERMINAL_STATUSES.has(run.status) && run.conclusion) continue;
+      if (run.lastChecked && (Date.now() - run.lastChecked) < 30000) continue;
+
+      try {
+        const result = await execFileAsync("gh", ["run", "view", String(run.runId), "--json", "status,conclusion,url", "-R", "ozzuworld/ozzu"], { timeout: 10000 });
+        const ghData = JSON.parse(result.stdout);
+        run.status = ghData.status || run.status;
+        run.conclusion = ghData.conclusion || null;
+        if (ghData.url) run.url = ghData.url;
+        run.lastChecked = Date.now();
+      } catch (err) {
+        log.bridge.warn(`[build-status] Failed to fetch run ${run.runId}: ${err.message}`);
+        run.lastChecked = Date.now();
+      }
+    }
+    saveDirectives(directives, directive);
+    sendJSON(res, 200, { buildRuns: directive.buildRuns });
     return;
   }
 
@@ -2731,6 +2851,22 @@ async function handleRequest(req, res) {
       actionsHtml += ` <button class="card-btn btn-comment" onclick="toggleCommentInput('${eid}')">Comment</button>`;
       actionsHtml += ` <button class="card-btn btn-log" onclick="toggleActivityLog('${eid}')">Log</button>`;
 
+      // Build status badges for this directive
+      let buildStatusHtml = "";
+      if (Array.isArray(d.buildRuns) && d.buildRuns.length > 0) {
+        const badges = d.buildRuns.map(run => {
+          const isActive = run.status === "in_progress" || run.status === "queued";
+          const succeeded = run.status === "completed" && run.conclusion === "success";
+          const failed = run.status === "completed" && (run.conclusion === "failure" || run.conclusion === "cancelled");
+          const badgeColor = isActive ? "#3b82f6" : succeeded ? "#10b981" : failed ? "#ef4444" : "#6b7280";
+          const label = run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : escapeHtml(run.platform);
+          const statusText = isActive ? (run.status === "in_progress" ? "building" : "queued") : run.conclusion || run.status;
+          const dot = isActive ? "&#9679;" : succeeded ? "&#10003;" : failed ? "&#10007;" : "&#9679;";
+          return `<a href="${escapeHtml(run.url)}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:${badgeColor}18;border:1px solid ${badgeColor};color:${badgeColor};font-size:11px;font-weight:bold;text-decoration:none;" title="Run #${run.runId}">${dot} ${label}: ${escapeHtml(statusText)}</a>`;
+        }).join(" ");
+        buildStatusHtml = `<div class="card-build-status" data-directive-id="${escapeHtml(d.id)}" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">${badges}</div>`;
+      }
+
       return `<div class="directive-card" data-status="${escapeHtml(d.status)}" data-title="${escapeHtml((d.title || d.id).toLowerCase())}" data-id="${escapeHtml(d.id)}" style="border-left:4px solid ${color};">
         <div class="card-header">
           <div class="card-header-left">
@@ -2747,6 +2883,7 @@ async function handleRequest(req, res) {
           </div>
         </div>
         ${d.failureReason ? `<div class="card-failure">${escapeHtml(d.failureReason)}</div>` : ""}
+        ${buildStatusHtml}
         ${lastActivityHtml}
         ${depsHtml}
         ${inlineAuditHtml}
@@ -3648,6 +3785,39 @@ function fetchBuildStatus() {
 
 fetchBuildStatus();
 buildPollTimer = setInterval(fetchBuildStatus, buildPollInterval);
+
+// ── Per-directive build status polling ──
+var directiveBuildPollTimer = null;
+function pollDirectiveBuildStatus() {
+  var buildBadges = document.querySelectorAll(".card-build-status[data-directive-id]");
+  buildBadges.forEach(function(el) {
+    var dirId = el.getAttribute("data-directive-id");
+    if (!dirId) return;
+    // Only poll for directives with active (non-terminal) builds
+    var hasActive = el.innerHTML.indexOf("building") !== -1 || el.innerHTML.indexOf("queued") !== -1;
+    if (!hasActive) return;
+
+    fetch("/directives/" + dirId + "/build-status")
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.buildRuns || !data.buildRuns.length) return;
+        var html = "";
+        data.buildRuns.forEach(function(run) {
+          var isActive = run.status === "in_progress" || run.status === "queued";
+          var succeeded = run.status === "completed" && run.conclusion === "success";
+          var failed = run.status === "completed" && (run.conclusion === "failure" || run.conclusion === "cancelled");
+          var badgeColor = isActive ? "#3b82f6" : succeeded ? "#10b981" : failed ? "#ef4444" : "#6b7280";
+          var label = run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : escapeText(run.platform);
+          var statusText = isActive ? (run.status === "in_progress" ? "building" : "queued") : (run.conclusion || run.status);
+          var dot = isActive ? "&#9679;" : succeeded ? "&#10003;" : failed ? "&#10007;" : "&#9679;";
+          html += '<a href="' + escapeText(run.url) + '" target="_blank" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:' + badgeColor + '18;border:1px solid ' + badgeColor + ';color:' + badgeColor + ';font-size:11px;font-weight:bold;text-decoration:none;" title="Run #' + run.runId + '">' + dot + ' ' + label + ': ' + escapeText(statusText) + '</a> ';
+        });
+        el.innerHTML = html;
+      })
+      .catch(function() {});
+  });
+}
+directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
 </script>
 
 </body></html>`;

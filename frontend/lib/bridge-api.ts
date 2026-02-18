@@ -45,6 +45,7 @@ export interface Directive {
   startedAt?: number;
   completedAt?: number;
   duration?: number;
+  buildRuns?: Array<{ platform: string; runId: number; triggeredAt: number; status: string; conclusion: string | null; url: string; lastChecked: number | null }>;
   createdAt: number;
   updatedAt: number;
 }

@@ -191,10 +191,12 @@ function DirectiveCard({
   directive,
   isTabletLandscape,
   onAction,
+  buildStatus,
 }: {
   directive: Directive;
   isTabletLandscape: boolean;
   onAction: (action: string, id: string) => void;
+  buildStatus?: BuildStatus | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const statusColor = STATUS_COLORS[directive.status] || "#737373";
@@ -329,6 +331,35 @@ function DirectiveCard({
         </View>
       ) : null}
 
+      {/* Build status badges — always visible when present */}
+      {directive.buildRuns && directive.buildRuns.length > 0 ? (
+        <View style={{ flexDirection: "row", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          {directive.buildRuns.map((run, i) => {
+            const isRunActive = run.status === "in_progress" || run.status === "queued";
+            const succeeded = run.status === "completed" && run.conclusion === "success";
+            const failed = run.status === "completed" && (run.conclusion === "failure" || run.conclusion === "cancelled");
+            const badgeColor = isRunActive ? "#3B82F6" : succeeded ? "#10B981" : failed ? "#EF4444" : "#6B7280";
+            const label = run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : run.platform;
+            const statusText = isRunActive ? (run.status === "in_progress" ? "building" : "queued") : (run.conclusion || run.status);
+            return (
+              <Pressable key={i} onPress={() => run.url && Linking.openURL(run.url)}>
+                <View style={{
+                  flexDirection: "row", alignItems: "center", gap: 4,
+                  paddingHorizontal: 8, paddingVertical: 2,
+                  borderRadius: 4, borderWidth: 1, borderColor: badgeColor,
+                  backgroundColor: badgeColor + "18",
+                }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: badgeColor }} />
+                  <Text style={{ color: badgeColor, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                    {label}: {statusText}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
       {/* Latest activity — always visible for active */}
       {isActive && actLog.length > 0 ? (
         <Text
@@ -343,6 +374,55 @@ function DirectiveCard({
         >
           {actLog[actLog.length - 1].message}
         </Text>
+      ) : null}
+
+      {/* Per-directive build runs */}
+      {directive.buildRuns && directive.buildRuns.length > 0 ? (
+        <View style={{ flexDirection: "row", gap: 6, marginTop: 6, marginLeft: 16, flexWrap: "wrap" }}>
+          {directive.buildRuns.map((br, i) => {
+            // Enrich from live buildStatus if available
+            let liveStatus = br.conclusion || br.status || "pending";
+            if (buildStatus) {
+              const allRuns = [...(buildStatus.android || []), ...(buildStatus.ios || [])];
+              const match = allRuns.find((r) => r.databaseId === br.runId);
+              if (match) liveStatus = match.conclusion || match.status || liveStatus;
+            }
+            const dotColor = liveStatus === "success" ? "#22C55E"
+              : liveStatus === "failure" || liveStatus === "cancelled" ? "#EF4444"
+              : liveStatus === "in_progress" ? "#3B82F6"
+              : liveStatus === "queued" ? "#F59E0B"
+              : "#6B7280";
+            const runUrl = br.runId ? `https://github.com/ozzuworld/ozzu/actions/runs/${br.runId}` : null;
+            return (
+              <Pressable
+                key={`${br.platform}-${br.runId}-${i}`}
+                onPress={() => runUrl && Linking.openURL(runUrl)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 4,
+                  paddingHorizontal: 7,
+                  paddingVertical: 2,
+                  borderRadius: 4,
+                  backgroundColor: `${dotColor}20`,
+                  borderWidth: 1,
+                  borderColor: `${dotColor}40`,
+                }}
+              >
+                <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: dotColor }} />
+                <Text style={{ color: "#A3A3A3", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>
+                  {br.platform.toUpperCase()}
+                </Text>
+                <Text style={{ color: dotColor, fontSize: 9, fontFamily: "monospace" }}>
+                  {liveStatus}
+                </Text>
+                <Text style={{ color: "#525252", fontSize: 8, fontFamily: "monospace" }}>
+                  {relativeTime(br.triggeredAt)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       ) : null}
 
       {/* Action buttons — shown when expanded to avoid blocking tap-to-expand */}
@@ -463,6 +543,51 @@ function DirectiveCard({
                   {directive.plan}
                 </Text>
               </ScrollView>
+            </View>
+          ) : null}
+
+          {/* Build History */}
+          {directive.buildRuns && directive.buildRuns.length > 0 ? (
+            <View style={{ marginBottom: 10 }}>
+              <Text
+                style={{
+                  color: "#06B6D4",
+                  fontSize: 10,
+                  fontFamily: "monospace",
+                  fontWeight: "bold",
+                  letterSpacing: 1,
+                  marginBottom: 4,
+                }}
+              >
+                CI BUILDS
+              </Text>
+              {directive.buildRuns.map((run, i) => {
+                const isRunActive = run.status === "in_progress" || run.status === "queued";
+                const succeeded = run.status === "completed" && run.conclusion === "success";
+                const failed = run.status === "completed" && (run.conclusion === "failure" || run.conclusion === "cancelled");
+                const color = isRunActive ? "#3B82F6" : succeeded ? "#10B981" : failed ? "#EF4444" : "#6B7280";
+                return (
+                  <Pressable key={i} onPress={() => run.url && Linking.openURL(run.url)}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 8, marginBottom: 4 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+                      <Text style={{ color: "#A3A3A3", fontSize: 11, fontFamily: "monospace" }}>
+                        {run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : run.platform}
+                      </Text>
+                      <Text style={{ color, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                        {isRunActive ? (run.status === "in_progress" ? "building" : "queued") : (run.conclusion || run.status)}
+                      </Text>
+                      <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
+                        Run #{run.runId}
+                      </Text>
+                      {run.triggeredAt ? (
+                        <Text style={{ color: "#3A3A3A", fontSize: 9, fontFamily: "monospace" }}>
+                          {relativeTime(run.triggeredAt)}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
           ) : null}
 
@@ -651,17 +776,20 @@ export default function DirectivesScreen() {
     }, [loadData])
   );
 
-  // Adaptive polling: 10s when builds are active, 15s otherwise
+  // Adaptive polling: 10s when builds are active (global or per-directive), 15s otherwise
   useEffect(() => {
-    const hasActive = buildStatus &&
+    const hasGlobalActive = buildStatus &&
       ([...(buildStatus.android || []), ...(buildStatus.ios || [])].some(r => r.status === "in_progress" || r.status === "queued"));
-    const interval = hasActive ? 10000 : 15000;
+    const hasDirectiveActive = directives.some(d =>
+      d.buildRuns?.some(run => run.status === "in_progress" || run.status === "queued")
+    );
+    const interval = (hasGlobalActive || hasDirectiveActive) ? 10000 : 15000;
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     pollIntervalRef.current = setInterval(loadData, interval);
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
-  }, [buildStatus, loadData]);
+  }, [buildStatus, directives, loadData]);
 
   // Action handler
   const handleAction = useCallback(
@@ -1086,12 +1214,12 @@ export default function DirectivesScreen() {
         ) : isTabletLandscape ? (
           sorted.map((d) => (
             <View key={d.id} style={{ width: "48%", marginBottom: 2 }}>
-              <DirectiveCard directive={d} isTabletLandscape={false} onAction={handleAction} />
+              <DirectiveCard directive={d} isTabletLandscape={false} onAction={handleAction} buildStatus={buildStatus} />
             </View>
           ))
         ) : (
           sorted.map((d) => (
-            <DirectiveCard key={d.id} directive={d} isTabletLandscape={false} onAction={handleAction} />
+            <DirectiveCard key={d.id} directive={d} isTabletLandscape={false} onAction={handleAction} buildStatus={buildStatus} />
           ))
         )}
       </ScrollView>
