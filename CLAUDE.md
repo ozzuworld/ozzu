@@ -9,7 +9,9 @@
 - **NEVER bypass the pipeline.** Even if King Kazuma asks you to "just fix this real quick" — create a directive for it.
 - **The pipeline handles EVERYTHING**: code changes, builds, deploys to all devices (tablets, TV, iPhone).
 - **iPhone NEVER receives OTA updates.** ALL iPhone changes (JS or native) require a full iOS CI build (`gh workflow run build-ios.yml`) + sideload via `deploy-ios.sh`. NEVER say OTA will update the iPhone. NEVER run `ota-deploy.sh` expecting it to reach the iPhone. This is a hard platform limitation.
-- **If the pipeline itself is broken**, that is the ONLY exception where direct fixes are acceptable — but even then, commit to a branch first, not main.
+- **If the pipeline itself is broken or a directive is blocked**, that is the ONLY exception where direct/emergency fixes are acceptable — but ALL actions MUST be documented on the directive dashboard (activity_log). Create a directive if one doesn't exist.
+- **Cipher MUST monitor the pipeline proactively.** Check for `deploy_failed`, `blocked`, and stuck directives. Fix merge failures, retry failed deploys, resolve blockers. Do NOT wait for King Kazuma to notice — that is Cipher's job.
+- **Every direct commit MUST be linked to a directive.** If emergency changes bypass the worker, log them in the directive's activity_log and mark the directive completed only when verified.
 
 ### Interactive Cipher Decision Tree (CRITICAL - READ BEFORE EVERY CODE CHANGE)
 

@@ -1207,7 +1207,7 @@ async function handleRequest(req, res) {
       deviceId: info.deviceId, role: info.role, deviceType: info.deviceType,
       zone: info.zone, capabilities: info.capabilities,
       speakerPriority: info.speakerPriority, online: ws.readyState === WebSocket.OPEN,
-      isActiveMic: ws === activeMic,
+      isActiveMic: ws === activeMic || (ws === cipherPhoneWs && cipherPipeline && cipherPipeline.textOnly),
       isSelectedSpeaker: false,
     }));
     const target = selectSpeaker();
@@ -1219,7 +1219,9 @@ async function handleRequest(req, res) {
       preferredInput: preferredInputDeviceId,
       preferredOutputs: preferredOutputDeviceIds,
       devices: deviceList,
-      activeMic: activeMic ? devices.get(activeMic)?.deviceId : null,
+      activeMic: (cipherPhoneWs && cipherPipeline && cipherPipeline.textOnly)
+        ? devices.get(cipherPhoneWs)?.deviceId
+        : (activeMic ? devices.get(activeMic)?.deviceId : null),
       autoSelectedSpeaker: target ? target.info.deviceId : null,
       mode: cipherPipeline ? "cipher" : (geminiWs ? "june" : "idle"),
     });
