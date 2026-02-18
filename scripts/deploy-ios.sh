@@ -23,11 +23,15 @@ ANISETTE_URL="http://10.8.0.1:6969"  # Anisette runs on GCP VM, reachable via VP
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="$(dirname "$SCRIPT_DIR")"
 # Try the main repo .env first (decrypted on GCP VM), then worktree copy
-if [ -f "/home/gcp/ozzu/backend/.env" ]; then
-  source "/home/gcp/ozzu/backend/.env"
-elif [ -f "$WORKDIR/backend/.env" ]; then
-  source "$WORKDIR/backend/.env"
-fi
+# Skip if file is git-crypt encrypted (starts with \0GITCRYPT)
+for _envfile in "/home/gcp/ozzu/backend/.env" "$WORKDIR/backend/.env"; do
+  if [ -f "$_envfile" ] && head -c 9 "$_envfile" 2>/dev/null | grep -q "GITCRYPT"; then
+    continue  # encrypted, skip
+  elif [ -f "$_envfile" ]; then
+    source "$_envfile" 2>/dev/null || true
+    break
+  fi
+done
 
 APPLE_ID="${APPLE_ID:-eng.ozzu@icloud.com}"
 APPLE_PASSWORD="${APPLE_PASSWORD:-}"
