@@ -4590,10 +4590,13 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
               }
             } else {
               errors++;
-              // If rate limited, wait longer and retry once
               if (resp.status === 429) {
-                log.memory.info("Backfill: rate limited, waiting 30s...");
-                await new Promise(r => setTimeout(r, 30000));
+                const errBody = await resp.text().catch(() => "");
+                log.memory.info(`Backfill: rate limited (429), waiting 60s... ${errBody.substring(0, 200)}`);
+                await new Promise(r => setTimeout(r, 60000));
+              } else {
+                const errBody = await resp.text().catch(() => "");
+                log.memory.error(`Backfill: Gemini error ${resp.status}: ${errBody.substring(0, 200)}`);
               }
             }
           } catch (err) {
