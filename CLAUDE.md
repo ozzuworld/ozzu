@@ -8,6 +8,7 @@
 - **NEVER manually trigger builds.** smartDeploy handles CI builds (Android + iOS) and deployment automatically.
 - **NEVER bypass the pipeline.** Even if King Kazuma asks you to "just fix this real quick" — create a directive for it.
 - **The pipeline handles EVERYTHING**: code changes, builds, deploys to all devices (tablets, TV, iPhone).
+- **iPhone NEVER receives OTA updates.** ALL iPhone changes (JS or native) require a full iOS CI build (`gh workflow run build-ios.yml`) + sideload via `deploy-ios.sh`. NEVER say OTA will update the iPhone. NEVER run `ota-deploy.sh` expecting it to reach the iPhone. This is a hard platform limitation.
 - **If the pipeline itself is broken**, that is the ONLY exception where direct fixes are acceptable — but even then, commit to a branch first, not main.
 
 ### Interactive Cipher Decision Tree (CRITICAL - READ BEFORE EVERY CODE CHANGE)
@@ -166,12 +167,11 @@ Naming convention: `ozzu-{type}-{location}-{number}`
 - **Local build** (only if needed — uses server CPU):
   1. `cd frontend/android && ./gradlew assembleDebug -x lint -x test -PreactNativeArchitectures=armeabi-v7a,arm64-v8a`
   2. `./scripts/deploy.sh --local`
-- **OTA updates** (JS-only changes — both platforms):
-  - `./scripts/ota-deploy.sh --restart` exports bundles for Android + iOS simultaneously
-  - `./scripts/publish-update.sh` also exports both platforms
-  - iOS app picks up OTA updates on next launch (no ADB restart equivalent)
+- **OTA updates** (JS-only changes — **ANDROID ONLY**):
+  - `./scripts/ota-deploy.sh --restart` exports bundles and restarts Android devices
+  - **iOS DOES NOT receive OTA updates.** The iPhone never requests the OTA manifest. ALL iPhone changes (JS or native) require a full IPA build + sideload via `deploy-ios.sh`. Do NOT tell King Kazuma that OTA will update the iPhone — it will not.
 - **Smart deploy** (cipher-watcher.sh — fully automated):
-  - JS-only changes → OTA update to all devices (both platforms, ~30 seconds)
+  - JS-only changes → OTA update to **Android devices only** (~30 seconds). iPhone requires native build.
   - Native changes → Android APK CI build + iOS IPA CI build triggered in parallel
   - iOS deploy runs in background alongside Android deploy
 - **Key details**:
