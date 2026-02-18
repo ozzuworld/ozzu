@@ -1403,13 +1403,19 @@ function spawnDetachedDeploy(platform, command) {
   const failMsg = platform === "ios"
     ? "iPhone update failed — check deploy log."
     : "Android update failed — check deploy log.";
+  const stagedMsg = "iPhone IPA built but dev-01 not available — IPA staged at /tmp/ozzu-ios-staged/ozzu.ipa. Connect iPhone to dev-01 and run: ./scripts/deploy-ios.sh --local /tmp/ozzu-ios-staged/ozzu.ipa";
 
   const script = `#!/bin/bash
 exec > "${logPath}" 2>&1
 echo "=== ${platform} deploy started at $(date -u) ==="
-if ${command}; then
+${command}
+EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
   echo "=== ${platform} deploy SUCCESS at $(date -u) ==="
   curl -s -X POST ${notifyUrl} -H 'Content-Type: application/json' -d '{"message":"${successMsg}"}' || true
+elif [ $EXIT_CODE -eq 2 ] && [ "${platform}" = "ios" ]; then
+  echo "=== ${platform} deploy STAGED at $(date -u) ==="
+  curl -s -X POST ${notifyUrl} -H 'Content-Type: application/json' -d '{"message":"${stagedMsg}"}' || true
 else
   echo "=== ${platform} deploy FAILED at $(date -u) ==="
   curl -s -X POST ${notifyUrl} -H 'Content-Type: application/json' -d '{"message":"${failMsg}"}' || true
@@ -1473,6 +1479,7 @@ function smartDeploy(directive) {
     // iOS IPA build + deploy via dev-01 — ALWAYS build iOS alongside Android
     // iPhone can't do OTA, so every frontend change needs a full rebuild to keep in sync
     // Spawn detached so it survives bridge restarts (iOS build takes 15-20 min)
+    // Uses --stage: if dev-01 is unreachable, IPA is saved for manual install later
     spawnDetachedDeploy("ios", [
       `cd ${WORKDIR}`,
       `gh workflow run build-ios.yml`,
@@ -1485,7 +1492,7 @@ function smartDeploy(directive) {
       `IPA_SIZE=$(stat -c%s /tmp/ozzu-ios-verify/ozzu.ipa 2>/dev/null || echo 0)`,
       `test "$IPA_SIZE" -gt 1000000 || { echo "ERROR: IPA too small ($IPA_SIZE bytes), likely corrupt"; exit 1; }`,
       `rm -rf /tmp/ozzu-ios-verify`,
-      `./scripts/deploy-ios.sh`,
+      `./scripts/deploy-ios.sh --stage`,
     ].join(" && "));
   } else {
     log("JS-only changes — deploying via OTA (Android) + CI build (iOS)");
@@ -1507,6 +1514,7 @@ function smartDeploy(directive) {
 
     // iOS: always needs a full rebuild (no OTA for sideloaded apps)
     // Spawn detached so it survives bridge restarts (iOS build takes 15-20 min)
+    // Uses --stage: if dev-01 is unreachable, IPA is saved for manual install later
     spawnDetachedDeploy("ios", [
       `cd ${WORKDIR}`,
       `gh workflow run build-ios.yml`,
@@ -1519,7 +1527,7 @@ function smartDeploy(directive) {
       `IPA_SIZE=$(stat -c%s /tmp/ozzu-ios-verify/ozzu.ipa 2>/dev/null || echo 0)`,
       `test "$IPA_SIZE" -gt 1000000 || { echo "ERROR: IPA too small ($IPA_SIZE bytes)"; exit 1; }`,
       `rm -rf /tmp/ozzu-ios-verify`,
-      `./scripts/deploy-ios.sh`,
+      `./scripts/deploy-ios.sh --stage`,
     ].join(" && "));
   }
 

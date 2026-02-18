@@ -3646,6 +3646,28 @@ document.getElementById("approval-modal").addEventListener("click", function(e) 
     return;
   }
 
+  // GET /health/dev01 — check dev-01 (iOS deploy server) health
+  // Returns SSH reachability, AltServer presence, iPhone USB connection
+  if (req.method === "GET" && pathname === "/health/dev01") {
+    const { execFile } = require("child_process");
+    const { promisify } = require("util");
+    const execFileAsync = promisify(execFile);
+    try {
+      const { stdout } = await execFileAsync("bash", [
+        `${WORKDIR}/scripts/deploy-ios.sh`, "--check",
+      ], { timeout: 15000, env: { ...process.env, PATH: process.env.PATH } });
+      // deploy-ios.sh --check outputs JSON on the last line
+      const lines = stdout.trim().split("\n");
+      const jsonLine = lines[lines.length - 1];
+      const health = JSON.parse(jsonLine);
+      const ready = health.ssh && health.altserver && health.iphone_usb;
+      sendJSON(res, ready ? 200 : 503, { ready, ...health });
+    } catch (err) {
+      sendJSON(res, 503, { ready: false, ssh: false, altserver: false, iphone_usb: false, error: err.message });
+    }
+    return;
+  }
+
   // GET /conversations/recent — last 10 conversation summaries across all personas
   if (req.method === "GET" && pathname === "/conversations/recent") {
     const limit = parseInt(url.searchParams.get("limit") || "10", 10);

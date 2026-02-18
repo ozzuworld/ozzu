@@ -182,13 +182,17 @@ deploy_ios() {
     curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
       -d '{"message":"iOS build passed and IPA verified. Installing on iPhone via AltServer..."}' > /dev/null
 
-    cd "$WORKDIR" && ./scripts/deploy-ios.sh >> "$LOGFILE" 2>&1
+    cd "$WORKDIR" && ./scripts/deploy-ios.sh --stage >> "$LOGFILE" 2>&1
     local DEPLOY_EXIT=$?
 
     if [ $DEPLOY_EXIT -eq 0 ]; then
       log "iOS deploy complete"
       curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
         -d '{"message":"iOS app deployed! The new version has been installed on iPhone."}' > /dev/null
+    elif [ $DEPLOY_EXIT -eq 2 ]; then
+      log "iOS deploy staged — dev-01 not available, IPA saved for later"
+      curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
+        -d '{"message":"iOS build succeeded but dev-01 is not available. IPA staged at /tmp/ozzu-ios-staged/ozzu.ipa — connect iPhone to dev-01 and run: ./scripts/deploy-ios.sh --local /tmp/ozzu-ios-staged/ozzu.ipa"}' > /dev/null
     else
       log "iOS deploy failed (exit=$DEPLOY_EXIT) — iPhone may not be connected to dev-01"
       curl -sf -X POST "$BRIDGE/notify" -H 'Content-Type: application/json' \
