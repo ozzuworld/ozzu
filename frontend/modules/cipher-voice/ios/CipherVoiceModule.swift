@@ -147,14 +147,22 @@ public class CipherVoiceModule: Module {
         self.recognitionRequest = request
 
         // Configure audio session for recording
+        // Deactivate first to reset any TTS-held session, then reconfigure for STT
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth])
         try session.setActive(true)
 
         // Set up audio engine
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let hwFormat = inputNode.outputFormat(forBus: 0)
+
+        // Guard against input node not ready (sampleRate 0 causes crash in installTap)
+        guard hwFormat.sampleRate > 0 else {
+            throw NSError(domain: "CipherVoice", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "Audio input not available (sampleRate=0)"])
+        }
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
@@ -227,12 +235,16 @@ public class CipherVoiceModule: Module {
 
         let utterance = AVSpeechUtterance(string: text)
 
-        // Try to use selected voice; fall back to system default
-        if let voice = AVSpeechSynthesisVoice(identifier: selectedVoiceId) {
-            utterance.voice = voice
-        } else if let fallback = AVSpeechSynthesisVoice(language: "en-US") {
-            utterance.voice = fallback
-        }
+        // Voice fallback chain: selected → Evan premium → Aaron enhanced → Aaron compact → system default
+        let fallbackIds = [
+            selectedVoiceId,
+            "com.apple.voice.premium.en-US.Evan",
+            "com.apple.voice.enhanced.en-US.Aaron",
+            "com.apple.voice.compact.en-US.Aaron"
+        ]
+        utterance.voice = fallbackIds.lazy
+            .compactMap { AVSpeechSynthesisVoice(identifier: $0) }
+            .first ?? AVSpeechSynthesisVoice(language: "en-US")
 
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         utterance.pitchMultiplier = 1.0
@@ -316,6 +328,7 @@ public class CipherVoiceModule: Module {
         func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
             guard let module = self.module else { return }
             module.speaking = false
+            module.captureSynthesizer?.stopSpeaking(at: .immediate)
             module.captureSynthesizer = nil
             module.sendEvent("onTtsDone", [:])
         }
@@ -323,6 +336,7 @@ public class CipherVoiceModule: Module {
         func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
             guard let module = self.module else { return }
             module.speaking = false
+            module.captureSynthesizer?.stopSpeaking(at: .immediate)
             module.captureSynthesizer = nil
             module.sendEvent("onTtsDone", [:])
         }
