@@ -65,7 +65,9 @@ async function init() {
       UNIQUE(date, metric_name)
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_metrics_date ON usage_metrics(date DESC)`);
-    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata; usage_metrics)");
+    // Migration: GIN index for conversation turn search
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_turns_content_search ON conversation_turns USING gin(to_tsvector('english', content))`);
+    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;

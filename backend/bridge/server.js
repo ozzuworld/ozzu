@@ -4199,10 +4199,7 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
   // GET /cipher/context — assemble full Cipher context for CLAUDE.local.md
   if (req.method === "GET" && pathname === "/cipher/context") {
     try {
-      const [briefing, memory] = await Promise.all([
-        buildSituationBriefing("cipher"),
-        buildMemoryContext("cipher"),
-      ]);
+      const briefing = await buildSituationBriefing("cipher");
 
       // Recent pipeline activity
       const directives = getDirectives();
@@ -4219,95 +4216,81 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
           }).join("\n");
       }
 
-      // Active work + key decisions from extracted memories
-      let activeWorkSection = "";
-      let decisionsSection = "";
+      // ── RAW CONVERSATION MEMORY ──
+      // Load last 200 user turns verbatim — this IS the memory.
+      // No summaries, no Gemini extraction, just actual words.
+      let conversationMemory = "";
       try {
-        const workMemories = await db.getMemoriesByCategory("cipher", ["work_pending", "work_completed"], 10);
-        if (workMemories.length > 0) {
-          activeWorkSection = "\n## Active Work (recent)\n";
-          for (const m of workMemories) {
-            const date = new Date(m.created_at).toLocaleDateString();
-            const tag = m.category === "work_pending" ? "PENDING" : "DONE";
-            activeWorkSection += `- [${tag}] ${m.fact} (${date})\n`;
+        const rawTurns = await db.query(
+          `SELECT ct.content, ct.role, ct.created_at, c.id as convo_id
+           FROM conversation_turns ct
+           JOIN conversations c ON ct.conversation_id = c.id
+           WHERE c.persona = 'cipher' AND ct.role = 'user'
+           ORDER BY ct.created_at DESC LIMIT 200`
+        );
+        if (rawTurns.rows.length > 0) {
+          // Group by conversation, show newest first
+          const byConvo = {};
+          for (const t of rawTurns.rows) {
+            if (!byConvo[t.convo_id]) byConvo[t.convo_id] = [];
+            byConvo[t.convo_id].push(t);
           }
-        }
-        const decisionMems = await db.getMemoriesByCategory("cipher", ["decision", "preference"], 15);
-        if (decisionMems.length > 0) {
-          decisionsSection = "\n## Key Decisions & Preferences\n";
-          for (const m of decisionMems) {
-            decisionsSection += `- ${m.fact}\n`;
+          const parts = [];
+          for (const [convoId, turns] of Object.entries(byConvo)) {
+            // Turns came in DESC order, reverse to chronological within each conversation
+            turns.reverse();
+            const firstTs = turns[0]?.created_at;
+            const dateStr = firstTs ? new Date(firstTs).toLocaleString() : "?";
+            let section = `### Session ${convoId} (${dateStr})\n`;
+            for (const t of turns) {
+              const content = t.content && t.content.length > 500
+                ? t.content.substring(0, 500) + "..."
+                : t.content || "";
+              section += `> ${content}\n\n`;
+            }
+            parts.push(section);
           }
+          // Reverse so newest conversations appear first
+          conversationMemory = "\n## Recent Conversations (raw — last 200 messages from King Kazuma)\n" +
+            "This is your actual memory. These are the real words King Kazuma said to you.\n\n" +
+            parts.join("\n");
         }
       } catch (err) {
-        log.memory.error("Failed to load categorized memories:", err.message);
+        conversationMemory = "\n## Recent Conversations\n_Could not load conversation history._";
       }
 
-      // Include actual conversation turns from recent Cipher sessions (last 3 user messages per session)
-      let recentTurnsSection = "";
+      // Older conversations: Gemini summaries for anything beyond the raw turns
+      let olderSummaries = "";
       try {
-        const conversations = await db.getConversationHistory({
-          persona: "cipher", limit: 200, conversationLimit: 8, contentTypes: null,
-        });
-        if (conversations && conversations.length > 0) {
-          const parts = [];
-          for (const c of conversations) {
-            const startDate = c.startedAt ? new Date(c.startedAt).toLocaleString() : "?";
-            let sesText = `### Session ${c.id} (${startDate})\n`;
-            if (c.summary && !c.summary.startsWith("CLI session:")) sesText += `Summary: ${c.summary}\n`;
-            // Show LAST 3 user messages (where things left off) instead of first 15
-            const userTurns = (c.turns || []).filter(t => t.role === "user");
-            const lastTurns = userTurns.slice(-3);
-            for (const t of lastTurns) {
-              const preview = t.content && t.content.length > 300 ? t.content.substring(0, 300) + "..." : t.content;
-              sesText += `- King Kazuma: ${preview}\n`;
-            }
-            parts.push(sesText);
-          }
-          if (parts.length > 0) {
-            recentTurnsSection = "\n## Recent Cipher Sessions (what King Kazuma said to you)\n" + parts.join("\n");
-          }
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+        const summaries = await db.query(
+          `SELECT id, summary, turn_count, started_at
+           FROM conversations
+           WHERE persona = 'cipher' AND summary IS NOT NULL
+             AND started_at < (
+               SELECT MIN(ct.created_at) FROM conversation_turns ct
+               JOIN conversations c ON ct.conversation_id = c.id
+               WHERE c.persona = 'cipher' AND ct.role = 'user'
+               ORDER BY ct.created_at DESC LIMIT 1 OFFSET 199
+             )
+           ORDER BY started_at DESC LIMIT 20`
+        );
+        if (summaries.rows.length > 0) {
+          olderSummaries = "\n## Older Sessions (summaries)\n" +
+            summaries.rows.map(s => {
+              const date = new Date(s.started_at).toLocaleDateString();
+              return `- [${date}] ${s.summary}`;
+            }).join("\n");
         }
-      } catch (err) {
-        recentTurnsSection = "\n## Recent Cipher Sessions\n_Could not load conversation history._";
-      }
+      } catch (err) { /* older summaries are nice-to-have */ }
 
-      // Include recent June (voice) conversations — so Cipher knows what was discussed verbally
-      let juneTurnsSection = "";
-      try {
-        const juneConvos = await db.getConversationHistory({
-          persona: "june", limit: 40, conversationLimit: 3, contentTypes: null,
-        });
-        if (juneConvos && juneConvos.length > 0) {
-          const parts = [];
-          for (const c of juneConvos) {
-            const startDate = c.startedAt ? new Date(c.startedAt).toLocaleString() : "?";
-            let sesText = `### Voice session ${c.id} (${startDate})\n`;
-            if (c.summary) sesText += `Summary: ${c.summary}\n`;
-            const userTurns = (c.turns || []).filter(t => t.role === "user");
-            for (const t of userTurns.slice(0, 10)) {
-              const preview = t.content && t.content.length > 200 ? t.content.substring(0, 200) + "..." : t.content;
-              sesText += `- King Kazuma (voice): ${preview}\n`;
-            }
-            parts.push(sesText);
-          }
-          if (parts.length > 0) {
-            juneTurnsSection = "\n## Recent June Voice Sessions (what King Kazuma said to June)\n" + parts.join("\n");
-          }
-        }
-      } catch (err) { /* June history unavailable — not critical */ }
-
-      // Critical reminders
-      const decisionMemories = await getMemories("cipher", 50);
-      const critical = decisionMemories
-        .filter(m => m.category === "decision" || m.category === "project")
-        .map(m => `- ${m.fact}`);
-      let criticalSection = "\n## Critical Reminders\n" +
+      // Critical reminders (hardcoded — these are non-negotiable project rules)
+      const criticalSection = "\n## Critical Reminders\n" +
         "- NEVER build web dashboards or websites — Ozzu is a React Native app, ALL UI lives in frontend/\n" +
         "- NEVER bypass the directive pipeline\n" +
         "- iPhone NEVER receives OTA updates — always requires native build + sideload\n" +
-        "- When King Kazuma says 'dashboard' he means the React Native app UI, NOT the bridge web page";
-      if (critical.length > 0) criticalSection += "\n" + critical.join("\n");
+        "- When King Kazuma says 'dashboard' he means the React Native app UI, NOT the bridge web page\n" +
+        "- Use GET /cipher/search?q=keyword to search older conversation history if you need context beyond what's loaded here";
 
       const timestamp = new Date().toISOString();
       const markdown = [
@@ -4320,19 +4303,57 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         ``,
         `## Situation Briefing`,
         briefing.trim(),
-        ``,
-        `## Your Memories`,
-        memory.trim(),
-        activeWorkSection,
-        decisionsSection,
         pipelineSection,
-        recentTurnsSection,
-        juneTurnsSection,
+        conversationMemory,
+        olderSummaries,
         criticalSection,
       ].join("\n");
 
       res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
       res.end(markdown);
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /cipher/search?q=keyword — search actual conversation content
+  if (req.method === "GET" && pathname === "/cipher/search") {
+    try {
+      const q = parsedUrl.searchParams.get("q");
+      const limitParam = parseInt(parsedUrl.searchParams.get("limit")) || 30;
+      const limit = Math.min(limitParam, 50);
+      if (!q || q.trim().length < 2) {
+        sendJSON(res, 400, { error: "q parameter required (min 2 chars)" });
+        return;
+      }
+      if (!db.isConnected()) {
+        sendJSON(res, 500, { error: "PostgreSQL not connected" });
+        return;
+      }
+
+      // Search conversation turns using ILIKE for flexibility (full-text search can miss short phrases)
+      const searchPattern = `%${q.trim()}%`;
+      const results = await db.query(
+        `SELECT ct.content, ct.role, ct.created_at, c.id as convo_id, c.persona, c.started_at as session_start
+         FROM conversation_turns ct
+         JOIN conversations c ON ct.conversation_id = c.id
+         WHERE ct.content ILIKE $1
+         ORDER BY ct.created_at DESC LIMIT $2`,
+        [searchPattern, limit]
+      );
+
+      // Format as readable text
+      let output = `# Search results for: "${q}"\n# Found: ${results.rows.length} matches\n\n`;
+      for (const r of results.rows) {
+        const date = new Date(r.created_at).toLocaleString();
+        const role = r.role === "user" ? "King Kazuma" : (r.persona === "cipher" ? "Cipher" : "June");
+        const content = r.content.length > 600 ? r.content.substring(0, 600) + "..." : r.content;
+        output += `[${date}] [${role}] (session ${r.convo_id}):\n${content}\n---\n`;
+      }
+
+      res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
+      res.end(output);
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
