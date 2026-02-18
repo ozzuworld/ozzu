@@ -4219,11 +4219,35 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
           }).join("\n");
       }
 
-      // Include actual conversation turns from recent Cipher sessions
+      // Active work + key decisions from extracted memories
+      let activeWorkSection = "";
+      let decisionsSection = "";
+      try {
+        const workMemories = await db.getMemoriesByCategory("cipher", ["work_pending", "work_completed"], 10);
+        if (workMemories.length > 0) {
+          activeWorkSection = "\n## Active Work (recent)\n";
+          for (const m of workMemories) {
+            const date = new Date(m.created_at).toLocaleDateString();
+            const tag = m.category === "work_pending" ? "PENDING" : "DONE";
+            activeWorkSection += `- [${tag}] ${m.fact} (${date})\n`;
+          }
+        }
+        const decisionMems = await db.getMemoriesByCategory("cipher", ["decision", "preference"], 15);
+        if (decisionMems.length > 0) {
+          decisionsSection = "\n## Key Decisions & Preferences\n";
+          for (const m of decisionMems) {
+            decisionsSection += `- ${m.fact}\n`;
+          }
+        }
+      } catch (err) {
+        log.memory.error("Failed to load categorized memories:", err.message);
+      }
+
+      // Include actual conversation turns from recent Cipher sessions (last 3 user messages per session)
       let recentTurnsSection = "";
       try {
         const conversations = await db.getConversationHistory({
-          persona: "cipher", limit: 80, conversationLimit: 3, contentTypes: null,
+          persona: "cipher", limit: 200, conversationLimit: 8, contentTypes: null,
         });
         if (conversations && conversations.length > 0) {
           const parts = [];
@@ -4231,8 +4255,10 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
             const startDate = c.startedAt ? new Date(c.startedAt).toLocaleString() : "?";
             let sesText = `### Session ${c.id} (${startDate})\n`;
             if (c.summary && !c.summary.startsWith("CLI session:")) sesText += `Summary: ${c.summary}\n`;
+            // Show LAST 3 user messages (where things left off) instead of first 15
             const userTurns = (c.turns || []).filter(t => t.role === "user");
-            for (const t of userTurns.slice(0, 15)) {
+            const lastTurns = userTurns.slice(-3);
+            for (const t of lastTurns) {
               const preview = t.content && t.content.length > 300 ? t.content.substring(0, 300) + "..." : t.content;
               sesText += `- King Kazuma: ${preview}\n`;
             }
@@ -4297,6 +4323,8 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         ``,
         `## Your Memories`,
         memory.trim(),
+        activeWorkSection,
+        decisionsSection,
         pipelineSection,
         recentTurnsSection,
         juneTurnsSection,
@@ -4370,6 +4398,58 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         summary = `CLI session (${turns.length} turns): Started with: ${first}` + (last ? ` | Ended with: ${last}` : "");
       }
 
+      // Extract structured facts via Gemini Flash (runs in parallel with DB save)
+      let extractedFacts = [];
+      let extractedTopics = [];
+      if (GEMINI_API_KEY) {
+        const factTranscript = turns
+          .map(t => `${t.role === "user" ? "King Kazuma" : "Cipher"}: ${t.content}`)
+          .join("\n");
+        const factText = factTranscript.length > 12000
+          ? factTranscript.substring(0, 5000) + "\n\n[... middle truncated ...]\n\n" + factTranscript.substring(factTranscript.length - 5000)
+          : factTranscript;
+        try {
+          const factController = new AbortController();
+          const factTimeout = setTimeout(() => factController.abort(), 25000);
+          const factResp = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: factController.signal,
+              body: JSON.stringify({
+                contents: [{ parts: [{ text:
+                  `Extract key facts from this conversation as a JSON object with two fields:\n` +
+                  `1. "facts": array of objects, each with:\n` +
+                  `   - "fact": the specific detail (1 sentence)\n` +
+                  `   - "category": one of "work_completed", "work_pending", "decision", "preference", "technical"\n` +
+                  `2. "topics": array of 2-5 short topic tags (e.g. "SideStore", "iOS deploy", "memory system")\n\n` +
+                  `Focus on: what was built/fixed, what's still pending, decisions made, user preferences, technical details that matter for future sessions.\n` +
+                  `Return ONLY valid JSON, no markdown fences.\n\n${factText}`
+                }] }],
+              }),
+            }
+          );
+          clearTimeout(factTimeout);
+          if (factResp.ok) {
+            const factData = await factResp.json();
+            const rawText = factData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            // Strip markdown fences if present
+            const cleaned = rawText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+            try {
+              const parsed = JSON.parse(cleaned);
+              if (Array.isArray(parsed.facts)) extractedFacts = parsed.facts;
+              else if (Array.isArray(parsed)) extractedFacts = parsed;
+              if (Array.isArray(parsed.topics)) extractedTopics = parsed.topics;
+            } catch (parseErr) {
+              log.memory.error("Failed to parse Gemini fact extraction:", parseErr.message);
+            }
+          }
+        } catch (err) {
+          log.memory.error("Gemini fact extraction error:", err.message);
+        }
+      }
+
       // Store conversation with individual turns + summary
       if (db.isConnected()) {
         const convId = await db.createConversation("cipher");
@@ -4382,7 +4462,19 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
               { source: "cli", sessionId }
             ).catch(() => {});
           }
-          await db.endConversation(convId, summary, turns.length).catch(() => {});
+          await db.endConversation(convId, summary, turns.length, extractedTopics).catch(() => {});
+
+          // Store extracted facts as memories
+          for (const f of extractedFacts) {
+            if (f.fact && f.category) {
+              const validCategories = ["work_completed", "work_pending", "decision", "preference", "technical"];
+              const cat = validCategories.includes(f.category) ? f.category : "general";
+              await db.addMemory("cipher", f.fact.substring(0, 500), cat, "session-extract").catch(() => {});
+            }
+          }
+          if (extractedFacts.length > 0) {
+            log.memory.info(`Extracted ${extractedFacts.length} facts from session, topics: [${extractedTopics.join(", ")}]`);
+          }
         }
       }
       // Write-through to Redis
@@ -4398,6 +4490,129 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
       log.memory.error("cipher session-save failed:", err.message);
       sendJSON(res, 500, { error: err.message });
     }
+    return;
+  }
+
+  // POST /cipher/backfill-memories — one-time extraction of facts from all existing conversations
+  if (req.method === "POST" && pathname === "/cipher/backfill-memories") {
+    if (!GEMINI_API_KEY) {
+      sendJSON(res, 500, { error: "GEMINI_API_KEY not set" });
+      return;
+    }
+    if (!db.isConnected()) {
+      sendJSON(res, 500, { error: "PostgreSQL not connected" });
+      return;
+    }
+    // Run in background — respond immediately
+    sendJSON(res, 200, { started: true, message: "Backfill started in background. Check logs for progress." });
+
+    (async () => {
+      try {
+        const allConvos = await db.query(
+          `SELECT c.id, c.persona, c.summary, c.turn_count, c.started_at
+           FROM conversations c
+           WHERE c.turn_count > 4
+           ORDER BY c.started_at ASC`
+        );
+        const convos = allConvos.rows;
+        log.memory.info(`Backfill: processing ${convos.length} conversations with >4 turns`);
+
+        let totalFacts = 0;
+        let processed = 0;
+        let errors = 0;
+
+        for (const convo of convos) {
+          try {
+            // Get turns for this conversation
+            const turnsRes = await db.query(
+              `SELECT role, content FROM conversation_turns
+               WHERE conversation_id = $1 ORDER BY turn_index ASC LIMIT 60`,
+              [convo.id]
+            );
+            if (turnsRes.rows.length < 4) { processed++; continue; }
+
+            const transcript = turnsRes.rows
+              .map(t => `${t.role === "user" ? "King Kazuma" : convo.persona === "cipher" ? "Cipher" : "June"}: ${t.content}`)
+              .join("\n");
+            const truncated = transcript.length > 10000
+              ? transcript.substring(0, 4000) + "\n\n[... truncated ...]\n\n" + transcript.substring(transcript.length - 4000)
+              : transcript;
+
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 30000);
+            const resp = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                signal: controller.signal,
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text:
+                    `Extract key facts from this conversation as a JSON object with two fields:\n` +
+                    `1. "facts": array of objects, each with:\n` +
+                    `   - "fact": the specific detail (1 sentence)\n` +
+                    `   - "category": one of "work_completed", "work_pending", "decision", "preference", "technical"\n` +
+                    `2. "topics": array of 2-5 short topic tags\n\n` +
+                    `Focus on: what was built/fixed, what's still pending, decisions made, user preferences, technical details.\n` +
+                    `Return ONLY valid JSON, no markdown fences.\n\n${truncated}`
+                  }] }],
+                }),
+              }
+            );
+            clearTimeout(timeout);
+
+            if (resp.ok) {
+              const data = await resp.json();
+              const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              const cleaned = rawText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+              try {
+                const parsed = JSON.parse(cleaned);
+                const facts = Array.isArray(parsed.facts) ? parsed.facts : (Array.isArray(parsed) ? parsed : []);
+                const topics = Array.isArray(parsed.topics) ? parsed.topics : [];
+                const validCategories = ["work_completed", "work_pending", "decision", "preference", "technical"];
+
+                for (const f of facts) {
+                  if (f.fact && f.category) {
+                    const cat = validCategories.includes(f.category) ? f.category : "general";
+                    await db.addMemory(convo.persona || "cipher", f.fact.substring(0, 500), cat, "session-extract").catch(() => {});
+                    totalFacts++;
+                  }
+                }
+                // Update conversation topics
+                if (topics.length > 0) {
+                  await db.query(
+                    `UPDATE conversations SET topics = $2 WHERE id = $1`,
+                    [convo.id, topics]
+                  ).catch(() => {});
+                }
+              } catch (parseErr) {
+                errors++;
+              }
+            } else {
+              errors++;
+              // If rate limited, wait longer
+              if (resp.status === 429) {
+                log.memory.info("Backfill: rate limited, waiting 5s...");
+                await new Promise(r => setTimeout(r, 5000));
+              }
+            }
+          } catch (err) {
+            errors++;
+          }
+
+          processed++;
+          if (processed % 20 === 0) {
+            log.memory.info(`Backfill progress: ${processed}/${convos.length} conversations, ${totalFacts} facts extracted, ${errors} errors`);
+          }
+          // Rate limit: 1 request per second
+          await new Promise(r => setTimeout(r, 1000));
+        }
+
+        log.memory.info(`Backfill complete: ${processed} conversations processed, ${totalFacts} facts extracted, ${errors} errors`);
+      } catch (err) {
+        log.memory.error("Backfill failed:", err.message);
+      }
+    })();
     return;
   }
 

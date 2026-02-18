@@ -105,6 +105,17 @@ async function getMemories(persona, limit = 50) {
   return res.rows;
 }
 
+async function getMemoriesByCategory(persona, categories, limit = 20) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT id, fact, category, confidence, created_at, source
+     FROM memories WHERE persona = $1 AND category = ANY($2)
+     ORDER BY created_at DESC LIMIT $3`,
+    [persona, categories, limit]
+  );
+  return res.rows;
+}
+
 async function searchMemories(persona, searchText, limit = 10) {
   if (!_pgConnected) return [];
   const res = await query(
@@ -578,6 +589,7 @@ module.exports = {
   // Memories
   addMemory,
   getMemories,
+  getMemoriesByCategory,
   searchMemories,
   // Conversations
   createConversation,
