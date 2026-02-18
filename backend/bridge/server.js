@@ -3022,6 +3022,21 @@ ${approvalBannerItems.map(item => `<div class="approval-item">
   <div class="stat-card"><div class="label">Avg Duration</div><div class="value">${avgDuration !== null ? formatDuration(avgDuration) : "N/A"}</div></div>
 </div>
 
+<div id="build-status-section" style="display:none;">
+<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px;">
+  <div class="stat-card" id="build-android" style="flex:1;min-width:260px;border-left:3px solid #6b7280;">
+    <div class="label">Android CI Build</div>
+    <div class="value" id="build-android-status" style="font-size:16px;">Loading...</div>
+    <div id="build-android-meta" style="font-size:11px;color:#64748b;margin-top:4px;"></div>
+  </div>
+  <div class="stat-card" id="build-ios" style="flex:1;min-width:260px;border-left:3px solid #6b7280;">
+    <div class="label">iOS CI Build</div>
+    <div class="value" id="build-ios-status" style="font-size:16px;">Loading...</div>
+    <div id="build-ios-meta" style="font-size:11px;color:#64748b;margin-top:4px;"></div>
+  </div>
+</div>
+</div>
+
 ${unresolvedViolations.length > 0 ? `<div class="violations-section">
 <h3>Pipeline Violations <span class="violations-count">${unresolvedViolations.length}</span></h3>
 ${violationsHtml}
@@ -3558,6 +3573,76 @@ document.addEventListener("keydown", function(e) {
 document.getElementById("approval-modal").addEventListener("click", function(e) {
   if (e.target === this) closeApprovalModal();
 });
+
+// ── Build Status Polling ──
+var buildPollTimer = null;
+var buildPollInterval = 30000;
+var buildHasActive = false;
+
+function renderBuildCard(platform, data) {
+  var statusEl = document.getElementById("build-" + platform + "-status");
+  var metaEl = document.getElementById("build-" + platform + "-meta");
+  var cardEl = document.getElementById("build-" + platform);
+  if (!statusEl || !metaEl || !cardEl) return;
+
+  if (!data || data.error) {
+    statusEl.textContent = data && data.error ? "Error" : "No runs";
+    statusEl.className = "value";
+    metaEl.textContent = data && data.error ? data.error : "";
+    cardEl.style.borderLeftColor = "#6b7280";
+    return;
+  }
+
+  var isActive = data.status === "in_progress" || data.status === "queued" || data.status === "waiting";
+  var succeeded = data.conclusion === "success";
+  var failed = data.conclusion === "failure" || data.conclusion === "cancelled";
+
+  if (isActive) {
+    buildHasActive = true;
+    statusEl.textContent = data.status === "in_progress" ? "Building..." : data.status === "queued" ? "Queued" : "Waiting";
+    statusEl.className = "value warn";
+    cardEl.style.borderLeftColor = "#f59e0b";
+  } else if (succeeded) {
+    statusEl.textContent = "Success";
+    statusEl.className = "value ok";
+    cardEl.style.borderLeftColor = "#10b981";
+  } else if (failed) {
+    statusEl.textContent = data.conclusion === "cancelled" ? "Cancelled" : "Failed";
+    statusEl.className = "value bad";
+    cardEl.style.borderLeftColor = "#ef4444";
+  } else {
+    statusEl.textContent = data.status || "Unknown";
+    statusEl.className = "value";
+    cardEl.style.borderLeftColor = "#6b7280";
+  }
+
+  var meta = timeAgo(data.createdAt);
+  if (data.url) {
+    meta = '<a href="' + escapeText(data.url) + '" target="_blank" style="color:#3b82f6;text-decoration:none;">' + meta + ' &rarr; View run</a>';
+  }
+  metaEl.innerHTML = meta;
+}
+
+function fetchBuildStatus() {
+  fetch("/api/build-status")
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var section = document.getElementById("build-status-section");
+      if (section) section.style.display = "";
+
+      buildHasActive = false;
+      renderBuildCard("android", data.android);
+      renderBuildCard("ios", data.ios);
+
+      // Poll faster when builds are active
+      clearInterval(buildPollTimer);
+      buildPollTimer = setInterval(fetchBuildStatus, buildHasActive ? buildPollInterval : 120000);
+    })
+    .catch(function() {});
+}
+
+fetchBuildStatus();
+buildPollTimer = setInterval(fetchBuildStatus, buildPollInterval);
 </script>
 
 </body></html>`;
@@ -4426,6 +4511,40 @@ document.getElementById("approval-modal").addEventListener("click", function(e) 
   }
 
   // GET /api/pipeline-violations — List violations
+  // GET /api/build-status — Latest GitHub Actions CI build status for Android and iOS
+  if (req.method === "GET" && pathname === "/api/build-status") {
+    const { execFile } = require("child_process");
+    const { promisify } = require("util");
+    const execFileAsync = promisify(execFile);
+    const fields = "status,conclusion,createdAt,url,displayTitle";
+    const ghArgs = (workflow) => ["run", "list", "--workflow=" + workflow, "-R", "ozzuworld/ozzu", "--limit", "1", "--json", fields];
+
+    const results = {};
+    for (const [platform, workflow] of [["android", "build-android.yml"], ["ios", "build-ios.yml"]]) {
+      try {
+        const { stdout } = await execFileAsync("gh", ghArgs(workflow), { timeout: 15000 });
+        const runs = JSON.parse(stdout);
+        if (runs.length > 0) {
+          const run = runs[0];
+          results[platform] = {
+            status: run.status,
+            conclusion: run.conclusion || null,
+            createdAt: run.createdAt,
+            url: run.url,
+            title: run.displayTitle,
+          };
+        } else {
+          results[platform] = null;
+        }
+      } catch (err) {
+        log.bridge.warn(`[build-status] Failed to fetch ${platform} CI status: ${err.message}`);
+        results[platform] = { error: err.message };
+      }
+    }
+    sendJSON(res, 200, results);
+    return;
+  }
+
   if (req.method === "GET" && pathname === "/api/pipeline-violations") {
     const resolved = url.searchParams.get("resolved");
     let results = [..._pipelineViolations].reverse();
