@@ -2,8 +2,7 @@
  * Expo config plugin for Meta DAT SDK configuration.
  *
  * Android: Adds Bluetooth permissions and META_APP_ID metadata to AndroidManifest.
- * iOS: Adds MWDAT config, Bluetooth description, background modes, URL schemes,
- *      and external accessory protocols to Info.plist.
+ * iOS: Adds MWDAT config, Bluetooth description, URL schemes to Info.plist.
  */
 const {
   withAndroidManifest,
@@ -125,22 +124,6 @@ function withMetaDATiOS(config) {
       plist.NSBluetoothAlwaysUsageDescription =
         "Required to connect to your glasses";
     }
-
-    // External accessory protocols
-    const protocols = plist.UISupportedExternalAccessoryProtocols || [];
-    if (!protocols.includes("com.meta.ar.wearable")) {
-      protocols.push("com.meta.ar.wearable");
-    }
-    plist.UISupportedExternalAccessoryProtocols = protocols;
-
-    // Background modes — append to existing
-    const bgModes = plist.UIBackgroundModes || [];
-    for (const mode of ["bluetooth-peripheral", "external-accessory"]) {
-      if (!bgModes.includes(mode)) {
-        bgModes.push(mode);
-      }
-    }
-    plist.UIBackgroundModes = bgModes;
 
     return config;
   });
