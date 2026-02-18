@@ -10,6 +10,7 @@ public class CipherVoiceModule: Module {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var audioEngine: AVAudioEngine?
     private var listening = false
+    private var sttSilenceTimer: Timer?
 
     // TTS
     private var synthesizer: AVSpeechSynthesizer?
@@ -185,7 +186,19 @@ public class CipherVoiceModule: Module {
                 ])
 
                 if isFinal {
+                    self.sttSilenceTimer?.invalidate()
+                    self.sttSilenceTimer = nil
                     self.stopSTT()
+                } else {
+                    // On-device recognition may never produce isFinal=true.
+                    // Reset a 1.5s silence timer — when no new partials arrive,
+                    // call endAudio() to force the recognizer to finalize.
+                    self.sttSilenceTimer?.invalidate()
+                    DispatchQueue.main.async {
+                        self.sttSilenceTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+                            self?.recognitionRequest?.endAudio()
+                        }
+                    }
                 }
             }
 
@@ -211,6 +224,8 @@ public class CipherVoiceModule: Module {
 
     private func stopSTT() {
         listening = false
+        sttSilenceTimer?.invalidate()
+        sttSilenceTimer = nil
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
