@@ -787,6 +787,21 @@ async function initStorage() {
   setTimeout(() => {
     scanOrphanCommits().catch(err => log.directive.error("orphan commit scanner (startup):", err.message));
   }, 2 * 60 * 1000);
+
+  // ── Stale branch cleanup — every 60 minutes ──
+  _intervals.push(setInterval(() => {
+    try {
+      const agentSpawner = require("./agent-spawner");
+      agentSpawner.cleanupStaleBranches(getDirectives);
+    } catch (err) { log.directive.error("stale branch cleanup:", err.message); }
+  }, 60 * 60 * 1000));
+  // Run once on startup after 3 minutes (after orphan scanner)
+  setTimeout(() => {
+    try {
+      const agentSpawner = require("./agent-spawner");
+      agentSpawner.cleanupStaleBranches(getDirectives);
+    } catch (err) { log.directive.error("stale branch cleanup (startup):", err.message); }
+  }, 3 * 60 * 1000);
 }
 
 async function migrateRedisToPostgres() {
@@ -1918,6 +1933,12 @@ async function handleRequest(req, res) {
     }
     // Kill agent if one is running for this directive
     const agentKilled = killAgent(id);
+    // Clean up branch/worktree if no agent was running (exit handler won't fire)
+    if (!agentKilled) {
+      const agentSpawner = require("./agent-spawner");
+      const branch = directive.mergeBranch || `agent/${id}`;
+      agentSpawner.cleanupWorktree(id, branch);
+    }
     const prevStatus = directive.status;
     directive.status = "cancelled";
     directive.updatedAt = Date.now();
@@ -1995,9 +2016,10 @@ async function handleRequest(req, res) {
         if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
         directive.activity_log.push({ timestamp: Date.now(), type: "status_change", actor: "King Kazuma", message: `Merge retried successfully from dashboard (branch ${branch})` });
         saveDirectives(directives, directive, prevStatus, "King Kazuma");
+        agentSpawner.cleanupWorktree(id, branch);
         agentSpawner.smartDeploy(directive);
-        log.bridge.info(`Merge retry succeeded for ${id} — deploying`);
-        sendJSON(res, 200, { ok: true, message: "Merge succeeded, deploying now" });
+        log.bridge.info(`Merge retry succeeded for ${id} — branch cleaned up, deploying`);
+        sendJSON(res, 200, { ok: true, message: "Merge succeeded, branch cleaned up, deploying now" });
       } else {
         directive.updatedAt = Date.now();
         directive.failureReason = `Merge retry failed for branch ${branch}`;
@@ -2065,9 +2087,14 @@ async function handleRequest(req, res) {
       sendJSON(res, 409, { error: `Directive is "${directive.status}" — cancel it first before deleting` });
       return;
     }
+    // Clean up any lingering branch/worktree for this directive
+    const agentSpawner = require("./agent-spawner");
+    const branch = directive.mergeBranch || `agent/${id}`;
+    agentSpawner.cleanupWorktree(id, branch);
+
     directives.splice(idx, 1);
     saveDirectives(directives, null, null);
-    log.bridge.info(`Directive deleted: ${id} "${directive.title}"`);
+    log.bridge.info(`Directive deleted: ${id} "${directive.title}" (branch cleanup attempted for ${branch})`);
     sendJSON(res, 200, { ok: true, message: `Directive ${id} deleted` });
     return;
   }
@@ -2104,6 +2131,12 @@ async function handleRequest(req, res) {
           continue;
         }
         const agentKilled = killAgent(id);
+        // Clean up branch/worktree if no agent was running (exit handler won't fire)
+        if (!agentKilled) {
+          const agentSpawner = require("./agent-spawner");
+          const branch = directive.mergeBranch || `agent/${id}`;
+          agentSpawner.cleanupWorktree(id, branch);
+        }
         const prevStatus = directive.status;
         directive.status = "cancelled";
         directive.updatedAt = Date.now();
@@ -2148,6 +2181,14 @@ async function handleRequest(req, res) {
     // Batch-apply deletes in a single pass (avoids index shifting and redundant saves)
     if (deletePending.length > 0) {
       const deleteSet = new Set(deletePending);
+      // Clean up branches for deleted directives before removing them
+      const agentSpawner = require("./agent-spawner");
+      for (const d of directives) {
+        if (deleteSet.has(d.id)) {
+          const branch = d.mergeBranch || `agent/${d.id}`;
+          agentSpawner.cleanupWorktree(d.id, branch);
+        }
+      }
       const filtered = directives.filter(d => !deleteSet.has(d.id));
       directives.length = 0;
       directives.push(...filtered);

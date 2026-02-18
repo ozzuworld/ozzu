@@ -437,6 +437,80 @@ function cleanupWorktree(directiveId, branch) {
   log(`Worktree cleaned up: ${wtDir}`);
 }
 
+// Scan for orphaned agent branches not linked to any active directive
+// Called periodically and on startup to prevent stale branch accumulation
+function cleanupStaleBranches(getDirectives) {
+  const { execSync } = require("child_process");
+  try {
+    // Get all local agent branches
+    const localBranches = execSync("git branch", { cwd: WORKDIR, encoding: "utf8", timeout: 10000 })
+      .split("\n")
+      .map(b => b.trim().replace(/^\* /, ""))
+      .filter(b => b.startsWith("agent/"));
+
+    // Get all remote agent branches
+    const remoteBranches = execSync("git branch -r", { cwd: WORKDIR, encoding: "utf8", timeout: 10000 })
+      .split("\n")
+      .map(b => b.trim())
+      .filter(b => b.startsWith("origin/agent/"))
+      .map(b => b.replace("origin/", ""));
+
+    const allBranches = [...new Set([...localBranches, ...remoteBranches])];
+    if (allBranches.length === 0) return 0;
+
+    const directives = getDirectives();
+    // Active = has a running agent or is in a non-terminal status that might still use the branch
+    const activeDirectiveIds = new Set();
+    const branchesInUse = new Set();
+
+    for (const d of directives) {
+      // Keep branches for deploy_failed (may need retry-merge)
+      if (d.status === "deploy_failed" && d.mergeBranch) {
+        branchesInUse.add(d.mergeBranch);
+      }
+      // Keep branches for directives with running agents
+      if (["in_progress", "planning"].includes(d.status)) {
+        activeDirectiveIds.add(d.id);
+      }
+    }
+
+    // Also keep branches for currently running agents
+    for (const [directiveId, info] of runningAgents) {
+      if (info.worktree && info.worktree.branch) {
+        branchesInUse.add(info.worktree.branch);
+      }
+      activeDirectiveIds.add(directiveId);
+    }
+
+    let cleaned = 0;
+    for (const branch of allBranches) {
+      // Extract directive ID from branch name: agent/dir_xxx or agent/dir_xxx-suffix
+      const match = branch.match(/^agent\/(dir_\d+)/);
+      if (!match) continue;
+      const directiveId = match[1];
+
+      // Skip if branch is explicitly in use or directive is active
+      if (branchesInUse.has(branch)) continue;
+      if (activeDirectiveIds.has(directiveId)) continue;
+
+      // This branch is orphaned — clean it up
+      log(`Stale branch cleanup: ${branch} (directive ${directiveId} is terminal or missing)`);
+      try { execSync(`git branch -D "${branch}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
+      try { execSync(`git push origin --delete "${branch}"`, { cwd: WORKDIR, timeout: 15000, stdio: "ignore" }); } catch {}
+      cleaned++;
+    }
+
+    if (cleaned > 0) {
+      log(`Stale branch cleanup: removed ${cleaned} orphaned agent branch(es)`);
+      pruneWorktrees();
+    }
+    return cleaned;
+  } catch (err) {
+    log(`Stale branch cleanup error: ${err.message}`);
+    return 0;
+  }
+}
+
 function mergeWorktreeToMain(directiveId, branch) {
   const { execSync } = require("child_process");
   const wtDir = path.join(WORKTREE_DIR, directiveId);
@@ -1525,5 +1599,7 @@ module.exports = {
   getConfig,
   setConfig,
   mergeWorktreeToMain,
+  cleanupWorktree,
+  cleanupStaleBranches,
   smartDeploy,
 };
