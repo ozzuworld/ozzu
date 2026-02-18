@@ -18,6 +18,7 @@ import { ContentPanel } from "../components/ContentPanel";
 import { useEntity } from "../lib/useEntity";
 import { useKeepAwake } from "expo-keep-awake";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
+import * as CipherVoice from "../modules/cipher-voice";
 
 // ── HUD corner bracket ──
 const BRACKET_LEN = 20;
@@ -134,6 +135,14 @@ export default function LandingScreen() {
   const isMutedRef = useRef(false);
   const spotifyEntity = useEntity("media_player.spotify_king_kazuma");
 
+  // Detect cipher-voice availability (iPhone with on-device STT/TTS)
+  const hasCipherVoice = useRef(false);
+  try {
+    hasCipherVoice.current = CipherVoice.isAvailable();
+  } catch {
+    hasCipherVoice.current = false;
+  }
+
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
   const playerRef = useRef<StreamingPlayer>(new StreamingPlayer());
   const micRef = useRef<MicRecorder>(new MicRecorder());
@@ -141,10 +150,82 @@ export default function LandingScreen() {
   // Connect to bridge on mount
   useEffect(() => {
     const bridge = bridgeRef.current;
+    const useCipherVoice = hasCipherVoice.current;
     let cancelled = false;
     let clearTranscriptTimer: ReturnType<typeof setTimeout> | null = null;
 
+    // Tell bridge session about cipher-voice capability before connecting
+    if (useCipherVoice) {
+      bridge.setCipherVoice(true);
+      console.log("[index] Cipher voice available — using on-device STT/TTS");
+    }
+
+    // ── Cipher voice event subscriptions (iPhone only) ──
+    const cipherVoiceSubs: Array<{ remove: () => void }> = [];
+
+    const startCipherVoiceListening = async () => {
+      if (!useCipherVoice) return;
+      const granted = await CipherVoice.requestPermissions();
+      if (!granted || cancelled) return;
+      const ok = await CipherVoice.startListening();
+      if (ok) setIsListening(true);
+    };
+
+    if (useCipherVoice) {
+      // STT results from on-device speech recognition
+      cipherVoiceSubs.push(
+        CipherVoice.onSttResult((event) => {
+          if (cancelled) return;
+          if (event.isFinal && event.text.trim()) {
+            // Send transcribed text to bridge for Claude processing
+            bridge.sendCipherText(event.text);
+            setInputTranscript(event.text);
+            setIsListening(false);
+            setIsStreaming(true);
+            // Restart listening for next utterance after a brief pause
+            CipherVoice.stopListening();
+          }
+        })
+      );
+
+      // TTS audio captured for relay to tablets
+      cipherVoiceSubs.push(
+        CipherVoice.onTtsAudio((event) => {
+          if (cancelled) return;
+          bridge.sendCipherAudio(event.data);
+        })
+      );
+
+      // TTS finished speaking
+      cipherVoiceSubs.push(
+        CipherVoice.onTtsDone(() => {
+          if (cancelled) return;
+          bridge.sendCipherTtsDone();
+          setIsStreaming(false);
+          setIsListening(true);
+          // Restart STT listening after Cipher finishes speaking
+          startCipherVoiceListening();
+        })
+      );
+
+      // STT errors
+      cipherVoiceSubs.push(
+        CipherVoice.onSttError((event) => {
+          console.warn("[CipherVoice] STT error:", event.error);
+          // Auto-restart listening after error
+          if (!cancelled) {
+            setTimeout(() => startCipherVoiceListening(), 1000);
+          }
+        })
+      );
+    }
+
     const requestMicAndStart = async () => {
+      if (useCipherVoice) {
+        // iPhone with cipher-voice: use on-device STT instead of MicRecorder
+        startCipherVoiceListening();
+        return;
+      }
       if (Platform.OS === "android") {
         const granted = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
@@ -164,6 +245,7 @@ export default function LandingScreen() {
         setSessionReady(true);
 
         // Tablets: auto-start mic on ready
+        // iPhone with cipher-voice: auto-start on-device STT on ready
         if (isMic) {
           requestMicAndStart();
         }
@@ -193,6 +275,9 @@ export default function LandingScreen() {
         }, 5000);
       },
       onInterrupted: () => {
+        if (useCipherVoice) {
+          CipherVoice.interrupt();
+        }
         playerRef.current.flush();
         setResponseText("");
         setIsStreaming(true);
@@ -226,6 +311,17 @@ export default function LandingScreen() {
         // Cipher finished speaking — show listening state on orb
         setIsStreaming(false);
         setIsListening(true);
+        // If using cipher-voice, restart listening
+        if (useCipherVoice) {
+          startCipherVoiceListening();
+        }
+      },
+      // Phone-mode: bridge sends Claude response text for on-device TTS
+      onCipherResponse: (text) => {
+        if (!useCipherVoice || cancelled) return;
+        setResponseText(text);
+        setIsStreaming(true);
+        CipherVoice.speak(text);
       },
       onError: (msg) => {
         console.error("BridgeSession error:", msg);
@@ -239,6 +335,12 @@ export default function LandingScreen() {
     return () => {
       cancelled = true;
       if (clearTranscriptTimer) clearTimeout(clearTranscriptTimer);
+      // Clean up cipher voice subscriptions
+      for (const sub of cipherVoiceSubs) sub.remove();
+      if (useCipherVoice) {
+        CipherVoice.stopListening();
+        CipherVoice.interrupt();
+      }
       bridge.close();
       playerRef.current.stop();
       micRef.current.stop();

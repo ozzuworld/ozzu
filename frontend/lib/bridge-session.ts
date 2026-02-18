@@ -25,6 +25,7 @@ export interface BridgeCallbacks {
   onHideContent: () => void;
   onConnected: () => void;
   onListeningReady: () => void;
+  onCipherResponse?: (text: string) => void; // Phone-mode: Claude response text for on-device TTS
   onError: (message: string) => void;
 }
 
@@ -34,6 +35,7 @@ export class BridgeSession {
   private _role: "mic" | "speaker" = "mic";
   private deviceId: string = "unknown";
   private _deviceType: string = "tablet";
+  private _cipherVoice = false; // true when cipher-voice native module is available (iPhone on-device STT/TTS)
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyClosed = false;
   private reconnectAttempt = 0;
@@ -49,6 +51,15 @@ export class BridgeSession {
 
   get connected(): boolean {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  get hasCipherVoice(): boolean {
+    return this._cipherVoice;
+  }
+
+  /** Enable cipher-voice mode (call before connect if cipher-voice module is available) */
+  setCipherVoice(enabled: boolean): void {
+    this._cipherVoice = enabled;
   }
 
   connect(callbacks: BridgeCallbacks): void {
@@ -85,14 +96,21 @@ export class BridgeSession {
     ws.onopen = () => {
       console.log("[BridgeSession] Connected, registering...");
       this.reconnectAttempt = 0; // Reset backoff on successful connection
-      ws.send(
-        JSON.stringify({
-          type: "register",
-          role: this._role,
-          deviceId: this.deviceId,
-          deviceType: this._deviceType,
-        })
-      );
+      const registration: Record<string, any> = {
+        type: "register",
+        role: this._role,
+        deviceId: this.deviceId,
+        deviceType: this._deviceType,
+      };
+      // Include capabilities for cipher-voice-capable phones
+      if (this._cipherVoice && this._deviceType === "phone") {
+        registration.capabilities = {
+          mic: true,
+          speaker: true,
+          cipherVoice: true, // Tells bridge to use textOnly mode
+        };
+      }
+      ws.send(JSON.stringify(registration));
     };
 
     ws.onmessage = (event: any) => {
@@ -194,6 +212,9 @@ export class BridgeSession {
         case "listeningReady":
           this.callbacks?.onListeningReady();
           break;
+        case "cipherResponse":
+          this.callbacks?.onCipherResponse?.(msg.text);
+          break;
         case "error":
           this.callbacks?.onError(msg.message);
           break;
@@ -240,6 +261,32 @@ export class BridgeSession {
       this.ws.send(msg);
     } else if (!this.intentionallyClosed) {
       this._queueMessage(msg);
+    }
+  }
+
+  // ── Cipher voice (phone on-device STT/TTS) ──
+
+  /** Send STT-transcribed text to bridge for Claude processing */
+  sendCipherText(text: string): void {
+    const msg = JSON.stringify({ type: "cipherText", text });
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(msg);
+    } else if (!this.intentionallyClosed) {
+      this._queueMessage(msg);
+    }
+  }
+
+  /** Send TTS audio (PCM base64) to bridge for relay to tablets/TV */
+  sendCipherAudio(pcmBase64: string): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "cipherAudio", data: pcmBase64 }));
+    }
+  }
+
+  /** Signal that TTS playback finished */
+  sendCipherTtsDone(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "cipherTtsDone" }));
     }
   }
 

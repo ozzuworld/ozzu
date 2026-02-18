@@ -4,6 +4,10 @@
 // SDK built-in tools (Read, Bash, Grep) are intentionally excluded so Cipher
 // never tries to code inline. It uses only MCP bridge tools for operational tasks
 // and sends_dev_directive for anything that touches code.
+//
+// textOnly mode: When an iPhone with cipher-voice capability connects, the pipeline
+// skips Deepgram STT/TTS entirely. iPhone handles STT (SFSpeechRecognizer) and
+// TTS (AVSpeechSynthesizer) on-device. Text flows: iPhone→bridge→Claude→bridge→iPhone.
 
 const { EventEmitter } = require("events");
 const { createClient, LiveTranscriptionEvents, LiveTTSEvents } = require("@deepgram/sdk");
@@ -20,11 +24,12 @@ async function getSDK() {
 }
 
 class CipherPipeline extends EventEmitter {
-  constructor({ systemPrompt, tools, handleToolCall }) {
+  constructor({ systemPrompt, tools, handleToolCall, textOnly = false }) {
     super();
     this.systemPrompt = systemPrompt;
     this.tools = tools; // Gemini-format tool declarations (will be wrapped as MCP tools)
     this.handleToolCall = handleToolCall; // async (name, args) => { success, message }
+    this.textOnly = textOnly; // true when iPhone handles STT/TTS on-device
     this.running = false;
     this.speaking = false;
 
@@ -94,20 +99,27 @@ class CipherPipeline extends EventEmitter {
 
   async start() {
     this.running = true;
-    console.log("[cipher] Starting pipeline...");
+    console.log("[cipher] Starting pipeline (textOnly: %s)...", this.textOnly);
 
-    // Start Deepgram STT
-    this._connectSTT();
+    if (this.textOnly) {
+      // textOnly mode: iPhone handles STT/TTS on-device — skip Deepgram entirely
+      // In textOnly mode, the turn starts as "user" since iPhone controls mic
+      this._turn = "user";
+      this._turnReady = true;
+    } else {
+      // Start Deepgram STT
+      this._connectSTT();
 
-    // Start Deepgram Aura TTS
-    this._connectTTS();
+      // Start Deepgram Aura TTS
+      this._connectTTS();
+    }
 
     // Start Claude Agent SDK query loop (runs in background)
     this._startClaudeSession();
 
     console.log("[cipher] Pipeline ready (STT: %s, TTS: %s, LLM: agent-sdk)",
-      this.dgSTT ? "ok" : "off",
-      this.dgTTS ? "ok" : "off"
+      this.textOnly ? "phone" : (this.dgSTT ? "ok" : "off"),
+      this.textOnly ? "phone" : (this.dgTTS ? "ok" : "off")
     );
     return true;
   }
@@ -618,7 +630,13 @@ class CipherPipeline extends EventEmitter {
       if (event.type === "content_block_start" && event.content_block?.type === "text") {
         // Clear interrupted flag — this is a fresh response (possibly from re-queued message)
         this._interrupted = false;
-        this._startTTS();
+        if (this.textOnly) {
+          // textOnly mode: accumulate response text for phone TTS
+          this._responseTextAccum = "";
+          this.speaking = true;
+        } else {
+          this._startTTS();
+        }
       }
 
       // Drop text deltas if we were interrupted mid-response
@@ -632,11 +650,25 @@ class CipherPipeline extends EventEmitter {
           console.log("[cipher] Latency: Claude thinking = %dms", thinkTime);
         }
         this.emit("responseText", text);
-        this._sendToTTS(text);
+        if (this.textOnly) {
+          // textOnly: accumulate for phone TTS (phone speaks full sentences)
+          this._responseTextAccum = (this._responseTextAccum || "") + text;
+        } else {
+          this._sendToTTS(text);
+        }
       }
 
-      if (event.type === "content_block_stop" && this._ttsActive) {
-        this._flushTTS();
+      if (event.type === "content_block_stop") {
+        if (this.textOnly) {
+          // textOnly: emit accumulated response text for phone to speak
+          const fullText = (this._responseTextAccum || "").trim();
+          if (fullText) {
+            this.emit("responseTextDone", fullText);
+          }
+          this._responseTextAccum = "";
+        } else if (this._ttsActive) {
+          this._flushTTS();
+        }
       }
 
       return;
@@ -680,7 +712,17 @@ class CipherPipeline extends EventEmitter {
       // Don't open if TTS is still flushing — Flushed handler will do it
       // Don't open if there are queued messages (user already sent next input after interrupt)
       const hasPendingMessages = this._messageQueue.length > 0;
-      if (this._turn === "cipher" && !this._ttsActive && !this._ttsFlushing && !hasPendingMessages) {
+      if (this.textOnly) {
+        // textOnly: no TTS flushing state — just check for pending messages
+        if (this._turn === "cipher" && !hasPendingMessages) {
+          this._turn = "user";
+          this._turnReady = true;
+          this.emit("listeningReady");
+          console.log("[cipher] Turn: user (listening, textOnly)");
+        } else if (hasPendingMessages) {
+          console.log("[cipher] Turn: skipping mic open — %d message(s) queued", this._messageQueue.length);
+        }
+      } else if (this._turn === "cipher" && !this._ttsActive && !this._ttsFlushing && !hasPendingMessages) {
         this._turn = "user";
         this._turnReady = true;
         this.emit("listeningReady");

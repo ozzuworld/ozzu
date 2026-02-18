@@ -271,6 +271,7 @@ let goAwayDuringToolCall = false;
 let goAwayPartialOutput = ""; // tracks what Gemini was saying before disconnect
 let goAwayNudgeTimer = null;  // retry timer for recovery nudge
 let cipherPipeline = null; // CipherPipeline instance when Cipher is active (Deepgram STT → Claude → Cartesia TTS)
+let cipherPhoneWs = null; // WebSocket of the cipher-voice-capable iPhone (for sending response text)
 const JUNE_VOICE = "Kore";
 const CIPHER_VOICE = "Orus";
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
@@ -7286,15 +7287,31 @@ async function startCipherPipeline() {
     pipelineTools = [...GEMINI_HA_TOOLS, ...GEMINI_BRIDGE_TOOLS, SWITCH_TO_JUNE_TOOL];
   }
 
+  // Detect if a cipher-voice phone is connected — use textOnly mode if so
+  const hasCipherPhone = cipherPhoneWs && cipherPhoneWs.readyState === WebSocket.OPEN;
+  const textOnly = !!hasCipherPhone;
+  if (textOnly) {
+    log.cipher.info("Starting pipeline in textOnly mode — iPhone handles STT/TTS on-device");
+  }
+
   cipherPipeline = new CipherPipeline({
     systemPrompt: systemPromptText,
     tools: pipelineTools,
     handleToolCall: handleToolCall,
+    textOnly,
   });
 
   // Wire pipeline events
   cipherPipeline.on("audio", (pcmBase64) => {
     routeAudio({ type: "audio", data: pcmBase64 });
+  });
+
+  // textOnly mode: send response text to phone for on-device TTS
+  cipherPipeline.on("responseTextDone", (text) => {
+    if (cipherPhoneWs && cipherPhoneWs.readyState === WebSocket.OPEN) {
+      cipherPhoneWs.send(JSON.stringify({ type: "cipherResponse", text }));
+      log.cipher.info(`Sent response to phone for TTS: "${text.substring(0, 80)}${text.length > 80 ? "..." : ""}"`);
+    }
   });
 
   cipherPipeline.on("inputTranscript", (text) => {
@@ -7454,6 +7471,21 @@ wss.on("connection", (ws) => {
         db.upsertDevice(deviceId, deviceType).catch(err =>
           log.pg.error("upsert device:", err.message));
 
+        // Track cipher-voice-capable phone
+        if (deviceType === "phone" && capabilities.cipherVoice) {
+          cipherPhoneWs = ws;
+          log.ws.info(`Cipher voice phone registered: ${deviceId} — on-device STT/TTS enabled`);
+
+          // If cipher pipeline is running in non-textOnly mode, restart in textOnly mode
+          if (cipherPipeline && typeof cipherPipeline === "object" && !cipherPipeline.textOnly) {
+            log.cipher.info("Phone with cipherVoice connected — restarting pipeline in textOnly mode");
+            const oldPipeline = cipherPipeline;
+            cipherPipeline = null;
+            oldPipeline.stop().then(() => startCipherPipeline()).catch(() => startCipherPipeline());
+            return;
+          }
+        }
+
         // Start AI session if not already running (skip during persona switch)
         if (personaSwitchPending) {
           log.ws.info("Persona switch pending, deferring AI session start");
@@ -7524,6 +7556,45 @@ wss.on("connection", (ws) => {
         } else if (!cipherPipeline) {
           sendToGeminiText(msg.text);
         }
+        return;
+      }
+
+      // ── Phone-mode Cipher messages (iPhone on-device STT/TTS) ──
+
+      // iPhone sends STT-transcribed text for Claude processing
+      if (msg.type === "cipherText") {
+        const info = devices.get(ws);
+        if (!info || info.deviceType !== "phone") return;
+        if (!cipherPipeline || typeof cipherPipeline !== "object") return;
+        if (!msg.text?.trim()) return;
+        log.cipher.info(`Phone STT: "${msg.text}" (from ${info.deviceId})`);
+        cipherPipeline.sendText(msg.text);
+        return;
+      }
+
+      // iPhone sends TTS audio (PCM base64) for relay to tablets/TV
+      if (msg.type === "cipherAudio") {
+        const info = devices.get(ws);
+        if (!info || info.deviceType !== "phone") return;
+        if (!msg.data) return;
+        // Broadcast to all non-phone speaker devices (tablets + TV)
+        const audioMsg = JSON.stringify({ type: "audio", data: msg.data });
+        for (const [clientWs, clientInfo] of devices) {
+          if (clientWs === ws) continue; // Don't send back to iPhone
+          if (!clientInfo.capabilities?.speaker) continue;
+          if (clientWs.readyState === WebSocket.OPEN) {
+            try { clientWs.send(audioMsg); } catch {}
+          }
+        }
+        return;
+      }
+
+      // iPhone signals TTS playback finished
+      if (msg.type === "cipherTtsDone") {
+        const info = devices.get(ws);
+        if (!info || info.deviceType !== "phone") return;
+        // Broadcast turnComplete to all devices (tablets know speech ended)
+        broadcastToAll({ type: "turnComplete" });
         return;
       }
 
@@ -7728,6 +7799,20 @@ wss.on("connection", (ws) => {
     // Clean up audio stats for disconnected device
     if (info?.deviceId) {
       audioStats.delete(info.deviceId);
+    }
+    // If cipher-voice phone disconnected, fall back to Deepgram pipeline
+    if (ws === cipherPhoneWs) {
+      cipherPhoneWs = null;
+      log.ws.info("Cipher voice phone disconnected — falling back to Deepgram STT/TTS");
+      if (cipherPipeline && typeof cipherPipeline === "object" && cipherPipeline.textOnly) {
+        const oldPipeline = cipherPipeline;
+        cipherPipeline = null;
+        oldPipeline.stop().then(() => {
+          if (devices.size > 0 && currentPersona === "cipher") startCipherPipeline();
+        }).catch(() => {
+          if (devices.size > 0 && currentPersona === "cipher") startCipherPipeline();
+        });
+      }
     }
     log.ws.info(`Device disconnected: ${info?.deviceId || "unknown"}, remaining: ${devices.size}`);
     if (info?.capabilities?.speaker) {

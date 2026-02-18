@@ -19,6 +19,7 @@
       "infoPlist": {
         "NSFaceIDUsageDescription": "Ozzu uses Face ID to authorize high-risk actions",
         "NSMicrophoneUsageDescription": "Ozzu needs microphone access for voice communication",
+        "NSSpeechRecognitionUsageDescription": "Ozzu uses on-device speech recognition for the Cipher voice pipeline",
         "UIBackgroundModes": ["audio"]
       }
     },
