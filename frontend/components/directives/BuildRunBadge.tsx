@@ -1,17 +1,7 @@
 import { useState } from "react";
 import { View, Text, Pressable, Alert } from "react-native";
-import { fetchDirectiveArtifacts, deployArtifact, type DirectiveArtifact } from "../../lib/bridge-api";
-
-function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  if (diff < 60000) return "just now";
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
+import { fetchDirectiveArtifacts, deployArtifact } from "../../lib/bridge-api";
+import { relativeTime } from "../../lib/directive-constants";
 
 interface BuildRun {
   platform: string;

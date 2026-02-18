@@ -31,6 +31,7 @@ export interface BridgeCallbacks {
   onListeningReady: () => void;
   onCipherResponse?: (text: string) => void; // Phone-mode: Claude response text for on-device TTS
   onAudioRoutingUpdate?: (data: any) => void; // Audio routing state changed
+  onDirectiveUpdate?: (data: any) => void; // Directive status/build changed (from bridge broadcast)
   onError: (message: string) => void;
 }
 
@@ -243,6 +244,9 @@ export class BridgeSession {
           break;
         case "audioRoutingUpdate":
           this.callbacks?.onAudioRoutingUpdate?.(msg);
+          break;
+        case "directiveUpdate":
+          this.callbacks?.onDirectiveUpdate?.(msg);
           break;
         case "error":
           this.callbacks?.onError(msg.message);

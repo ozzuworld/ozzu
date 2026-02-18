@@ -1,9 +1,6 @@
 import { View, Text, Pressable, ScrollView } from "react-native";
+import { ACTIVE_STATUSES, FAILED_STATUSES, NEEDS_ACTION_STATUSES } from "../../lib/directive-constants";
 import type { Directive } from "../../lib/bridge-api";
-
-const ACTIVE_STATUSES = ["pending", "planning", "planned", "approved", "in_progress", "blocked"];
-const FAILED_STATUSES = ["failed", "stale", "deploy_failed"];
-const NEEDS_ACTION_STATUSES = ["planned", "blocked", "deploy_failed"];
 
 interface SummaryStatsBarProps {
   directives: Directive[];

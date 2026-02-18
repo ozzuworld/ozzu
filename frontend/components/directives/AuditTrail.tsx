@@ -1,43 +1,12 @@
 import { useState, useCallback } from "react";
 import { View, Text, Pressable, LayoutAnimation } from "react-native";
+import { ACTOR_COLORS, AUDIT_TYPE_EMOJIS, relativeTime } from "../../lib/directive-constants";
 
 interface ActivityEntry {
   timestamp: number;
   type: string;
   actor?: string;
   message: string;
-}
-
-const ACTOR_COLORS: Record<string, string> = {
-  "King Kazuma": "#A78BFA",
-  June: "#67E8F9",
-  Cipher: "#6EE7B7",
-  system: "#9CA3AF",
-};
-
-const TYPE_EMOJIS: Record<string, string> = {
-  status_change: "🔄",
-  verification_started: "🔍",
-  verification_success: "✅",
-  verification_failure: "❌",
-  completion_blocked: "🛑",
-  build_triggered: "🏗️",
-  deploy_started: "🚀",
-  deploy_success: "✅",
-  deploy_failed: "💥",
-  comment: "💬",
-  escalation: "⚡",
-};
-
-function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  if (diff < 60000) return "just now";
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
 }
 
 function ActorBadge({ actor }: { actor?: string }) {
@@ -105,7 +74,7 @@ export function AuditTrail({ entries, collapsed = true, maxCollapsed = 3 }: Audi
         </Text>
       </Pressable>
       {shown.map((entry, i) => {
-        const emoji = TYPE_EMOJIS[entry.type] || "•";
+        const emoji = AUDIT_TYPE_EMOJIS[entry.type] || "•";
         return (
           <View
             key={expanded ? i : `c-${i}`}

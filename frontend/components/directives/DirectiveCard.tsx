@@ -2,95 +2,18 @@ import { useState, useCallback } from "react";
 import { View, Text, Pressable, LayoutAnimation } from "react-native";
 import { BuildRunBadge } from "./BuildRunBadge";
 import { AuditTrail } from "./AuditTrail";
+import {
+  STATUS_EMOJI,
+  STATUS_COLORS,
+  TYPE_EMOJI,
+  PRIORITY_EMOJI,
+  ACTOR_COLORS,
+  relativeTime,
+  formatTimestamp,
+  humanDuration,
+  priorityLabel,
+} from "../../lib/directive-constants";
 import type { Directive, BuildStatus } from "../../lib/bridge-api";
-
-// ── Emoji Maps ──
-
-const STATUS_EMOJI: Record<string, string> = {
-  deploy_failed: "🚨",
-  blocked: "🛑",
-  planned: "📋",
-  in_progress: "🔨",
-  planning: "🧠",
-  pending: "⏳",
-  approved: "✅",
-  completed: "🎉",
-  failed: "❌",
-  cancelled: "🚫",
-  stale: "💤",
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: "#737373",
-  planning: "#A855F7",
-  planned: "#8B5CF6",
-  approved: "#FBBF24",
-  in_progress: "#3B82F6",
-  completed: "#22C55E",
-  failed: "#EF4444",
-  cancelled: "#F97316",
-  stale: "#6B7280",
-  blocked: "#F59E0B",
-  deploy_failed: "#DC2626",
-};
-
-const TYPE_EMOJI: Record<string, string> = {
-  feature: "✨",
-  quick: "⚡",
-  explore: "🔍",
-};
-
-const PRIORITY_EMOJI: Record<number, string> = {
-  1: "🔴",
-  2: "🟠",
-  3: "🟡",
-  4: "⚪",
-};
-
-const ACTOR_COLORS: Record<string, string> = {
-  "King Kazuma": "#A78BFA",
-  June: "#67E8F9",
-  Cipher: "#6EE7B7",
-  system: "#9CA3AF",
-};
-
-// ── Helpers ──
-
-function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  if (diff < 60000) return "just now";
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
-}
-
-function formatTimestamp(ts: number): string {
-  const d = new Date(ts);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function humanDuration(ms: number): string {
-  if (ms < 60000) return `${Math.round(ms / 1000)}s`;
-  const mins = Math.floor(ms / 60000);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  if (hrs < 24) return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ${hrs % 24}h`;
-}
-
-function priorityLabel(p: number): string {
-  if (p <= 1) return "P1";
-  if (p <= 2) return "P2";
-  if (p <= 3) return "P3";
-  return "P4";
-}
 
 // ── Subcomponents ──
 

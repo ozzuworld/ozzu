@@ -1,57 +1,11 @@
 import { View, Text, Pressable, Modal } from "react-native";
 import { updateDirective, type Directive } from "../../lib/bridge-api";
-
-const STATUS_EMOJI: Record<string, string> = {
-  pending: "⏳",
-  planning: "🧠",
-  planned: "📋",
-  approved: "✅",
-  in_progress: "🔨",
-  completed: "🎉",
-  failed: "❌",
-  cancelled: "🚫",
-  stale: "💤",
-  blocked: "🛑",
-  deploy_failed: "🚨",
-};
-
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  pending: ["planning", "in_progress", "cancelled"],
-  planning: ["planned", "in_progress", "cancelled"],
-  planned: ["in_progress", "cancelled"],
-  approved: ["in_progress", "cancelled"],
-  in_progress: ["completed", "failed", "blocked", "cancelled"],
-  blocked: ["in_progress", "cancelled"],
-  failed: ["pending", "cancelled"],
-  stale: ["pending", "cancelled"],
-  deploy_failed: ["pending", "in_progress", "cancelled"],
-  cancelled: ["pending"],
-};
-
-const TRANSITION_LABELS: Record<string, string> = {
-  pending: "⏳ Reopen (Pending)",
-  planning: "🧠 Start Planning",
-  planned: "📋 Mark Planned",
-  in_progress: "🔨 Start Work",
-  completed: "🎉 Mark Completed",
-  failed: "❌ Mark Failed",
-  cancelled: "🚫 Cancel",
-  blocked: "🛑 Mark Blocked",
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: "#737373",
-  planning: "#A855F7",
-  planned: "#8B5CF6",
-  approved: "#FBBF24",
-  in_progress: "#3B82F6",
-  completed: "#22C55E",
-  failed: "#EF4444",
-  cancelled: "#F97316",
-  stale: "#6B7280",
-  blocked: "#F59E0B",
-  deploy_failed: "#DC2626",
-};
+import {
+  STATUS_EMOJI,
+  STATUS_COLORS,
+  VALID_TRANSITIONS,
+  TRANSITION_LABELS,
+} from "../../lib/directive-constants";
 
 interface StatusChangeSheetProps {
   visible: boolean;

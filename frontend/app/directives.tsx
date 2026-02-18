@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -11,23 +11,23 @@ import {
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
 import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
+import { useDirectives } from "../lib/directive-hooks";
 import {
-  fetchDirectives,
-  fetchApprovalDetails,
-  fetchBuildStatus,
-  resolveApproval,
   cancelDirective,
   retryDirective,
   retryMergeDirective,
   unblockDirective,
   type Directive,
-  type EnrichedApproval,
-  type BuildStatus,
 } from "../lib/bridge-api";
+import {
+  STATUS_ORDER,
+  ACTIVE_STATUSES,
+  FAILED_STATUSES,
+  NEEDS_ACTION_STATUSES,
+} from "../lib/directive-constants";
 import { DirectiveCard } from "../components/directives/DirectiveCard";
 import { SummaryStatsBar } from "../components/directives/SummaryStatsBar";
 import { PlanReviewModal } from "../components/directives/PlanReviewModal";
@@ -41,20 +41,6 @@ if (
 }
 
 const TOP_BAR_HEIGHT = 48;
-
-const STATUS_ORDER: Record<string, number> = {
-  deploy_failed: 0,
-  blocked: 1,
-  planned: 2,
-  in_progress: 3,
-  planning: 4,
-  pending: 5,
-  approved: 6,
-  completed: 7,
-  failed: 8,
-  cancelled: 9,
-  stale: 10,
-};
 
 const FILTER_CHIPS = [
   { key: "all", label: "ALL", emoji: "🌍" },
@@ -71,80 +57,29 @@ const SORT_OPTIONS = [
   { key: "created", label: "Created" },
 ];
 
-const ACTIVE_STATUSES = ["pending", "planning", "planned", "approved", "in_progress", "blocked"];
-const FAILED_STATUSES = ["failed", "stale", "deploy_failed"];
-const NEEDS_ACTION_STATUSES = ["planned", "blocked", "deploy_failed"];
-
 export default function DirectivesScreen() {
   const router = useRouter();
   const { insets, isPhone, screenWidth, screenHeight } = usePhoneLayout();
   const isTabletLandscape = !isPhone && screenWidth > screenHeight;
 
-  const [directives, setDirectives] = useState<Directive[]>([]);
-  const [approvals, setApprovals] = useState<EnrichedApproval[]>([]);
-  const [buildStatus, setBuildStatus] = useState<BuildStatus | null>(null);
+  const { directives, approvals, buildStatus, error, refresh } = useDirectives();
+
   const [filter, setFilter] = useState("all");
   const [sortBy, setSortBy] = useState("status");
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // Plan review modal
   const [planReviewDirective, setPlanReviewDirective] = useState<Directive | null>(null);
-  const [planReviewApproval, setPlanReviewApproval] = useState<EnrichedApproval | null>(null);
+  const [planReviewApproval, setPlanReviewApproval] = useState<any>(null);
 
   // Status change sheet
   const [statusChangeDirective, setStatusChangeDirective] = useState<Directive | null>(null);
 
-  const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      const [directiveData, approvalData, buildData] = await Promise.all([
-        fetchDirectives(),
-        fetchApprovalDetails().catch(() => [] as EnrichedApproval[]),
-        fetchBuildStatus().catch(() => null as BuildStatus | null),
-      ]);
-      setDirectives(directiveData);
-      setApprovals(approvalData);
-      if (buildData) setBuildStatus(buildData);
-    } catch (e: any) {
-      setError(e.message || "Failed to load directives");
-    }
-  }, []);
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadData();
+    await refresh();
     setRefreshing(false);
-  }, [loadData]);
-
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadData();
-      pollIntervalRef.current = setInterval(loadData, 15000);
-      return () => {
-        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-      };
-    }, [loadData])
-  );
-
-  // Adaptive polling: 10s when builds are active, 15s otherwise
-  useEffect(() => {
-    const hasGlobalActive = buildStatus &&
-      ([...(buildStatus.android || []), ...(buildStatus.ios || [])].some(
-        (r) => r.status === "in_progress" || r.status === "queued"
-      ));
-    const hasDirectiveActive = directives.some((d) =>
-      d.buildRuns?.some((run) => run.status === "in_progress" || run.status === "queued")
-    );
-    const interval = hasGlobalActive || hasDirectiveActive ? 10000 : 15000;
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    pollIntervalRef.current = setInterval(loadData, interval);
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    };
-  }, [buildStatus, directives, loadData]);
+  }, [refresh]);
 
   // Action handler
   const handleAction = useCallback(
@@ -167,7 +102,7 @@ export default function DirectivesScreen() {
               style: "destructive",
               onPress: async () => {
                 await cancelDirective(id);
-                loadData();
+                refresh();
               },
             },
           ]);
@@ -181,7 +116,7 @@ export default function DirectivesScreen() {
               style: "destructive",
               onPress: async () => {
                 await cancelDirective(id);
-                loadData();
+                refresh();
               },
             },
           ]);
@@ -190,7 +125,7 @@ export default function DirectivesScreen() {
         if (action === "retry") {
           const result = await retryDirective(id);
           if (!result.ok) Alert.alert("Error", result.error || "Retry failed");
-          loadData();
+          refresh();
           return;
         }
         if (action === "retry_merge") {
@@ -200,20 +135,20 @@ export default function DirectivesScreen() {
           } else {
             Alert.alert("❌ Merge Failed", result.error || "Merge failed again");
           }
-          loadData();
+          refresh();
           return;
         }
         if (action === "unblock") {
           const result = await unblockDirective(id);
           if (!result.ok) Alert.alert("Error", result.error || "Unblock failed");
-          loadData();
+          refresh();
           return;
         }
       } catch (err: any) {
         Alert.alert("Error", err.message || "Action failed");
       }
     },
-    [approvals, directives, loadData]
+    [approvals, directives, refresh]
   );
 
   const handlePlanReview = useCallback(
@@ -552,7 +487,7 @@ export default function DirectivesScreen() {
             <Text style={{ color: "#EF4444", fontSize: 12, fontFamily: "monospace", textAlign: "center" }}>
               {error}
             </Text>
-            <Pressable onPress={loadData} style={{ marginTop: 12 }}>
+            <Pressable onPress={refresh} style={{ marginTop: 12 }}>
               <Text style={{ color: "#06B6D4", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
                 TAP TO RETRY
               </Text>
@@ -601,7 +536,7 @@ export default function DirectivesScreen() {
           setPlanReviewDirective(null);
           setPlanReviewApproval(null);
         }}
-        onResolved={loadData}
+        onResolved={refresh}
       />
 
       {/* Status Change Sheet */}
@@ -609,7 +544,7 @@ export default function DirectivesScreen() {
         visible={statusChangeDirective !== null}
         directive={statusChangeDirective}
         onDismiss={() => setStatusChangeDirective(null)}
-        onStatusChanged={loadData}
+        onStatusChanged={refresh}
       />
 
       <StatusBar style="light" />

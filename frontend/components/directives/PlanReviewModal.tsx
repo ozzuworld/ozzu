@@ -2,33 +2,7 @@ import { View, Text, Pressable, Modal, ScrollView, TextInput, Alert } from "reac
 import { useState, useCallback } from "react";
 import { MarkdownContent } from "../ContentPanel";
 import { resolveApproval, cancelDirective, type Directive, type EnrichedApproval } from "../../lib/bridge-api";
-
-const STATUS_EMOJI: Record<string, string> = {
-  pending: "⏳",
-  planning: "🧠",
-  planned: "📋",
-  approved: "✅",
-  in_progress: "🔨",
-  completed: "🎉",
-  failed: "❌",
-  cancelled: "🚫",
-  stale: "💤",
-  blocked: "🛑",
-  deploy_failed: "🚨",
-};
-
-const TYPE_EMOJI: Record<string, string> = {
-  feature: "✨",
-  quick: "⚡",
-  explore: "🔍",
-};
-
-const PRIORITY_EMOJI: Record<number, string> = {
-  1: "🔴",
-  2: "🟠",
-  3: "🟡",
-  4: "⚪",
-};
+import { STATUS_EMOJI, TYPE_EMOJI, PRIORITY_EMOJI } from "../../lib/directive-constants";
 
 interface PlanReviewModalProps {
   visible: boolean;
