@@ -513,36 +513,69 @@ function cleanupStaleBranches(getDirectives) {
 
 function mergeWorktreeToMain(directiveId, branch) {
   const { execSync } = require("child_process");
-  const wtDir = path.join(WORKTREE_DIR, directiveId);
-  try {
-    // Check if there are any commits on the agent branch beyond what's on main
-    const ahead = execSync(`git rev-list main..${branch} --count`, { cwd: WORKDIR, encoding: "utf8", timeout: 5000 }).trim();
-    if (ahead === "0") {
-      log(`No new commits on ${branch} — skipping merge`);
-      return true;
-    }
+  const MAX_RETRIES = 3;
 
-    // Fast-forward merge to main (agent worked on top of HEAD, should always fast-forward)
-    execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
-    execSync(`git merge --ff-only "${branch}"`, { cwd: WORKDIR, timeout: 10000 });
-    execSync(`git push origin main`, { cwd: WORKDIR, timeout: 30000 });
-    log(`Merged ${branch} to main (${ahead} commit(s)) and pushed`);
-    return true;
-  } catch (err) {
-    log(`Merge failed for ${branch}: ${err.message}`);
-    // Fallback: try rebase merge
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
+      // 1. Fetch latest refs from origin
+      execSync(`git fetch origin`, { cwd: WORKDIR, timeout: 30000, stdio: "ignore" });
+
+      // 2. Ensure we're on main and up to date
       execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
-      execSync(`git merge "${branch}" --no-edit`, { cwd: WORKDIR, timeout: 10000 });
-      execSync(`git push origin main`, { cwd: WORKDIR, timeout: 30000 });
-      log(`Rebase-merged ${branch} to main and pushed`);
+      execSync(`git reset --hard origin/main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+
+      // 3. Check if there are any commits on the agent branch beyond main
+      const ahead = execSync(`git rev-list main..${branch} --count`, { cwd: WORKDIR, encoding: "utf8", timeout: 5000 }).trim();
+      if (ahead === "0") {
+        log(`No new commits on ${branch} — skipping merge`);
+        return true;
+      }
+
+      // 4. Rebase agent branch onto current main (makes FF possible)
+      try {
+        execSync(`git rebase main "${branch}"`, { cwd: WORKDIR, timeout: 60000, stdio: "ignore" });
+      } catch (rebaseErr) {
+        // Rebase conflict — abort and fall back to merge commit
+        log(`Rebase conflict for ${branch} — falling back to merge commit`);
+        try { execSync(`git rebase --abort`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
+        execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+        execSync(`git merge "${branch}" --no-edit`, { cwd: WORKDIR, timeout: 30000 });
+        execSync(`git push origin main`, { cwd: WORKDIR, timeout: 60000 });
+        log(`Merge-committed ${branch} to main (attempt ${attempt}) and pushed`);
+        return true;
+      }
+
+      // 5. Fast-forward merge (guaranteed to work after successful rebase)
+      execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+      execSync(`git merge --ff-only "${branch}"`, { cwd: WORKDIR, timeout: 10000 });
+
+      // 6. Push to origin
+      execSync(`git push origin main`, { cwd: WORKDIR, timeout: 60000 });
+      log(`Merged ${branch} to main (${ahead} commit(s), attempt ${attempt}) and pushed`);
       return true;
-    } catch (err2) {
-      log(`Merge completely failed for ${branch}: ${err2.message}`);
+    } catch (err) {
+      const msg = err.message || "";
+      // Push rejected (another agent pushed between our fetch and push) — retry
+      if (msg.includes("non-fast-forward") || msg.includes("fetch first") || msg.includes("rejected")) {
+        log(`Push rejected for ${branch} (attempt ${attempt}/${MAX_RETRIES}) — retrying after fetch`);
+        try { execSync(`git merge --abort`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
+        try { execSync(`git rebase --abort`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
+        if (attempt < MAX_RETRIES) {
+          // Brief delay before retry to avoid hammering
+          execSync(`sleep 2`, { timeout: 5000 });
+          continue;
+        }
+      }
+      // Real conflict or final retry exhausted
+      log(`Merge completely failed for ${branch} (attempt ${attempt}): ${msg}`);
       try { execSync(`git merge --abort`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
+      try { execSync(`git rebase --abort`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
+      try { execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
+      try { execSync(`git reset --hard origin/main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
       return false;
     }
   }
+  return false;
 }
 
 // Wrap an orchestrator-crafted prompt with infrastructure boilerplate
