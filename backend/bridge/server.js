@@ -10,7 +10,7 @@ const WebSocket = require("ws");
 const Redis = require("ioredis");
 const db = require("./db");
 const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
-const { spawnPlanningAgent, spawnImplementationAgent, spawnWorkerWithPrompt, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, getConfig, setConfig } = require("./agent-spawner");
+const { spawnPlanningAgent, spawnImplementationAgent, spawnWorkerWithPrompt, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, getConfig, setConfig, mergeWorktreeToMain, cleanupWorktree, smartDeploy } = require("./agent-spawner");
 const orchestrator = require("./orchestrator");
 const buildVerifier = require("./build-verifier");
 const createLogger = require("./logger");
@@ -164,46 +164,11 @@ const DIRECTIVE_TEMPLATES = [
   { name: "Deploy", type: "quick", titleTemplate: "Deploy {target}", descriptionTemplate: "Deploy to the specified target." },
 ];
 
-// ── Orchestrator-based directive routing ──
-// Routes directives through the persistent Cipher orchestrator for context-aware dispatch.
-// Falls back to direct spawn if orchestrator is unavailable.
-async function routeDirective(directive, type) {
-  if (!orchestrator.isAvailable()) {
-    // Fallback: direct spawn with generic template (current behavior)
-    if (type === "planning") spawnPlanningAgent(directive);
-    else spawnImplementationAgent(directive);
-    return;
-  }
-
-  try {
-    const message = `NEW_DIRECTIVE: ${JSON.stringify({
-      id: directive.id,
-      type: directive.type,
-      title: directive.title,
-      description: directive.description,
-      context: directive.context || null,
-      priority: directive.priority,
-      status: directive.status,
-      plan: directive.plan || null,
-      failureReason: directive.failureReason || null,
-      retryCount: directive.retryCount || 0,
-    })}`;
-
-    const response = await orchestrator.sendMessage(message);
-    await orchestrator.handleResponse(directive, response);
-  } catch (err) {
-    log.directive.error(`Orchestrator routing failed for ${directive.id}: ${err.message} — falling back to direct spawn`);
-    // Log the failure to directive activity for audit
-    const directives = getDirectives();
-    const d = directives.find(x => x.id === directive.id);
-    if (d) {
-      if (!Array.isArray(d.activity_log)) d.activity_log = [];
-      d.activity_log.push({ timestamp: Date.now(), type: "orchestrator_error", actor: "system", message: `Orchestrator failed: ${err.message.slice(0, 200)} — fell back to direct ${type} spawn` });
-      saveDirectives(directives, d, null, "system");
-    }
-    if (type === "planning") spawnPlanningAgent(directive);
-    else spawnImplementationAgent(directive);
-  }
+// ── Directive status transition logging (Cipher handles work directly) ──
+// Workers removed — Cipher (CLI session) picks up directives directly with full context.
+// This function is kept as a no-op to avoid breaking call sites during transition.
+function routeDirective(directive, type) {
+  log.directive.info(`Directive ${directive.id} "${directive.title}" → ${type} — awaiting Cipher (no worker spawn)`);
 }
 
 // ── Auto-escalation for exhausted directives ──
@@ -805,20 +770,10 @@ async function initStorage() {
     if (failedCount > 0) log.directive.info(`Failed ${failedCount} exhausted directive(s)`);
   }
 
-  // Phase B: Respawn agents for directives still in actionable states (higher priority first)
-  const respawnTargets = _directives.filter(d => d.status === "planning" || d.status === "approved")
-    .sort((a, b) => (a.priority || 3) - (b.priority || 3));
-  if (respawnTargets.length > 0) {
-    log.directive.info(`Respawning agents for ${respawnTargets.length} active directive(s)...`);
-    const INITIAL_DELAY = 5000; // 5s — let HTTP server start first
-    const STAGGER_MS = 3000;   // 3s between spawns
-    respawnTargets.forEach((d, i) => {
-      setTimeout(() => {
-        const type = d.status === "planning" ? "planning" : "implementation";
-        log.directive.info(`Respawn: ${d.id} "${d.title}" → ${type} agent`);
-        routeDirective(d, type);
-      }, INITIAL_DELAY + i * STAGGER_MS);
-    });
+  // Phase B: Log actionable directives (Cipher handles them directly, no worker respawn)
+  const actionable = _directives.filter(d => d.status === "planning" || d.status === "approved");
+  if (actionable.length > 0) {
+    log.directive.info(`${actionable.length} directive(s) awaiting Cipher: ${actionable.map(d => `${d.id} (${d.status})`).join(", ")}`);
   }
 
   // Clean up expired approvals (older than APPROVAL_EXPIRY_MS and still pending)
@@ -2186,6 +2141,123 @@ async function handleRequest(req, res) {
       saveDirectives(directives, directive, null, "system");
       sendJSON(res, 500, { success: false, error: err.message });
     }
+    return;
+  }
+
+  // POST /directives/:id/merge-and-deploy — Cipher merges branch + deploys
+  // Replaces the old worker→reviewAndMerge→smartDeploy flow
+  const directiveMergeMatch = pathname.match(/^\/directives\/([^/]+)\/merge-and-deploy$/);
+  if (req.method === "POST" && directiveMergeMatch) {
+    const id = directiveMergeMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    if (directive.status !== "in_progress" && directive.status !== "completed") {
+      sendJSON(res, 400, { error: `Directive is "${directive.status}" — must be in_progress or completed to merge` });
+      return;
+    }
+
+    const data = await parseBody(req);
+    // Accept branch from request body or directive's mergeBranch field
+    const branch = data.branch || directive.mergeBranch;
+    if (!branch) {
+      // Try to detect branch from git
+      try {
+        const { execSync } = require("child_process");
+        const currentBranch = execSync("git branch --show-current", { cwd: "/home/gcp/ozzu", encoding: "utf8", timeout: 5000 }).trim();
+        if (currentBranch.startsWith("cipher/") || currentBranch.startsWith("agent/")) {
+          // Use detected branch — but we need to be on main to merge
+          sendJSON(res, 400, { error: `No branch specified. Detected current branch: ${currentBranch}. Pass {"branch":"${currentBranch}"} in request body.` });
+          return;
+        }
+      } catch {}
+      sendJSON(res, 400, { error: "No branch specified. Pass {\"branch\":\"cipher/dir_xxx\"} in request body or set mergeBranch on directive." });
+      return;
+    }
+
+    if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+    const prevStatus = directive.status;
+
+    // Step 1: Run verification
+    directive.activity_log.push({ timestamp: Date.now(), type: "merge_deploy_started", actor: "Cipher", message: `Merge-and-deploy started for branch ${branch}` });
+    saveDirectives(directives, directive, null, "Cipher");
+
+    log.directive.info(`merge-and-deploy: ${id} branch=${branch} — running verification`);
+
+    try {
+      const verifyResult = await buildVerifier.verify(directive);
+      directive.verification_result = {
+        verified_at: Date.now(),
+        success: verifyResult.success,
+        verification_log: verifyResult.verification_log,
+        change_type: verifyResult.change_type,
+        failure_reason: verifyResult.failure_reason || null,
+      };
+
+      if (!verifyResult.success) {
+        directive.activity_log.push({ timestamp: Date.now(), type: "verification_failure", actor: "system", message: `Verification failed: ${verifyResult.failure_reason}` });
+        saveDirectives(directives, directive, null, "system");
+        sendJSON(res, 400, {
+          success: false,
+          step: "verification",
+          error: `Verification failed: ${verifyResult.failure_reason}`,
+          verification_log: verifyResult.verification_log,
+        });
+        return;
+      }
+
+      directive.activity_log.push({ timestamp: Date.now(), type: "verification_success", actor: "system", message: `Verification passed (${verifyResult.change_type})` });
+      saveDirectives(directives, directive, null, "system");
+    } catch (err) {
+      log.directive.error(`merge-and-deploy verification error for ${id}: ${err.message}`);
+      sendJSON(res, 500, { success: false, step: "verification", error: err.message });
+      return;
+    }
+
+    // Step 2: Merge branch to main
+    log.directive.info(`merge-and-deploy: ${id} — merging ${branch} to main`);
+    const mergeOk = mergeWorktreeToMain(id, branch);
+
+    if (!mergeOk) {
+      directive.status = "deploy_failed";
+      directive.failureReason = `Merge failed for branch ${branch}`;
+      directive.mergeBranch = branch;
+      directive.activity_log.push({ timestamp: Date.now(), type: "merge_failed", actor: "system", message: directive.failureReason });
+      saveDirectives(directives, directive, prevStatus, "system");
+      sendJSON(res, 500, { success: false, step: "merge", error: directive.failureReason });
+      return;
+    }
+
+    directive.activity_log.push({ timestamp: Date.now(), type: "merged", actor: "Cipher", message: `Branch ${branch} merged to main` });
+
+    // Step 3: Mark completed
+    directive.status = "completed";
+    directive.completedAt = Date.now();
+    directive.activity_log.push({ timestamp: Date.now(), type: "status_change", actor: "Cipher", message: `Status changed from ${prevStatus} to completed` });
+    saveDirectives(directives, directive, prevStatus, "Cipher");
+
+    log.directive.info(`merge-and-deploy: ${id} — merged and completed, triggering smartDeploy`);
+
+    // Step 4: Trigger smartDeploy (async, non-blocking)
+    try {
+      smartDeploy(directive);
+    } catch (err) {
+      log.directive.error(`smartDeploy error for ${id}: ${err.message}`);
+    }
+
+    // Clean up the branch (best-effort)
+    try {
+      cleanupWorktree(id, branch);
+    } catch {}
+
+    sendJSON(res, 200, {
+      success: true,
+      message: `Directive ${id} merged from ${branch}, marked completed, deploy triggered`,
+      directive,
+    });
     return;
   }
 
@@ -8706,26 +8778,8 @@ wss.on("connection", (ws) => {
 
 (async () => {
   await initStorage();
-  // Bootstrap orchestrator session (non-blocking — directives fall back to direct spawn if unavailable)
-  orchestrator.ensureSession().then(async () => {
-    const info = orchestrator.getSessionInfo();
-    if (info) {
-      log.bridge.info(`Orchestrator session: ${info.id} (${info.messageCount} messages)`);
-      // Notify orchestrator of restart with active directive summary
-      try {
-        const active = _directives.filter(d => ["planning", "approved", "in_progress"].includes(d.status));
-        if (active.length > 0) {
-          await orchestrator.sendMessage(`BRIDGE_RESTARTED: ${JSON.stringify({
-            activeDirectives: active.map(d => ({ id: d.id, title: d.title, status: d.status, type: d.type })),
-          })}`);
-        }
-      } catch {}
-    } else {
-      log.bridge.info("Orchestrator unavailable — directives will use direct spawn");
-    }
-  }).catch(err => {
-    log.bridge.error(`Orchestrator bootstrap failed: ${err.message}`);
-  });
+  // Orchestrator disabled — Cipher handles directives directly (no worker agents)
+  log.bridge.info("Orchestrator disabled — Cipher handles directives directly");
   server.listen(PORT, "0.0.0.0", () => {
     log.bridge.info(`listening on :${PORT}`);
     log.bridge.info(`data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);

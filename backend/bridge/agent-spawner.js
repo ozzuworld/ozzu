@@ -1,5 +1,6 @@
-// agent-spawner.js — Event-driven agent subprocess manager for directives
-// Spawns `claude` CLI processes when directives transition to planning/approved status
+// agent-spawner.js — Directive infrastructure: merge, deploy, cleanup utilities
+// Worker agent spawning is DISABLED — Cipher handles directives directly.
+// Kept: smartDeploy, mergeWorktreeToMain, cleanupWorktree, cleanupStaleBranches
 
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -1302,18 +1303,20 @@ function drainQueue() {
   }).on("error", (e) => log(`Drain: failed to fetch directives: ${e.message}`));
 }
 
+// Worker spawn functions disabled — Cipher handles directives directly (no disposable agents)
 function spawnPlanningAgent(directive) {
-  // For quick directives, mark as planning first (they'll self-transition)
-  return spawnAgent(directive, "planning");
+  log(`DISABLED: spawnPlanningAgent called for ${directive.id} "${directive.title}" — Cipher handles directly`);
+  return null;
 }
 
 function spawnImplementationAgent(directive) {
-  return spawnAgent(directive, "implementation");
+  log(`DISABLED: spawnImplementationAgent called for ${directive.id} "${directive.title}" — Cipher handles directly`);
+  return null;
 }
 
-// Spawn a worker with an orchestrator-crafted prompt
 function spawnWorkerWithPrompt(directive, type, orchestratorPrompt) {
-  return spawnAgent(directive, type, orchestratorPrompt);
+  log(`DISABLED: spawnWorkerWithPrompt called for ${directive.id} "${directive.title}" — Cipher handles directly`);
+  return null;
 }
 
 function getRunningAgents() {
@@ -1588,73 +1591,7 @@ function startWatchdog() {
   // Startup cleanup: prune stale worktree references from previous bridge runs
   pruneWorktrees();
   log("Startup: pruned stale worktree references");
-
-  log(`Watchdog started (interval: ${_config.WATCHDOG_INTERVAL_MS / 60000}min, stall threshold: ${_config.STALL_THRESHOLD_MS / 60000}min)`);
-  setInterval(() => {
-    for (const [directiveId, info] of runningAgents) {
-      try {
-        process.kill(info.pid, 0); // signal 0 = check existence
-        const runtime = Math.round((Date.now() - new Date(info.startedAt).getTime()) / 60000);
-        log(`Watchdog: ${directiveId} (${info.type}) alive — pid ${info.pid}, ${runtime}min`);
-
-        // Stall detection: check if directive has had recent activity
-        const http = require("http");
-        http.get(`${BRIDGE}/directives`, (res) => {
-          let body = "";
-          res.on("data", (d) => body += d);
-          res.on("end", () => {
-            try {
-              const directives = JSON.parse(body);
-              const d = directives.find(x => x.id === directiveId);
-              if (!d || !d.lastActivity) return;
-              const idleMs = Date.now() - d.lastActivity;
-              if (idleMs > _config.STALL_THRESHOLD_MS) {
-                const stallMin = Math.round(idleMs / 60000);
-                log(`Watchdog: ${directiveId} STALLED — pid ${info.pid} alive but no activity for ${stallMin}min, killing`);
-                info.killReason = `watchdog: stalled for ${stallMin}min`;
-                info.process.kill("SIGTERM");
-                // SIGKILL fallback — use process.kill(pid, 0) to check if still alive
-                setTimeout(() => {
-                  try {
-                    process.kill(info.pid, 0); // throws ESRCH if gone
-                    info.process.kill("SIGKILL");
-                  } catch (e) { /* already gone */ }
-                }, SIGKILL_GRACE_MS);
-              }
-            } catch (e) { /* parse error, skip */ }
-          });
-        }).on("error", () => {});
-      } catch (err) {
-        if (err.code === "ESRCH") {
-          log(`Watchdog: ${directiveId} (${info.type}) DEAD — pid ${info.pid} gone, cleaning up`);
-          clearTimeout(info.timeout);
-          runningAgents.delete(directiveId);
-
-          // Clean up worktree for dead process
-          if (info.worktree) {
-            cleanupWorktree(directiveId, info.worktree.branch);
-          }
-
-          // Reset directive to recoverable state with failure reason
-          const resetStatus = info.type === "planning" ? "pending" : "stale";
-          const failureReason = info.killReason || "crash: process disappeared";
-          const payload = JSON.stringify({ status: resetStatus, failureReason });
-          const req = require("http").request(
-            `${BRIDGE}/directives/${directiveId}`,
-            { method: "PATCH", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
-            (res) => {
-              let body = "";
-              res.on("data", (d) => body += d);
-              res.on("end", () => log(`Watchdog: reset ${directiveId} → ${resetStatus}: ${res.statusCode}`));
-            }
-          );
-          req.on("error", (e) => log(`Watchdog: failed to reset ${directiveId}: ${e.message}`));
-          req.write(payload);
-          req.end();
-        }
-      }
-    }
-  }, _config.WATCHDOG_INTERVAL_MS);
+  log("Watchdog started (agent monitoring disabled — Cipher handles directives directly)");
 }
 
 module.exports = {
