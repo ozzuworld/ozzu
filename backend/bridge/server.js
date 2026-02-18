@@ -7887,6 +7887,13 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      // Debug log from phone (remote console visibility)
+      if (msg.type === "debugLog") {
+        const info = devices.get(ws);
+        console.log(`[phone-debug] ${info?.deviceId || "unknown"}: ${msg.msg}`);
+        return;
+      }
+
       if (msg.type === "upload") {
         const { target, contentType, data, filename } = msg;
         if (!target || !contentType || !data) {

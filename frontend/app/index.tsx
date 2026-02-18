@@ -165,10 +165,20 @@ export default function LandingScreen() {
 
     const startCipherVoiceListening = async () => {
       if (!useCipherVoice) return;
+      bridge.sendDebug("STT: requesting permissions");
       const granted = await CipherVoice.requestPermissions();
-      if (!granted || cancelled) return;
-      const ok = await CipherVoice.startListening();
-      if (ok) setIsListening(true);
+      if (!granted || cancelled) {
+        bridge.sendDebug(`STT: permissions denied (granted=${granted}, cancelled=${cancelled})`);
+        return;
+      }
+      bridge.sendDebug("STT: calling startListening");
+      try {
+        const ok = await CipherVoice.startListening();
+        bridge.sendDebug(`STT: startListening returned ${ok}`);
+        if (ok) setIsListening(true);
+      } catch (e: any) {
+        bridge.sendDebug(`STT: startListening THREW: ${e.message}`);
+      }
     };
 
     if (useCipherVoice) {
@@ -176,6 +186,7 @@ export default function LandingScreen() {
       cipherVoiceSubs.push(
         CipherVoice.onSttResult((event) => {
           if (cancelled) return;
+          bridge.sendDebug(`STT result: isFinal=${event.isFinal} text="${event.text.substring(0, 50)}"`);
           if (event.isFinal && event.text.trim()) {
             // Send transcribed text to bridge for Claude processing
             bridge.sendCipherText(event.text);
@@ -200,6 +211,7 @@ export default function LandingScreen() {
       cipherVoiceSubs.push(
         CipherVoice.onTtsDone(() => {
           if (cancelled) return;
+          bridge.sendDebug("TTS done — restarting STT");
           bridge.sendCipherTtsDone();
           setIsStreaming(false);
           setIsListening(true);
@@ -211,7 +223,7 @@ export default function LandingScreen() {
       // STT errors
       cipherVoiceSubs.push(
         CipherVoice.onSttError((event) => {
-          console.warn("[CipherVoice] STT error:", event.error);
+          bridge.sendDebug(`STT error: ${event.error}`);
           // Auto-restart listening after error
           if (!cancelled) {
             setTimeout(() => startCipherVoiceListening(), 1000);
@@ -319,9 +331,14 @@ export default function LandingScreen() {
       // Phone-mode: bridge sends Claude response text for on-device TTS
       onCipherResponse: (text) => {
         if (!useCipherVoice || cancelled) return;
+        bridge.sendDebug(`TTS: speaking "${text.substring(0, 40)}..."`);
         setResponseText(text);
         setIsStreaming(true);
-        CipherVoice.speak(text);
+        CipherVoice.speak(text).then((ok: boolean) => {
+          bridge.sendDebug(`TTS: speak() returned ${ok}`);
+        }).catch((e: any) => {
+          bridge.sendDebug(`TTS: speak() THREW: ${e.message}`);
+        });
       },
       onError: (msg) => {
         console.error("BridgeSession error:", msg);

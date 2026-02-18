@@ -319,6 +319,13 @@ export class BridgeSession {
     }
   }
 
+  /** Send debug log to bridge for remote visibility */
+  sendDebug(msg: string): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "debugLog", msg }));
+    }
+  }
+
   sendGlassesFrame(data: string, width: number, height: number): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "glassesFrame", data, width, height }));
