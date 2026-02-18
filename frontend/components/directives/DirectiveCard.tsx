@@ -121,7 +121,6 @@ export function DirectiveCard({
   const statusEmoji = STATUS_EMOJI[directive.status] || "•";
   const typeEmoji = TYPE_EMOJI[directive.type] || "⚡";
   const priorityEmoji = PRIORITY_EMOJI[directive.priority ?? 3] || "⚪";
-  const isActive = !["completed", "cancelled"].includes(directive.status);
   const actLog = directive.activity_log || [];
 
   const toggle = useCallback(() => {
@@ -254,8 +253,8 @@ export function DirectiveCard({
         </View>
       ) : null}
 
-      {/* Latest activity for active directives */}
-      {isActive && actLog.length > 0 && !expanded ? (
+      {/* Latest activity one-liner */}
+      {actLog.length > 0 && !expanded ? (
         <Text
           style={{
             color: "#737373",
@@ -310,8 +309,8 @@ export function DirectiveCard({
         </View>
       ) : null}
 
-      {/* Collapsed audit trail for active directives */}
-      {isActive && actLog.length > 1 && !expanded ? (
+      {/* Collapsed audit trail */}
+      {actLog.length > 1 && !expanded ? (
         <AuditTrail entries={actLog} collapsed maxCollapsed={3} />
       ) : null}
 

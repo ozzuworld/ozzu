@@ -163,24 +163,6 @@ export async function unblockDirective(
   return res.json();
 }
 
-export interface DirectiveStats {
-  total: number;
-  active: number;
-  needsAction: number;
-  completed: number;
-  failed: number;
-  successRate: number | null;
-  avgDurationMs: number | null;
-}
-
-export async function fetchDirectiveStats(): Promise<DirectiveStats> {
-  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/stats`, {
-    headers: { "Content-Type": "application/json" },
-  });
-  if (!res.ok) throw new Error(`Bridge directive stats error: ${res.status}`);
-  return res.json();
-}
-
 export async function fetchApprovalDetails(): Promise<EnrichedApproval[]> {
   const res = await fetchWithTimeout(`${BRIDGE_URL}/approvals/details`, {
     headers: { "Content-Type": "application/json" },

@@ -62,7 +62,7 @@ export default function DirectivesScreen() {
   const { insets, isPhone, screenWidth, screenHeight } = usePhoneLayout();
   const isTabletLandscape = !isPhone && screenWidth > screenHeight;
 
-  const { directives, approvals, buildStatus, error, refresh } = useDirectives();
+  const { directives, approvals, buildStatus, loading, error, refresh } = useDirectives();
 
   const [filter, setFilter] = useState("all");
   const [sortBy, setSortBy] = useState("status");
@@ -493,11 +493,27 @@ export default function DirectivesScreen() {
               </Text>
             </Pressable>
           </View>
-        ) : sorted.length === 0 ? (
+        ) : loading && sorted.length === 0 ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
             <Text style={{ color: "#06B6D4", fontSize: 13, fontFamily: "monospace", opacity: 0.6 }}>
-              No directives found
+              Loading directives...
             </Text>
+          </View>
+        ) : sorted.length === 0 ? (
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
+            <Text style={{ fontSize: 24, marginBottom: 8 }}>
+              {filter === "needs_action" ? "🔥" : filter === "active" ? "🚀" : filter === "completed" ? "✅" : filter === "failed" ? "⚠️" : "🌍"}
+            </Text>
+            <Text style={{ color: "#06B6D4", fontSize: 13, fontFamily: "monospace", opacity: 0.6 }}>
+              {filter === "needs_action" ? "No directives need action" : filter === "active" ? "No active directives" : filter === "completed" ? "No completed directives" : filter === "failed" ? "No failed directives" : "No directives found"}
+            </Text>
+            {filter !== "all" ? (
+              <Pressable onPress={() => setFilter("all")} style={{ marginTop: 12 }}>
+                <Text style={{ color: "#06B6D4", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
+                  Show All
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : isTabletLandscape ? (
           sorted.map((d) => (

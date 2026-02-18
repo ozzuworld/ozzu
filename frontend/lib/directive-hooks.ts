@@ -1,6 +1,6 @@
 // useDirectives — data hook for directive screen with WS push + HTTP polling fallback
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   fetchDirectives,
   fetchApprovalDetails,
@@ -132,10 +132,8 @@ export function useDirectives(): UseDirectivesResult {
     };
   }, [loadData, connectWs]);
 
-  // Adaptive polling: shorter interval when builds are active
-  useEffect(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
-
+  // Compute whether any build is active (memoized to reduce poll interval churn)
+  const hasActiveBuild = useMemo(() => {
     const hasGlobalActive = buildStatus &&
       ([...(buildStatus.android || []), ...(buildStatus.ios || [])].some(
         (r) => r.status === "in_progress" || r.status === "queued"
@@ -143,7 +141,14 @@ export function useDirectives(): UseDirectivesResult {
     const hasDirectiveActive = directives.some((d) =>
       d.buildRuns?.some((run) => run.status === "in_progress" || run.status === "queued")
     );
-    const interval = hasGlobalActive || hasDirectiveActive
+    return !!(hasGlobalActive || hasDirectiveActive);
+  }, [buildStatus, directives]);
+
+  // Adaptive polling: shorter interval when builds are active
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    const interval = hasActiveBuild
       ? POLL_INTERVAL_ACTIVE_BUILD
       : POLL_INTERVAL_DEFAULT;
 
@@ -152,7 +157,7 @@ export function useDirectives(): UseDirectivesResult {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [buildStatus, directives, loadData]);
+  }, [hasActiveBuild, loadData]);
 
   return { directives, approvals, buildStatus, loading, error, refresh };
 }
