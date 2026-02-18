@@ -5,6 +5,9 @@ import { getDeviceType } from "../modules/pcm-player";
 import { Dimensions } from "react-native";
 import * as FileSystem from "expo-file-system";
 
+// Module-level cache: survives reconnects even if FileSystem persistence fails (e.g. iOS sideloaded apps)
+let cachedDeviceId: string | null = null;
+
 const BRIDGE_WS_URL =
   (process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333").replace(
     /^http/,
@@ -86,18 +89,25 @@ export class BridgeSession {
     }
 
     // Stable deviceId: persist a UUID so preferences survive reconnects
-    const idFile = `${FileSystem.documentDirectory}ozzu-device-id.txt`;
-    let storedId: string | null = null;
-    try {
-      const info = await FileSystem.getInfoAsync(idFile);
-      if (info.exists) storedId = await FileSystem.readAsStringAsync(idFile);
-    } catch {}
-    if (storedId) {
-      this.deviceId = storedId;
+    // Use module-level cache first (survives reconnects even if FileSystem fails on sideloaded iOS)
+    if (cachedDeviceId) {
+      this.deviceId = cachedDeviceId;
     } else {
-      const uuid = "xxxx-xxxx".replace(/x/g, () => Math.floor(Math.random() * 16).toString(16));
-      this.deviceId = `ozzu-${this._deviceType}-${uuid}`;
-      try { await FileSystem.writeAsStringAsync(idFile, this.deviceId); } catch {}
+      const idFile = `${FileSystem.documentDirectory}ozzu-device-id.txt`;
+      let storedId: string | null = null;
+      try {
+        const info = await FileSystem.getInfoAsync(idFile);
+        if (info.exists) storedId = await FileSystem.readAsStringAsync(idFile);
+      } catch {}
+      if (storedId) {
+        this.deviceId = storedId;
+        cachedDeviceId = storedId;
+      } else {
+        const uuid = "xxxx-xxxx".replace(/x/g, () => Math.floor(Math.random() * 16).toString(16));
+        this.deviceId = `ozzu-${this._deviceType}-${uuid}`;
+        cachedDeviceId = this.deviceId;
+        try { await FileSystem.writeAsStringAsync(idFile, this.deviceId); } catch {}
+      }
     }
 
     this._connect();

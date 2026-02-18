@@ -14,7 +14,7 @@ public class CipherVoiceModule: Module {
     // TTS
     private var synthesizer: AVSpeechSynthesizer?
     private var ttsDelegate: TTSDelegate?
-    private var selectedVoiceId: String = "com.apple.voice.premium.en-US.Zoe"
+    private var selectedVoiceId: String = "com.apple.voice.premium.en-US.Aaron"
     private var speaking = false
 
     // TTS audio capture: captures synthesized audio as PCM for relay to bridge
@@ -182,8 +182,11 @@ public class CipherVoiceModule: Module {
             }
 
             if let error = error as NSError? {
-                // Error code 1110 = "No speech detected" — not a real error, just silence
+                // Error code 1110 = "No speech detected" — silence timeout
+                // Must clean up so startListening() can be called again
                 if error.code == 1110 {
+                    self.stopSTT()
+                    self.sendEvent("onSttError", ["error": "silence_timeout"])
                     return
                 }
                 // Error code 216 = request cancelled (we called stopSTT) — ignore
