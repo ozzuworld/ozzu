@@ -29,15 +29,15 @@ npx expo export --platform ios --output-dir /tmp/ota-ios 2>&1 | tail -5
 cp -r /tmp/ota-android /tmp/ota-export
 cp -r /tmp/ota-ios/_expo/static/js/ios /tmp/ota-export/_expo/static/js/ 2>/dev/null || true
 
-# Merge metadata.json from both platforms
-python3 -c "
-import json
-a = json.load(open('/tmp/ota-android/metadata.json'))
-b = json.load(open('/tmp/ota-ios/metadata.json'))
-a['fileMetadata']['ios'] = b['fileMetadata']['ios']
-json.dump(a, open('/tmp/ota-export/metadata.json', 'w'), indent=2)
-print('Merged metadata: android + ios')
-" 2>&1
+# Merge metadata.json from both platforms (use node — python3 not available in Docker)
+node -e "
+const fs = require('fs');
+const a = JSON.parse(fs.readFileSync('/tmp/ota-android/metadata.json', 'utf8'));
+const b = JSON.parse(fs.readFileSync('/tmp/ota-ios/metadata.json', 'utf8'));
+a.fileMetadata.ios = b.fileMetadata.ios;
+fs.writeFileSync('/tmp/ota-export/metadata.json', JSON.stringify(a, null, 2));
+console.log('Merged metadata: android + ios');
+"
 
 rm -rf /tmp/ota-android /tmp/ota-ios
 
@@ -47,7 +47,7 @@ if [ ! -f "$METADATA" ]; then
   echo "ERROR: Export produced no metadata.json — aborting"
   exit 1
 fi
-BUNDLE_REL=$(python3 -c "import json,sys; m=json.load(open('$METADATA')); print(m['fileMetadata']['android']['bundle'])" 2>/dev/null || true)
+BUNDLE_REL=$(node -e "const m=JSON.parse(require('fs').readFileSync('$METADATA','utf8')); console.log(m.fileMetadata.android.bundle)" 2>/dev/null || true)
 if [ -z "$BUNDLE_REL" ] || [ ! -f "/tmp/ota-export/$BUNDLE_REL" ]; then
   echo "ERROR: Android bundle file missing from export — aborting"
   exit 1
@@ -59,7 +59,7 @@ if [ "$BUNDLE_SIZE" -lt 100000 ]; then
 fi
 
 # Verify iOS bundle too
-IOS_BUNDLE_REL=$(python3 -c "import json,sys; m=json.load(open('$METADATA')); print(m['fileMetadata']['ios']['bundle'])" 2>/dev/null || true)
+IOS_BUNDLE_REL=$(node -e "const m=JSON.parse(require('fs').readFileSync('$METADATA','utf8')); console.log(m.fileMetadata.ios.bundle)" 2>/dev/null || true)
 if [ -z "$IOS_BUNDLE_REL" ] || [ ! -f "/tmp/ota-export/$IOS_BUNDLE_REL" ]; then
   echo "WARNING: iOS bundle not found in export — iOS devices won't get this OTA update"
 else
@@ -78,28 +78,33 @@ echo "Published to $UPDATES_DIR"
 echo "Bundle: $(du -sh "$UPDATES_DIR" | cut -f1) ($BUNDLE_SIZE bytes)"
 
 # Restart apps on devices so they check for update on load
+# Non-fatal: OTA is already published, restart is best-effort (adb may not be available in Docker)
 if [ "$RESTART" = true ]; then
   echo "[3/3] Restarting apps on devices..."
 
   # Brief pause to ensure bridge serves the new manifest
   sleep 2
 
-  source "$SCRIPT_DIR/adb-discover.sh"
-  PACKAGE="com.anonymous.ozzu"
-  ACTIVITY=".MainActivity"
+  if command -v adb &>/dev/null && [ -f "$SCRIPT_DIR/adb-discover.sh" ]; then
+    source "$SCRIPT_DIR/adb-discover.sh"
+    PACKAGE="com.anonymous.ozzu"
+    ACTIVITY=".MainActivity"
 
-  for entry in "${KNOWN_DEVICES[@]}"; do
-    name="${entry%%|*}"
-    addr=$(get_device_addr "$name" 2>/dev/null) || true
-    if [ -n "$addr" ]; then
-      adb -s "$addr" shell am force-stop "$PACKAGE" 2>/dev/null || true
-      sleep 1  # Let the process fully exit before restarting
-      adb -s "$addr" shell am start -n "$PACKAGE/$ACTIVITY" 2>/dev/null || true
-      echo "  [$name] restarted ($addr)"
-    else
-      echo "  [$name] not reachable"
-    fi
-  done
+    for entry in "${KNOWN_DEVICES[@]}"; do
+      name="${entry%%|*}"
+      addr=$(get_device_addr "$name" 2>/dev/null) || true
+      if [ -n "$addr" ]; then
+        adb -s "$addr" shell am force-stop "$PACKAGE" 2>/dev/null || true
+        sleep 1  # Let the process fully exit before restarting
+        adb -s "$addr" shell am start -n "$PACKAGE/$ACTIVITY" 2>/dev/null || true
+        echo "  [$name] restarted ($addr)"
+      else
+        echo "  [$name] not reachable"
+      fi
+    done
+  else
+    echo "  adb not available — devices will pick up update on next app launch"
+  fi
 else
   echo "[3/3] Skipping restart (apps will pick up update on next launch)"
   echo "  Use --restart to force-restart all devices now"
