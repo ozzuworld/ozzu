@@ -128,9 +128,9 @@ async function verifyFrontendJSChanges() {
   const results = [];
 
   try {
-    // Run expo export to verify bundles compile
+    // Run expo export for Android only (we deploy Android + iOS, not web)
     const { stdout } = await execAsync(
-      `cd frontend && npx expo export --dump-sourcemap --output-dir /tmp/ozzu-verify-bundles 2>&1`,
+      `cd frontend && npx expo export --platform android --dump-sourcemap --output-dir /tmp/ozzu-verify-bundles 2>&1`,
       { timeout: VERIFICATION_TIMEOUT_MS }
     );
     results.push("OTA export completed");
@@ -138,7 +138,7 @@ async function verifyFrontendJSChanges() {
     // Verify bundle files exist and have non-zero size
     const bundleDir = "/tmp/ozzu-verify-bundles";
     const bundleChecks = [
-      { pattern: "_expo/static/js/web", desc: "JS bundle" },
+      { pattern: "_expo/static/js/android", desc: "JS bundle" },
     ];
 
     let bundlesFound = false;
