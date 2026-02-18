@@ -1824,8 +1824,9 @@ async function handleRequest(req, res) {
 
         // Parse changed files from plan field if available
         let changedFilesStr = "";
-        if (directive.plan) {
-          const filePatterns = directive.plan.match(/(?:[\w./-]+\.(?:js|ts|tsx|jsx|py|json|yml|yaml|md|css|html|sh|sql|env))/g);
+        const planStr = typeof directive.plan === "string" ? directive.plan : JSON.stringify(directive.plan || "");
+        if (planStr) {
+          const filePatterns = planStr.match(/(?:[\w./-]+\.(?:js|ts|tsx|jsx|py|json|yml|yaml|md|css|html|sh|sql|env))/g);
           if (filePatterns && filePatterns.length > 0) {
             const uniqueFiles = [...new Set(filePatterns)].slice(0, 10);
             changedFilesStr = ` Files touched: ${uniqueFiles.join(", ")}.`;
