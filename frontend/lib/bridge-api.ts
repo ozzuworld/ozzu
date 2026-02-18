@@ -294,6 +294,30 @@ export async function fetchAnthropicUsage(): Promise<AnthropicUsageData> {
   return res.json();
 }
 
+// ── Build Status ──
+
+export interface BuildRun {
+  databaseId: number;
+  status: string;       // queued | in_progress | completed
+  conclusion: string | null; // success | failure | cancelled | null (when in_progress)
+  createdAt: string;
+  headBranch: string;
+  name: string;
+  url: string;
+}
+
+export interface BuildStatus {
+  android: BuildRun[];
+  ios: BuildRun[];
+  cachedAt: number;
+}
+
+export async function fetchBuildStatus(): Promise<BuildStatus> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/api/build-status`);
+  if (!res.ok) throw new Error(`Build status error: ${res.status}`);
+  return res.json();
+}
+
 // ── Audio Preferences ──
 
 export interface AudioDevice {

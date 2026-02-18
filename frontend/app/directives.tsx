@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   TextInput,
   Modal,
   Alert,
+  Linking,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
@@ -21,6 +22,7 @@ import { usePhoneLayout } from "../lib/usePhoneLayout";
 import {
   fetchDirectives,
   fetchApprovalDetails,
+  fetchBuildStatus,
   resolveApproval,
   cancelDirective,
   retryDirective,
@@ -28,6 +30,7 @@ import {
   unblockDirective,
   type Directive,
   type EnrichedApproval,
+  type BuildStatus,
 } from "../lib/bridge-api";
 import { BRIDGE_PIN } from "../lib/biometric-auth";
 
@@ -600,6 +603,7 @@ export default function DirectivesScreen() {
 
   const [directives, setDirectives] = useState<Directive[]>([]);
   const [approvals, setApprovals] = useState<EnrichedApproval[]>([]);
+  const [buildStatus, setBuildStatus] = useState<BuildStatus | null>(null);
   const [filter, setFilter] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -616,12 +620,14 @@ export default function DirectivesScreen() {
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      const [directiveData, approvalData] = await Promise.all([
+      const [directiveData, approvalData, buildData] = await Promise.all([
         fetchDirectives(),
         fetchApprovalDetails().catch(() => [] as EnrichedApproval[]),
+        fetchBuildStatus().catch(() => null as BuildStatus | null),
       ]);
       setDirectives(directiveData);
       setApprovals(approvalData);
+      if (buildData) setBuildStatus(buildData);
     } catch (e: any) {
       setError(e.message || "Failed to load directives");
     }
@@ -633,14 +639,29 @@ export default function DirectivesScreen() {
     setRefreshing(false);
   }, [loadData]);
 
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useFocusEffect(
     useCallback(() => {
       loadData();
-      // Auto-refresh every 15s
-      const interval = setInterval(loadData, 15000);
-      return () => clearInterval(interval);
+      pollIntervalRef.current = setInterval(loadData, 15000);
+      return () => {
+        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      };
     }, [loadData])
   );
+
+  // Adaptive polling: 10s when builds are active, 15s otherwise
+  useEffect(() => {
+    const hasActive = buildStatus &&
+      ([...(buildStatus.android || []), ...(buildStatus.ios || [])].some(r => r.status === "in_progress" || r.status === "queued"));
+    const interval = hasActive ? 10000 : 15000;
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    pollIntervalRef.current = setInterval(loadData, interval);
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
+  }, [buildStatus, loadData]);
 
   // Action handler
   const handleAction = useCallback(
@@ -826,6 +847,67 @@ export default function DirectivesScreen() {
           <StatusBadge />
         </View>
       </View>
+
+      {/* Build Status Bar */}
+      {buildStatus && (buildStatus.android.length > 0 || buildStatus.ios.length > 0) ? (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            paddingHorizontal: hPad,
+            paddingVertical: 6,
+            backgroundColor: "#141414",
+          }}
+        >
+          {[
+            { label: "ANDROID", runs: buildStatus.android },
+            { label: "iOS", runs: buildStatus.ios },
+          ].map(({ label, runs }) => {
+            const latest = runs[0];
+            if (!latest) return (
+              <Text key={label} style={{ color: "#6B7280", fontSize: 10, fontFamily: "monospace" }}>
+                {label} — no builds
+              </Text>
+            );
+            const isActive = latest.status === "in_progress" || latest.status === "queued";
+            const succeeded = latest.conclusion === "success";
+            const failed = latest.conclusion === "failure" || latest.conclusion === "cancelled";
+            const dotColor = isActive ? "#3B82F6" : succeeded ? "#22C55E" : failed ? "#EF4444" : "#6B7280";
+            const statusText = isActive
+              ? (latest.status === "in_progress" ? "building" : "queued")
+              : (latest.conclusion || latest.status);
+            return (
+              <Pressable
+                key={label}
+                onPress={() => latest.url && Linking.openURL(latest.url)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 4,
+                  borderWidth: 1,
+                  borderColor: "#2A2A2A",
+                  backgroundColor: "#1A1A1A",
+                }}
+              >
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />
+                <Text style={{ color: "#A3A3A3", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                  {label}
+                </Text>
+                <Text style={{ color: dotColor, fontSize: 10, fontFamily: "monospace" }}>
+                  {statusText}
+                </Text>
+                <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
+                  {relativeTime(new Date(latest.createdAt).getTime())}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
       {/* Filter Chips */}
       <ScrollView

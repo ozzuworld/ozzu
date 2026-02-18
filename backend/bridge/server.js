@@ -51,6 +51,9 @@ let _rateLimitHits = 0;
 const MAX_PIPELINE_VIOLATIONS = 100;
 const _pipelineViolations = [];
 let _pipelineViolationIdCounter = 1;
+let _buildStatusCache = null;
+let _buildStatusCacheTime = 0;
+const BUILD_STATUS_CACHE_TTL = 30000; // 30s
 
 // ── Album color + Spotify caches ──
 const _albumColorCache = new Map(); // url -> hex color string (max 100)
@@ -3022,7 +3025,8 @@ ${approvalBannerItems.map(item => `<div class="approval-item">
   <div class="stat-card"><div class="label">Avg Duration</div><div class="value">${avgDuration !== null ? formatDuration(avgDuration) : "N/A"}</div></div>
 </div>
 
-<div id="build-status-section" style="display:none;">
+<div id="build-status-section">
+<h2>CI Build Status</h2>
 <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px;">
   <div class="stat-card" id="build-android" style="flex:1;min-width:260px;border-left:3px solid #6b7280;">
     <div class="label">Android CI Build</div>
@@ -3579,20 +3583,21 @@ var buildPollTimer = null;
 var buildPollInterval = 30000;
 var buildHasActive = false;
 
-function renderBuildCard(platform, data) {
+function renderBuildCard(platform, runs) {
   var statusEl = document.getElementById("build-" + platform + "-status");
   var metaEl = document.getElementById("build-" + platform + "-meta");
   var cardEl = document.getElementById("build-" + platform);
   if (!statusEl || !metaEl || !cardEl) return;
 
-  if (!data || data.error) {
-    statusEl.textContent = data && data.error ? "Error" : "No runs";
+  if (!runs || !Array.isArray(runs) || runs.length === 0) {
+    statusEl.textContent = "No runs";
     statusEl.className = "value";
-    metaEl.textContent = data && data.error ? data.error : "";
+    metaEl.textContent = "";
     cardEl.style.borderLeftColor = "#6b7280";
     return;
   }
 
+  var data = runs[0]; // Latest run
   var isActive = data.status === "in_progress" || data.status === "queued" || data.status === "waiting";
   var succeeded = data.conclusion === "success";
   var failed = data.conclusion === "failure" || data.conclusion === "cancelled";
@@ -3617,8 +3622,9 @@ function renderBuildCard(platform, data) {
   }
 
   var meta = timeAgo(data.createdAt);
+  if (data.headBranch) meta = '<span style="color:#94a3b8;">' + escapeText(data.headBranch) + '</span> &middot; ' + meta;
   if (data.url) {
-    meta = '<a href="' + escapeText(data.url) + '" target="_blank" style="color:#3b82f6;text-decoration:none;">' + meta + ' &rarr; View run</a>';
+    meta = '<a href="' + escapeText(data.url) + '" target="_blank" style="color:#3b82f6;text-decoration:none;">' + meta + ' &rarr; View</a>';
   }
   metaEl.innerHTML = meta;
 }
@@ -3627,9 +3633,6 @@ function fetchBuildStatus() {
   fetch("/api/build-status")
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      var section = document.getElementById("build-status-section");
-      if (section) section.style.display = "";
-
       buildHasActive = false;
       renderBuildCard("android", data.android);
       renderBuildCard("ios", data.ios);
@@ -4513,34 +4516,56 @@ buildPollTimer = setInterval(fetchBuildStatus, buildPollInterval);
   // GET /api/pipeline-violations — List violations
   // GET /api/build-status — Latest GitHub Actions CI build status for Android and iOS
   if (req.method === "GET" && pathname === "/api/build-status") {
+    // Return cached result if fresh
+    if (_buildStatusCache && (Date.now() - _buildStatusCacheTime) < BUILD_STATUS_CACHE_TTL) {
+      sendJSON(res, 200, _buildStatusCache);
+      return;
+    }
+
     const { execFile } = require("child_process");
     const { promisify } = require("util");
     const execFileAsync = promisify(execFile);
-    const fields = "status,conclusion,createdAt,url,displayTitle";
-    const ghArgs = (workflow) => ["run", "list", "--workflow=" + workflow, "-R", "ozzuworld/ozzu", "--limit", "1", "--json", fields];
+    const fields = "databaseId,status,conclusion,createdAt,headBranch,name,url";
+    const ghArgs = (workflow) => ["run", "list", "--workflow=" + workflow, "-R", "ozzuworld/ozzu", "--limit", "3", "--json", fields];
 
-    const results = {};
-    for (const [platform, workflow] of [["android", "build-android.yml"], ["ios", "build-ios.yml"]]) {
-      try {
-        const { stdout } = await execFileAsync("gh", ghArgs(workflow), { timeout: 15000 });
-        const runs = JSON.parse(stdout);
-        if (runs.length > 0) {
-          const run = runs[0];
-          results[platform] = {
-            status: run.status,
-            conclusion: run.conclusion || null,
-            createdAt: run.createdAt,
-            url: run.url,
-            title: run.displayTitle,
-          };
-        } else {
-          results[platform] = null;
-        }
-      } catch (err) {
-        log.bridge.warn(`[build-status] Failed to fetch ${platform} CI status: ${err.message}`);
-        results[platform] = { error: err.message };
+    const results = { android: [], ios: [], cachedAt: Date.now() };
+    try {
+      const [androidResult, iosResult] = await Promise.all([
+        execFileAsync("gh", ghArgs("build-android.yml"), { timeout: 15000 }).catch(err => ({ error: err.message })),
+        execFileAsync("gh", ghArgs("build-ios.yml"), { timeout: 15000 }).catch(err => ({ error: err.message })),
+      ]);
+      if (androidResult.error) {
+        log.bridge.warn(`[build-status] Failed to fetch android CI status: ${androidResult.error}`);
+      } else {
+        results.android = JSON.parse(androidResult.stdout).map(r => ({
+          databaseId: r.databaseId,
+          status: r.status,
+          conclusion: r.conclusion || null,
+          createdAt: r.createdAt,
+          headBranch: r.headBranch,
+          name: r.name,
+          url: r.url,
+        }));
       }
+      if (iosResult.error) {
+        log.bridge.warn(`[build-status] Failed to fetch ios CI status: ${iosResult.error}`);
+      } else {
+        results.ios = JSON.parse(iosResult.stdout).map(r => ({
+          databaseId: r.databaseId,
+          status: r.status,
+          conclusion: r.conclusion || null,
+          createdAt: r.createdAt,
+          headBranch: r.headBranch,
+          name: r.name,
+          url: r.url,
+        }));
+      }
+    } catch (err) {
+      log.bridge.warn(`[build-status] Unexpected error: ${err.message}`);
+      results.error = err.message;
     }
+    _buildStatusCache = results;
+    _buildStatusCacheTime = Date.now();
     sendJSON(res, 200, results);
     return;
   }
