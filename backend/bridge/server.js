@@ -4320,8 +4320,8 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
   // GET /cipher/search?q=keyword — search actual conversation content
   if (req.method === "GET" && pathname === "/cipher/search") {
     try {
-      const q = parsedUrl.searchParams.get("q");
-      const limitParam = parseInt(parsedUrl.searchParams.get("limit")) || 30;
+      const q = url.searchParams.get("q");
+      const limitParam = parseInt(url.searchParams.get("limit")) || 30;
       const limit = Math.min(limitParam, 50);
       if (!q || q.trim().length < 2) {
         sendJSON(res, 400, { error: "q parameter required (min 2 chars)" });
