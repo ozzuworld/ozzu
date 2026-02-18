@@ -103,13 +103,23 @@ public class CipherVoiceModule: Module {
         // List available premium/enhanced voices
         Function("getAvailableVoices") { () -> [[String: String]] in
             return AVSpeechSynthesisVoice.speechVoices()
-                .filter { $0.language.starts(with: "en") && $0.quality != .default }
+                .filter { voice in
+                    guard voice.language.starts(with: "en") else { return false }
+                    if #available(iOS 16.0, *) {
+                        return voice.quality != .default
+                    }
+                    return true
+                }
                 .map { voice in
-                    [
+                    var quality = "enhanced"
+                    if #available(iOS 16.0, *) {
+                        quality = voice.quality == .premium ? "premium" : "enhanced"
+                    }
+                    return [
                         "id": voice.identifier,
                         "name": voice.name,
                         "language": voice.language,
-                        "quality": voice.quality == .premium ? "premium" : "enhanced"
+                        "quality": quality
                     ]
                 }
         }
@@ -127,7 +137,9 @@ public class CipherVoiceModule: Module {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true // Force on-device (A18 Pro Neural Engine)
         request.shouldReportPartialResults = true
-        request.addsPunctuation = true
+        if #available(iOS 16.0, *) {
+            request.addsPunctuation = true
+        }
         // Custom vocabulary hints for ozzu-specific terms
         if #available(iOS 17.0, *) {
             request.customizedLanguageModel = nil // Could add custom LM later
