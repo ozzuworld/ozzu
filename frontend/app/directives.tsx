@@ -5,11 +5,8 @@ import {
   ScrollView,
   RefreshControl,
   Pressable,
-  LayoutAnimation,
   UIManager,
   Platform,
-  TextInput,
-  Modal,
   Alert,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -31,7 +28,10 @@ import {
   type EnrichedApproval,
   type BuildStatus,
 } from "../lib/bridge-api";
-import { BRIDGE_PIN } from "../lib/biometric-auth";
+import { DirectiveCard } from "../components/directives/DirectiveCard";
+import { SummaryStatsBar } from "../components/directives/SummaryStatsBar";
+import { PlanReviewModal } from "../components/directives/PlanReviewModal";
+import { StatusChangeSheet } from "../components/directives/StatusChangeSheet";
 
 if (
   Platform.OS === "android" &&
@@ -41,20 +41,6 @@ if (
 }
 
 const TOP_BAR_HEIGHT = 48;
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: "#737373",
-  planning: "#A855F7",
-  planned: "#8B5CF6",
-  approved: "#FBBF24",
-  in_progress: "#3B82F6",
-  completed: "#22C55E",
-  failed: "#EF4444",
-  cancelled: "#F97316",
-  stale: "#6B7280",
-  blocked: "#F59E0B",
-  deploy_failed: "#DC2626",
-};
 
 const STATUS_ORDER: Record<string, number> = {
   deploy_failed: 0,
@@ -70,649 +56,24 @@ const STATUS_ORDER: Record<string, number> = {
   stale: 10,
 };
 
-const ACTOR_COLORS: Record<string, string> = {
-  "King Kazuma": "#A78BFA",
-  "June": "#67E8F9",
-  "Cipher": "#6EE7B7",
-  "system": "#9CA3AF",
-};
-
 const FILTER_CHIPS = [
-  { key: "all", label: "ALL" },
-  { key: "needs_action", label: "NEEDS ACTION" },
-  { key: "active", label: "ACTIVE" },
-  { key: "completed", label: "COMPLETED" },
-  { key: "failed", label: "FAILED" },
+  { key: "all", label: "ALL", emoji: "🌍" },
+  { key: "needs_action", label: "NEEDS ACTION", emoji: "🔥" },
+  { key: "active", label: "ACTIVE", emoji: "🚀" },
+  { key: "completed", label: "COMPLETED", emoji: "✅" },
+  { key: "failed", label: "FAILED", emoji: "⚠️" },
+];
+
+const SORT_OPTIONS = [
+  { key: "status", label: "Status" },
+  { key: "recent", label: "Recent" },
+  { key: "priority", label: "Priority" },
+  { key: "created", label: "Created" },
 ];
 
 const ACTIVE_STATUSES = ["pending", "planning", "planned", "approved", "in_progress", "blocked"];
 const FAILED_STATUSES = ["failed", "stale", "deploy_failed"];
 const NEEDS_ACTION_STATUSES = ["planned", "blocked", "deploy_failed"];
-
-function relativeTime(ts: number): string {
-  const now = Date.now();
-  const diff = now - ts;
-  if (diff < 60000) return "just now";
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
-function formatTimestamp(ts: number): string {
-  const d = new Date(ts);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function humanDuration(ms: number): string {
-  if (ms < 60000) return `${Math.round(ms / 1000)}s`;
-  const mins = Math.floor(ms / 60000);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  if (hrs < 24) return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ${hrs % 24}h`;
-}
-
-function priorityLabel(p: number): string {
-  if (p <= 1) return "P1";
-  if (p <= 2) return "P2";
-  if (p <= 3) return "P3";
-  return "P4";
-}
-
-function ActorBadge({ actor }: { actor?: string }) {
-  if (!actor) return null;
-  const color = ACTOR_COLORS[actor] || "#9CA3AF";
-  return (
-    <Text
-      style={{
-        color,
-        fontSize: 9,
-        fontFamily: "monospace",
-        fontWeight: "bold",
-        backgroundColor: `${color}18`,
-        borderWidth: 1,
-        borderColor: `${color}33`,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: 3,
-        overflow: "hidden",
-      }}
-    >
-      {actor}
-    </Text>
-  );
-}
-
-function ActionButton({
-  label,
-  color,
-  onPress,
-}: {
-  label: string;
-  color: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={{
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: 5,
-        borderWidth: 1,
-        borderColor: color,
-        backgroundColor: `${color}18`,
-      }}
-    >
-      <Text
-        style={{
-          color,
-          fontSize: 11,
-          fontFamily: "monospace",
-          fontWeight: "bold",
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function DirectiveCard({
-  directive,
-  isTabletLandscape,
-  onAction,
-  buildStatus,
-}: {
-  directive: Directive;
-  isTabletLandscape: boolean;
-  onAction: (action: string, id: string) => void;
-  buildStatus?: BuildStatus | null;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const statusColor = STATUS_COLORS[directive.status] || "#737373";
-  const isActive = !["completed", "cancelled"].includes(directive.status);
-  const actLog = directive.activity_log || [];
-
-  const toggle = useCallback(() => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpanded((prev) => !prev);
-  }, []);
-
-  return (
-    <Pressable
-      onPress={toggle}
-      style={{
-        backgroundColor: "#1A1A1A",
-        borderRadius: 8,
-        borderLeftWidth: 3,
-        borderLeftColor: statusColor,
-        borderWidth: 1,
-        borderColor: "#2A2A2A",
-        padding: 12,
-        flex: isTabletLandscape ? 1 : undefined,
-      }}
-    >
-      {/* Header */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <View
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: statusColor,
-          }}
-        />
-        <Text
-          style={{
-            flex: 1,
-            color: "#E5E5E5",
-            fontSize: 14,
-            fontWeight: "600",
-            fontFamily: "monospace",
-          }}
-          numberOfLines={expanded ? undefined : 1}
-        >
-          {directive.title}
-        </Text>
-        {directive.createdBy ? <ActorBadge actor={directive.createdBy} /> : null}
-        <Text style={{ color: "#525252", fontSize: 12, fontFamily: "monospace" }}>
-          {expanded ? "▲" : "▼"}
-        </Text>
-      </View>
-
-      {/* Meta row */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 8,
-          marginTop: 6,
-          marginLeft: 16,
-        }}
-      >
-        <Text
-          style={{
-            color: "#06B6D4",
-            fontSize: 10,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-            letterSpacing: 1,
-            backgroundColor: "rgba(6,182,212,0.1)",
-            paddingHorizontal: 6,
-            paddingVertical: 2,
-            borderRadius: 4,
-            overflow: "hidden",
-          }}
-        >
-          {directive.type?.toUpperCase() || "QUICK"}
-        </Text>
-        <Text
-          style={{
-            color:
-              directive.priority <= 1
-                ? "#EF4444"
-                : directive.priority <= 2
-                  ? "#F59E0B"
-                  : "#737373",
-            fontSize: 10,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-          }}
-        >
-          {priorityLabel(directive.priority ?? 3)}
-        </Text>
-        <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
-          {relativeTime(directive.updatedAt)}
-        </Text>
-        {directive.duration ? (
-          <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
-            {humanDuration(directive.duration)}
-          </Text>
-        ) : null}
-        <View style={{ flex: 1 }} />
-        <Text
-          style={{
-            color: statusColor,
-            fontSize: 10,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-            letterSpacing: 0.5,
-          }}
-        >
-          {directive.status?.toUpperCase().replace(/_/g, " ")}
-        </Text>
-      </View>
-
-      {/* Failure reason — always visible */}
-      {directive.failureReason ? (
-        <View
-          style={{
-            backgroundColor: "rgba(239,68,68,0.1)",
-            borderWidth: 1,
-            borderColor: "rgba(239,68,68,0.3)",
-            borderRadius: 6,
-            padding: 8,
-            marginTop: 8,
-          }}
-        >
-          <Text style={{ color: "#FCA5A5", fontSize: 11, fontFamily: "monospace", lineHeight: 16 }}>
-            {directive.failureReason}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Build status badges — always visible when present */}
-      {directive.buildRuns && directive.buildRuns.length > 0 ? (
-        <View style={{ flexDirection: "row", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-          {directive.buildRuns.map((run, i) => {
-            const isRunActive = run.status === "in_progress" || run.status === "queued";
-            const succeeded = run.status === "completed" && run.conclusion === "success";
-            const failed = run.status === "completed" && (run.conclusion === "failure" || run.conclusion === "cancelled");
-            const badgeColor = isRunActive ? "#3B82F6" : succeeded ? "#10B981" : failed ? "#EF4444" : "#6B7280";
-            const label = run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : run.platform;
-            const statusText = isRunActive ? (run.status === "in_progress" ? "building" : "queued") : (run.conclusion || run.status);
-            return (
-              <View key={i} style={{
-                  flexDirection: "row", alignItems: "center", gap: 4,
-                  paddingHorizontal: 8, paddingVertical: 2,
-                  borderRadius: 4, borderWidth: 1, borderColor: badgeColor,
-                  backgroundColor: badgeColor + "18",
-                }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: badgeColor }} />
-                  <Text style={{ color: badgeColor, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-                    {label}: {statusText}
-                  </Text>
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
-
-      {/* Latest activity — always visible for active */}
-      {isActive && actLog.length > 0 ? (
-        <Text
-          style={{
-            color: "#737373",
-            fontSize: 11,
-            fontFamily: "monospace",
-            marginTop: 6,
-            marginLeft: 16,
-          }}
-          numberOfLines={1}
-        >
-          {actLog[actLog.length - 1].message}
-        </Text>
-      ) : null}
-
-      {/* Per-directive build runs */}
-      {directive.buildRuns && directive.buildRuns.length > 0 ? (
-        <View style={{ flexDirection: "row", gap: 6, marginTop: 6, marginLeft: 16, flexWrap: "wrap" }}>
-          {directive.buildRuns.map((br, i) => {
-            // Enrich from live buildStatus if available
-            let liveStatus = br.conclusion || br.status || "pending";
-            if (buildStatus) {
-              const allRuns = [...(buildStatus.android || []), ...(buildStatus.ios || [])];
-              const match = allRuns.find((r) => r.databaseId === br.runId);
-              if (match) liveStatus = match.conclusion || match.status || liveStatus;
-            }
-            const dotColor = liveStatus === "success" ? "#22C55E"
-              : liveStatus === "failure" || liveStatus === "cancelled" ? "#EF4444"
-              : liveStatus === "in_progress" ? "#3B82F6"
-              : liveStatus === "queued" ? "#F59E0B"
-              : "#6B7280";
-            return (
-              <View
-                key={`${br.platform}-${br.runId}-${i}`}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 4,
-                  paddingHorizontal: 7,
-                  paddingVertical: 2,
-                  borderRadius: 4,
-                  backgroundColor: `${dotColor}20`,
-                  borderWidth: 1,
-                  borderColor: `${dotColor}40`,
-                }}
-              >
-                <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: dotColor }} />
-                <Text style={{ color: "#A3A3A3", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>
-                  {br.platform.toUpperCase()}
-                </Text>
-                <Text style={{ color: dotColor, fontSize: 9, fontFamily: "monospace" }}>
-                  {liveStatus}
-                </Text>
-                <Text style={{ color: "#525252", fontSize: 8, fontFamily: "monospace" }}>
-                  {relativeTime(br.triggeredAt)}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
-
-      {/* Action buttons — shown when expanded to avoid blocking tap-to-expand */}
-      {expanded && (
-        <View style={{ flexDirection: "row", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-          {directive.status === "planned" ? (
-            <>
-              <ActionButton label="APPROVE" color="#22C55E" onPress={() => onAction("approve", directive.id)} />
-              <ActionButton label="DENY" color="#EF4444" onPress={() => onAction("deny", directive.id)} />
-            </>
-          ) : null}
-          {directive.status === "deploy_failed" ? (
-            <>
-              <ActionButton label="RETRY MERGE" color="#F59E0B" onPress={() => onAction("retry_merge", directive.id)} />
-              <ActionButton label="RETRY FULL" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
-            </>
-          ) : null}
-          {directive.status === "blocked" ? (
-            <>
-              <ActionButton label="UNBLOCK" color="#A855F7" onPress={() => onAction("unblock", directive.id)} />
-              <ActionButton label="CANCEL" color="#EF4444" onPress={() => onAction("cancel", directive.id)} />
-            </>
-          ) : null}
-          {["failed", "stale", "cancelled"].includes(directive.status) ? (
-            <ActionButton label="RETRY" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
-          ) : null}
-          {!["completed", "failed", "cancelled", "stale", "planned", "blocked", "deploy_failed"].includes(directive.status) ? (
-            <ActionButton label="CANCEL" color="#EF4444" onPress={() => onAction("cancel", directive.id)} />
-          ) : null}
-        </View>
-      )}
-
-      {/* Inline audit trail for active (last 3 entries) */}
-      {isActive && actLog.length > 1 ? (
-        <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: "#252525", paddingTop: 6 }}>
-          {actLog.slice(-3).reverse().map((entry, i) => (
-            <View
-              key={i}
-              style={{
-                flexDirection: "row",
-                gap: 6,
-                alignItems: "baseline",
-                marginBottom: 2,
-              }}
-            >
-              <Text style={{ color: "#3A3A3A", fontSize: 9, fontFamily: "monospace", minWidth: 45 }}>
-                {relativeTime(entry.timestamp)}
-              </Text>
-              {entry.actor ? <ActorBadge actor={entry.actor} /> : null}
-              <Text
-                style={{ color: "#666", fontSize: 9, fontFamily: "monospace", flex: 1 }}
-                numberOfLines={1}
-              >
-                {entry.message}
-              </Text>
-            </View>
-          ))}
-          {actLog.length > 3 ? (
-            <Text style={{ color: "#3B82F6", fontSize: 9, fontFamily: "monospace", marginTop: 2 }}>
-              +{actLog.length - 3} more entries ▼
-            </Text>
-          ) : null}
-        </View>
-      ) : null}
-
-      {/* Expanded content */}
-      {expanded && (
-        <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: "#252525", paddingTop: 10 }}>
-          {/* Description */}
-          {directive.description ? (
-            <Text
-              style={{
-                color: "#A3A3A3",
-                fontSize: 12,
-                fontFamily: "monospace",
-                lineHeight: 18,
-                marginBottom: 10,
-              }}
-            >
-              {directive.description}
-            </Text>
-          ) : null}
-
-          {/* Plan section */}
-          {directive.plan ? (
-            <View
-              style={{
-                borderWidth: 1,
-                borderColor: "#333",
-                borderRadius: 6,
-                padding: 10,
-                marginBottom: 10,
-                backgroundColor: "#141414",
-                maxHeight: 200,
-              }}
-            >
-              <Text
-                style={{
-                  color: "#06B6D4",
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  fontWeight: "bold",
-                  letterSpacing: 1,
-                  marginBottom: 6,
-                }}
-              >
-                PLAN
-              </Text>
-              <ScrollView nestedScrollEnabled>
-                <Text
-                  style={{
-                    color: "#A3A3A3",
-                    fontSize: 11,
-                    fontFamily: "monospace",
-                    lineHeight: 16,
-                  }}
-                >
-                  {directive.plan}
-                </Text>
-              </ScrollView>
-            </View>
-          ) : null}
-
-          {/* Build History */}
-          {directive.buildRuns && directive.buildRuns.length > 0 ? (
-            <View style={{ marginBottom: 10 }}>
-              <Text
-                style={{
-                  color: "#06B6D4",
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  fontWeight: "bold",
-                  letterSpacing: 1,
-                  marginBottom: 4,
-                }}
-              >
-                CI BUILDS
-              </Text>
-              {directive.buildRuns.map((run, i) => {
-                const isRunActive = run.status === "in_progress" || run.status === "queued";
-                const succeeded = run.status === "completed" && run.conclusion === "success";
-                const failed = run.status === "completed" && (run.conclusion === "failure" || run.conclusion === "cancelled");
-                const color = isRunActive ? "#3B82F6" : succeeded ? "#10B981" : failed ? "#EF4444" : "#6B7280";
-                return (
-                  <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 8, marginBottom: 4 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
-                    <Text style={{ color: "#A3A3A3", fontSize: 11, fontFamily: "monospace" }}>
-                      {run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : run.platform}
-                    </Text>
-                    <Text style={{ color, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-                      {isRunActive ? (run.status === "in_progress" ? "building" : "queued") : (run.conclusion || run.status)}
-                    </Text>
-                    <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
-                      Run #{run.runId}
-                    </Text>
-                    {run.triggeredAt ? (
-                      <Text style={{ color: "#3A3A3A", fontSize: 9, fontFamily: "monospace" }}>
-                        {relativeTime(run.triggeredAt)}
-                      </Text>
-                    ) : null}
-                  </View>
-                );
-              })}
-            </View>
-          ) : null}
-
-          {/* Metadata grid */}
-          <View
-            style={{
-              flexDirection: "row",
-              flexWrap: "wrap",
-              gap: 4,
-              marginBottom: 10,
-            }}
-          >
-            <MetaItem label="Created" value={formatTimestamp(directive.createdAt)} />
-            <MetaItem label="Updated" value={formatTimestamp(directive.updatedAt)} />
-            {directive.startedAt ? (
-              <MetaItem label="Started" value={formatTimestamp(directive.startedAt)} />
-            ) : null}
-            {directive.completedAt ? (
-              <MetaItem label="Completed" value={formatTimestamp(directive.completedAt)} />
-            ) : null}
-            {directive.duration ? (
-              <MetaItem label="Duration" value={humanDuration(directive.duration)} />
-            ) : null}
-            {(directive.retryCount ?? 0) > 0 ? (
-              <MetaItem label="Retries" value={String(directive.retryCount)} />
-            ) : null}
-            {directive.createdBy ? (
-              <MetaItem label="Created By" value={directive.createdBy} />
-            ) : null}
-          </View>
-
-          {/* Dependencies */}
-          {directive.dependsOn && directive.dependsOn.length > 0 ? (
-            <View style={{ marginBottom: 10 }}>
-              <Text
-                style={{
-                  color: "#525252",
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  fontWeight: "bold",
-                  letterSpacing: 1,
-                  marginBottom: 4,
-                }}
-              >
-                DEPENDS ON
-              </Text>
-              {directive.dependsOn.map((depId) => (
-                <Text
-                  key={depId}
-                  style={{
-                    color: "#A3A3A3",
-                    fontSize: 11,
-                    fontFamily: "monospace",
-                    marginLeft: 8,
-                  }}
-                >
-                  • {depId}
-                </Text>
-              ))}
-            </View>
-          ) : null}
-
-          {/* Full activity log */}
-          {actLog.length > 0 ? (
-            <View>
-              <Text
-                style={{
-                  color: "#525252",
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  fontWeight: "bold",
-                  letterSpacing: 1,
-                  marginBottom: 4,
-                }}
-              >
-                AUDIT TRAIL
-              </Text>
-              {actLog.map((entry, i) => (
-                <View
-                  key={i}
-                  style={{
-                    flexDirection: "row",
-                    gap: 6,
-                    marginLeft: 8,
-                    marginBottom: 3,
-                    alignItems: "baseline",
-                  }}
-                >
-                  <Text style={{ color: "#3A3A3A", fontSize: 10, fontFamily: "monospace", minWidth: 55 }}>
-                    {relativeTime(entry.timestamp)}
-                  </Text>
-                  {entry.actor ? <ActorBadge actor={entry.actor} /> : null}
-                  <Text
-                    style={{
-                      color: "#A3A3A3",
-                      fontSize: 10,
-                      fontFamily: "monospace",
-                      flex: 1,
-                    }}
-                  >
-                    {entry.message}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </View>
-      )}
-    </Pressable>
-  );
-}
-
-function MetaItem({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={{ width: "48%", marginBottom: 2 }}>
-      <Text
-        style={{
-          color: "#525252",
-          fontSize: 9,
-          fontFamily: "monospace",
-          fontWeight: "bold",
-          letterSpacing: 0.5,
-        }}
-      >
-        {label}
-      </Text>
-      <Text style={{ color: "#A3A3A3", fontSize: 11, fontFamily: "monospace" }}>
-        {value}
-      </Text>
-    </View>
-  );
-}
 
 export default function DirectivesScreen() {
   const router = useRouter();
@@ -723,17 +84,16 @@ export default function DirectivesScreen() {
   const [approvals, setApprovals] = useState<EnrichedApproval[]>([]);
   const [buildStatus, setBuildStatus] = useState<BuildStatus | null>(null);
   const [filter, setFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("status");
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Approval modal state
-  const [modalVisible, setModalVisible] = useState(false);
-  const [modalDirectiveId, setModalDirectiveId] = useState<string | null>(null);
-  const [modalTitle, setModalTitle] = useState("");
-  const [modalPlan, setModalPlan] = useState("");
-  const [modalPin, setModalPin] = useState("");
-  const [modalError, setModalError] = useState("");
-  const [modalLoading, setModalLoading] = useState(false);
+  // Plan review modal
+  const [planReviewDirective, setPlanReviewDirective] = useState<Directive | null>(null);
+  const [planReviewApproval, setPlanReviewApproval] = useState<EnrichedApproval | null>(null);
+
+  // Status change sheet
+  const [statusChangeDirective, setStatusChangeDirective] = useState<Directive | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -769,14 +129,16 @@ export default function DirectivesScreen() {
     }, [loadData])
   );
 
-  // Adaptive polling: 10s when builds are active (global or per-directive), 15s otherwise
+  // Adaptive polling: 10s when builds are active, 15s otherwise
   useEffect(() => {
     const hasGlobalActive = buildStatus &&
-      ([...(buildStatus.android || []), ...(buildStatus.ios || [])].some(r => r.status === "in_progress" || r.status === "queued"));
-    const hasDirectiveActive = directives.some(d =>
-      d.buildRuns?.some(run => run.status === "in_progress" || run.status === "queued")
+      ([...(buildStatus.android || []), ...(buildStatus.ios || [])].some(
+        (r) => r.status === "in_progress" || r.status === "queued"
+      ));
+    const hasDirectiveActive = directives.some((d) =>
+      d.buildRuns?.some((run) => run.status === "in_progress" || run.status === "queued")
     );
-    const interval = (hasGlobalActive || hasDirectiveActive) ? 10000 : 15000;
+    const interval = hasGlobalActive || hasDirectiveActive ? 10000 : 15000;
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     pollIntervalRef.current = setInterval(loadData, interval);
     return () => {
@@ -789,18 +151,16 @@ export default function DirectivesScreen() {
     async (action: string, id: string) => {
       try {
         if (action === "approve") {
-          // Open modal
+          const dir = directives.find((d) => d.id === id);
           const approval = approvals.find((a) => a.directiveId === id);
-          setModalDirectiveId(id);
-          setModalTitle(approval?.directiveTitle || id);
-          setModalPlan(approval?.directivePlan || approval?.directiveDescription || "No plan details available.");
-          setModalPin("");
-          setModalError("");
-          setModalVisible(true);
+          if (dir) {
+            setPlanReviewDirective(dir);
+            setPlanReviewApproval(approval || null);
+          }
           return;
         }
         if (action === "deny") {
-          Alert.alert("Deny Plan", "Cancel this directive?", [
+          Alert.alert("❌ Deny Plan", "Cancel this directive?", [
             { text: "No", style: "cancel" },
             {
               text: "Yes, Deny",
@@ -814,7 +174,7 @@ export default function DirectivesScreen() {
           return;
         }
         if (action === "cancel") {
-          Alert.alert("Cancel Directive", "Are you sure?", [
+          Alert.alert("🚫 Cancel Directive", "Are you sure?", [
             { text: "No", style: "cancel" },
             {
               text: "Cancel It",
@@ -836,9 +196,9 @@ export default function DirectivesScreen() {
         if (action === "retry_merge") {
           const result = await retryMergeDirective(id);
           if (result.ok) {
-            Alert.alert("Success", "Merge succeeded! Deploying now.");
+            Alert.alert("✅ Success", "Merge succeeded! Deploying now.");
           } else {
-            Alert.alert("Merge Failed", result.error || "Merge failed again");
+            Alert.alert("❌ Merge Failed", result.error || "Merge failed again");
           }
           loadData();
           return;
@@ -853,45 +213,27 @@ export default function DirectivesScreen() {
         Alert.alert("Error", err.message || "Action failed");
       }
     },
-    [approvals, loadData]
+    [approvals, directives, loadData]
   );
 
-  const submitApproval = useCallback(async () => {
-    if (!modalPin) {
-      setModalError("PIN is required");
-      return;
-    }
-    setModalLoading(true);
-    setModalError("");
-    try {
-      const approval = approvals.find((a) => a.directiveId === modalDirectiveId);
-      if (!approval) {
-        setModalError("Approval not found — may already be resolved");
-        return;
-      }
-      const result = await resolveApproval(approval.id, true, modalPin);
-      if (result.ok) {
-        setModalVisible(false);
-        loadData();
-      } else {
-        setModalError(result.error || "Approval failed");
-      }
-    } catch (err: any) {
-      setModalError(err.message || "Network error");
-    } finally {
-      setModalLoading(false);
-    }
-  }, [modalPin, modalDirectiveId, approvals, loadData]);
+  const handlePlanReview = useCallback(
+    (directive: Directive) => {
+      const approval = approvals.find((a) => a.directiveId === directive.id);
+      setPlanReviewDirective(directive);
+      setPlanReviewApproval(approval || null);
+    },
+    [approvals]
+  );
+
+  const handleStatusChange = useCallback((directive: Directive) => {
+    setStatusChangeDirective(directive);
+  }, []);
 
   // Status counts
-  const statusCounts: Record<string, number> = {};
-  for (const d of directives) {
-    statusCounts[d.status] = (statusCounts[d.status] || 0) + 1;
-  }
   const needsActionCount = directives.filter((d) => NEEDS_ACTION_STATUSES.includes(d.status)).length;
   const activeCount = directives.filter((d) => ACTIVE_STATUSES.includes(d.status)).length;
   const failedCount = directives.filter((d) => FAILED_STATUSES.includes(d.status)).length;
-  const completedCount = statusCounts["completed"] || 0;
+  const completedCount = directives.filter((d) => d.status === "completed").length;
 
   // Filter
   const filtered =
@@ -907,8 +249,12 @@ export default function DirectivesScreen() {
               ? directives.filter((d) => FAILED_STATUSES.includes(d.status))
               : directives;
 
-  // Sort: needs-action first, then active, then terminal
+  // Sort
   const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "recent") return b.updatedAt - a.updatedAt;
+    if (sortBy === "priority") return (a.priority ?? 3) - (b.priority ?? 3);
+    if (sortBy === "created") return b.createdAt - a.createdAt;
+    // Default: status order
     const orderA = STATUS_ORDER[a.status] ?? 99;
     const orderB = STATUS_ORDER[b.status] ?? 99;
     if (orderA !== orderB) return orderA - orderB;
@@ -969,76 +315,23 @@ export default function DirectivesScreen() {
         </View>
       </View>
 
-      {/* Build Status Bar */}
-      {buildStatus && (buildStatus.android.length > 0 || buildStatus.ios.length > 0) ? (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            paddingHorizontal: hPad,
-            paddingVertical: 6,
-            backgroundColor: "#141414",
-          }}
-        >
-          {[
-            { label: "ANDROID", runs: buildStatus.android },
-            { label: "iOS", runs: buildStatus.ios },
-          ].map(({ label, runs }) => {
-            const latest = runs[0];
-            if (!latest) return (
-              <Text key={label} style={{ color: "#6B7280", fontSize: 10, fontFamily: "monospace" }}>
-                {label} — no builds
-              </Text>
-            );
-            const isActive = latest.status === "in_progress" || latest.status === "queued";
-            const succeeded = latest.conclusion === "success";
-            const failed = latest.conclusion === "failure" || latest.conclusion === "cancelled";
-            const dotColor = isActive ? "#3B82F6" : succeeded ? "#22C55E" : failed ? "#EF4444" : "#6B7280";
-            const statusText = isActive
-              ? (latest.status === "in_progress" ? "building" : "queued")
-              : (latest.conclusion || latest.status);
-            return (
-              <View
-                key={label}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 5,
-                  paddingHorizontal: 8,
-                  paddingVertical: 3,
-                  borderRadius: 4,
-                  borderWidth: 1,
-                  borderColor: "#2A2A2A",
-                  backgroundColor: "#1A1A1A",
-                }}
-              >
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />
-                <Text style={{ color: "#A3A3A3", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-                  {label}
-                </Text>
-                <Text style={{ color: dotColor, fontSize: 10, fontFamily: "monospace" }}>
-                  {statusText}
-                </Text>
-                <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
-                  {relativeTime(new Date(latest.createdAt).getTime())}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
+      {/* Summary Stats Bar */}
+      <SummaryStatsBar
+        directives={directives}
+        onFilterSelect={setFilter}
+        hPad={hPad}
+      />
 
       {/* Filter Chips */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={{ maxHeight: 44, flexGrow: 0 }}
+        style={{ maxHeight: 40, flexGrow: 0 }}
         contentContainerStyle={{
           paddingHorizontal: hPad,
           gap: 8,
           alignItems: "center",
-          paddingVertical: 6,
+          paddingVertical: 4,
         }}
       >
         {FILTER_CHIPS.map((chip) => {
@@ -1071,6 +364,7 @@ export default function DirectivesScreen() {
                 backgroundColor: isActive ? `${chipColor}15` : "#1A1A1A",
               }}
             >
+              <Text style={{ fontSize: 10 }}>{chip.emoji}</Text>
               <Text
                 style={{
                   color: isActive ? chipColor : "#737373",
@@ -1092,6 +386,49 @@ export default function DirectivesScreen() {
                 }}
               >
                 {chip.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      {/* Sort Chips */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ maxHeight: 34, flexGrow: 0 }}
+        contentContainerStyle={{
+          paddingHorizontal: hPad,
+          gap: 6,
+          alignItems: "center",
+          paddingVertical: 3,
+        }}
+      >
+        {SORT_OPTIONS.map((opt) => {
+          const isActive = sortBy === opt.key;
+          return (
+            <Pressable
+              key={opt.key}
+              onPress={() => setSortBy(opt.key)}
+              style={{
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: isActive ? "#06B6D420" : "transparent",
+                borderWidth: 1,
+                borderColor: isActive ? "#06B6D440" : "#222",
+              }}
+            >
+              <Text
+                style={{
+                  color: isActive ? "#06B6D4" : "#525252",
+                  fontSize: 9,
+                  fontFamily: "monospace",
+                  fontWeight: "bold",
+                  letterSpacing: 0.5,
+                }}
+              >
+                {opt.label}
               </Text>
             </Pressable>
           );
@@ -1141,11 +478,15 @@ export default function DirectivesScreen() {
                 marginBottom: 10,
               }}
             >
-              PENDING APPROVALS ({approvals.length})
+              📋 PENDING APPROVALS ({approvals.length})
             </Text>
             {approvals.map((a) => (
-              <View
+              <Pressable
                 key={a.id}
+                onPress={() => {
+                  const dir = directives.find((d) => d.id === a.directiveId);
+                  if (dir) handlePlanReview(dir);
+                }}
                 style={{
                   backgroundColor: "#111",
                   borderWidth: 1,
@@ -1170,18 +511,38 @@ export default function DirectivesScreen() {
                   </Text>
                 ) : null}
                 <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                  <ActionButton
-                    label="APPROVE"
-                    color="#22C55E"
+                  <Pressable
                     onPress={() => handleAction("approve", a.directiveId || "")}
-                  />
-                  <ActionButton
-                    label="DENY"
-                    color="#EF4444"
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 5,
+                      borderWidth: 1,
+                      borderColor: "#22C55E",
+                      backgroundColor: "rgba(34,197,94,0.1)",
+                    }}
+                  >
+                    <Text style={{ color: "#22C55E", fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>
+                      ✅ APPROVE
+                    </Text>
+                  </Pressable>
+                  <Pressable
                     onPress={() => handleAction("deny", a.directiveId || "")}
-                  />
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 5,
+                      borderWidth: 1,
+                      borderColor: "#EF4444",
+                      backgroundColor: "rgba(239,68,68,0.1)",
+                    }}
+                  >
+                    <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>
+                      ❌ DENY
+                    </Text>
+                  </Pressable>
                 </View>
-              </View>
+              </Pressable>
             ))}
           </View>
         ) : null}
@@ -1206,126 +567,50 @@ export default function DirectivesScreen() {
         ) : isTabletLandscape ? (
           sorted.map((d) => (
             <View key={d.id} style={{ width: "48%", marginBottom: 2 }}>
-              <DirectiveCard directive={d} isTabletLandscape={false} onAction={handleAction} buildStatus={buildStatus} />
+              <DirectiveCard
+                directive={d}
+                isTabletLandscape={false}
+                onAction={handleAction}
+                buildStatus={buildStatus}
+                onPlanReview={handlePlanReview}
+                onStatusChange={handleStatusChange}
+              />
             </View>
           ))
         ) : (
           sorted.map((d) => (
-            <DirectiveCard key={d.id} directive={d} isTabletLandscape={false} onAction={handleAction} buildStatus={buildStatus} />
+            <DirectiveCard
+              key={d.id}
+              directive={d}
+              isTabletLandscape={false}
+              onAction={handleAction}
+              buildStatus={buildStatus}
+              onPlanReview={handlePlanReview}
+              onStatusChange={handleStatusChange}
+            />
           ))
         )}
       </ScrollView>
 
-      {/* Approval Modal */}
-      <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={() => setModalVisible(false)}>
-        <Pressable
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.8)",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: 24,
-          }}
-          onPress={() => setModalVisible(false)}
-        >
-          <Pressable
-            style={{
-              backgroundColor: "#1A1A1A",
-              borderWidth: 1,
-              borderColor: "#333",
-              borderRadius: 12,
-              padding: 20,
-              width: "100%",
-              maxWidth: 500,
-              maxHeight: "80%",
-            }}
-            onPress={() => {}}
-          >
-            <Text style={{ color: "#E5E5E5", fontSize: 16, fontFamily: "monospace", fontWeight: "bold", marginBottom: 14 }}>
-              Approve: {modalTitle}
-            </Text>
+      {/* Plan Review Modal */}
+      <PlanReviewModal
+        visible={planReviewDirective !== null}
+        directive={planReviewDirective}
+        approval={planReviewApproval}
+        onDismiss={() => {
+          setPlanReviewDirective(null);
+          setPlanReviewApproval(null);
+        }}
+        onResolved={loadData}
+      />
 
-            <ScrollView style={{ maxHeight: 250, marginBottom: 14 }}>
-              <View
-                style={{
-                  backgroundColor: "#111",
-                  borderWidth: 1,
-                  borderColor: "#2A2A2A",
-                  borderRadius: 8,
-                  padding: 12,
-                }}
-              >
-                <Text style={{ color: "#A3A3A3", fontSize: 12, fontFamily: "monospace", lineHeight: 18 }}>
-                  {modalPlan}
-                </Text>
-              </View>
-            </ScrollView>
-
-            <Text style={{ color: "#737373", fontSize: 12, fontFamily: "monospace", marginBottom: 6 }}>
-              PIN
-            </Text>
-            <TextInput
-              value={modalPin}
-              onChangeText={setModalPin}
-              secureTextEntry
-              maxLength={8}
-              placeholder="Enter PIN"
-              placeholderTextColor="#444"
-              autoFocus
-              onSubmitEditing={submitApproval}
-              style={{
-                backgroundColor: "#111",
-                color: "#E5E5E5",
-                borderWidth: 1,
-                borderColor: "#333",
-                borderRadius: 8,
-                padding: 12,
-                fontSize: 18,
-                fontFamily: "monospace",
-                textAlign: "center",
-                letterSpacing: 6,
-                marginBottom: 14,
-              }}
-            />
-
-            {modalError ? (
-              <Text style={{ color: "#EF4444", fontSize: 12, fontFamily: "monospace", marginBottom: 10 }}>
-                {modalError}
-              </Text>
-            ) : null}
-
-            <View style={{ flexDirection: "row", gap: 10, justifyContent: "flex-end" }}>
-              <Pressable
-                onPress={() => setModalVisible(false)}
-                style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 10,
-                  borderRadius: 8,
-                  backgroundColor: "#2A2A2A",
-                }}
-              >
-                <Text style={{ color: "#A3A3A3", fontSize: 14, fontFamily: "monospace", fontWeight: "bold" }}>
-                  Cancel
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={submitApproval}
-                disabled={modalLoading}
-                style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 10,
-                  borderRadius: 8,
-                  backgroundColor: modalLoading ? "#333" : "#22C55E",
-                }}
-              >
-                <Text style={{ color: "#fff", fontSize: 14, fontFamily: "monospace", fontWeight: "bold" }}>
-                  {modalLoading ? "Approving..." : "Approve"}
-                </Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Status Change Sheet */}
+      <StatusChangeSheet
+        visible={statusChangeDirective !== null}
+        directive={statusChangeDirective}
+        onDismiss={() => setStatusChangeDirective(null)}
+        onStatusChanged={loadData}
+      />
 
       <StatusBar style="light" />
     </View>

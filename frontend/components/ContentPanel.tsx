@@ -285,7 +285,7 @@ function statusColor(status: string): string {
 }
 
 // ── Block renderers ──
-function MarkdownContent({ content }: { content: string }) {
+export function MarkdownContent({ content }: { content: string }) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
 
   return (

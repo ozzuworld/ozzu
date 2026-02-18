@@ -2071,6 +2071,73 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /directives/:id/artifacts — List downloadable CI artifacts for a directive
+  const directiveArtifactsMatch = pathname.match(/^\/directives\/([^/]+)\/artifacts$/);
+  if (req.method === "GET" && directiveArtifactsMatch) {
+    const id = directiveArtifactsMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) { sendJSON(res, 404, { error: "Directive not found" }); return; }
+    if (!Array.isArray(directive.buildRuns) || directive.buildRuns.length === 0) {
+      sendJSON(res, 200, { artifacts: [] }); return;
+    }
+    const { execFile } = require("child_process");
+    const { promisify } = require("util");
+    const execFileAsync = promisify(execFile);
+    const artifacts = [];
+    for (const run of directive.buildRuns) {
+      if (run.status !== "completed" || run.conclusion !== "success") continue;
+      try {
+        const result = await execFileAsync("gh", [
+          "api", `repos/ozzuworld/ozzu/actions/runs/${run.runId}/artifacts`,
+          "--jq", ".artifacts[] | {id: .id, name: .name, size_in_bytes: .size_in_bytes}",
+        ], { timeout: 10000 });
+        const lines = result.stdout.trim().split("\n").filter(Boolean);
+        for (const line of lines) {
+          try {
+            const a = JSON.parse(line);
+            artifacts.push({
+              artifactId: a.id,
+              runId: run.runId,
+              platform: run.platform,
+              name: a.name,
+              sizeBytes: a.size_in_bytes,
+            });
+          } catch (_) {}
+        }
+      } catch (err) {
+        log.bridge.warn(`[artifacts] Failed to fetch artifacts for run ${run.runId}: ${err.message}`);
+      }
+    }
+    sendJSON(res, 200, { artifacts });
+    return;
+  }
+
+  // POST /api/artifacts/:artifactId/deploy — Download artifact and deploy to devices
+  const artifactDeployMatch = pathname.match(/^\/api\/artifacts\/(\d+)\/deploy$/);
+  if (req.method === "POST" && artifactDeployMatch) {
+    if (!requireAuth(req, res)) return;
+    const artifactId = artifactDeployMatch[1];
+    const { exec } = require("child_process");
+    // Download artifact via gh, then deploy
+    const scriptDir = path.resolve(__dirname, "../../scripts");
+    exec(
+      `cd ${scriptDir} && gh api repos/ozzuworld/ozzu/actions/artifacts/${artifactId}/zip > /tmp/artifact-${artifactId}.zip && ` +
+      `unzip -o /tmp/artifact-${artifactId}.zip -d /tmp/artifact-${artifactId}/ && ` +
+      `ls /tmp/artifact-${artifactId}/*.apk 2>/dev/null && ./deploy.sh --local /tmp/artifact-${artifactId}/*.apk`,
+      { timeout: 120000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          log.bridge.warn(`[artifact-deploy] Failed: ${err.message}`);
+          sendJSON(res, 500, { ok: false, error: err.message });
+        } else {
+          sendJSON(res, 200, { ok: true, message: `Artifact ${artifactId} deployed`, output: stdout.slice(-500) });
+        }
+      }
+    );
+    return;
+  }
+
   // POST /directives/:id/verify — Run build verification before marking completed
   const directiveVerifyMatch = pathname.match(/^\/directives\/([^/]+)\/verify$/);
   if (req.method === "POST" && directiveVerifyMatch) {

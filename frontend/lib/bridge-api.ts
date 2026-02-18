@@ -112,7 +112,7 @@ export async function sendDirective(
 
 export async function updateDirective(
   id: string,
-  updates: { status?: string; plan?: string; title?: string }
+  updates: { status?: string; plan?: string; title?: string; failureReason?: string | null; priority?: number; actor?: string }
 ): Promise<{ ok: boolean; directive: Directive }> {
   const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}`, {
     method: "PATCH",
@@ -360,5 +360,36 @@ export async function setAudioPreferences(prefs: {
     body: JSON.stringify(prefs),
   });
   if (!res.ok) throw new Error(`Bridge set audio preferences error: ${res.status}`);
+  return res.json();
+}
+
+// ── Directive Artifacts ──
+
+export interface DirectiveArtifact {
+  artifactId: number;
+  runId: number;
+  platform: string;
+  name: string;
+  sizeBytes: number;
+}
+
+export async function fetchDirectiveArtifacts(
+  id: string
+): Promise<{ artifacts: DirectiveArtifact[] }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}/artifacts`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge artifacts error: ${res.status}`);
+  return res.json();
+}
+
+export async function deployArtifact(
+  artifactId: number
+): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/api/artifacts/${artifactId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge deploy artifact error: ${res.status}`);
   return res.json();
 }
