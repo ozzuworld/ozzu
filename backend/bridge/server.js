@@ -4508,14 +4508,15 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
 
     (async () => {
       try {
+        // Skip conversations that already have topics (already processed)
         const allConvos = await db.query(
           `SELECT c.id, c.persona, c.summary, c.turn_count, c.started_at
            FROM conversations c
-           WHERE c.turn_count > 4
+           WHERE c.turn_count > 4 AND (c.topics IS NULL OR c.topics = '{}')
            ORDER BY c.started_at ASC`
         );
         const convos = allConvos.rows;
-        log.memory.info(`Backfill: processing ${convos.length} conversations with >4 turns`);
+        log.memory.info(`Backfill: ${convos.length} conversations to process (skipping already-processed)`);
 
         let totalFacts = 0;
         let processed = 0;
@@ -4540,8 +4541,9 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
 
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 30000);
+            // Use flash-lite for backfill — higher rate limits than flash
             const resp = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -4592,7 +4594,7 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
               errors++;
               if (resp.status === 429) {
                 const errBody = await resp.text().catch(() => "");
-                log.memory.info(`Backfill: rate limited (429), waiting 60s... ${errBody.substring(0, 200)}`);
+                log.memory.info(`Backfill: rate limited (429), waiting 60s... ${errBody.substring(0, 500)}`);
                 await new Promise(r => setTimeout(r, 60000));
               } else {
                 const errBody = await resp.text().catch(() => "");
