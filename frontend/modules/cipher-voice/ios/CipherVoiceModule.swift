@@ -241,6 +241,13 @@ public class CipherVoiceModule: Module {
     private func speakText(_ text: String) {
         interruptTTS() // Stop any current speech
 
+        // Reconfigure audio session for TTS playback
+        // STT leaves the session in .measurement mode which is incompatible with AVSpeechSynthesizer
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        try? session.setCategory(.playback, mode: .default, options: [.defaultToSpeaker])
+        try? session.setActive(true)
+
         let synth = AVSpeechSynthesizer()
         let delegate = TTSDelegate(module: self)
         synth.delegate = delegate

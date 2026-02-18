@@ -32,6 +32,10 @@ function setConfig(key, value) {
 // Running agents: directiveId → { process, type, startedAt, pid, timeout, logFile }
 const runningAgents = new Map();
 
+// Branches awaiting merge — prevents cleanupStaleBranches from deleting them
+// between agent exit (runningAgents.delete) and merge completion
+const pendingMerges = new Set();
+
 // WebSocket broadcast function — injected by server.js via setBroadcast()
 let _broadcastToAll = null;
 function setBroadcast(fn) { _broadcastToAll = fn; }
@@ -489,9 +493,10 @@ function cleanupStaleBranches(getDirectives) {
       if (!match) continue;
       const directiveId = match[1];
 
-      // Skip if branch is explicitly in use or directive is active
+      // Skip if branch is explicitly in use, directive is active, or merge is pending
       if (branchesInUse.has(branch)) continue;
       if (activeDirectiveIds.has(directiveId)) continue;
+      if (pendingMerges.has(branch)) continue;
 
       // This branch is orphaned — clean it up
       log(`Stale branch cleanup: ${branch} (directive ${directiveId} is terminal or missing)`);
@@ -523,6 +528,22 @@ function mergeWorktreeToMain(directiveId, branch) {
       // 2. Ensure we're on main and up to date
       execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
       execSync(`git reset --hard origin/main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+
+      // 2b. Ensure local branch exists — may have been pruned by worktree cleanup or race condition
+      // If missing locally but exists on origin, recreate it from the remote tracking branch
+      try {
+        execSync(`git rev-parse --verify "${branch}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" });
+      } catch {
+        // Local branch missing — check if it exists on origin
+        try {
+          execSync(`git rev-parse --verify "origin/${branch}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" });
+          log(`Local branch ${branch} missing — recreating from origin/${branch}`);
+          execSync(`git branch "${branch}" "origin/${branch}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" });
+        } catch {
+          log(`Branch ${branch} not found locally or on origin — nothing to merge`);
+          return true;
+        }
+      }
 
       // 3. Check if there are any commits on the agent branch beyond main
       const ahead = execSync(`git rev-list main..${branch} --count`, { cwd: WORKDIR, encoding: "utf8", timeout: 5000 }).trim();
@@ -890,6 +911,8 @@ function spawnAgent(directive, type, customPrompt) {
               req.end();
             } else if (current.status === "completed") {
               // Properly completed (implementation agent OR quick directive planning agent)
+              // Protect branch from cleanupStaleBranches during merge window
+              if (agentInfo.worktree?.branch) pendingMerges.add(agentInfo.worktree.branch);
               // Send to orchestrator for review before merging
               reviewAndMerge(directive, agentInfo);
             } else if (current.status === "planned" && type === "planning") {
@@ -1065,8 +1088,9 @@ async function reviewAndMerge(directive, agentInfo) {
     req.write(payload);
     req.end();
 
-    // Clean up worktree (don't merge broken code)
+    // Clean up worktree (don't merge broken code) and release pending merge lock
     if (agentInfo.worktree) {
+      if (agentInfo.worktree.branch) pendingMerges.delete(agentInfo.worktree.branch);
       cleanupWorktree(directive.id, agentInfo.worktree.branch);
     }
 
@@ -1124,6 +1148,8 @@ async function reviewAndMerge(directive, agentInfo) {
       doMergeAndDeploy(directive, agentInfo);
     } else if (response.action === "needs_changes") {
       log(`Orchestrator rejected merge for ${directive.id}: ${response.merge_feedback || "needs changes"}`);
+      // Release pending merge lock
+      if (agentInfo.worktree?.branch) pendingMerges.delete(agentInfo.worktree.branch);
       // Spawn a fix worker with the orchestrator's feedback
       if (response.worker_prompt && agentInfo.worktree) {
         // Clean up old worktree first
@@ -1157,6 +1183,9 @@ async function reviewAndMerge(directive, agentInfo) {
 
 // Perform the actual merge + deploy (extracted from the old inline handler)
 function doMergeAndDeploy(directive, agentInfo) {
+  // Release pending merge lock (set before orchestrator review)
+  if (agentInfo.worktree?.branch) pendingMerges.delete(agentInfo.worktree.branch);
+
   let mergeOk = true;
   if (agentInfo.worktree) {
     mergeOk = mergeWorktreeToMain(directive.id, agentInfo.worktree.branch);
