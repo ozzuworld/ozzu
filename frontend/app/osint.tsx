@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   RefreshControl,
   Pressable,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
@@ -18,12 +19,17 @@ import {
   triggerOsintScanAll,
   setOsintSchedule,
   fetchOsintReport,
+  triggerOsintCorrelation,
+  fetchOsintCorrelations,
   type OsintProfile,
+  type OsintCorrelation,
 } from "../lib/bridge-api";
 import {
   SEVERITY_EMOJI,
   SEVERITY_COLORS,
   PROFILE_TYPE_EMOJI,
+  CORRELATION_TYPE_EMOJI,
+  CORRELATION_TYPE_LABELS,
   scoreColor,
   scoreLabel,
 } from "../lib/osint-constants";
@@ -31,6 +37,7 @@ import { FindingCard } from "../components/osint/FindingCard";
 import { AddProfileModal } from "../components/osint/AddProfileModal";
 import { EntityGraph } from "../components/osint/EntityGraph";
 import { ReportModal } from "../components/osint/ReportModal";
+import { ReportList } from "../components/osint/ReportList";
 
 const TOP_BAR_HEIGHT = 48;
 
@@ -46,7 +53,8 @@ const FILTER_CHIPS = [
 const VIEW_TABS = [
   { key: "findings", label: "FINDINGS", emoji: "🔍" },
   { key: "graph", label: "GRAPH", emoji: "🕸" },
-  { key: "report", label: "REPORT", emoji: "📄" },
+  { key: "correlations", label: "LINKS", emoji: "🔗" },
+  { key: "reports", label: "REPORTS", emoji: "📊" },
 ];
 
 export default function OsintScreen() {
@@ -62,6 +70,9 @@ export default function OsintScreen() {
   const [showReport, setShowReport] = useState(false);
   const [reportData, setReportData] = useState<{ markdown: string } | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const [correlations, setCorrelations] = useState<OsintCorrelation[]>([]);
+  const [correlationsLoading, setCorrelationsLoading] = useState(false);
+  const [correlating, setCorrelating] = useState(false);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -109,6 +120,35 @@ export default function OsintScreen() {
         },
       ]
     );
+  };
+
+  const loadCorrelations = useCallback(async () => {
+    try {
+      setCorrelationsLoading(true);
+      const data = await fetchOsintCorrelations();
+      setCorrelations(data);
+    } catch {
+      // ignore
+    } finally {
+      setCorrelationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeView === "correlations") loadCorrelations();
+  }, [activeView, loadCorrelations]);
+
+  const handleCorrelate = async () => {
+    try {
+      setCorrelating(true);
+      await triggerOsintCorrelation();
+      // Give it a moment to process
+      setTimeout(loadCorrelations, 2000);
+    } catch (err: any) {
+      Alert.alert("Correlation Error", err.message);
+    } finally {
+      setCorrelating(false);
+    }
   };
 
   const handleOpenReport = async () => {
@@ -370,13 +410,7 @@ export default function OsintScreen() {
             return (
               <Pressable
                 key={tab.key}
-                onPress={() => {
-                  if (tab.key === "report") {
-                    handleOpenReport();
-                  } else {
-                    setActiveView(tab.key);
-                  }
-                }}
+                onPress={() => setActiveView(tab.key)}
                 style={{
                   flex: 1,
                   backgroundColor: active ? "#1E1E1E" : "transparent",
@@ -474,6 +508,99 @@ export default function OsintScreen() {
             summary={graph.summary}
             loading={graph.loading}
           />
+        )}
+
+        {/* CORRELATIONS VIEW */}
+        {activeView === "correlations" && (
+          <View style={{ gap: 12 }}>
+            {/* Header with correlate button */}
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={{ color: "#06B6D4", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                🔗 IDENTITY LINKS ({correlations.length})
+              </Text>
+              <Pressable
+                onPress={handleCorrelate}
+                disabled={correlating || profiles.length < 2}
+                style={{ backgroundColor: "#1A1A2E", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: "#333" }}
+              >
+                <Text style={{ color: correlating ? "#525252" : "#A855F7", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                  {correlating ? "ANALYZING..." : "RUN ANALYSIS"}
+                </Text>
+              </Pressable>
+            </View>
+
+            {correlationsLoading && <ActivityIndicator color="#06B6D4" size="small" />}
+
+            {!correlationsLoading && correlations.length === 0 && (
+              <View style={{ alignItems: "center", paddingVertical: 20 }}>
+                <Text style={{ fontSize: 24, marginBottom: 8 }}>🔗</Text>
+                <Text style={{ color: "#525252", fontSize: 12, fontFamily: "monospace", textAlign: "center" }}>
+                  No identity links found yet.{"\n"}Run analysis after scanning profiles.
+                </Text>
+              </View>
+            )}
+
+            {correlations.map((c) => (
+              <View
+                key={c.id}
+                style={{
+                  backgroundColor: "#1A1A1A",
+                  borderRadius: 8,
+                  padding: 12,
+                  borderLeftWidth: 3,
+                  borderLeftColor: c.confidence >= 0.8 ? "#22C55E" : c.confidence >= 0.5 ? "#EAB308" : "#525252",
+                }}
+              >
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
+                    <Text style={{ fontSize: 14 }}>{CORRELATION_TYPE_EMOJI[c.correlation_type] || "🔗"}</Text>
+                    <Text style={{ color: "#A855F7", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                      {CORRELATION_TYPE_LABELS[c.correlation_type] || c.correlation_type.toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={{ color: c.confidence >= 0.8 ? "#22C55E" : "#EAB308", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                    {Math.round(c.confidence * 100)}%
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Text style={{ fontSize: 12 }}>{PROFILE_TYPE_EMOJI[c.source_type || ""] || "📋"}</Text>
+                  <Text style={{ color: "#E5E5E5", fontSize: 11, fontFamily: "monospace", flex: 1 }} numberOfLines={1}>
+                    {c.source_label || c.source_value}
+                  </Text>
+                  <Text style={{ color: "#525252", fontSize: 11, fontFamily: "monospace" }}>↔</Text>
+                  <Text style={{ fontSize: 12 }}>{PROFILE_TYPE_EMOJI[c.target_type || ""] || "📋"}</Text>
+                  <Text style={{ color: "#E5E5E5", fontSize: 11, fontFamily: "monospace", flex: 1 }} numberOfLines={1}>
+                    {c.target_label || c.target_value}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* REPORTS VIEW */}
+        {activeView === "reports" && (
+          <View style={{ gap: 12 }}>
+            {/* Quick generate report button */}
+            <Pressable
+              onPress={handleOpenReport}
+              style={({ pressed }) => ({
+                backgroundColor: pressed ? "#1E2A3F" : "#0E1A2F",
+                borderWidth: 1,
+                borderColor: "#3B82F6",
+                borderRadius: 8,
+                paddingVertical: 10,
+                alignItems: "center",
+              })}
+            >
+              <Text style={{ color: "#60A5FA", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
+                📄 VIEW LIVE REPORT
+              </Text>
+            </Pressable>
+
+            {/* Stored reports list */}
+            <ReportList onError={(msg) => Alert.alert("Error", msg)} />
+          </View>
         )}
 
         {error && (

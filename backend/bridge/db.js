@@ -166,7 +166,35 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_relationships_source ON osint_relationships(source_entity_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_relationships_target ON osint_relationships(target_entity_id)`);
 
-    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables; osint_score_history; osint entities/relationships)");
+    // Migration: OSINT cross-profile correlations
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_correlations (
+      id SERIAL PRIMARY KEY,
+      source_profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE CASCADE,
+      target_profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE CASCADE,
+      correlation_type VARCHAR(30) NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0.0,
+      evidence JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(source_profile_id, target_profile_id, correlation_type)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_correlations_source ON osint_correlations(source_profile_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_correlations_target ON osint_correlations(target_profile_id)`);
+
+    // Migration: OSINT stored reports
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_reports (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      report_type VARCHAR(20) DEFAULT 'full',
+      data JSONB NOT NULL,
+      profiles_included INTEGER[] DEFAULT '{}',
+      total_findings INTEGER DEFAULT 0,
+      score_at_generation INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_reports_created ON osint_reports(created_at DESC)`);
+
+    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables; osint_score_history; osint entities/relationships; osint correlations/reports)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -983,6 +1011,109 @@ async function getOsintCorrelationSummary() {
   };
 }
 
+// ── OSINT Cross-Profile Correlations ──
+
+async function upsertOsintCorrelation(sourceProfileId, targetProfileId, correlationType, confidence, evidence) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_correlations (source_profile_id, target_profile_id, correlation_type, confidence, evidence)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (source_profile_id, target_profile_id, correlation_type) DO UPDATE SET
+       confidence = GREATEST(osint_correlations.confidence, EXCLUDED.confidence),
+       evidence = EXCLUDED.evidence,
+       updated_at = NOW()
+     RETURNING *`,
+    [sourceProfileId, targetProfileId, correlationType, confidence, JSON.stringify(evidence || {})]
+  );
+  return res.rows[0];
+}
+
+async function getOsintCorrelations(filters = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT c.*,
+    sp.label as source_label, sp.profile_type as source_type, sp.value as source_value,
+    tp.label as target_label, tp.profile_type as target_type, tp.value as target_value
+    FROM osint_correlations c
+    JOIN osint_profiles sp ON c.source_profile_id = sp.id
+    JOIN osint_profiles tp ON c.target_profile_id = tp.id
+    WHERE 1=1`;
+  const params = [];
+  let idx = 1;
+  if (filters.minConfidence) {
+    sql += ` AND c.confidence >= $${idx++}`;
+    params.push(filters.minConfidence);
+  }
+  if (filters.correlationType) {
+    sql += ` AND c.correlation_type = $${idx++}`;
+    params.push(filters.correlationType);
+  }
+  if (filters.profileId) {
+    sql += ` AND (c.source_profile_id = $${idx} OR c.target_profile_id = $${idx})`;
+    params.push(filters.profileId);
+    idx++;
+  }
+  sql += ` ORDER BY c.confidence DESC`;
+  if (filters.limit) {
+    sql += ` LIMIT $${idx++}`;
+    params.push(filters.limit);
+  }
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function getOsintCorrelationGraph() {
+  if (!_pgConnected) return { nodes: [], edges: [] };
+  const profiles = await getOsintProfiles();
+  const correlations = await getOsintCorrelations();
+  const nodes = profiles.map((p) => ({
+    id: p.id,
+    label: p.label,
+    type: p.profile_type,
+    value: p.value,
+  }));
+  const edges = correlations.map((c) => ({
+    source: c.source_profile_id,
+    target: c.target_profile_id,
+    type: c.correlation_type,
+    confidence: c.confidence,
+    evidence: c.evidence,
+  }));
+  return { nodes, edges };
+}
+
+async function deleteOsintCorrelations() {
+  if (!_pgConnected) return;
+  await query(`DELETE FROM osint_correlations`);
+}
+
+// ── OSINT Stored Reports ──
+
+async function createOsintReport(title, reportType, data, profilesIncluded, totalFindings, scoreAtGeneration) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_reports (title, report_type, data, profiles_included, total_findings, score_at_generation)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [title, reportType || "full", JSON.stringify(data), profilesIncluded || [], totalFindings || 0, scoreAtGeneration || 0]
+  );
+  return res.rows[0];
+}
+
+async function getOsintReports(limit = 20) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT id, title, report_type, profiles_included, total_findings, score_at_generation, created_at
+     FROM osint_reports ORDER BY created_at DESC LIMIT $1`,
+    [limit]
+  );
+  return res.rows;
+}
+
+async function getOsintReportById(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM osint_reports WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -1047,6 +1178,15 @@ module.exports = {
   getOsintRelationships,
   getOsintEntityGraph,
   getOsintCorrelationSummary,
+  // OSINT Cross-Profile Correlations
+  upsertOsintCorrelation,
+  getOsintCorrelations,
+  getOsintCorrelationGraph,
+  deleteOsintCorrelations,
+  // OSINT Stored Reports
+  createOsintReport,
+  getOsintReports,
+  getOsintReportById,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

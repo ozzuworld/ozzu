@@ -96,6 +96,11 @@ export function FindingCard({ finding, onStatusChange }: Props) {
               {categoryEmoji} {categoryLabel}
             </Text>
           </View>
+          {finding.raw_data?.gps || finding.raw_data?.latitude || finding.raw_data?.coordinates ? (
+            <View style={{ backgroundColor: "#1A1A0A", paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 }}>
+              <Text style={{ color: "#F59E0B", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>📍 LOC</Text>
+            </View>
+          ) : null}
           <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
             {timeAgo()}
           </Text>

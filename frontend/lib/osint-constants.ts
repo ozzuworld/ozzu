@@ -28,6 +28,8 @@ export const CATEGORY_EMOJI: Record<string, string> = {
   breach: "💀",
   account_found: "👤",
   exposure: "🌐",
+  infrastructure: "🏗",
+  metadata: "🔬",
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -56,6 +58,22 @@ export const PROFILE_TYPE_EMOJI: Record<string, string> = {
   password: "🔑",
   phone: "📱",
   domain: "🌐",
+};
+
+export const CORRELATION_TYPE_EMOJI: Record<string, string> = {
+  name_match: "👤",
+  email_username_link: "🔗",
+  shared_breach: "💀",
+  platform_overlap: "🔄",
+  domain_association: "🌐",
+};
+
+export const CORRELATION_TYPE_LABELS: Record<string, string> = {
+  name_match: "NAME MATCH",
+  email_username_link: "EMAIL-USERNAME",
+  shared_breach: "SHARED BREACH",
+  platform_overlap: "PLATFORM OVERLAP",
+  domain_association: "DOMAIN LINK",
 };
 
 export function scoreColor(score: number): string {

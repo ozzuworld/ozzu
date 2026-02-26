@@ -686,6 +686,95 @@ export async function fetchOsintReport(profileId?: number): Promise<OsintReport>
   return data.report;
 }
 
+// ── OSINT Cross-Profile Correlations ──
+
+export interface OsintCorrelation {
+  id: number;
+  source_profile_id: number;
+  target_profile_id: number;
+  correlation_type: string;
+  confidence: number;
+  evidence: Record<string, any>;
+  source_label?: string;
+  source_type?: string;
+  source_value?: string;
+  target_label?: string;
+  target_type?: string;
+  target_value?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function triggerOsintCorrelation(): Promise<{ ok: boolean; message: string }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/correlate`, { method: "POST" });
+  if (!res.ok) throw new Error(`Correlate error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintCorrelations(filters?: {
+  minConfidence?: number;
+  type?: string;
+  profileId?: number;
+  limit?: number;
+}): Promise<OsintCorrelation[]> {
+  const params = new URLSearchParams();
+  if (filters?.minConfidence) params.set("minConfidence", String(filters.minConfidence));
+  if (filters?.type) params.set("type", filters.type);
+  if (filters?.profileId) params.set("profileId", String(filters.profileId));
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  const qs = params.toString() ? `?${params}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/correlations${qs}`);
+  if (!res.ok) throw new Error(`Correlations error: ${res.status}`);
+  const data = await res.json();
+  return data.correlations || [];
+}
+
+// ── OSINT Stored Reports ──
+
+export interface StoredReportSummary {
+  id: number;
+  title: string;
+  report_type: string;
+  profiles_included: number[];
+  total_findings: number;
+  score_at_generation: number;
+  created_at: string;
+}
+
+export interface StoredReport extends StoredReportSummary {
+  data: OsintReport;
+}
+
+export async function generateStoredReport(opts?: {
+  title?: string;
+  type?: string;
+  profileIds?: number[];
+}): Promise<StoredReport> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/reports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts || {}),
+  });
+  if (!res.ok) throw new Error(`Generate report error: ${res.status}`);
+  const data = await res.json();
+  return data.report;
+}
+
+export async function fetchStoredReports(limit?: number): Promise<StoredReportSummary[]> {
+  const qs = limit ? `?limit=${limit}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/reports${qs}`);
+  if (!res.ok) throw new Error(`Reports list error: ${res.status}`);
+  const data = await res.json();
+  return data.reports || [];
+}
+
+export async function fetchStoredReport(id: number): Promise<StoredReport> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/reports/${id}`);
+  if (!res.ok) throw new Error(`Report detail error: ${res.status}`);
+  const data = await res.json();
+  return data.report;
+}
+
 // ── Epics (integrated into directives — type="epic" with epicId/phaseOrder) ──
 
 export interface EpicProgress {

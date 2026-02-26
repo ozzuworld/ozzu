@@ -6131,6 +6131,100 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
+  // POST /osint/correlate — run cross-profile correlation engine
+  if (req.method === "POST" && pathname === "/osint/correlate") {
+    try {
+      const correlationEngine = require("./correlation-engine");
+      // Run async — respond immediately
+      sendJSON(res, 200, { ok: true, message: "Correlation started" });
+      correlationEngine.runCorrelation().then((result) => {
+        log.bridge.info(`[osint] Correlation complete: ${result.correlationsFound} correlations found`);
+      }).catch((err) => {
+        log.bridge.error("[osint] Correlation error:", err.message);
+      });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/correlations — list cross-profile correlations
+  if (req.method === "GET" && pathname === "/osint/correlations") {
+    try {
+      const filters = {};
+      if (url.searchParams.get("minConfidence")) filters.minConfidence = parseFloat(url.searchParams.get("minConfidence"));
+      if (url.searchParams.get("type")) filters.correlationType = url.searchParams.get("type");
+      if (url.searchParams.get("profileId")) filters.profileId = parseInt(url.searchParams.get("profileId"), 10);
+      if (url.searchParams.get("limit")) filters.limit = parseInt(url.searchParams.get("limit"), 10);
+      const correlations = await db.getOsintCorrelations(filters);
+      sendJSON(res, 200, { ok: true, correlations });
+    } catch (err) {
+      log.bridge.error("OSINT correlations error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/reports — generate and store a report
+  if (req.method === "POST" && pathname === "/osint/reports") {
+    try {
+      const body = await readBody(req);
+      const { title, type, profileIds } = body;
+      const osintReport = require("./osint-report");
+      let report;
+      if (profileIds && profileIds.length === 1) {
+        report = await osintReport.generateReport(profileIds[0]);
+      } else {
+        report = await osintReport.generateCombinedReport();
+      }
+      // Get current score
+      const scoreData = await db.getOsintFindingCounts();
+      const totalFindings = Object.values(scoreData).reduce((a, b) => a + b, 0);
+      const profiles = await db.getOsintProfiles();
+      const stored = await db.createOsintReport(
+        title || `OSINT Report — ${new Date().toISOString().split("T")[0]}`,
+        type || "full",
+        report,
+        profileIds || profiles.map((p) => p.id),
+        totalFindings,
+        report.json?.summary?.critical * 10 + report.json?.summary?.high * 5 + report.json?.summary?.medium * 2 + report.json?.summary?.low || 0
+      );
+      sendJSON(res, 200, { ok: true, report: stored });
+    } catch (err) {
+      log.bridge.error("OSINT report generation error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/reports — list stored reports (summary only)
+  if (req.method === "GET" && pathname === "/osint/reports") {
+    try {
+      const limit = parseInt(url.searchParams.get("limit") || "20", 10);
+      const reports = await db.getOsintReports(limit);
+      sendJSON(res, 200, { ok: true, reports });
+    } catch (err) {
+      log.bridge.error("OSINT reports list error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/reports/:id — get full stored report
+  const reportsMatch = pathname.match(/^\/osint\/reports\/(\d+)$/);
+  if (req.method === "GET" && reportsMatch) {
+    try {
+      const reportId = parseInt(reportsMatch[1], 10);
+      const report = await db.getOsintReportById(reportId);
+      if (!report) return sendJSON(res, 404, { error: "Report not found" });
+      sendJSON(res, 200, { ok: true, report });
+    } catch (err) {
+      log.bridge.error("OSINT report detail error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
   sendJSON(res, 404, { error: "Not found" });
 }
 
