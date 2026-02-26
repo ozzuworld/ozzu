@@ -59,6 +59,8 @@ CREATE TABLE directives (
   status          VARCHAR(20) NOT NULL DEFAULT 'pending',
   plan            TEXT,
   approval_id     VARCHAR(50),
+  epic_id         VARCHAR(50) REFERENCES directives(id),
+  phase_order     INTEGER,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );

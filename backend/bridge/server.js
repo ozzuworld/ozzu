@@ -22,6 +22,8 @@ osintEngine.registerModule(require("./osint-modules/username-enum"));
 osintEngine.registerModule(require("./osint-modules/email-domain"));
 osintEngine.registerModule(require("./osint-modules/gravatar-lookup"));
 osintEngine.registerModule(require("./osint-modules/hibp-email"));
+osintEngine.registerModule(require("./osint-modules/data-broker"));
+osintEngine.registerModule(require("./osint-modules/paste-monitor"));
 
 const log = {
   bridge: createLogger("bridge"),

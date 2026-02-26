@@ -32,6 +32,7 @@ export const TYPE_EMOJI: Record<string, string> = {
   feature: "✨",
   quick: "⚡",
   explore: "🔍",
+  epic: "📦",
 };
 
 export const PRIORITY_EMOJI: Record<number, string> = {

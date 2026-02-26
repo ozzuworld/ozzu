@@ -66,6 +66,7 @@ export function SummaryStatsBar({ directives, onFilterSelect, hPad }: SummarySta
   const needsAction = directives.filter((d) => NEEDS_ACTION_STATUSES.includes(d.status)).length;
   const active = directives.filter((d) => ACTIVE_STATUSES.includes(d.status)).length;
   const completed = directives.filter((d) => d.status === "completed").length;
+  const epics = directives.filter((d) => d.type === "epic").length;
   const total = directives.length;
   const successRate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
@@ -83,6 +84,7 @@ export function SummaryStatsBar({ directives, onFilterSelect, hPad }: SummarySta
     >
       <StatChip emoji="🔥" count={needsAction} label="NEEDS ACTION" color="#F59E0B" onPress={() => onFilterSelect("needs_action")} />
       <StatChip emoji="🚀" count={active} label="ACTIVE" color="#3B82F6" onPress={() => onFilterSelect("active")} />
+      {epics > 0 ? <StatChip emoji="📦" count={epics} label="EPICS" color="#A855F7" onPress={() => onFilterSelect("epics")} /> : null}
       <StatChip emoji="✅" count={completed} label="COMPLETED" color="#22C55E" onPress={() => onFilterSelect("completed")} />
       <StatChip emoji="📊" count={successRate} label="% SUCCESS" color="#06B6D4" onPress={() => onFilterSelect("all")} />
     </ScrollView>

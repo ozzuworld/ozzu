@@ -5,6 +5,7 @@ import { AuditTrail } from "./AuditTrail";
 import {
   STATUS_EMOJI,
   STATUS_COLORS,
+  TYPE_EMOJI,
   relativeTime,
   formatTimestamp,
   humanDuration,
@@ -176,6 +177,34 @@ export function DirectiveCard({
           </>
         ) : null}
       </Text>
+
+      {/* Epic progress bar */}
+      {directive.type === "epic" && directive.phases && directive.phases.length > 0 ? (() => {
+        const total = directive.phases.length;
+        const completed = directive.phases.filter((p: Directive) => p.status === "completed").length;
+        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        return (
+          <View style={{ marginTop: 6, marginLeft: 24 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <View style={{ flex: 1, height: 4, backgroundColor: "#2A2A2A", borderRadius: 2, overflow: "hidden" }}>
+                <View style={{ width: `${pct}%` as any, height: "100%", backgroundColor: "#22C55E", borderRadius: 2 }} />
+              </View>
+              <Text style={{ color: "#737373", fontSize: 10, fontFamily: "monospace" }}>
+                {completed}/{total}
+              </Text>
+            </View>
+          </View>
+        );
+      })() : null}
+
+      {/* Phase badge */}
+      {directive.epicId && directive.phaseOrder ? (
+        <View style={{ marginTop: 4, marginLeft: 24 }}>
+          <Text style={{ color: "#A78BFA", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+            Phase {directive.phaseOrder}
+          </Text>
+        </View>
+      ) : null}
 
       {/* Failure reason */}
       {directive.failureReason ? (

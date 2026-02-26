@@ -46,6 +46,7 @@ const FILTER_CHIPS = [
   { key: "all", label: "ALL", emoji: "🌍" },
   { key: "needs_action", label: "NEEDS ACTION", emoji: "🔥" },
   { key: "active", label: "ACTIVE", emoji: "🚀" },
+  { key: "epics", label: "EPICS", emoji: "📦" },
   { key: "completed", label: "COMPLETED", emoji: "✅" },
   { key: "failed", label: "FAILED", emoji: "⚠️" },
 ];
@@ -169,6 +170,7 @@ export default function DirectivesScreen() {
   const activeCount = directives.filter((d) => ACTIVE_STATUSES.includes(d.status)).length;
   const failedCount = directives.filter((d) => FAILED_STATUSES.includes(d.status)).length;
   const completedCount = directives.filter((d) => d.status === "completed").length;
+  const epicCount = directives.filter((d) => d.type === "epic").length;
 
   // Filter
   const filtered =
@@ -178,14 +180,24 @@ export default function DirectivesScreen() {
         ? directives.filter((d) => NEEDS_ACTION_STATUSES.includes(d.status))
         : filter === "active"
           ? directives.filter((d) => ACTIVE_STATUSES.includes(d.status))
-          : filter === "completed"
-            ? directives.filter((d) => d.status === "completed")
-            : filter === "failed"
-              ? directives.filter((d) => FAILED_STATUSES.includes(d.status))
-              : directives;
+          : filter === "epics"
+            ? directives.filter((d) => d.type === "epic" || d.epicId)
+            : filter === "completed"
+              ? directives.filter((d) => d.status === "completed")
+              : filter === "failed"
+                ? directives.filter((d) => FAILED_STATUSES.includes(d.status))
+                : directives;
 
-  // Sort
+  // Sort — group epic phases together when viewing epics filter
   const sorted = [...filtered].sort((a, b) => {
+    if (filter === "epics") {
+      const epicA = a.type === "epic" ? a.id : a.epicId || "";
+      const epicB = b.type === "epic" ? b.id : b.epicId || "";
+      if (epicA !== epicB) return epicA < epicB ? -1 : 1;
+      if (a.type === "epic") return -1;
+      if (b.type === "epic") return 1;
+      return (a.phaseOrder || 0) - (b.phaseOrder || 0);
+    }
     if (sortBy === "recent") return b.updatedAt - a.updatedAt;
     if (sortBy === "priority") return (a.priority ?? 3) - (b.priority ?? 3);
     if (sortBy === "created") return b.createdAt - a.createdAt;
@@ -196,12 +208,24 @@ export default function DirectivesScreen() {
     return b.updatedAt - a.updatedAt;
   });
 
+  // Enrich epic directives with their phases for progress bars
+  const enriched = sorted.map((d) => {
+    if (d.type === "epic" && !d.phases) {
+      const phases = directives
+        .filter((p) => p.epicId === d.id)
+        .sort((a, b) => (a.phaseOrder || 0) - (b.phaseOrder || 0));
+      if (phases.length > 0) return { ...d, phases };
+    }
+    return d;
+  });
+
   const hPad = Math.max(16, insets.left, insets.right);
 
   const chipCounts: Record<string, number> = {
     all: directives.length,
     needs_action: needsActionCount,
     active: activeCount,
+    epics: epicCount,
     completed: completedCount,
     failed: failedCount,
   };
@@ -493,19 +517,19 @@ export default function DirectivesScreen() {
               </Text>
             </Pressable>
           </View>
-        ) : loading && sorted.length === 0 ? (
+        ) : loading && enriched.length === 0 ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
             <Text style={{ color: "#06B6D4", fontSize: 13, fontFamily: "monospace", opacity: 0.6 }}>
               Loading directives...
             </Text>
           </View>
-        ) : sorted.length === 0 ? (
+        ) : enriched.length === 0 ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
             <Text style={{ fontSize: 24, marginBottom: 8 }}>
-              {filter === "needs_action" ? "🔥" : filter === "active" ? "🚀" : filter === "completed" ? "✅" : filter === "failed" ? "⚠️" : "🌍"}
+              {filter === "needs_action" ? "🔥" : filter === "active" ? "🚀" : filter === "epics" ? "📦" : filter === "completed" ? "✅" : filter === "failed" ? "⚠️" : "🌍"}
             </Text>
             <Text style={{ color: "#06B6D4", fontSize: 13, fontFamily: "monospace", opacity: 0.6 }}>
-              {filter === "needs_action" ? "No directives need action" : filter === "active" ? "No active directives" : filter === "completed" ? "No completed directives" : filter === "failed" ? "No failed directives" : "No directives found"}
+              {filter === "needs_action" ? "No directives need action" : filter === "active" ? "No active directives" : filter === "epics" ? "No epics found" : filter === "completed" ? "No completed directives" : filter === "failed" ? "No failed directives" : "No directives found"}
             </Text>
             {filter !== "all" ? (
               <Pressable onPress={() => setFilter("all")} style={{ marginTop: 12 }}>
@@ -516,7 +540,7 @@ export default function DirectivesScreen() {
             ) : null}
           </View>
         ) : isTabletLandscape ? (
-          sorted.map((d) => (
+          enriched.map((d) => (
             <View key={d.id} style={{ width: "48%", marginBottom: 2 }}>
               <DirectiveCard
                 directive={d}
@@ -529,7 +553,7 @@ export default function DirectivesScreen() {
             </View>
           ))
         ) : (
-          sorted.map((d) => (
+          enriched.map((d) => (
             <DirectiveCard
               key={d.id}
               directive={d}
