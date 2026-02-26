@@ -6,6 +6,15 @@ BRIDGE_URL="${BRIDGE_URL:-http://localhost:3333}"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LOCAL_MD="${PROJECT_DIR}/CLAUDE.local.md"
 
+# ── Enforce git hooks — pipeline has zero enforcement without this ──
+CURRENT_HOOKS=$(cd "$PROJECT_DIR" && git config core.hooksPath 2>/dev/null || echo "")
+if [[ "$CURRENT_HOOKS" != ".githooks" ]]; then
+  (cd "$PROJECT_DIR" && git config core.hooksPath .githooks)
+  echo "Pipeline enforcement: git hooks installed (.githooks)"
+else
+  echo "Pipeline enforcement: git hooks active"
+fi
+
 # Pull Cipher context from bridge
 CONTEXT=$(curl -sf "${BRIDGE_URL}/cipher/context" 2>/dev/null)
 

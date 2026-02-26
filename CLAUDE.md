@@ -1,8 +1,25 @@
 # Ozzu — Project Notes
 
-## MANDATORY RULES — READ FIRST
+## STOP — BEFORE YOU WRITE ANY CODE, READ THIS
 
-**ALL code changes MUST go through the directive pipeline. Cipher does all work directly.**
+**YOU MUST FOLLOW THE PIPELINE. NO EXCEPTIONS. NO SHORTCUTS.**
+
+If King Kazuma asks you to implement something, fix something, or change any file — you MUST do these steps IN ORDER before touching a single file:
+
+1. **CREATE A DIRECTIVE FIRST** — `POST /directives` with title, description, type, emoji
+2. **SET STATUS** — features need `planned` + approval; fixes go straight to `in_progress`
+3. **CREATE A BRANCH** — `git checkout -b cipher/dir_xxx` (NEVER work on main)
+4. **THEN write code** — only after steps 1-3 are done
+5. **VERIFY** — run verification checks before merging
+6. **MERGE AND DEPLOY** — `POST /directives/{id}/merge-and-deploy` (NEVER merge manually)
+
+**If you skip ANY step, you are breaking the pipeline.** King Kazuma will see it.
+Git hooks will block direct commits to main. The merge-and-deploy endpoint enforces verification.
+There is NO valid reason to skip these steps — not "it's a quick fix", not "I'll do it after", not anything.
+
+---
+
+## MANDATORY RULES
 
 - **NEVER commit directly to main.** Cipher works on `cipher/dir_xxx` branches, then merges after verification.
 - **NEVER manually trigger builds.** smartDeploy handles CI builds (Android + iOS) and deployment automatically after merge to main.
@@ -14,14 +31,17 @@
 - **iPhone is the ONLY device that handles PIN approvals.** Tablets and TV NEVER show keypads or biometric prompts. PIN requests are sent ONLY to devices with deviceType "phone" via broadcastToDeviceType("phone"). This is enforced server-side.
 - **Ozzu is a React Native app — there is NO website.** ALL user-facing UI lives in `frontend/`. The bridge server's `/dashboard` endpoint is an internal dev tool only — NEVER build features, redesigns, or user-facing UI there. When King Kazuma says "dashboard", "UI", "screen", or "layout", he means the **React Native app in `frontend/`**, NEVER the bridge web page. Do NOT propose or implement web-based solutions.
 - **Cipher MUST use the memory system.** Launch Cipher via `./scripts/cipher.sh` to load context from past sessions. Session transcripts are auto-saved via the SessionEnd hook. If context seems missing, check `/cipher/context` and the session-save hook logs at `/tmp/ozzu-bridge/cipher-session-save.log`.
+- **NEVER stop after merging.** The job is not done until deploy completes. After merge-and-deploy, monitor smartDeploy output. If OTA: confirm devices restarted. If native: confirm CI build passes and deploy succeeds. Report result to King Kazuma.
 
-### Cipher Workflow (CRITICAL - READ BEFORE EVERY CODE CHANGE)
+### Cipher Workflow (CRITICAL - FOLLOW EXACTLY IN ORDER)
 
 Cipher does all work directly — no worker agents, no orchestrator. Directives are for tracking and audit.
 
+**YOUR FIRST ACTION when asked to change code must ALWAYS be creating/finding a directive. NOT reading files. NOT writing code. The directive comes FIRST.**
+
 **Step 1: Does this require code/config changes?**
 - NO → Handle directly (status queries, research, reading files, answering questions)
-- YES → Continue to Step 2
+- YES → **STOP. Do Step 2 BEFORE doing anything else.**
 
 **Step 2: Create or find an existing directive**
 ```bash
@@ -34,12 +54,23 @@ Pick 1 emoji that represents the work — 🔧 fix, 🎨 UI, 🚀 deploy, 📦 d
 - YES → Set status to `planned` with a plan. Wait for King Kazuma's PIN approval before implementing.
 - NO (fix/debug/config/refactor) → Set status to `in_progress` and proceed immediately.
 
-**Step 4: Do the work**
-1. Create branch: `git checkout -b cipher/dir_xxx`
-2. Make changes, commit with `Directive: dir_xxx` in message
+**Step 4: Create branch BEFORE writing any code**
+```bash
+git checkout -b cipher/dir_xxx
+```
+
+**Step 5: Do the work**
+1. Make changes on the branch
+2. Commit with `Directive: dir_xxx` in message
 3. Run verification (see Verification Commands below)
 4. Call `POST /directives/{id}/merge-and-deploy` to merge + deploy
 5. Directive is auto-completed on successful merge
+
+**Step 6: Monitor deploy — DO NOT STOP HERE**
+1. After merge, smartDeploy runs automatically
+2. JS-only → OTA deploys to Android in ~30s. Confirm success.
+3. Native → CI builds trigger. Monitor until complete.
+4. Report deploy result to King Kazuma.
 
 **If something goes wrong:**
 - Verification fails → Fix it on the branch and retry
@@ -52,14 +83,24 @@ Pick 1 emoji that represents the work — 🔧 fix, 🎨 UI, 🚀 deploy, 📦 d
 - Work on branches, never directly on main
 - Verify before merging — broken code should never reach main
 - Log activity to the directive for dashboard visibility
+- The job is NOT done until deploy completes and King Kazuma is informed
 
 ## Pipeline Enforcement
 
-The pipeline is protected by automated bypass detection. A pre-commit hook ensures audit trail integrity:
+The pipeline has TWO layers of protection:
 
-- **All commits must reference a directive ID** in the commit message (e.g., `dir_1234567890`) or be on a `cipher/*` or `agent/*` branch
-- **Direct commits to `main`** are blocked by the pre-commit hook unless they match an exception
-- **Commit messages should include** `Directive: <directive_id>` for audit trail linkage
+### Layer 1: Git Hooks (hard block)
+Pre-commit and commit-msg hooks in `.githooks/` block direct commits to main.
+
+**CRITICAL: Hooks must be installed.** If `git config core.hooksPath` returns empty, run:
+```bash
+git config core.hooksPath .githooks
+```
+**cipher.sh auto-installs this on every launch.** If hooks are missing, the pipeline has zero enforcement.
+
+- **Direct commits to `main`** are blocked unless they match an exception
+- **All commits on main must reference a directive ID** (e.g., `dir_1234567890`) or use an exception tag
+- **`cipher/*` and `agent/*` branches** are always allowed (no restrictions)
 
 **Exception tags** (add to commit message to bypass on main):
 | Tag | Use Case |
@@ -73,7 +114,9 @@ The pipeline is protected by automated bypass detection. A pre-commit hook ensur
 - Only `.md` files are staged
 - Only `.env*` files are staged
 
-**Hook installation:** `git config core.hooksPath .githooks` (hooks live in `.githooks/` tracked in git)
+### Layer 2: CLAUDE.md Instructions (behavioral)
+The workflow rules at the top of this file tell Cipher to create directives + branches before writing code.
+Even if hooks didn't exist, Cipher MUST follow the pipeline steps in order.
 
 **Violations API:**
 - `GET /api/pipeline-violations` — list all violations
