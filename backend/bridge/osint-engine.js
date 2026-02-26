@@ -18,7 +18,8 @@ class RateLimiter {
           resolve(() => {
             this._active--;
             if (this._queue.length > 0) {
-              setTimeout(() => this._queue.shift()(), this._delay);
+              const next = this._queue.shift();
+              if (typeof next === "function") setTimeout(next, this._delay);
             }
           });
         } else {
