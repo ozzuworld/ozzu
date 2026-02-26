@@ -468,7 +468,9 @@ function validateCommand(command) {
 let _statusEntries = [];
 let _approvals = [];
 let _directives = [];
+let _epics = [];
 let _redisConnected = false;
+const EPICS_FILE = path.join(DATA_DIR, "epics.json");
 
 // ── Uptime & restart tracking ──
 const _serverStartedAt = new Date().toISOString();
@@ -548,6 +550,42 @@ function saveDirectives(directives, changedDirective = null, oldStatus = null, a
         log.pg.error("save directive history failed:", err.message));
     }
   }
+}
+
+// ── Epics — multi-phase project tracking ──
+function getEpics() { return _epics; }
+function saveEpics(epics) {
+  _epics = epics;
+  writeJSON(EPICS_FILE, epics);
+  if (_redisConnected) redis.set("ozzu:epics", JSON.stringify(epics)).catch(err =>
+    log.redis.error("save epics failed:", err.message));
+}
+function updateEpicProgress(epicId) {
+  const epic = _epics.find(e => e.id === epicId);
+  if (!epic) return;
+  const directives = getDirectives();
+  for (const phase of epic.phases) {
+    if (phase.directiveId) {
+      const dir = directives.find(d => d.id === phase.directiveId);
+      if (dir) phase.status = dir.status;
+    }
+  }
+  const total = epic.phases.length;
+  const completed = epic.phases.filter(p => p.status === "completed").length;
+  epic.progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+  if (completed === total && total > 0) {
+    epic.status = "completed";
+    epic.completedAt = Date.now();
+  } else if (epic.phases.some(p => ["in_progress", "planning", "planned"].includes(p.status))) {
+    epic.status = "in_progress";
+  }
+  epic.updatedAt = Date.now();
+  saveEpics(_epics);
+}
+function getNextEpicPhase(epicId) {
+  const epic = _epics.find(e => e.id === epicId);
+  if (!epic) return null;
+  return epic.phases.find(p => p.status === "pending" || !p.directiveId) || null;
 }
 
 // ── Orphan commit scanner — detects commits on main without directive linkage ──
@@ -664,6 +702,15 @@ async function initStorage() {
       log.redis.info("Migrated directives from JSON");
     }
 
+    const storedEpics = await redis.get("ozzu:epics");
+    if (storedEpics) {
+      _epics = JSON.parse(storedEpics);
+    } else if (fs.existsSync(EPICS_FILE)) {
+      _epics = readJSON(EPICS_FILE, []);
+      await redis.set("ozzu:epics", JSON.stringify(_epics));
+      log.redis.info("Migrated epics from JSON");
+    }
+
     const storedApprovals = await redis.get("ozzu:approvals");
     if (storedApprovals) {
       _approvals = JSON.parse(storedApprovals);
@@ -684,6 +731,7 @@ async function initStorage() {
   } catch (err) {
     log.redis.error("Connection failed, falling back to JSON files:", err.message);
     _directives = readJSON(DIRECTIVES_FILE, []);
+    _epics = readJSON(EPICS_FILE, []);
     _approvals = readJSON(APPROVALS_FILE, []);
     _statusEntries = readJSON(STATUS_FILE, []);
   }
@@ -4298,12 +4346,39 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         }
       } catch (err) { /* older summaries are nice-to-have */ }
 
+      // ── Active Epics ──
+      let epicSection = "";
+      const activeEpics = _epics.filter(e => e.status !== "completed" && e.status !== "cancelled");
+      if (activeEpics.length > 0) {
+        epicSection = "\n## Active Epics (MULTI-PHASE PROJECTS — DO NOT FORGET)\n" +
+          "These are ongoing projects with multiple phases. After completing a phase, CHECK THIS LIST and start the next one.\n\n";
+        for (const epic of activeEpics) {
+          updateEpicProgress(epic.id);
+          epicSection += `### ${epic.emoji} ${epic.title} (${epic.progress}% complete)\n`;
+          epicSection += `Epic ID: ${epic.id}\n`;
+          for (const phase of epic.phases) {
+            const statusIcon = phase.status === "completed" ? "✅" :
+              phase.status === "in_progress" ? "🔨" :
+              phase.status === "pending" ? "⏳" : "❓";
+            const dirNote = phase.directiveId ? ` → ${phase.directiveId}` : "";
+            epicSection += `  ${statusIcon} Phase ${phase.phase}: ${phase.title} [${phase.status}]${dirNote}\n`;
+          }
+          const next = getNextEpicPhase(epic.id);
+          if (next) {
+            epicSection += `  **→ NEXT: Phase ${next.phase} — ${next.title}**\n`;
+            epicSection += `  To start: create a directive, link it with POST /epics/${epic.id}/link-phase {phase: ${next.phase}, directiveId: "dir_xxx"}\n`;
+          }
+          epicSection += "\n";
+        }
+      }
+
       // Critical reminders (hardcoded — these are non-negotiable project rules)
       const criticalSection = "\n## Critical Reminders\n" +
         "- NEVER build web dashboards or websites — Ozzu is a React Native app, ALL UI lives in frontend/\n" +
         "- NEVER bypass the directive pipeline\n" +
         "- iPhone NEVER receives OTA updates — always requires native build + sideload\n" +
         "- When King Kazuma says 'dashboard' he means the React Native app UI, NOT the bridge web page\n" +
+        "- After completing a directive, CHECK /epics for pending phases — do NOT stop if there's more work\n" +
         "- Use GET /cipher/search?q=keyword to search older conversation history if you need context beyond what's loaded here";
 
       const timestamp = new Date().toISOString();
@@ -4317,6 +4392,7 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         ``,
         `## Situation Briefing`,
         briefing.trim(),
+        epicSection,
         pipelineSection,
         conversationMemory,
         olderSummaries,
@@ -5468,6 +5544,125 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     violation.resolvedAt = Date.now();
     metrics.trackPipelineViolationResolved();
     sendJSON(res, 200, { ok: true, violation });
+    return;
+  }
+
+  // ── Epic/Project Endpoints ──
+
+  // POST /epics — create a multi-phase epic
+  if (req.method === "POST" && pathname === "/epics") {
+    try {
+      const data = await parseBody(req);
+      if (!data.title || !data.phases || !Array.isArray(data.phases) || data.phases.length === 0) {
+        sendJSON(res, 400, { error: "Required: title, phases (array of {title, description})" });
+        return;
+      }
+      const epic = {
+        id: `epic_${Date.now()}`,
+        title: data.title,
+        description: data.description || "",
+        emoji: data.emoji || "📦",
+        status: "pending",
+        phases: data.phases.map((p, i) => ({
+          phase: i + 1,
+          title: p.title,
+          description: p.description || "",
+          directiveId: null,
+          status: "pending",
+        })),
+        progress: 0,
+        createdBy: data.createdBy || "cipher",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        completedAt: null,
+      };
+      _epics.push(epic);
+      saveEpics(_epics);
+      sendJSON(res, 201, { ok: true, epic });
+    } catch (err) {
+      log.bridge.error("Create epic error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /epics — list all epics
+  if (req.method === "GET" && pathname === "/epics") {
+    const statusFilter = url.searchParams.get("status");
+    let epics = getEpics();
+    // Refresh progress from directive statuses
+    for (const epic of epics) updateEpicProgress(epic.id);
+    if (statusFilter) epics = epics.filter(e => e.status === statusFilter);
+    sendJSON(res, 200, epics);
+    return;
+  }
+
+  // GET /epics/:id — single epic with phase details
+  const epicGetMatch = pathname.match(/^\/epics\/([^/]+)$/);
+  if (req.method === "GET" && epicGetMatch) {
+    const id = epicGetMatch[1];
+    const epic = _epics.find(e => e.id === id);
+    if (!epic) { sendJSON(res, 404, { error: "Epic not found" }); return; }
+    updateEpicProgress(id);
+    // Enrich phases with directive details
+    const directives = getDirectives();
+    const enrichedPhases = epic.phases.map(p => {
+      const dir = p.directiveId ? directives.find(d => d.id === p.directiveId) : null;
+      return { ...p, directive: dir || null };
+    });
+    sendJSON(res, 200, { ...epic, phases: enrichedPhases });
+    return;
+  }
+
+  // PATCH /epics/:id — update epic (title, description, status)
+  if (req.method === "PATCH" && epicGetMatch) {
+    try {
+      const id = epicGetMatch[1];
+      const data = await parseBody(req);
+      const epic = _epics.find(e => e.id === id);
+      if (!epic) { sendJSON(res, 404, { error: "Epic not found" }); return; }
+      if (data.title) epic.title = data.title;
+      if (data.description !== undefined) epic.description = data.description;
+      if (data.status) epic.status = data.status;
+      if (data.emoji) epic.emoji = data.emoji;
+      epic.updatedAt = Date.now();
+      saveEpics(_epics);
+      sendJSON(res, 200, { ok: true, epic });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /epics/:id/link-phase — link a directive to an epic phase
+  const epicLinkMatch = pathname.match(/^\/epics\/([^/]+)\/link-phase$/);
+  if (req.method === "POST" && epicLinkMatch) {
+    try {
+      const epicId = epicLinkMatch[1];
+      const data = await parseBody(req);
+      const epic = _epics.find(e => e.id === epicId);
+      if (!epic) { sendJSON(res, 404, { error: "Epic not found" }); return; }
+      const phase = epic.phases.find(p => p.phase === data.phase);
+      if (!phase) { sendJSON(res, 400, { error: `Phase ${data.phase} not found` }); return; }
+      if (!data.directiveId) { sendJSON(res, 400, { error: "directiveId required" }); return; }
+      phase.directiveId = data.directiveId;
+      updateEpicProgress(epicId);
+      sendJSON(res, 200, { ok: true, epic });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /epics/:id/next — get the next pending phase (for Cipher to know what to work on)
+  const epicNextMatch = pathname.match(/^\/epics\/([^/]+)\/next$/);
+  if (req.method === "GET" && epicNextMatch) {
+    const epicId = epicNextMatch[1];
+    const epic = _epics.find(e => e.id === epicId);
+    if (!epic) { sendJSON(res, 404, { error: "Epic not found" }); return; }
+    updateEpicProgress(epicId);
+    const next = getNextEpicPhase(epicId);
+    sendJSON(res, 200, { epic: { id: epic.id, title: epic.title, progress: epic.progress }, nextPhase: next });
     return;
   }
 
