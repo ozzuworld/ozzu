@@ -15,6 +15,8 @@ import { useOsint } from "../lib/osint-hooks";
 import {
   deleteOsintProfile,
   triggerOsintScan,
+  triggerOsintScanAll,
+  setOsintSchedule,
   type OsintProfile,
 } from "../lib/bridge-api";
 import {
@@ -41,7 +43,7 @@ const FILTER_CHIPS = [
 export default function OsintScreen() {
   const router = useRouter();
   const { insets, isPhone } = usePhoneLayout();
-  const { profiles, findings, score, loading, error, refresh, isScanning, setIsScanning } = useOsint();
+  const { profiles, findings, score, schedule, scoreHistory, loading, error, refresh, isScanning, setIsScanning } = useOsint();
 
   const [filter, setFilter] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
@@ -70,11 +72,10 @@ export default function OsintScreen() {
     }
     setIsScanning(true);
     try {
-      for (const p of profiles) {
-        await triggerOsintScan(p.id);
-      }
+      await triggerOsintScanAll();
     } catch (err: any) {
       Alert.alert("Scan Error", err.message);
+      setIsScanning(false);
     }
   };
 
@@ -188,6 +189,43 @@ export default function OsintScreen() {
             </View>
           )}
         </View>
+
+        {/* Schedule + Last scan info */}
+        {schedule && (
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 12,
+              paddingHorizontal: 4,
+            }}
+          >
+            <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
+              {schedule.lastScanAt
+                ? `LAST SCAN: ${new Date(schedule.lastScanAt).toLocaleDateString()} ${new Date(schedule.lastScanAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                : "NO SCANS YET"}
+            </Text>
+            <Pressable
+              onPress={async () => {
+                const options = [0, 6, 12, 24, 48];
+                const labels = ["OFF", "6H", "12H", "24H", "48H"];
+                const current = schedule.intervalHours;
+                const nextIdx = (options.indexOf(current) + 1) % options.length;
+                try {
+                  await setOsintSchedule(options[nextIdx]);
+                  refresh();
+                } catch (err: any) {
+                  Alert.alert("Schedule Error", err.message);
+                }
+              }}
+            >
+              <Text style={{ color: schedule.enabled ? "#22C55E" : "#525252", fontSize: 10, fontFamily: "monospace" }}>
+                {schedule.enabled ? `⏰ EVERY ${schedule.intervalHours}H` : "⏰ SCHEDULE: OFF"} ▸
+              </Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Action buttons */}
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>

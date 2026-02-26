@@ -108,6 +108,26 @@ async function runScan(profileId, scanType = "full") {
   return { scanId, modulesQueued: modules.map((m) => m.name) };
 }
 
+// ── Scan All Profiles ──
+async function runScanAll() {
+  const profiles = await db.getOsintProfiles();
+  if (!profiles || profiles.length === 0) {
+    return { scans: [], message: "No active profiles to scan" };
+  }
+
+  const scans = [];
+  for (const profile of profiles) {
+    try {
+      const result = await runScan(profile.id, "full");
+      scans.push({ profileId: profile.id, label: profile.label, ...result });
+    } catch (err) {
+      scans.push({ profileId: profile.id, label: profile.label, error: err.message });
+    }
+  }
+
+  return { scans, profilesScanned: profiles.length };
+}
+
 // ── Exposure Score Calculation ──
 const SEVERITY_WEIGHTS = { critical: 10, high: 5, medium: 2, low: 1, info: 0 };
 
@@ -133,10 +153,71 @@ async function calculateExposureScore() {
   return { score, breakdown, totalFindings };
 }
 
+// ── Score History + Snapshot ──
+async function recordScoreSnapshot() {
+  try {
+    const { score, breakdown, totalFindings } = await calculateExposureScore();
+    const profiles = await db.getOsintProfiles();
+    await db.recordOsintScore(score, breakdown, totalFindings, profiles ? profiles.length : 0);
+    console.log(`[osint] Score snapshot recorded: ${score}/100 (${totalFindings} findings)`);
+    return { score, breakdown, totalFindings };
+  } catch (err) {
+    console.error("[osint] Failed to record score snapshot:", err.message);
+    return null;
+  }
+}
+
+// ── Scheduled Scanning ──
+let _scheduleTimer = null;
+let _scheduleIntervalMs = 0; // 0 = disabled
+
+function startScheduledScans(intervalHours) {
+  stopScheduledScans();
+  if (!intervalHours || intervalHours <= 0) return;
+
+  _scheduleIntervalMs = intervalHours * 60 * 60 * 1000;
+  console.log(`[osint] Scheduled scans enabled: every ${intervalHours}h`);
+
+  _scheduleTimer = setInterval(async () => {
+    console.log("[osint] Running scheduled scan-all...");
+    try {
+      const result = await runScanAll();
+      console.log(`[osint] Scheduled scan complete: ${result.profilesScanned} profiles, ${result.scans.length} scans`);
+
+      // Record score snapshot after scheduled scan
+      setTimeout(() => recordScoreSnapshot(), 30000); // Wait 30s for scans to finish
+    } catch (err) {
+      console.error("[osint] Scheduled scan failed:", err.message);
+    }
+  }, _scheduleIntervalMs);
+}
+
+function stopScheduledScans() {
+  if (_scheduleTimer) {
+    clearInterval(_scheduleTimer);
+    _scheduleTimer = null;
+    _scheduleIntervalMs = 0;
+    console.log("[osint] Scheduled scans disabled");
+  }
+}
+
+function getScheduleStatus() {
+  return {
+    enabled: _scheduleTimer !== null,
+    intervalMs: _scheduleIntervalMs,
+    intervalHours: _scheduleIntervalMs > 0 ? _scheduleIntervalMs / (60 * 60 * 1000) : 0,
+  };
+}
+
 module.exports = {
   registerModule,
   getModulesForProfile,
   runScan,
+  runScanAll,
   calculateExposureScore,
+  recordScoreSnapshot,
+  startScheduledScans,
+  stopScheduledScans,
+  getScheduleStatus,
   RateLimiter,
 };

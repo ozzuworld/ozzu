@@ -29,7 +29,7 @@ export interface ApprovalRequest {
 
 export interface Directive {
   id: string;
-  type: "quick" | "feature" | "explore";
+  type: "quick" | "feature" | "explore" | "epic";
   title: string;
   description: string;
   emoji?: string | null;
@@ -47,6 +47,9 @@ export interface Directive {
   completedAt?: number;
   duration?: number;
   buildRuns?: Array<{ platform: string; runId: number; triggeredAt: number; status: string; conclusion: string | null; url: string; lastChecked: number | null }>;
+  epicId?: string | null;
+  phaseOrder?: number | null;
+  phases?: Directive[];
   createdAt: number;
   updatedAt: number;
 }
@@ -538,89 +541,74 @@ export async function fetchOsintScore(): Promise<ExposureScore> {
   return res.json();
 }
 
-// ── Epics (Multi-Phase Projects) ──
-
-export interface EpicPhase {
-  phase: number;
-  title: string;
-  description: string;
-  directiveId: string | null;
-  status: string;
-  directive?: Directive | null;
-}
-
-export interface Epic {
-  id: string;
-  title: string;
-  description: string;
-  emoji: string;
-  status: string;
-  phases: EpicPhase[];
-  progress: number;
-  createdBy: string;
-  createdAt: number;
-  updatedAt: number;
-  completedAt: number | null;
-}
-
-export async function fetchEpics(status?: string): Promise<Epic[]> {
-  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-  const res = await fetchWithTimeout(`${BRIDGE_URL}/epics${qs}`);
-  if (!res.ok) throw new Error(`Fetch epics error: ${res.status}`);
+export async function triggerOsintScanAll(): Promise<{
+  ok: boolean;
+  scans: Array<{ profileId: number; label: string; scanId?: number; error?: string }>;
+  profilesScanned: number;
+}> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/scan-all`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`Scan-all error: ${res.status}`);
   return res.json();
 }
 
-export async function fetchEpic(id: string): Promise<Epic> {
-  const res = await fetchWithTimeout(`${BRIDGE_URL}/epics/${id}`);
-  if (!res.ok) throw new Error(`Fetch epic error: ${res.status}`);
+export interface ScoreHistoryEntry {
+  id: number;
+  score: number;
+  breakdown: Record<string, number>;
+  total_findings: number;
+  profiles_scanned: number;
+  recorded_at: string;
+}
+
+export async function fetchOsintScoreHistory(
+  days?: number
+): Promise<ScoreHistoryEntry[]> {
+  const qs = days ? `?days=${days}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/score/history${qs}`);
+  if (!res.ok) throw new Error(`Score history error: ${res.status}`);
   return res.json();
 }
 
-export async function createEpic(
-  title: string,
-  phases: Array<{ title: string; description?: string }>,
-  opts?: { description?: string; emoji?: string }
-): Promise<{ ok: boolean; epic: Epic }> {
-  const res = await fetchWithTimeout(`${BRIDGE_URL}/epics`, {
+export interface ScanSchedule {
+  enabled: boolean;
+  intervalMs: number;
+  intervalHours: number;
+  lastScanAt: string | null;
+}
+
+export async function fetchOsintSchedule(): Promise<ScanSchedule> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/schedule`);
+  if (!res.ok) throw new Error(`Fetch schedule error: ${res.status}`);
+  return res.json();
+}
+
+export async function setOsintSchedule(
+  intervalHours: number
+): Promise<{ ok: boolean; message: string; schedule: ScanSchedule }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/schedule`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, phases, ...opts }),
+    body: JSON.stringify({ intervalHours }),
   });
-  if (!res.ok) throw new Error(`Create epic error: ${res.status}`);
+  if (!res.ok) throw new Error(`Set schedule error: ${res.status}`);
   return res.json();
 }
 
-export async function updateEpic(
-  id: string,
-  updates: { title?: string; description?: string; status?: string; emoji?: string }
-): Promise<{ ok: boolean; epic: Epic }> {
-  const res = await fetchWithTimeout(`${BRIDGE_URL}/epics/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  if (!res.ok) throw new Error(`Update epic error: ${res.status}`);
-  return res.json();
+// ── Epics (integrated into directives — type="epic" with epicId/phaseOrder) ──
+
+export interface EpicProgress {
+  total: number;
+  completed: number;
+  inProgress: number;
+  currentPhase: { id: string; title: string; status: string } | null;
+  nextPhase: { id: string; title: string } | null;
+  percent: number;
 }
 
-export async function linkEpicPhase(
-  epicId: string,
-  phase: number,
-  directiveId: string
-): Promise<{ ok: boolean; epic: Epic }> {
-  const res = await fetchWithTimeout(`${BRIDGE_URL}/epics/${epicId}/link-phase`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phase, directiveId }),
-  });
-  if (!res.ok) throw new Error(`Link phase error: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchNextEpicPhase(
-  epicId: string
-): Promise<{ epic: { id: string; title: string; progress: number }; nextPhase: EpicPhase | null }> {
-  const res = await fetchWithTimeout(`${BRIDGE_URL}/epics/${epicId}/next`);
-  if (!res.ok) throw new Error(`Fetch next phase error: ${res.status}`);
+export async function fetchEpicProgress(epicId: string): Promise<EpicProgress> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${epicId}/progress`);
+  if (!res.ok) throw new Error(`Fetch epic progress error: ${res.status}`);
   return res.json();
 }

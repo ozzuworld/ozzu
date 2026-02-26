@@ -109,7 +109,17 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_findings_profile ON osint_findings(profile_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_findings_severity ON osint_findings(severity)`);
-    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables)");
+    // Migration: OSINT score history
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_score_history (
+      id SERIAL PRIMARY KEY,
+      score INTEGER NOT NULL,
+      breakdown JSONB DEFAULT '{}',
+      total_findings INTEGER DEFAULT 0,
+      profiles_scanned INTEGER DEFAULT 0,
+      recorded_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_score_history_date ON osint_score_history(recorded_at DESC)`);
+    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables; osint_score_history)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -294,15 +304,17 @@ async function getRecentConversations(limit = 10) {
 async function saveDirective(directive) {
   if (!_pgConnected) return;
   await query(
-    `INSERT INTO directives (id, type, title, description, status, plan, approval_id, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8::double precision / 1000), to_timestamp($9::double precision / 1000))
+    `INSERT INTO directives (id, type, title, description, status, plan, approval_id, epic_id, phase_order, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_timestamp($10::double precision / 1000), to_timestamp($11::double precision / 1000))
      ON CONFLICT (id) DO UPDATE SET
        type = EXCLUDED.type, title = EXCLUDED.title, description = EXCLUDED.description,
        status = EXCLUDED.status, plan = EXCLUDED.plan, approval_id = EXCLUDED.approval_id,
+       epic_id = EXCLUDED.epic_id, phase_order = EXCLUDED.phase_order,
        updated_at = EXCLUDED.updated_at`,
     [
       directive.id, directive.type, directive.title || "", directive.description || "",
       directive.status, directive.plan || null, directive.directiveApprovalId || null,
+      directive.epicId || null, directive.phaseOrder || null,
       directive.createdAt, directive.updatedAt,
     ]
   );
@@ -761,6 +773,35 @@ async function getOsintFindingCounts() {
   return res.rows;
 }
 
+async function recordOsintScore(score, breakdown, totalFindings, profilesScanned) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_score_history (score, breakdown, total_findings, profiles_scanned)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [score, JSON.stringify(breakdown), totalFindings, profilesScanned]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintScoreHistory(days = 30) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT * FROM osint_score_history
+     WHERE recorded_at > NOW() - INTERVAL '1 day' * $1
+     ORDER BY recorded_at ASC`,
+    [days]
+  );
+  return res.rows;
+}
+
+async function getLastOsintScanTime() {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `SELECT MAX(created_at) as last_scan FROM osint_scans WHERE status = 'completed'`
+  );
+  return res.rows[0]?.last_scan || null;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -814,6 +855,9 @@ module.exports = {
   getOsintFindings,
   updateOsintFinding,
   getOsintFindingCounts,
+  recordOsintScore,
+  getOsintScoreHistory,
+  getLastOsintScanTime,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

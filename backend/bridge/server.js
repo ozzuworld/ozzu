@@ -555,7 +555,8 @@ function saveDirectives(directives, changedDirective = null, oldStatus = null, a
   }
 }
 
-// ── Epics — multi-phase project tracking ──
+// ── Epics — multi-phase project tracking (integrated into directives) ──
+// Legacy: keep getEpics/saveEpics for backward compat with old /epics endpoints
 function getEpics() { return _epics; }
 function saveEpics(epics) {
   _epics = epics;
@@ -563,32 +564,53 @@ function saveEpics(epics) {
   if (_redisConnected) redis.set("ozzu:epics", JSON.stringify(epics)).catch(err =>
     log.redis.error("save epics failed:", err.message));
 }
-function updateEpicProgress(epicId) {
-  const epic = _epics.find(e => e.id === epicId);
-  if (!epic) return;
+// Derive epic status from its child phases (directives with epicId pointing to this epic)
+function deriveEpicStatus(epicId) {
   const directives = getDirectives();
-  for (const phase of epic.phases) {
-    if (phase.directiveId) {
-      const dir = directives.find(d => d.id === phase.directiveId);
-      if (dir) phase.status = dir.status;
-    }
-  }
-  const total = epic.phases.length;
-  const completed = epic.phases.filter(p => p.status === "completed").length;
-  epic.progress = total > 0 ? Math.round((completed / total) * 100) : 0;
-  if (completed === total && total > 0) {
-    epic.status = "completed";
-    epic.completedAt = Date.now();
-  } else if (epic.phases.some(p => ["in_progress", "planning", "planned"].includes(p.status))) {
-    epic.status = "in_progress";
-  }
-  epic.updatedAt = Date.now();
-  saveEpics(_epics);
-}
-function getNextEpicPhase(epicId) {
-  const epic = _epics.find(e => e.id === epicId);
+  const epic = directives.find(d => d.id === epicId && d.type === "epic");
   if (!epic) return null;
-  return epic.phases.find(p => p.status === "pending" || !p.directiveId) || null;
+  const phases = directives.filter(d => d.epicId === epicId);
+  if (phases.length === 0) return epic.status;
+  const allCompleted = phases.every(p => p.status === "completed");
+  const anyActive = phases.some(p => ["in_progress", "planning", "planned", "approved"].includes(p.status));
+  const anyBlocked = phases.some(p => ["blocked", "deploy_failed", "failed"].includes(p.status));
+  const allPending = phases.every(p => p.status === "pending");
+  let newStatus;
+  if (allCompleted) newStatus = "completed";
+  else if (anyBlocked) newStatus = "blocked";
+  else if (anyActive) newStatus = "in_progress";
+  else if (allPending) newStatus = "pending";
+  else newStatus = "in_progress"; // mix of completed + pending
+  const prevStatus = epic.status;
+  if (newStatus !== prevStatus) {
+    epic.status = newStatus;
+    epic.updatedAt = Date.now();
+    if (!Array.isArray(epic.activity_log)) epic.activity_log = [];
+    epic.activity_log.push({ timestamp: Date.now(), type: "status_change", actor: "system", message: `Epic status derived: ${prevStatus} → ${newStatus}` });
+    if (newStatus === "completed") {
+      epic.completedAt = Date.now();
+      if (epic.startedAt) epic.duration = epic.completedAt - epic.startedAt;
+      epic.activity_log.push({ timestamp: Date.now(), type: "status_change", actor: "system", message: "All phases completed — epic auto-completed" });
+    }
+    saveDirectives(directives, epic, prevStatus, "system");
+  }
+  return newStatus;
+}
+// Get epic progress info for the progress endpoint
+function getEpicProgress(epicId) {
+  const directives = getDirectives();
+  const phases = directives.filter(d => d.epicId === epicId).sort((a, b) => (a.phaseOrder || 0) - (b.phaseOrder || 0));
+  const total = phases.length;
+  const completed = phases.filter(p => p.status === "completed").length;
+  const inProgressCount = phases.filter(p => ["in_progress", "planning", "planned", "approved"].includes(p.status)).length;
+  const currentPhase = phases.find(p => ["in_progress", "planning", "planned", "approved"].includes(p.status)) || null;
+  const nextPhase = phases.find(p => p.status === "pending") || null;
+  return {
+    total, completed, inProgress: inProgressCount,
+    currentPhase: currentPhase ? { id: currentPhase.id, title: currentPhase.title, status: currentPhase.status } : null,
+    nextPhase: nextPhase ? { id: nextPhase.id, title: nextPhase.title } : null,
+    percent: total > 0 ? Math.round((completed / total) * 100) : 0,
+  };
 }
 
 // ── Orphan commit scanner — detects commits on main without directive linkage ──
@@ -1700,6 +1722,25 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /directives/:id/progress — Epic progress (phases completed/total/current/next)
+  const directiveProgressMatch = pathname.match(/^\/directives\/([^/]+)\/progress$/);
+  if (req.method === "GET" && directiveProgressMatch) {
+    const id = directiveProgressMatch[1];
+    const directives = getDirectives();
+    const directive = directives.find((d) => d.id === id);
+    if (!directive) {
+      sendJSON(res, 404, { error: "Directive not found" });
+      return;
+    }
+    if (directive.type !== "epic") {
+      sendJSON(res, 400, { error: "Progress is only available for epic-type directives" });
+      return;
+    }
+    const progress = getEpicProgress(id);
+    sendJSON(res, 200, progress);
+    return;
+  }
+
   // PATCH /directives/:id — Update directive (status, plan, title)
   const directivePatchMatch = pathname.match(/^\/directives\/([^/]+)$/);
   if (req.method === "PATCH" && directivePatchMatch) {
@@ -1915,6 +1956,12 @@ async function handleRequest(req, res) {
     unblockedDirectives.sort((a, b) => (a.priority || 3) - (b.priority || 3));
     for (const d of unblockedDirectives) {
       routeDirective(d, "planning");
+    }
+
+    // ── Epic status derivation ──
+    // If this directive is a phase of an epic, re-derive the epic's status
+    if (directive.epicId && data.status && data.status !== prevStatus) {
+      deriveEpicStatus(directive.epicId);
     }
 
     sendJSON(res, 200, { ok: true, directive, unblocked: unblockedDirectives.length > 0 ? unblockedDirectives.map(d => d.id) : undefined });
@@ -2401,9 +2448,25 @@ async function handleRequest(req, res) {
     directive.updatedAt = Date.now();
     if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
     directive.activity_log.push({ timestamp: Date.now(), type: "cancelled", actor: "King Kazuma", message: `Cancelled from dashboard (was ${prevStatus})` });
+    // If cancelling an epic, cascade cancel to all pending/active child phases
+    const cancelledChildren = [];
+    if (directive.type === "epic") {
+      const nonTerminal = new Set(["pending", "planning", "planned", "approved", "in_progress", "blocked"]);
+      for (const d of directives) {
+        if (d.epicId === id && nonTerminal.has(d.status)) {
+          const childPrev = d.status;
+          d.status = "cancelled";
+          d.updatedAt = Date.now();
+          if (!Array.isArray(d.activity_log)) d.activity_log = [];
+          d.activity_log.push({ timestamp: Date.now(), type: "cancelled", actor: "system", message: `Cancelled — parent epic cancelled` });
+          cancelledChildren.push(d.id);
+          killAgent(d.id);
+        }
+      }
+    }
     saveDirectives(directives, directive, prevStatus, "King Kazuma");
-    log.bridge.info(`Directive cancelled: ${id} "${directive.title}" (was ${prevStatus}, agent killed: ${agentKilled})`);
-    sendJSON(res, 200, { ok: true, directive, agentKilled });
+    log.bridge.info(`Directive cancelled: ${id} "${directive.title}" (was ${prevStatus}, agent killed: ${agentKilled}${cancelledChildren.length > 0 ? `, cascaded to ${cancelledChildren.length} children` : ""})`);
+    sendJSON(res, 200, { ok: true, directive, agentKilled, cancelledChildren: cancelledChildren.length > 0 ? cancelledChildren : undefined });
     return;
   }
 
@@ -4349,27 +4412,35 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         }
       } catch (err) { /* older summaries are nice-to-have */ }
 
-      // ── Active Epics ──
+      // ── Active Epics (directive-based) ──
       let epicSection = "";
-      const activeEpics = _epics.filter(e => e.status !== "completed" && e.status !== "cancelled");
-      if (activeEpics.length > 0) {
-        epicSection = "\n## Active Epics (MULTI-PHASE PROJECTS — DO NOT FORGET)\n" +
-          "These are ongoing projects with multiple phases. After completing a phase, CHECK THIS LIST and start the next one.\n\n";
-        for (const epic of activeEpics) {
-          updateEpicProgress(epic.id);
-          epicSection += `### ${epic.emoji} ${epic.title} (${epic.progress}% complete)\n`;
-          epicSection += `Epic ID: ${epic.id}\n`;
-          for (const phase of epic.phases) {
+      const epicDirectives = directives.filter(d => d.type === "epic" && !["completed", "cancelled"].includes(d.status));
+      if (epicDirectives.length > 0) {
+        epicSection = "\n## Active Epics (multi-phase projects)\n" +
+          "These are ongoing projects with multiple phases. Pick up where you left off.\n\n";
+        for (const epic of epicDirectives) {
+          const phases = directives
+            .filter(d => d.epicId === epic.id)
+            .sort((a, b) => (a.phaseOrder || 0) - (b.phaseOrder || 0));
+          const progress = getEpicProgress(epic.id);
+          epicSection += `### ${epic.emoji || "📦"} Epic: "${epic.title}" (${epic.id})\n`;
+          epicSection += `Progress: ${progress.completed}/${progress.total} phases completed\n`;
+          for (const phase of phases) {
             const statusIcon = phase.status === "completed" ? "✅" :
-              phase.status === "in_progress" ? "🔨" :
-              phase.status === "pending" ? "⏳" : "❓";
-            const dirNote = phase.directiveId ? ` → ${phase.directiveId}` : "";
-            epicSection += `  ${statusIcon} Phase ${phase.phase}: ${phase.title} [${phase.status}]${dirNote}\n`;
+              ["in_progress", "planning", "planned", "approved"].includes(phase.status) ? "🔨" :
+              phase.status === "pending" ? "⏳" :
+              phase.status === "blocked" ? "🛑" : "❓";
+            const marker = ["in_progress", "planning", "planned", "approved"].includes(phase.status) ? " ← YOU ARE HERE" : "";
+            epicSection += `- [${phase.status}] Phase ${phase.phaseOrder || "?"}: ${phase.title}${marker}\n`;
           }
-          const next = getNextEpicPhase(epic.id);
-          if (next) {
-            epicSection += `  **→ NEXT: Phase ${next.phase} — ${next.title}**\n`;
-            epicSection += `  To start: create a directive, link it with POST /epics/${epic.id}/link-phase {phase: ${next.phase}, directiveId: "dir_xxx"}\n`;
+          if (progress.currentPhase) {
+            const currentDir = directives.find(d => d.id === progress.currentPhase.id);
+            if (currentDir && currentDir.plan) {
+              const planSnippet = currentDir.plan.length > 500 ? currentDir.plan.substring(0, 500) + "..." : currentDir.plan;
+              epicSection += `\nCurrent phase plan:\n${planSnippet}\n`;
+            }
+          } else if (progress.nextPhase) {
+            epicSection += `\n**→ NEXT: ${progress.nextPhase.title}** — start by creating a directive with epicId: "${epic.id}"\n`;
           }
           epicSection += "\n";
         }
@@ -4381,7 +4452,7 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         "- NEVER bypass the directive pipeline\n" +
         "- iPhone NEVER receives OTA updates — always requires native build + sideload\n" +
         "- When King Kazuma says 'dashboard' he means the React Native app UI, NOT the bridge web page\n" +
-        "- After completing a directive, CHECK /epics for pending phases — do NOT stop if there's more work\n" +
+        "- After completing a directive phase, check if the parent epic has more pending phases — do NOT stop if there's more work\n" +
         "- Use GET /cipher/search?q=keyword to search older conversation history if you need context beyond what's loaded here";
 
       const timestamp = new Date().toISOString();
@@ -5815,6 +5886,78 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
+  // POST /osint/scan-all — scan all active profiles
+  if (req.method === "POST" && pathname === "/osint/scan-all") {
+    try {
+      const result = await osintEngine.runScanAll();
+      setTimeout(() => osintEngine.recordScoreSnapshot(), 30000);
+      sendJSON(res, 202, { ok: true, ...result });
+    } catch (err) {
+      log.bridge.error("OSINT scan-all error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/score/history — score trend over time
+  if (req.method === "GET" && pathname === "/osint/score/history") {
+    try {
+      const days = url.searchParams.get("days") ? parseInt(url.searchParams.get("days"), 10) : 30;
+      const history = await db.getOsintScoreHistory(days);
+      sendJSON(res, 200, history);
+    } catch (err) {
+      log.bridge.error("OSINT score history error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/score/snapshot — manually record a score snapshot
+  if (req.method === "POST" && pathname === "/osint/score/snapshot") {
+    try {
+      const result = await osintEngine.recordScoreSnapshot();
+      sendJSON(res, 200, { ok: true, ...result });
+    } catch (err) {
+      log.bridge.error("OSINT score snapshot error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/schedule — configure scheduled scans
+  if (req.method === "POST" && pathname === "/osint/schedule") {
+    try {
+      const body = await parseBody(req);
+      const { intervalHours } = body;
+      if (intervalHours === 0 || intervalHours === null) {
+        osintEngine.stopScheduledScans();
+        sendJSON(res, 200, { ok: true, message: "Scheduled scans disabled", schedule: osintEngine.getScheduleStatus() });
+      } else if (intervalHours > 0) {
+        osintEngine.startScheduledScans(intervalHours);
+        sendJSON(res, 200, { ok: true, message: `Scheduled scans set to every ${intervalHours}h`, schedule: osintEngine.getScheduleStatus() });
+      } else {
+        sendJSON(res, 400, { error: "intervalHours must be a positive number or 0 to disable" });
+      }
+    } catch (err) {
+      log.bridge.error("OSINT schedule error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/schedule — get schedule status
+  if (req.method === "GET" && pathname === "/osint/schedule") {
+    try {
+      const schedule = osintEngine.getScheduleStatus();
+      const lastScan = await db.getLastOsintScanTime();
+      sendJSON(res, 200, { ...schedule, lastScanAt: lastScan });
+    } catch (err) {
+      log.bridge.error("OSINT schedule status error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
   sendJSON(res, 404, { error: "Not found" });
 }
 
@@ -6733,6 +6876,16 @@ async function buildSituationBriefing(persona) {
     );
     for (const d of active.slice(0, 5)) {
       lines.push(`  - [${d.status}] ${d.title}`);
+    }
+  }
+
+  // 4b. Active epics summary
+  const activeEpics = directives.filter(d => d.type === "epic" && !["completed", "cancelled"].includes(d.status));
+  if (activeEpics.length > 0) {
+    lines.push(`Active epics: ${activeEpics.length}`);
+    for (const epic of activeEpics) {
+      const progress = getEpicProgress(epic.id);
+      lines.push(`  ${epic.emoji || "📦"} "${epic.title}" — Phase ${progress.completed + (progress.inProgress > 0 ? 1 : 0)}/${progress.total} ${progress.currentPhase ? `(${progress.currentPhase.status})` : ""}`);
     }
   }
 
