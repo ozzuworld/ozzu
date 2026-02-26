@@ -6,11 +6,15 @@ import {
   fetchOsintScore,
   fetchOsintSchedule,
   fetchOsintScoreHistory,
+  fetchOsintGraph,
   type OsintProfile,
   type OsintFinding,
   type ExposureScore,
   type ScanSchedule,
   type ScoreHistoryEntry,
+  type OsintEntity,
+  type OsintRelationship,
+  type OsintCorrelationSummary,
 } from "./bridge-api";
 
 interface UseOsintResult {
@@ -86,4 +90,52 @@ export function useOsint(): UseOsintResult {
   }, [fetchHistory]);
 
   return { profiles, findings, score, schedule, scoreHistory, loading, error, refresh: fetchAll, isScanning, setIsScanning };
+}
+
+// useOsintGraph() hook — fetch entity graph with polling
+interface UseOsintGraphResult {
+  entities: OsintEntity[];
+  relationships: OsintRelationship[];
+  summary: OsintCorrelationSummary | null;
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
+
+export function useOsintGraph(profileId?: number): UseOsintGraphResult {
+  const [entities, setEntities] = useState<OsintEntity[]>([]);
+  const [relationships, setRelationships] = useState<OsintRelationship[]>([]);
+  const [summary, setSummary] = useState<OsintCorrelationSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  const fetchGraph = useCallback(async () => {
+    try {
+      const data = await fetchOsintGraph(profileId);
+      if (!mountedRef.current) return;
+      setEntities(data.entities || []);
+      setRelationships(data.relationships || []);
+      setSummary(data.summary || null);
+      setError(null);
+    } catch (err: any) {
+      if (mountedRef.current) setError(err.message);
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [profileId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchGraph();
+    return () => { mountedRef.current = false; };
+  }, [fetchGraph]);
+
+  // Poll every 30s
+  useEffect(() => {
+    const interval = setInterval(fetchGraph, 30000);
+    return () => clearInterval(interval);
+  }, [fetchGraph]);
+
+  return { entities, relationships, summary, loading, error, refresh: fetchGraph };
 }

@@ -24,6 +24,11 @@ osintEngine.registerModule(require("./osint-modules/gravatar-lookup"));
 osintEngine.registerModule(require("./osint-modules/hibp-email"));
 osintEngine.registerModule(require("./osint-modules/data-broker"));
 osintEngine.registerModule(require("./osint-modules/paste-monitor"));
+osintEngine.registerModule(require("./osint-modules/phone-lookup"));
+osintEngine.registerModule(require("./osint-modules/domain-recon"));
+osintEngine.registerModule(require("./osint-modules/social-deep"));
+osintEngine.registerModule(require("./osint-modules/image-search"));
+osintEngine.registerModule(require("./osint-modules/document-meta"));
 
 const log = {
   bridge: createLogger("bridge"),
@@ -5785,8 +5790,8 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         sendJSON(res, 400, { error: "Missing required fields: label, profileType, value" });
         return;
       }
-      if (!["email", "username", "password"].includes(profileType)) {
-        sendJSON(res, 400, { error: "profileType must be email, username, or password" });
+      if (!["email", "username", "password", "phone", "domain"].includes(profileType)) {
+        sendJSON(res, 400, { error: "profileType must be email, username, password, phone, or domain" });
         return;
       }
       const id = await db.createOsintProfile(label, profileType, value, tags || []);
@@ -5987,6 +5992,95 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
       sendJSON(res, 200, { ...schedule, lastScanAt: lastScan });
     } catch (err) {
       log.bridge.error("OSINT schedule status error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── OSINT Entity/Graph Endpoints ──
+
+  // GET /osint/entities — list entities (optional ?type= filter)
+  if (req.method === "GET" && pathname === "/osint/entities") {
+    try {
+      const type = parsedUrl.searchParams.get("type");
+      const profileId = parsedUrl.searchParams.get("profileId");
+      const limit = parseInt(parsedUrl.searchParams.get("limit") || "200", 10);
+      const entities = await db.getOsintEntities({ type, profileId: profileId ? parseInt(profileId, 10) : null, limit });
+      sendJSON(res, 200, { ok: true, entities });
+    } catch (err) {
+      log.bridge.error("OSINT entities error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/entities/:id/neighbors — connected entities
+  const entityNeighborMatch = pathname.match(/^\/osint\/entities\/(\d+)\/neighbors$/);
+  if (req.method === "GET" && entityNeighborMatch) {
+    try {
+      const entityId = parseInt(entityNeighborMatch[1], 10);
+      const entity = await db.getOsintEntity(entityId);
+      if (!entity) { sendJSON(res, 404, { error: "Entity not found" }); return; }
+      const relationships = await db.getOsintRelationships(entityId);
+      sendJSON(res, 200, { ok: true, entity, relationships });
+    } catch (err) {
+      log.bridge.error("OSINT entity neighbors error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/graph — full entity graph + summary
+  if (req.method === "GET" && pathname === "/osint/graph") {
+    try {
+      const graph = await db.getOsintEntityGraph();
+      const summary = await db.getOsintCorrelationSummary();
+      sendJSON(res, 200, { ok: true, ...graph, summary });
+    } catch (err) {
+      log.bridge.error("OSINT graph error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/graph/:profileId — graph for one profile
+  const graphProfileMatch = pathname.match(/^\/osint\/graph\/(\d+)$/);
+  if (req.method === "GET" && graphProfileMatch) {
+    try {
+      const profileId = parseInt(graphProfileMatch[1], 10);
+      const graph = await db.getOsintEntityGraph(profileId);
+      const summary = await db.getOsintCorrelationSummary();
+      sendJSON(res, 200, { ok: true, ...graph, summary });
+    } catch (err) {
+      log.bridge.error("OSINT profile graph error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/report/:profileId — report for one profile
+  const reportProfileMatch = pathname.match(/^\/osint\/report\/(\d+)$/);
+  if (req.method === "GET" && reportProfileMatch) {
+    try {
+      const osintReport = require("./osint-report");
+      const profileId = parseInt(reportProfileMatch[1], 10);
+      const report = await osintReport.generateReport(profileId);
+      sendJSON(res, 200, { ok: true, report });
+    } catch (err) {
+      log.bridge.error("OSINT profile report error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/report — combined report across all profiles
+  if (req.method === "GET" && pathname === "/osint/report") {
+    try {
+      const osintReport = require("./osint-report");
+      const report = await osintReport.generateCombinedReport();
+      sendJSON(res, 200, { ok: true, report });
+    } catch (err) {
+      log.bridge.error("OSINT combined report error:", err.message);
       sendJSON(res, 500, { error: err.message });
     }
     return;

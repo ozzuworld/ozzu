@@ -54,6 +54,8 @@ export const PROFILE_TYPE_EMOJI: Record<string, string> = {
   email: "📧",
   username: "👤",
   password: "🔑",
+  phone: "📱",
+  domain: "🌐",
 };
 
 export function scoreColor(score: number): string {

@@ -403,7 +403,7 @@ export async function deployArtifact(
 export interface OsintProfile {
   id: number;
   label: string;
-  profile_type: "email" | "username" | "password";
+  profile_type: "email" | "username" | "password" | "phone" | "domain";
   value: string;
   tags: string[];
   is_active: boolean;
@@ -594,6 +594,96 @@ export async function setOsintSchedule(
   });
   if (!res.ok) throw new Error(`Set schedule error: ${res.status}`);
   return res.json();
+}
+
+// ── OSINT Entity/Graph Types ──
+
+export interface OsintEntity {
+  id: number;
+  entity_type: string;
+  value: string;
+  label: string | null;
+  metadata: Record<string, any>;
+  source_module: string | null;
+  source_finding_id: number | null;
+  profile_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OsintRelationship {
+  id: number;
+  source_entity_id: number;
+  target_entity_id: number;
+  relationship: string;
+  confidence: number;
+  source_module: string | null;
+  evidence: string | null;
+  source_type?: string;
+  source_value?: string;
+  source_label?: string;
+  target_type?: string;
+  target_value?: string;
+  target_label?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OsintCorrelationSummary {
+  totalEntities: number;
+  totalRelationships: number;
+  entityTypes: Record<string, number>;
+  relationshipTypes: Record<string, number>;
+}
+
+export interface OsintGraph {
+  entities: OsintEntity[];
+  relationships: OsintRelationship[];
+  summary: OsintCorrelationSummary;
+}
+
+export interface OsintReport {
+  markdown: string;
+  json: {
+    profile: OsintProfile | null;
+    summary: { critical: number; high: number; medium: number; low: number; info: number; totalEntities: number; totalRelationships: number };
+    findings: OsintFinding[];
+    entities: OsintEntity[];
+    relationships: OsintRelationship[];
+    remediation: string[];
+  };
+}
+
+export async function fetchOsintGraph(profileId?: number): Promise<OsintGraph> {
+  const path = profileId ? `/osint/graph/${profileId}` : "/osint/graph";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}${path}`);
+  if (!res.ok) throw new Error(`Graph error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintEntities(type?: string, profileId?: number): Promise<OsintEntity[]> {
+  const params = new URLSearchParams();
+  if (type) params.set("type", type);
+  if (profileId) params.set("profileId", String(profileId));
+  const qs = params.toString() ? `?${params}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/entities${qs}`);
+  if (!res.ok) throw new Error(`Entities error: ${res.status}`);
+  const data = await res.json();
+  return data.entities || [];
+}
+
+export async function fetchOsintEntityNeighbors(entityId: number): Promise<{ entity: OsintEntity; relationships: OsintRelationship[] }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/entities/${entityId}/neighbors`);
+  if (!res.ok) throw new Error(`Entity neighbors error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintReport(profileId?: number): Promise<OsintReport> {
+  const path = profileId ? `/osint/report/${profileId}` : "/osint/report";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}${path}`);
+  if (!res.ok) throw new Error(`Report error: ${res.status}`);
+  const data = await res.json();
+  return data.report;
 }
 
 // ── Epics (integrated into directives — type="epic" with epicId/phaseOrder) ──

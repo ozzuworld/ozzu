@@ -11,12 +11,13 @@ import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
-import { useOsint } from "../lib/osint-hooks";
+import { useOsint, useOsintGraph } from "../lib/osint-hooks";
 import {
   deleteOsintProfile,
   triggerOsintScan,
   triggerOsintScanAll,
   setOsintSchedule,
+  fetchOsintReport,
   type OsintProfile,
 } from "../lib/bridge-api";
 import {
@@ -28,6 +29,8 @@ import {
 } from "../lib/osint-constants";
 import { FindingCard } from "../components/osint/FindingCard";
 import { AddProfileModal } from "../components/osint/AddProfileModal";
+import { EntityGraph } from "../components/osint/EntityGraph";
+import { ReportModal } from "../components/osint/ReportModal";
 
 const TOP_BAR_HEIGHT = 48;
 
@@ -40,20 +43,31 @@ const FILTER_CHIPS = [
   { key: "info", label: "INFO", emoji: "⚪" },
 ];
 
+const VIEW_TABS = [
+  { key: "findings", label: "FINDINGS", emoji: "🔍" },
+  { key: "graph", label: "GRAPH", emoji: "🕸" },
+  { key: "report", label: "REPORT", emoji: "📄" },
+];
+
 export default function OsintScreen() {
   const router = useRouter();
   const { insets, isPhone } = usePhoneLayout();
   const { profiles, findings, score, schedule, scoreHistory, loading, error, refresh, isScanning, setIsScanning } = useOsint();
+  const graph = useOsintGraph();
 
+  const [activeView, setActiveView] = useState("findings");
   const [filter, setFilter] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [reportData, setReportData] = useState<{ markdown: string } | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refresh();
+    await Promise.all([refresh(), graph.refresh()]);
     setRefreshing(false);
-  }, [refresh]);
+  }, [refresh, graph.refresh]);
 
   const handleScan = async (profileId: number) => {
     try {
@@ -81,7 +95,7 @@ export default function OsintScreen() {
 
   const handleDeleteProfile = (profile: OsintProfile) => {
     Alert.alert(
-      "🗑 Delete Profile",
+      "Delete Profile",
       `Remove "${profile.label}"?`,
       [
         { text: "Cancel", style: "cancel" },
@@ -95,6 +109,20 @@ export default function OsintScreen() {
         },
       ]
     );
+  };
+
+  const handleOpenReport = async () => {
+    setReportLoading(true);
+    setShowReport(true);
+    try {
+      const report = await fetchOsintReport();
+      setReportData(report);
+    } catch (err: any) {
+      Alert.alert("Report Error", err.message);
+      setShowReport(false);
+    } finally {
+      setReportLoading(false);
+    }
   };
 
   const filteredFindings = filter === "all"
@@ -134,7 +162,7 @@ export default function OsintScreen() {
             letterSpacing: 3,
           }}
         >
-          🛡 OSINT
+          OSINT
         </Text>
         <StatusBadge />
       </View>
@@ -209,7 +237,6 @@ export default function OsintScreen() {
             <Pressable
               onPress={async () => {
                 const options = [0, 6, 12, 24, 48];
-                const labels = ["OFF", "6H", "12H", "24H", "48H"];
                 const current = schedule.intervalHours;
                 const nextIdx = (options.indexOf(current) + 1) % options.length;
                 try {
@@ -221,7 +248,7 @@ export default function OsintScreen() {
               }}
             >
               <Text style={{ color: schedule.enabled ? "#22C55E" : "#525252", fontSize: 10, fontFamily: "monospace" }}>
-                {schedule.enabled ? `⏰ EVERY ${schedule.intervalHours}H` : "⏰ SCHEDULE: OFF"} ▸
+                {schedule.enabled ? `EVERY ${schedule.intervalHours}H` : "SCHEDULE: OFF"} ▸
               </Text>
             </Pressable>
           </View>
@@ -242,7 +269,7 @@ export default function OsintScreen() {
             })}
           >
             <Text style={{ color: "#60A5FA", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
-              ➕ ADD PROFILE
+              + ADD PROFILE
             </Text>
           </Pressable>
           <Pressable
@@ -260,7 +287,7 @@ export default function OsintScreen() {
             })}
           >
             <Text style={{ color: "#4ADE80", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
-              {isScanning ? "⏳ SCANNING..." : "🔍 SCAN ALL"}
+              {isScanning ? "SCANNING..." : "SCAN ALL"}
             </Text>
           </Pressable>
         </View>
@@ -306,7 +333,7 @@ export default function OsintScreen() {
                     opacity: isScanning ? 0.5 : 1,
                   })}
                 >
-                  <Text style={{ color: "#06B6D4", fontSize: 11, fontFamily: "monospace" }}>🔍</Text>
+                  <Text style={{ color: "#06B6D4", fontSize: 11, fontFamily: "monospace" }}>SCAN</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => handleDeleteProfile(p)}
@@ -319,7 +346,7 @@ export default function OsintScreen() {
                     paddingVertical: 4,
                   })}
                 >
-                  <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace" }}>🗑</Text>
+                  <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace" }}>DEL</Text>
                 </Pressable>
               </View>
             ))}
@@ -331,75 +358,128 @@ export default function OsintScreen() {
           <View style={{ alignItems: "center", paddingVertical: 20 }}>
             <Text style={{ fontSize: 32, marginBottom: 8 }}>🛡</Text>
             <Text style={{ color: "#525252", fontSize: 12, fontFamily: "monospace", textAlign: "center" }}>
-              Add an email, username, or password{"\n"}to start scanning for exposures
+              Add an email, username, phone, or domain{"\n"}to start scanning for exposures
             </Text>
           </View>
         )}
 
-        {/* Filter chips */}
-        {findings.length > 0 && (
-          <>
-            <View style={{ flexDirection: "row", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-              {FILTER_CHIPS.map((chip) => {
-                const active = filter === chip.key;
-                const count = chip.key === "all"
-                  ? findings.length
-                  : findings.filter((f) => f.severity === chip.key).length;
-                return (
-                  <Pressable
-                    key={chip.key}
-                    onPress={() => setFilter(chip.key)}
-                    style={{
-                      backgroundColor: active ? "#1E1E1E" : "transparent",
-                      borderWidth: 1,
-                      borderColor: active ? "#444" : "#252525",
-                      borderRadius: 6,
-                      paddingHorizontal: 8,
-                      paddingVertical: 4,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: active ? "#E5E5E5" : "#525252",
-                        fontSize: 11,
-                        fontFamily: "monospace",
-                        fontWeight: active ? "bold" : "normal",
-                      }}
-                    >
-                      {chip.emoji} {chip.label} {count > 0 ? `(${count})` : ""}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+        {/* View tabs: FINDINGS / GRAPH / REPORT */}
+        <View style={{ flexDirection: "row", gap: 4, marginBottom: 12 }}>
+          {VIEW_TABS.map((tab) => {
+            const active = activeView === tab.key;
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => {
+                  if (tab.key === "report") {
+                    handleOpenReport();
+                  } else {
+                    setActiveView(tab.key);
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  backgroundColor: active ? "#1E1E1E" : "transparent",
+                  borderWidth: 1,
+                  borderColor: active ? "#06B6D4" : "#252525",
+                  borderRadius: 8,
+                  paddingVertical: 8,
+                  alignItems: "center",
+                }}
+              >
+                <Text
+                  style={{
+                    color: active ? "#06B6D4" : "#525252",
+                    fontSize: 11,
+                    fontFamily: "monospace",
+                    fontWeight: active ? "bold" : "normal",
+                  }}
+                >
+                  {tab.emoji} {tab.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-            {/* Findings list */}
-            <Text style={{ color: "#525252", fontSize: 11, fontFamily: "monospace", letterSpacing: 2, marginBottom: 8 }}>
-              FINDINGS ({filteredFindings.length})
-            </Text>
+        {/* FINDINGS VIEW */}
+        {activeView === "findings" && (
+          <>
+            {/* Filter chips */}
+            {findings.length > 0 && (
+              <>
+                <View style={{ flexDirection: "row", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+                  {FILTER_CHIPS.map((chip) => {
+                    const active = filter === chip.key;
+                    const count = chip.key === "all"
+                      ? findings.length
+                      : findings.filter((f) => f.severity === chip.key).length;
+                    return (
+                      <Pressable
+                        key={chip.key}
+                        onPress={() => setFilter(chip.key)}
+                        style={{
+                          backgroundColor: active ? "#1E1E1E" : "transparent",
+                          borderWidth: 1,
+                          borderColor: active ? "#444" : "#252525",
+                          borderRadius: 6,
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: active ? "#E5E5E5" : "#525252",
+                            fontSize: 11,
+                            fontFamily: "monospace",
+                            fontWeight: active ? "bold" : "normal",
+                          }}
+                        >
+                          {chip.emoji} {chip.label} {count > 0 ? `(${count})` : ""}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={{ color: "#525252", fontSize: 11, fontFamily: "monospace", letterSpacing: 2, marginBottom: 8 }}>
+                  FINDINGS ({filteredFindings.length})
+                </Text>
+              </>
+            )}
+
+            {filteredFindings.map((f) => (
+              <FindingCard key={f.id} finding={f} onStatusChange={refresh} />
+            ))}
+
+            {findings.length > 0 && filteredFindings.length === 0 && (
+              <View style={{ alignItems: "center", paddingVertical: 20 }}>
+                <Text style={{ fontSize: 24, marginBottom: 8 }}>🔍</Text>
+                <Text style={{ color: "#525252", fontSize: 12, fontFamily: "monospace", textAlign: "center" }}>
+                  No {filter} findings
+                </Text>
+                <Pressable onPress={() => setFilter("all")} style={{ marginTop: 8 }}>
+                  <Text style={{ color: "#06B6D4", fontSize: 12, fontFamily: "monospace" }}>Show All</Text>
+                </Pressable>
+              </View>
+            )}
           </>
         )}
 
-        {filteredFindings.map((f) => (
-          <FindingCard key={f.id} finding={f} onStatusChange={refresh} />
-        ))}
-
-        {findings.length > 0 && filteredFindings.length === 0 && (
-          <View style={{ alignItems: "center", paddingVertical: 20 }}>
-            <Text style={{ fontSize: 24, marginBottom: 8 }}>🔍</Text>
-            <Text style={{ color: "#525252", fontSize: 12, fontFamily: "monospace", textAlign: "center" }}>
-              No {filter} findings
-            </Text>
-            <Pressable onPress={() => setFilter("all")} style={{ marginTop: 8 }}>
-              <Text style={{ color: "#06B6D4", fontSize: 12, fontFamily: "monospace" }}>Show All</Text>
-            </Pressable>
-          </View>
+        {/* GRAPH VIEW */}
+        {activeView === "graph" && (
+          <EntityGraph
+            entities={graph.entities}
+            relationships={graph.relationships}
+            summary={graph.summary}
+            loading={graph.loading}
+          />
         )}
 
         {error && (
           <View style={{ alignItems: "center", paddingVertical: 20 }}>
             <Text style={{ color: "#EF4444", fontSize: 12, fontFamily: "monospace" }}>
-              ⚠️ {error}
+              {error}
             </Text>
           </View>
         )}
@@ -409,6 +489,13 @@ export default function OsintScreen() {
         visible={showAddModal}
         onClose={() => setShowAddModal(false)}
         onCreated={refresh}
+      />
+
+      <ReportModal
+        visible={showReport}
+        onClose={() => setShowReport(false)}
+        report={reportData}
+        loading={reportLoading}
       />
     </View>
   );

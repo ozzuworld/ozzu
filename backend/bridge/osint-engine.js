@@ -1,5 +1,6 @@
 // OSINT Scanner Engine — module registry, rate limiter, scan orchestration, score calculation
 const db = require("./db");
+const correlator = require("./osint-correlator");
 
 // ── Rate Limiter ──
 class RateLimiter {
@@ -97,6 +98,13 @@ async function runScan(profileId, scanType = "full") {
         status: "completed",
         findings_count: totalFindings,
       });
+
+      // Run entity correlation after scan completes
+      try {
+        await correlator.correlateScanResults(profileId, scanId);
+      } catch (corrErr) {
+        console.error(`[osint] Correlation error for scan ${scanId}:`, corrErr.message);
+      }
     } catch (err) {
       console.error(`[osint] Scan ${scanId} failed:`, err.message);
       await db.updateOsintScan(scanId, {

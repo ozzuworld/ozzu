@@ -52,6 +52,8 @@ const PROFILE_TYPES = [
   { key: "email" as const, label: "Email", emoji: "📧" },
   { key: "username" as const, label: "Username", emoji: "👤" },
   { key: "password" as const, label: "Password", emoji: "🔑" },
+  { key: "phone" as const, label: "Phone", emoji: "📱" },
+  { key: "domain" as const, label: "Domain", emoji: "🌐" },
 ];
 
 interface Props {
@@ -61,7 +63,7 @@ interface Props {
 }
 
 export function AddProfileModal({ visible, onClose, onCreated }: Props) {
-  const [type, setType] = useState<"email" | "username" | "password">("username");
+  const [type, setType] = useState<"email" | "username" | "password" | "phone" | "domain">("username");
   const [label, setLabel] = useState("");
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -139,7 +141,7 @@ export function AddProfileModal({ visible, onClose, onCreated }: Props) {
               <TextInput
                 value={value}
                 onChangeText={setValue}
-                placeholder={type === "email" ? "email@example.com" : type === "username" ? "username" : "password (hashed locally)"}
+                placeholder={type === "email" ? "email@example.com" : type === "username" ? "username" : type === "phone" ? "+14155551234" : type === "domain" ? "example.com" : "password (hashed locally)"}
                 placeholderTextColor="#525252"
                 secureTextEntry={type === "password"}
                 autoCapitalize="none"

@@ -71,7 +71,7 @@ async function init() {
     await pool.query(`CREATE TABLE IF NOT EXISTS osint_profiles (
       id SERIAL PRIMARY KEY,
       label TEXT NOT NULL,
-      profile_type VARCHAR(20) NOT NULL CHECK (profile_type IN ('email', 'username', 'password')),
+      profile_type VARCHAR(20) NOT NULL CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain')),
       value TEXT NOT NULL,
       tags TEXT[] DEFAULT '{}',
       is_active BOOLEAN DEFAULT true,
@@ -119,7 +119,54 @@ async function init() {
       recorded_at TIMESTAMPTZ DEFAULT NOW()
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_score_history_date ON osint_score_history(recorded_at DESC)`);
-    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables; osint_score_history)");
+
+    // Migration: Add phone + domain profile types
+    await pool.query(`DO $$ BEGIN
+      ALTER TABLE osint_profiles DROP CONSTRAINT IF EXISTS osint_profiles_profile_type_check;
+      ALTER TABLE osint_profiles ADD CONSTRAINT osint_profiles_profile_type_check
+        CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain'));
+    EXCEPTION WHEN others THEN NULL;
+    END $$`);
+
+    // Migration: OSINT entity correlation tables
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_entities (
+      id SERIAL PRIMARY KEY,
+      entity_type VARCHAR(30) NOT NULL CHECK (entity_type IN (
+        'person','email','username','phone','domain','ip',
+        'social_account','organization','location','image'
+      )),
+      value TEXT NOT NULL,
+      label TEXT,
+      metadata JSONB DEFAULT '{}',
+      source_module VARCHAR(50),
+      source_finding_id INTEGER REFERENCES osint_findings(id),
+      profile_id INTEGER REFERENCES osint_profiles(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(entity_type, value)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_entities_type ON osint_entities(entity_type)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_entities_profile ON osint_entities(profile_id)`);
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_relationships (
+      id SERIAL PRIMARY KEY,
+      source_entity_id INTEGER REFERENCES osint_entities(id) ON DELETE CASCADE,
+      target_entity_id INTEGER REFERENCES osint_entities(id) ON DELETE CASCADE,
+      relationship VARCHAR(30) NOT NULL CHECK (relationship IN (
+        'uses','owns','linked_to','associated_with','hosted_on',
+        'registered_to','member_of','found_on','resolves_to'
+      )),
+      confidence INTEGER NOT NULL CHECK (confidence >= 0 AND confidence <= 100),
+      source_module VARCHAR(50),
+      evidence TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(source_entity_id, target_entity_id, relationship)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_relationships_source ON osint_relationships(source_entity_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_relationships_target ON osint_relationships(target_entity_id)`);
+
+    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables; osint_score_history; osint entities/relationships)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -802,6 +849,140 @@ async function getLastOsintScanTime() {
   return res.rows[0]?.last_scan || null;
 }
 
+// ── OSINT Entities & Relationships ──
+
+async function upsertOsintEntity(entity) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_entities (entity_type, value, label, metadata, source_module, source_finding_id, profile_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (entity_type, value) DO UPDATE SET
+       label = COALESCE(EXCLUDED.label, osint_entities.label),
+       metadata = osint_entities.metadata || EXCLUDED.metadata,
+       updated_at = NOW()
+     RETURNING *`,
+    [entity.entity_type, entity.value, entity.label || null, JSON.stringify(entity.metadata || {}),
+     entity.source_module || null, entity.source_finding_id || null, entity.profile_id || null]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintEntities(filters = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT * FROM osint_entities WHERE 1=1`;
+  const params = [];
+  if (filters.type) {
+    params.push(filters.type);
+    sql += ` AND entity_type = $${params.length}`;
+  }
+  if (filters.profileId) {
+    params.push(filters.profileId);
+    sql += ` AND profile_id = $${params.length}`;
+  }
+  sql += ` ORDER BY created_at DESC`;
+  if (filters.limit) {
+    params.push(filters.limit);
+    sql += ` LIMIT $${params.length}`;
+  }
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function getOsintEntity(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM osint_entities WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function upsertOsintRelationship(rel) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_relationships (source_entity_id, target_entity_id, relationship, confidence, source_module, evidence)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (source_entity_id, target_entity_id, relationship) DO UPDATE SET
+       confidence = GREATEST(osint_relationships.confidence, EXCLUDED.confidence),
+       evidence = COALESCE(EXCLUDED.evidence, osint_relationships.evidence),
+       updated_at = NOW()
+     RETURNING *`,
+    [rel.source_entity_id, rel.target_entity_id, rel.relationship,
+     rel.confidence, rel.source_module || null, rel.evidence || null]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintRelationships(entityId) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT r.*,
+       se.entity_type as source_type, se.value as source_value, se.label as source_label,
+       te.entity_type as target_type, te.value as target_value, te.label as target_label
+     FROM osint_relationships r
+     JOIN osint_entities se ON r.source_entity_id = se.id
+     JOIN osint_entities te ON r.target_entity_id = te.id
+     WHERE r.source_entity_id = $1 OR r.target_entity_id = $1
+     ORDER BY r.confidence DESC`,
+    [entityId]
+  );
+  return res.rows;
+}
+
+async function getOsintEntityGraph(profileId = null) {
+  if (!_pgConnected) return { entities: [], relationships: [] };
+  let entitySql, relSql;
+  const params = [];
+
+  if (profileId) {
+    params.push(profileId);
+    entitySql = `SELECT * FROM osint_entities WHERE profile_id = $1 ORDER BY entity_type, value`;
+    relSql = `SELECT r.*,
+       se.entity_type as source_type, se.value as source_value, se.label as source_label,
+       te.entity_type as target_type, te.value as target_value, te.label as target_label
+     FROM osint_relationships r
+     JOIN osint_entities se ON r.source_entity_id = se.id
+     JOIN osint_entities te ON r.target_entity_id = te.id
+     WHERE se.profile_id = $1 OR te.profile_id = $1
+     ORDER BY r.confidence DESC`;
+  } else {
+    entitySql = `SELECT * FROM osint_entities ORDER BY entity_type, value`;
+    relSql = `SELECT r.*,
+       se.entity_type as source_type, se.value as source_value, se.label as source_label,
+       te.entity_type as target_type, te.value as target_value, te.label as target_label
+     FROM osint_relationships r
+     JOIN osint_entities se ON r.source_entity_id = se.id
+     JOIN osint_entities te ON r.target_entity_id = te.id
+     ORDER BY r.confidence DESC`;
+  }
+
+  const [entities, relationships] = await Promise.all([
+    query(entitySql, profileId ? params : []),
+    query(relSql, profileId ? params : []),
+  ]);
+
+  return { entities: entities.rows, relationships: relationships.rows };
+}
+
+async function getOsintCorrelationSummary() {
+  if (!_pgConnected) return { totalEntities: 0, totalRelationships: 0, entityTypes: {}, relationshipTypes: {} };
+  const [entityRes, relRes, typeRes, relTypeRes] = await Promise.all([
+    query(`SELECT COUNT(*) as count FROM osint_entities`),
+    query(`SELECT COUNT(*) as count FROM osint_relationships`),
+    query(`SELECT entity_type, COUNT(*) as count FROM osint_entities GROUP BY entity_type ORDER BY count DESC`),
+    query(`SELECT relationship, COUNT(*) as count FROM osint_relationships GROUP BY relationship ORDER BY count DESC`),
+  ]);
+
+  const entityTypes = {};
+  for (const row of typeRes.rows) entityTypes[row.entity_type] = parseInt(row.count, 10);
+  const relationshipTypes = {};
+  for (const row of relTypeRes.rows) relationshipTypes[row.relationship] = parseInt(row.count, 10);
+
+  return {
+    totalEntities: parseInt(entityRes.rows[0]?.count || "0", 10),
+    totalRelationships: parseInt(relRes.rows[0]?.count || "0", 10),
+    entityTypes,
+    relationshipTypes,
+  };
+}
+
 module.exports = {
   init,
   isConnected,
@@ -858,6 +1039,14 @@ module.exports = {
   recordOsintScore,
   getOsintScoreHistory,
   getLastOsintScanTime,
+  // OSINT Entities & Relationships
+  upsertOsintEntity,
+  getOsintEntities,
+  getOsintEntity,
+  upsertOsintRelationship,
+  getOsintRelationships,
+  getOsintEntityGraph,
+  getOsintCorrelationSummary,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,
