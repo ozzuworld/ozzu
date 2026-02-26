@@ -2246,6 +2246,51 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /api/artifacts/:artifactId/download — Download artifact file directly (IPA/APK)
+  const artifactDownloadMatch = pathname.match(/^\/api\/artifacts\/(\d+)\/download$/);
+  if (req.method === "GET" && artifactDownloadMatch) {
+    const artifactId = artifactDownloadMatch[1];
+    const { execSync } = require("child_process");
+    const fs = require("fs");
+
+    try {
+      const tmpZip = `/tmp/artifact-dl-${artifactId}.zip`;
+      const tmpDir = `/tmp/artifact-dl-${artifactId}`;
+
+      // Download artifact zip from GitHub
+      execSync(`gh api repos/ozzuworld/ozzu/actions/artifacts/${artifactId}/zip > ${tmpZip}`, { timeout: 60000 });
+      execSync(`rm -rf ${tmpDir} && mkdir -p ${tmpDir} && unzip -o ${tmpZip} -d ${tmpDir}`, { timeout: 30000 });
+
+      // Find IPA or APK
+      const files = fs.readdirSync(tmpDir);
+      const ipa = files.find((f) => f.endsWith(".ipa"));
+      const apk = files.find((f) => f.endsWith(".apk"));
+      const targetFile = ipa || apk;
+
+      if (!targetFile) {
+        sendJSON(res, 404, { error: "No IPA or APK found in artifact" });
+        return;
+      }
+
+      const filePath = `${tmpDir}/${targetFile}`;
+      const stat = fs.statSync(filePath);
+      const ext = targetFile.endsWith(".ipa") ? "ipa" : "apk";
+      const contentType = ext === "ipa" ? "application/octet-stream" : "application/vnd.android.package-archive";
+
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="${targetFile}"`,
+        "Content-Length": stat.size,
+      });
+      const stream = fs.createReadStream(filePath);
+      stream.pipe(res);
+    } catch (err) {
+      log.bridge.warn(`[artifact-download] Failed: ${err.message}`);
+      sendJSON(res, 500, { error: `Download failed: ${err.message}` });
+    }
+    return;
+  }
+
   // POST /directives/:id/verify — Run build verification before marking completed
   const directiveVerifyMatch = pathname.match(/^\/directives\/([^/]+)\/verify$/);
   if (req.method === "POST" && directiveVerifyMatch) {

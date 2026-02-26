@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { View, Text, Pressable, Alert } from "react-native";
+import { View, Text, Pressable, Alert, Linking } from "react-native";
 import { fetchDirectiveArtifacts, deployArtifact } from "../../lib/bridge-api";
 import { relativeTime } from "../../lib/directive-constants";
+
+const BRIDGE_URL = process.env.EXPO_PUBLIC_BRIDGE_URL || "http://localhost:3333";
 
 interface BuildRun {
   platform: string;
@@ -43,28 +45,48 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
       }
       const artifact = matching[0];
       const sizeMB = (artifact.sizeBytes / 1048576).toFixed(1);
-      Alert.alert(
-        "📥 Deploy Artifact",
-        `${artifact.name}\n${sizeMB} MB\n\nDeploy to devices?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Deploy",
-            onPress: async () => {
-              try {
-                const result = await deployArtifact(artifact.artifactId);
-                if (result.ok) {
-                  Alert.alert("✅ Deployed", result.message || "Artifact deployed to devices");
-                } else {
-                  Alert.alert("❌ Failed", result.error || "Deploy failed");
-                }
-              } catch (err: any) {
-                Alert.alert("Error", err.message);
-              }
+
+      if (run.platform === "ios") {
+        // iOS: open download URL in browser so user can install the IPA
+        Alert.alert(
+          "Download IPA",
+          `${artifact.name}\n${sizeMB} MB\n\nDownload to this device?`,
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Download",
+              onPress: () => {
+                const downloadUrl = `${BRIDGE_URL}/api/artifacts/${artifact.artifactId}/download`;
+                Linking.openURL(downloadUrl);
+              },
             },
-          },
-        ]
-      );
+          ]
+        );
+      } else {
+        // Android: deploy to devices via server
+        Alert.alert(
+          "Deploy Artifact",
+          `${artifact.name}\n${sizeMB} MB\n\nDeploy to devices?`,
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Deploy",
+              onPress: async () => {
+                try {
+                  const result = await deployArtifact(artifact.artifactId);
+                  if (result.ok) {
+                    Alert.alert("Deployed", result.message || "Artifact deployed to devices");
+                  } else {
+                    Alert.alert("Failed", result.error || "Deploy failed");
+                  }
+                } catch (err: any) {
+                  Alert.alert("Error", err.message);
+                }
+              },
+            },
+          ]
+        );
+      }
     } catch (err: any) {
       Alert.alert("Error", err.message);
     } finally {
