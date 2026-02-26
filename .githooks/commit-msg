@@ -7,8 +7,49 @@ set -e
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-# Cipher-direct and agent branches are always allowed
-if [[ "$BRANCH" == cipher/* ]] || [[ "$BRANCH" == agent/* ]]; then
+# Agent branches are always allowed (legacy)
+if [[ "$BRANCH" == agent/* ]]; then
+  exit 0
+fi
+
+# Cipher branches: require directive ID in commit message + directive must be active
+if [[ "$BRANCH" == cipher/* ]]; then
+  COMMIT_MSG_FILE="$1"
+  if [[ -z "$COMMIT_MSG_FILE" || ! -f "$COMMIT_MSG_FILE" ]]; then
+    exit 0
+  fi
+  COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+  # Must contain a valid directive ID (dir_ followed by 10+ digits)
+  if ! echo "$COMMIT_MSG" | grep -qE 'dir_[0-9]{10,}'; then
+    echo ""
+    echo "=========================================="
+    echo "  COMMIT BLOCKED — Missing directive ID"
+    echo "=========================================="
+    echo ""
+    echo "  Cipher branch commits must reference a directive ID."
+    echo "  Add 'Directive: dir_XXXXXXXXXXXXX' to your commit message."
+    echo ""
+    exit 1
+  fi
+
+  # Extract directive ID and verify it's active via bridge API
+  DIR_ID=$(echo "$COMMIT_MSG" | grep -oE 'dir_[0-9]{10,}' | head -1)
+  RESPONSE=$(curl -sf "http://localhost:3333/directives/${DIR_ID}" 2>/dev/null || echo "BRIDGE_DOWN")
+  if [[ "$RESPONSE" != "BRIDGE_DOWN" ]]; then
+    STATUS=$(echo "$RESPONSE" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [[ "$STATUS" == "completed" || "$STATUS" == "cancelled" || "$STATUS" == "failed" ]]; then
+      echo ""
+      echo "=========================================="
+      echo "  COMMIT BLOCKED — Directive $DIR_ID is $STATUS"
+      echo "=========================================="
+      echo ""
+      echo "  Create a new directive for further changes."
+      echo ""
+      exit 1
+    fi
+  fi
+  # Bridge down or directive active — allow
   exit 0
 fi
 

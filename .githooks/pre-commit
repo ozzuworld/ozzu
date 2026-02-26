@@ -7,8 +7,21 @@ set -e
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-# Cipher-direct and agent branches are always allowed
-if [[ "$BRANCH" == cipher/* ]] || [[ "$BRANCH" == agent/* ]]; then
+# Agent branches are always allowed (legacy)
+if [[ "$BRANCH" == agent/* ]]; then
+  exit 0
+fi
+
+# Cipher branches: check that staged files exist (prevent empty commits)
+if [[ "$BRANCH" == cipher/* ]]; then
+  STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || echo "")
+  if [[ -z "$STAGED_FILES" ]]; then
+    echo ""
+    echo "  COMMIT BLOCKED — No staged files on cipher branch."
+    echo "  Stage files with 'git add' before committing."
+    echo ""
+    exit 1
+  fi
   exit 0
 fi
 

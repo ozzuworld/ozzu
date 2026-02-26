@@ -29,12 +29,34 @@ async function detectChangeType(directiveId) {
   const verificationLog = [];
 
   try {
-    // Find the branch for this directive
-    const branchName = `agent/${directiveId}`;
-    const { stdout: diffOutput } = await execAsync(
-      `git diff --name-only main...${branchName} 2>/dev/null || git diff --name-only HEAD~1 HEAD`,
-      { timeout: 10000 }
-    );
+    // Find the branch for this directive — try cipher/ first, then agent/, then HEAD~1
+    let branchName = `cipher/${directiveId}`;
+    let diffOutput;
+    try {
+      const result = await execAsync(
+        `git diff --name-only main...${branchName}`,
+        { timeout: 10000 }
+      );
+      diffOutput = result.stdout;
+    } catch {
+      // Try agent/ prefix
+      branchName = `agent/${directiveId}`;
+      try {
+        const result = await execAsync(
+          `git diff --name-only main...${branchName}`,
+          { timeout: 10000 }
+        );
+        diffOutput = result.stdout;
+      } catch {
+        // Fall back to HEAD~1
+        branchName = "HEAD";
+        const result = await execAsync(
+          `git diff --name-only HEAD~1 HEAD`,
+          { timeout: 10000 }
+        );
+        diffOutput = result.stdout;
+      }
+    }
 
     const changedFiles = diffOutput.trim().split("\n").filter(Boolean);
     if (changedFiles.length === 0) {
@@ -73,7 +95,7 @@ async function detectChangeType(directiveId) {
     if (changedFiles.includes("frontend/package.json")) {
       try {
         const { stdout: pkgDiff } = await execAsync(
-          `git diff main...${branchName} -- frontend/package.json 2>/dev/null || git diff HEAD~1 HEAD -- frontend/package.json`,
+          `git diff main...${branchName} -- frontend/package.json`,
           { timeout: 10000 }
         );
         if (/^\+.*"(expo-|react-native-|@react-native)/m.test(pkgDiff)) {

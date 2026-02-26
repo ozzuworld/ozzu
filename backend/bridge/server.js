@@ -2353,8 +2353,8 @@ async function handleRequest(req, res) {
       sendJSON(res, 404, { error: "Directive not found" });
       return;
     }
-    if (directive.status !== "in_progress" && directive.status !== "completed") {
-      sendJSON(res, 400, { error: `Directive is "${directive.status}" — must be in_progress or completed to merge` });
+    if (directive.status !== "in_progress") {
+      sendJSON(res, 400, { error: `Directive is "${directive.status}" — must be in_progress to merge. ${directive.status === "completed" ? "Create a new directive for further changes." : ""}` });
       return;
     }
 

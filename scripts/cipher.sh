@@ -31,6 +31,9 @@ EOF
   echo "WARNING: Bridge unreachable at ${BRIDGE_URL} — launching with minimal context"
 fi
 
+# Enable pipeline enforcement — cipher-guard.sh PreToolUse hook checks this
+export CIPHER_MODE=1
+
 # Launch Claude Code — permissions managed via .claude/settings.local.json allow patterns
 # NOTE: --dangerously-skip-permissions was removed because it's blocked when running as root.
 # The settings.local.json broad allow patterns (Bash(*), Edit(*), etc.) provide equivalent autonomy.
