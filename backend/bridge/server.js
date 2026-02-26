@@ -16,6 +16,9 @@ const buildVerifier = require("./build-verifier");
 const createLogger = require("./logger");
 const metrics = require("./metrics-tracker");
 const anthropicUsage = require("./anthropic-usage");
+const osintEngine = require("./osint-engine");
+osintEngine.registerModule(require("./osint-modules/hibp-password"));
+osintEngine.registerModule(require("./osint-modules/username-enum"));
 
 const log = {
   bridge: createLogger("bridge"),
@@ -1112,6 +1115,17 @@ async function handleRequest(req, res) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, CORS_HEADERS);
     res.end();
+    return;
+  }
+
+  // GET /tmp-file/:filename — serve temp files (for iOS pairing etc)
+  if (req.method === "GET" && pathname.startsWith("/tmp-file/")) {
+    const fs = require("fs");
+    const fname = pathname.replace("/tmp-file/", "");
+    const fpath = `/tmp/${fname}`;
+    if (!fs.existsSync(fpath)) { sendJSON(res, 404, { error: "not found" }); return; }
+    res.writeHead(200, { ...CORS_HEADERS, "Content-Type": "application/octet-stream", "Content-Disposition": `attachment; filename="${fname}"` });
+    fs.createReadStream(fpath).pipe(res);
     return;
   }
 
@@ -5454,6 +5468,152 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     violation.resolvedAt = Date.now();
     metrics.trackPipelineViolationResolved();
     sendJSON(res, 200, { ok: true, violation });
+    return;
+  }
+
+  // ── OSINT Endpoints ──
+
+  // POST /osint/profiles — create a profile to scan
+  if (req.method === "POST" && pathname === "/osint/profiles") {
+    try {
+      const body = await parseBody(req);
+      const { label, profileType, value, tags } = body;
+      if (!label || !profileType || !value) {
+        sendJSON(res, 400, { error: "Missing required fields: label, profileType, value" });
+        return;
+      }
+      if (!["email", "username", "password"].includes(profileType)) {
+        sendJSON(res, 400, { error: "profileType must be email, username, or password" });
+        return;
+      }
+      const id = await db.createOsintProfile(label, profileType, value, tags || []);
+      if (!id) { sendJSON(res, 500, { error: "Failed to create profile" }); return; }
+      const profile = await db.getOsintProfile(id);
+      sendJSON(res, 201, { ok: true, profile });
+    } catch (err) {
+      if (err.message.includes("duplicate key")) {
+        sendJSON(res, 409, { error: "A profile with this type and value already exists" });
+      } else {
+        log.bridge.error("OSINT create profile error:", err.message);
+        sendJSON(res, 500, { error: err.message });
+      }
+    }
+    return;
+  }
+
+  // GET /osint/profiles — list active profiles (mask password values)
+  if (req.method === "GET" && pathname === "/osint/profiles") {
+    try {
+      const profiles = await db.getOsintProfiles();
+      const masked = profiles.map(p => ({
+        ...p,
+        value: p.profile_type === "password" ? p.value.substring(0, 5) + "..." : p.value,
+      }));
+      sendJSON(res, 200, masked);
+    } catch (err) {
+      log.bridge.error("OSINT list profiles error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // DELETE /osint/profiles/:id — soft-delete profile
+  const osintProfileDeleteMatch = pathname.match(/^\/osint\/profiles\/(\d+)$/);
+  if (req.method === "DELETE" && osintProfileDeleteMatch) {
+    try {
+      const profileId = parseInt(osintProfileDeleteMatch[1], 10);
+      await db.deleteOsintProfile(profileId);
+      sendJSON(res, 200, { ok: true });
+    } catch (err) {
+      log.bridge.error("OSINT delete profile error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/scan — trigger a scan for a profile
+  if (req.method === "POST" && pathname === "/osint/scan") {
+    try {
+      const body = await parseBody(req);
+      const { profileId, scanType } = body;
+      if (!profileId) {
+        sendJSON(res, 400, { error: "Missing required field: profileId" });
+        return;
+      }
+      const result = await osintEngine.runScan(profileId, scanType || "full");
+      sendJSON(res, 202, { ok: true, ...result });
+    } catch (err) {
+      log.bridge.error("OSINT scan error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/scan/:id — get scan status + findings
+  const osintScanMatch = pathname.match(/^\/osint\/scan\/(\d+)$/);
+  if (req.method === "GET" && osintScanMatch) {
+    try {
+      const scanId = parseInt(osintScanMatch[1], 10);
+      const scan = await db.getOsintScan(scanId);
+      if (!scan) { sendJSON(res, 404, { error: "Scan not found" }); return; }
+      const findings = await db.getOsintFindings({ scanId });
+      sendJSON(res, 200, { scan, findings });
+    } catch (err) {
+      log.bridge.error("OSINT get scan error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/findings — list findings with filters
+  if (req.method === "GET" && pathname === "/osint/findings") {
+    try {
+      const filters = {
+        severity: url.searchParams.get("severity") || undefined,
+        category: url.searchParams.get("category") || undefined,
+        status: url.searchParams.get("status") || undefined,
+        profileId: url.searchParams.get("profileId") ? parseInt(url.searchParams.get("profileId"), 10) : undefined,
+        limit: url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit"), 10) : undefined,
+        offset: url.searchParams.get("offset") ? parseInt(url.searchParams.get("offset"), 10) : undefined,
+      };
+      const findings = await db.getOsintFindings(filters);
+      sendJSON(res, 200, findings);
+    } catch (err) {
+      log.bridge.error("OSINT list findings error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // PATCH /osint/findings/:id — update finding status
+  const osintFindingMatch = pathname.match(/^\/osint\/findings\/(\d+)$/);
+  if (req.method === "PATCH" && osintFindingMatch) {
+    try {
+      const findingId = parseInt(osintFindingMatch[1], 10);
+      const body = await parseBody(req);
+      if (!body.status || !["new", "acknowledged", "remediated", "false_positive"].includes(body.status)) {
+        sendJSON(res, 400, { error: "Invalid status. Must be: new, acknowledged, remediated, false_positive" });
+        return;
+      }
+      const finding = await db.updateOsintFinding(findingId, body.status);
+      if (!finding) { sendJSON(res, 404, { error: "Finding not found" }); return; }
+      sendJSON(res, 200, { ok: true, finding });
+    } catch (err) {
+      log.bridge.error("OSINT update finding error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/score — exposure score
+  if (req.method === "GET" && pathname === "/osint/score") {
+    try {
+      const score = await osintEngine.calculateExposureScore();
+      sendJSON(res, 200, score);
+    } catch (err) {
+      log.bridge.error("OSINT score error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
     return;
   }
 

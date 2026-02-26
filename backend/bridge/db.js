@@ -67,7 +67,49 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_metrics_date ON usage_metrics(date DESC)`);
     // Migration: GIN index for conversation turn search
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_turns_content_search ON conversation_turns USING gin(to_tsvector('english', content))`);
-    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics)");
+    // Migration: OSINT tables
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_profiles (
+      id SERIAL PRIMARY KEY,
+      label TEXT NOT NULL,
+      profile_type VARCHAR(20) NOT NULL CHECK (profile_type IN ('email', 'username', 'password')),
+      value TEXT NOT NULL,
+      tags TEXT[] DEFAULT '{}',
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(profile_type, value)
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_scans (
+      id SERIAL PRIMARY KEY,
+      profile_id INTEGER REFERENCES osint_profiles(id),
+      scan_type VARCHAR(50) DEFAULT 'full',
+      status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+      modules_run TEXT[] DEFAULT '{}',
+      findings_count INTEGER DEFAULT 0,
+      error_message TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_findings (
+      id SERIAL PRIMARY KEY,
+      scan_id INTEGER REFERENCES osint_scans(id),
+      profile_id INTEGER REFERENCES osint_profiles(id),
+      module VARCHAR(50) NOT NULL,
+      category VARCHAR(30) NOT NULL,
+      severity VARCHAR(10) NOT NULL CHECK (severity IN ('critical', 'high', 'medium', 'low', 'info')),
+      title TEXT NOT NULL,
+      description TEXT,
+      source_url TEXT,
+      raw_data JSONB,
+      status VARCHAR(20) DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'remediated', 'false_positive')),
+      remediation TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(profile_id, module, title)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_findings_profile ON osint_findings(profile_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_findings_severity ON osint_findings(severity)`);
+    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -584,6 +626,141 @@ async function migrateStatusFromRedis(entries) {
   return count;
 }
 
+// ── OSINT Profiles ──
+
+async function createOsintProfile(label, profileType, value, tags = []) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_profiles (label, profile_type, value, tags)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [label, profileType, value, tags]
+  );
+  return res.rows[0]?.id;
+}
+
+async function getOsintProfiles() {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT id, label, profile_type, value, tags, is_active, created_at, updated_at
+     FROM osint_profiles WHERE is_active = true ORDER BY created_at DESC`
+  );
+  return res.rows;
+}
+
+async function getOsintProfile(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM osint_profiles WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function deleteOsintProfile(id) {
+  if (!_pgConnected) return;
+  await query(`UPDATE osint_profiles SET is_active = false, updated_at = NOW() WHERE id = $1`, [id]);
+}
+
+// ── OSINT Scans ──
+
+async function createOsintScan(profileId, scanType, modulesRun) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_scans (profile_id, scan_type, modules_run)
+     VALUES ($1, $2, $3) RETURNING id`,
+    [profileId, scanType, modulesRun]
+  );
+  return res.rows[0]?.id;
+}
+
+async function updateOsintScan(id, updates) {
+  if (!_pgConnected) return;
+  const sets = [];
+  const params = [id];
+  if (updates.status) { params.push(updates.status); sets.push(`status = $${params.length}`); }
+  if (updates.findings_count !== undefined) { params.push(updates.findings_count); sets.push(`findings_count = $${params.length}`); }
+  if (updates.error_message) { params.push(updates.error_message); sets.push(`error_message = $${params.length}`); }
+  if (updates.status === "completed" || updates.status === "failed") sets.push(`completed_at = NOW()`);
+  if (sets.length === 0) return;
+  await query(`UPDATE osint_scans SET ${sets.join(", ")} WHERE id = $1`, params);
+}
+
+async function getOsintScans(profileId = null, limit = 20) {
+  if (!_pgConnected) return [];
+  if (profileId) {
+    const res = await query(
+      `SELECT * FROM osint_scans WHERE profile_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [profileId, limit]
+    );
+    return res.rows;
+  }
+  const res = await query(`SELECT * FROM osint_scans ORDER BY created_at DESC LIMIT $1`, [limit]);
+  return res.rows;
+}
+
+async function getOsintScan(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM osint_scans WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+// ── OSINT Findings ──
+
+async function upsertOsintFinding(finding) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_findings (scan_id, profile_id, module, category, severity, title, description, source_url, raw_data, remediation)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (profile_id, module, title) DO UPDATE SET
+       scan_id = EXCLUDED.scan_id, severity = EXCLUDED.severity,
+       description = EXCLUDED.description, source_url = EXCLUDED.source_url,
+       raw_data = EXCLUDED.raw_data, remediation = EXCLUDED.remediation,
+       updated_at = NOW()
+     RETURNING id`,
+    [finding.scan_id, finding.profile_id, finding.module, finding.category, finding.severity,
+     finding.title, finding.description, finding.source_url,
+     finding.raw_data ? JSON.stringify(finding.raw_data) : null, finding.remediation]
+  );
+  return res.rows[0]?.id;
+}
+
+async function getOsintFindings(filters = {}) {
+  if (!_pgConnected) return [];
+  const params = [];
+  const clauses = [];
+  if (filters.severity) { params.push(filters.severity); clauses.push(`severity = $${params.length}`); }
+  if (filters.category) { params.push(filters.category); clauses.push(`category = $${params.length}`); }
+  if (filters.status) { params.push(filters.status); clauses.push(`status = $${params.length}`); }
+  if (filters.profileId) { params.push(filters.profileId); clauses.push(`profile_id = $${params.length}`); }
+  let sql = `SELECT * FROM osint_findings`;
+  if (clauses.length) sql += ` WHERE ${clauses.join(" AND ")}`;
+  sql += ` ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, created_at DESC`;
+  const limit = Math.min(filters.limit || 100, 500);
+  const offset = filters.offset || 0;
+  params.push(limit);
+  sql += ` LIMIT $${params.length}`;
+  params.push(offset);
+  sql += ` OFFSET $${params.length}`;
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function updateOsintFinding(id, status) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `UPDATE osint_findings SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+    [id, status]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintFindingCounts() {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT severity, COUNT(*) as count FROM osint_findings
+     WHERE status != 'false_positive'
+     GROUP BY severity`
+  );
+  return res.rows;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -624,6 +801,19 @@ module.exports = {
   queryHistory,
   // Health
   healthCheck,
+  // OSINT
+  createOsintProfile,
+  getOsintProfiles,
+  getOsintProfile,
+  deleteOsintProfile,
+  createOsintScan,
+  updateOsintScan,
+  getOsintScans,
+  getOsintScan,
+  upsertOsintFinding,
+  getOsintFindings,
+  updateOsintFinding,
+  getOsintFindingCounts,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

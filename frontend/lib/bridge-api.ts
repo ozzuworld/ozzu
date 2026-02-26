@@ -394,3 +394,146 @@ export async function deployArtifact(
   if (!res.ok) throw new Error(`Bridge deploy artifact error: ${res.status}`);
   return res.json();
 }
+
+// ── OSINT Types ──
+
+export interface OsintProfile {
+  id: number;
+  label: string;
+  profile_type: "email" | "username" | "password";
+  value: string;
+  tags: string[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OsintScan {
+  id: number;
+  profile_id: number;
+  scan_type: string;
+  status: "pending" | "running" | "completed" | "failed";
+  modules_run: string[];
+  findings_count: number;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface OsintFinding {
+  id: number;
+  scan_id: number;
+  profile_id: number;
+  module: string;
+  category: string;
+  severity: "critical" | "high" | "medium" | "low" | "info";
+  title: string;
+  description: string | null;
+  source_url: string | null;
+  raw_data: any;
+  status: "new" | "acknowledged" | "remediated" | "false_positive";
+  remediation: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExposureScore {
+  score: number;
+  breakdown: Record<string, number>;
+  totalFindings: number;
+}
+
+// ── OSINT API ──
+
+export async function createOsintProfile(
+  label: string,
+  profileType: string,
+  value: string,
+  tags?: string[]
+): Promise<{ ok: boolean; profile: OsintProfile }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/profiles`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label, profileType, value, tags }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `Create profile failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchOsintProfiles(): Promise<OsintProfile[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/profiles`);
+  if (!res.ok) throw new Error(`OSINT profiles error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteOsintProfile(id: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/profiles/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Delete profile error: ${res.status}`);
+  return res.json();
+}
+
+export async function triggerOsintScan(
+  profileId: number,
+  scanType?: string
+): Promise<{ ok: boolean; scanId: number; modulesQueued: string[] }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/scan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profileId, scanType }),
+  });
+  if (!res.ok) throw new Error(`Trigger scan error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintScan(
+  scanId: number
+): Promise<{ scan: OsintScan; findings: OsintFinding[] }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/scan/${scanId}`);
+  if (!res.ok) throw new Error(`Fetch scan error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintFindings(filters?: {
+  severity?: string;
+  category?: string;
+  status?: string;
+  profileId?: number;
+  limit?: number;
+  offset?: number;
+}): Promise<OsintFinding[]> {
+  const params = new URLSearchParams();
+  if (filters?.severity) params.set("severity", filters.severity);
+  if (filters?.category) params.set("category", filters.category);
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.profileId) params.set("profileId", String(filters.profileId));
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  if (filters?.offset) params.set("offset", String(filters.offset));
+  const qs = params.toString();
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/findings${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(`Fetch findings error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateOsintFinding(
+  id: number,
+  status: string
+): Promise<{ ok: boolean; finding: OsintFinding }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/findings/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(`Update finding error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintScore(): Promise<ExposureScore> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/score`);
+  if (!res.ok) throw new Error(`Fetch score error: ${res.status}`);
+  return res.json();
+}
