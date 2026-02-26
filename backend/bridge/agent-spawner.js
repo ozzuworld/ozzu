@@ -1427,7 +1427,7 @@ function spawnDetachedDeploy(platform, command) {
   const { spawn } = require("child_process");
   const scriptPath = `/tmp/ozzu-bridge/deploy-${platform}-${Date.now()}.sh`;
   const logPath = `/tmp/ozzu-bridge/deploy-${platform}.log`;
-  const notifyUrl = `http://localhost:${PORT}/notify`;
+  const notifyUrl = `${BRIDGE}/notify`;
 
   const successMsg = platform === "ios"
     ? "iPhone's updated — connect it to see the latest."
