@@ -19,6 +19,9 @@ const anthropicUsage = require("./anthropic-usage");
 const osintEngine = require("./osint-engine");
 osintEngine.registerModule(require("./osint-modules/hibp-password"));
 osintEngine.registerModule(require("./osint-modules/username-enum"));
+osintEngine.registerModule(require("./osint-modules/email-domain"));
+osintEngine.registerModule(require("./osint-modules/gravatar-lookup"));
+osintEngine.registerModule(require("./osint-modules/hibp-email"));
 
 const log = {
   bridge: createLogger("bridge"),
