@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, Modal, Pressable, TextInput } from "react-native";
+import { View, Text, Modal, Pressable, TextInput, TouchableWithoutFeedback } from "react-native";
 import { createOsintProfile } from "../../lib/bridge-api";
 import { PROFILE_TYPE_EMOJI } from "../../lib/osint-constants";
 
@@ -94,159 +94,101 @@ export function AddProfileModal({ visible, onClose, onCreated }: Props) {
 
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <Pressable
-          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.85)" }}
-          onPress={onClose}
-        />
-        <View
-          style={{
-            width: 300,
-            backgroundColor: "#111111",
-            borderWidth: 1,
-            borderColor: "#333",
-            borderRadius: 12,
-            padding: 16,
-          }}
-        >
-          <Text
-            style={{
-              color: "#06B6D4",
-              fontSize: 14,
-              fontFamily: "monospace",
-              fontWeight: "bold",
-              letterSpacing: 2,
-              textAlign: "center",
-              marginBottom: 12,
-            }}
-          >
-            🛡 ADD PROFILE
-          </Text>
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.85)" }}>
+          <TouchableWithoutFeedback>
+            <View style={{ width: 320, backgroundColor: "#111111", borderWidth: 1, borderColor: "#333", borderRadius: 12, padding: 20 }}>
+              <Text style={{ color: "#06B6D4", fontSize: 14, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2, textAlign: "center", marginBottom: 16 }}>
+                🛡 ADD PROFILE
+              </Text>
 
-          {/* Type selector */}
-          <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, justifyContent: "center" }}>
-            {PROFILE_TYPES.map((pt) => (
-              <Pressable
-                key={pt.key}
-                onPress={() => setType(pt.key)}
-                style={{
-                  backgroundColor: type === pt.key ? "#1E3A5F" : "#1A1A1A",
-                  borderWidth: 1,
-                  borderColor: type === pt.key ? "#3B82F6" : "#333",
-                  borderRadius: 8,
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                }}
-              >
-                <Text
-                  style={{
-                    color: type === pt.key ? "#60A5FA" : "#737373",
-                    fontSize: 12,
-                    fontFamily: "monospace",
-                    fontWeight: "600",
-                  }}
-                >
-                  {pt.emoji} {pt.label.toUpperCase()}
+              {/* Type selector — large tap targets */}
+              <View style={{ flexDirection: "row", gap: 6, marginBottom: 16 }}>
+                {PROFILE_TYPES.map((pt) => (
+                  <Pressable
+                    key={pt.key}
+                    onPress={() => setType(pt.key)}
+                    hitSlop={8}
+                    style={{
+                      flex: 1,
+                      backgroundColor: type === pt.key ? "#1E3A5F" : "#1A1A1A",
+                      borderWidth: 2,
+                      borderColor: type === pt.key ? "#3B82F6" : "#333",
+                      borderRadius: 10,
+                      paddingVertical: 12,
+                      alignItems: "center",
+                    }}
+                  >
+                    <Text style={{ color: type === pt.key ? "#60A5FA" : "#737373", fontSize: 13, fontFamily: "monospace", fontWeight: "bold" }}>
+                      {pt.emoji} {pt.label.toUpperCase()}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              {/* Label input */}
+              <TextInput
+                value={label}
+                onChangeText={setLabel}
+                placeholder="Label (e.g. Personal Email)"
+                placeholderTextColor="#525252"
+                style={{ backgroundColor: "#1A1A1A", borderWidth: 1, borderColor: "#333", borderRadius: 8, color: "#E5E5E5", fontSize: 13, fontFamily: "monospace", padding: 12, marginBottom: 8 }}
+              />
+
+              {/* Value input */}
+              <TextInput
+                value={value}
+                onChangeText={setValue}
+                placeholder={type === "email" ? "email@example.com" : type === "username" ? "username" : "password (hashed locally)"}
+                placeholderTextColor="#525252"
+                secureTextEntry={type === "password"}
+                autoCapitalize="none"
+                style={{ backgroundColor: "#1A1A1A", borderWidth: 1, borderColor: "#333", borderRadius: 8, color: "#E5E5E5", fontSize: 13, fontFamily: "monospace", padding: 12, marginBottom: 4 }}
+              />
+
+              {type === "password" && (
+                <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace", marginBottom: 8, textAlign: "center" }}>
+                  🔒 SHA-1 hashed locally — never sent as plaintext
                 </Text>
-              </Pressable>
-            ))}
-          </View>
+              )}
 
-          {/* Label input */}
-          <TextInput
-            value={label}
-            onChangeText={setLabel}
-            placeholder="Label (e.g. Personal Email)"
-            placeholderTextColor="#525252"
-            style={{
-              backgroundColor: "#1A1A1A",
-              borderWidth: 1,
-              borderColor: "#333",
-              borderRadius: 8,
-              color: "#E5E5E5",
-              fontSize: 13,
-              fontFamily: "monospace",
-              padding: 10,
-              marginBottom: 8,
-            }}
-          />
+              {error && (
+                <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace", marginBottom: 8, textAlign: "center" }}>
+                  {error}
+                </Text>
+              )}
 
-          {/* Value input */}
-          <TextInput
-            value={value}
-            onChangeText={setValue}
-            placeholder={
-              type === "email" ? "email@example.com" :
-              type === "username" ? "username" :
-              "password (hashed locally)"
-            }
-            placeholderTextColor="#525252"
-            secureTextEntry={type === "password"}
-            autoCapitalize="none"
-            style={{
-              backgroundColor: "#1A1A1A",
-              borderWidth: 1,
-              borderColor: "#333",
-              borderRadius: 8,
-              color: "#E5E5E5",
-              fontSize: 13,
-              fontFamily: "monospace",
-              padding: 10,
-              marginBottom: 4,
-            }}
-          />
-
-          {type === "password" && (
-            <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace", marginBottom: 8, textAlign: "center" }}>
-              🔒 SHA-1 hashed locally — never sent as plaintext
-            </Text>
-          )}
-
-          {error && (
-            <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace", marginBottom: 8, textAlign: "center" }}>
-              {error}
-            </Text>
-          )}
-
-          {/* Buttons */}
-          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-            <Pressable
-              onPress={onClose}
-              style={{
-                flex: 1,
-                backgroundColor: "#1A1A1A",
-                borderWidth: 1,
-                borderColor: "#333",
-                borderRadius: 8,
-                paddingVertical: 10,
-                alignItems: "center",
-              }}
-            >
-              <Text style={{ color: "#737373", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
-                CANCEL
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={handleSubmit}
-              disabled={submitting}
-              style={({ pressed }) => ({
-                flex: 1,
-                backgroundColor: pressed ? "#1E3A5F" : "#0E2A4F",
-                borderWidth: 1,
-                borderColor: "#3B82F6",
-                borderRadius: 8,
-                paddingVertical: 10,
-                alignItems: "center",
-                opacity: submitting ? 0.5 : 1,
-              })}
-            >
-              <Text style={{ color: "#60A5FA", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
-                {submitting ? "ADDING..." : `${PROFILE_TYPE_EMOJI[type]} ADD`}
-              </Text>
-            </Pressable>
-          </View>
+              {/* Buttons */}
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                <Pressable
+                  onPress={onClose}
+                  style={{ flex: 1, backgroundColor: "#1A1A1A", borderWidth: 1, borderColor: "#333", borderRadius: 8, paddingVertical: 12, alignItems: "center" }}
+                >
+                  <Text style={{ color: "#737373", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>CANCEL</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleSubmit}
+                  disabled={submitting}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    backgroundColor: pressed ? "#1E3A5F" : "#0E2A4F",
+                    borderWidth: 1,
+                    borderColor: "#3B82F6",
+                    borderRadius: 8,
+                    paddingVertical: 12,
+                    alignItems: "center",
+                    opacity: submitting ? 0.5 : 1,
+                  })}
+                >
+                  <Text style={{ color: "#60A5FA", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
+                    {submitting ? "ADDING..." : `${PROFILE_TYPE_EMOJI[type]} ADD`}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
         </View>
-      </View>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }
