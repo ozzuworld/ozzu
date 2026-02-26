@@ -240,12 +240,13 @@ const EXTRACTION_RULES = [
       const entities = [];
       const relationships = [];
       for (const sub of f.raw_data.subdomains.slice(0, 20)) { // Cap at 20
+        const subValue = typeof sub === "string" ? sub : sub.subdomain || JSON.stringify(sub);
         entities.push({
-          entity_type: "domain", value: sub, label: sub,
+          entity_type: "domain", value: subValue, label: subValue,
           metadata: { parentDomain: profile.value, source: f.raw_data.source || "discovery" }, source_module: "domain-recon",
         });
         relationships.push({
-          fromType: "domain", fromValue: profile.value, toType: "domain", toValue: sub,
+          fromType: "domain", fromValue: profile.value, toType: "domain", toValue: subValue,
           relationship: "owns", confidence: CONFIDENCE.CERT_TRANSPARENCY, evidence: `Subdomain of ${profile.value}`,
         });
       }

@@ -2603,7 +2603,7 @@ async function handleRequest(req, res) {
       sendJSON(res, 409, { error: `Directive is "${directive.status}" — can only escalate from: ${escalatableStatuses.join(", ")}` });
       return;
     }
-    const body = await readBody(req);
+    const body = await parseBody(req);
     const { escalatedBy, reason } = body || {};
     const prevStatus = directive.status;
 
@@ -6047,9 +6047,9 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
   // GET /osint/entities — list entities (optional ?type= filter)
   if (req.method === "GET" && pathname === "/osint/entities") {
     try {
-      const type = parsedUrl.searchParams.get("type");
-      const profileId = parsedUrl.searchParams.get("profileId");
-      const limit = parseInt(parsedUrl.searchParams.get("limit") || "200", 10);
+      const type = url.searchParams.get("type");
+      const profileId = url.searchParams.get("profileId");
+      const limit = parseInt(url.searchParams.get("limit") || "200", 10);
       const entities = await db.getOsintEntities({ type, profileId: profileId ? parseInt(profileId, 10) : null, limit });
       sendJSON(res, 200, { ok: true, entities });
     } catch (err) {
@@ -6168,7 +6168,7 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
   // POST /osint/reports — generate and store a report
   if (req.method === "POST" && pathname === "/osint/reports") {
     try {
-      const body = await readBody(req);
+      const body = await parseBody(req);
       const { title, type, profileIds } = body;
       const osintReport = require("./osint-report");
       let report;
@@ -6179,7 +6179,7 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
       }
       // Get current score
       const scoreData = await db.getOsintFindingCounts();
-      const totalFindings = Object.values(scoreData).reduce((a, b) => a + b, 0);
+      const totalFindings = scoreData.reduce((sum, row) => sum + parseInt(row.count, 10), 0);
       const profiles = await db.getOsintProfiles();
       const stored = await db.createOsintReport(
         title || `OSINT Report — ${new Date().toISOString().split("T")[0]}`,
@@ -6187,7 +6187,7 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         report,
         profileIds || profiles.map((p) => p.id),
         totalFindings,
-        report.json?.summary?.critical * 10 + report.json?.summary?.high * 5 + report.json?.summary?.medium * 2 + report.json?.summary?.low || 0
+        (report.json?.summary?.critical || 0) * 10 + (report.json?.summary?.high || 0) * 5 + (report.json?.summary?.medium || 0) * 2 + (report.json?.summary?.low || 0)
       );
       sendJSON(res, 200, { ok: true, report: stored });
     } catch (err) {
