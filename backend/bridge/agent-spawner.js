@@ -1430,12 +1430,11 @@ function spawnDetachedDeploy(platform, command) {
   const notifyUrl = `${BRIDGE}/notify`;
 
   const successMsg = platform === "ios"
-    ? "iPhone's updated — connect it to see the latest."
+    ? "iOS build done — download the IPA from the directive dashboard."
     : "Android update's live on all tablets.";
   const failMsg = platform === "ios"
-    ? "iPhone update failed — check deploy log."
+    ? "iOS build failed — check GitHub Actions."
     : "Android update failed — check deploy log.";
-  const stagedMsg = "iPhone IPA built but dev-01 not available — IPA staged at /tmp/ozzu-ios-staged/ozzu.ipa. Connect iPhone to dev-01 and run: ./scripts/deploy-ios.sh --local /tmp/ozzu-ios-staged/ozzu.ipa";
 
   const script = `#!/bin/bash
 exec > "${logPath}" 2>&1
@@ -1445,9 +1444,6 @@ EXIT_CODE=$?
 if [ $EXIT_CODE -eq 0 ]; then
   echo "=== ${platform} deploy SUCCESS at $(date -u) ==="
   curl -s -X POST ${notifyUrl} -H 'Content-Type: application/json' -d '{"message":"${successMsg}"}' || true
-elif [ $EXIT_CODE -eq 2 ] && [ "${platform}" = "ios" ]; then
-  echo "=== ${platform} deploy STAGED at $(date -u) ==="
-  curl -s -X POST ${notifyUrl} -H 'Content-Type: application/json' -d '{"message":"${stagedMsg}"}' || true
 else
   echo "=== ${platform} deploy FAILED at $(date -u) ==="
   curl -s -X POST ${notifyUrl} -H 'Content-Type: application/json' -d '{"message":"${failMsg}"}' || true
@@ -1508,23 +1504,17 @@ function smartDeploy(directive) {
       ].join(" && "));
     }
 
-    // iOS IPA build + deploy via dev-01 — ALWAYS build iOS alongside Android
-    // iPhone can't do OTA, so every frontend change needs a full rebuild to keep in sync
-    // Spawn detached so it survives bridge restarts (iOS build takes 15-20 min)
-    // Uses --stage: if dev-01 is unreachable, IPA is saved for manual install later
+    // iOS IPA build — ALWAYS build iOS alongside Android
+    // iPhone can't do OTA, so every frontend change needs a full rebuild
+    // IPA is downloadable from directive dashboard — no dev-01 needed
     spawnDetachedDeploy("ios", [
       `cd ${WORKDIR}`,
       `gh workflow run build-ios.yml`,
       `sleep 20`,
       `RUN_ID=$(gh run list --workflow=build-ios.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
+      `echo "iOS build started: run $RUN_ID"`,
+      directive.id ? `curl -s -X POST ${BRIDGE}/directives/${directive.id}/build-run -H 'Content-Type: application/json' -d "{\\"platform\\":\\"ios\\",\\"runId\\":$RUN_ID,\\"url\\":\\"https://github.com/ozzuworld/ozzu/actions/runs/$RUN_ID\\"}" || true` : `echo "No directive ID — skipping build-run registration"`,
       `gh run watch "$RUN_ID" --exit-status`,
-      `rm -rf /tmp/ozzu-ios-verify`,
-      `gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ios-verify -R ozzuworld/ozzu`,
-      `test -f /tmp/ozzu-ios-verify/ozzu.ipa || { echo "ERROR: IPA artifact not found after download"; exit 1; }`,
-      `IPA_SIZE=$(stat -c%s /tmp/ozzu-ios-verify/ozzu.ipa 2>/dev/null || echo 0)`,
-      `test "$IPA_SIZE" -gt 1000000 || { echo "ERROR: IPA too small ($IPA_SIZE bytes), likely corrupt"; exit 1; }`,
-      `rm -rf /tmp/ozzu-ios-verify`,
-      `./scripts/deploy-ios.sh --stage`,
     ].join(" && "));
   } else {
     log("JS-only changes — deploying via OTA (Android) + CI build (iOS)");
@@ -1545,21 +1535,15 @@ function smartDeploy(directive) {
     });
 
     // iOS: always needs a full rebuild (no OTA for sideloaded apps)
-    // Spawn detached so it survives bridge restarts (iOS build takes 15-20 min)
-    // Uses --stage: if dev-01 is unreachable, IPA is saved for manual install later
+    // IPA is downloadable from directive dashboard — no dev-01 needed
     spawnDetachedDeploy("ios", [
       `cd ${WORKDIR}`,
       `gh workflow run build-ios.yml`,
       `sleep 20`,
       `RUN_ID=$(gh run list --workflow=build-ios.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
+      `echo "iOS build started: run $RUN_ID"`,
+      directive.id ? `curl -s -X POST ${BRIDGE}/directives/${directive.id}/build-run -H 'Content-Type: application/json' -d "{\\"platform\\":\\"ios\\",\\"runId\\":$RUN_ID,\\"url\\":\\"https://github.com/ozzuworld/ozzu/actions/runs/$RUN_ID\\"}" || true` : `echo "No directive ID — skipping build-run registration"`,
       `gh run watch "$RUN_ID" --exit-status`,
-      `rm -rf /tmp/ozzu-ios-verify`,
-      `gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ios-verify -R ozzuworld/ozzu`,
-      `test -f /tmp/ozzu-ios-verify/ozzu.ipa || { echo "ERROR: IPA artifact not found"; exit 1; }`,
-      `IPA_SIZE=$(stat -c%s /tmp/ozzu-ios-verify/ozzu.ipa 2>/dev/null || echo 0)`,
-      `test "$IPA_SIZE" -gt 1000000 || { echo "ERROR: IPA too small ($IPA_SIZE bytes)"; exit 1; }`,
-      `rm -rf /tmp/ozzu-ios-verify`,
-      `./scripts/deploy-ios.sh --stage`,
     ].join(" && "));
   }
 
