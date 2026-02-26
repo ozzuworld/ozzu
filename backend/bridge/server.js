@@ -1482,9 +1482,9 @@ async function handleRequest(req, res) {
       return;
     }
     const data = await parseBody(req);
-    const validTypes = ["quick", "feature", "explore"];
+    const validTypes = ["quick", "feature", "explore", "epic"];
     if (!data.type || !validTypes.includes(data.type)) {
-      sendJSON(res, 400, { error: "type must be one of: quick, feature, explore" });
+      sendJSON(res, 400, { error: "type must be one of: quick, feature, explore, epic" });
       return;
     }
     if (!data.description) {
@@ -1497,6 +1497,18 @@ async function handleRequest(req, res) {
       sendJSON(res, 409, { error: `Similar directive already exists: "${existing.title}" [${existing.status}] (${existing.id})` });
       return;
     }
+    // Validate epicId if provided (must reference an existing epic-type directive)
+    if (data.epicId) {
+      const epicParent = getDirectives().find(d => d.id === data.epicId);
+      if (!epicParent) {
+        sendJSON(res, 400, { error: `Epic not found: ${data.epicId}` });
+        return;
+      }
+      if (epicParent.type !== "epic") {
+        sendJSON(res, 400, { error: `Directive ${data.epicId} is not an epic (type: ${epicParent.type})` });
+        return;
+      }
+    }
     // Validate dependsOn if provided
     const dependsOn = Array.isArray(data.dependsOn) ? data.dependsOn : [];
     if (dependsOn.length > 0) {
@@ -1505,6 +1517,14 @@ async function handleRequest(req, res) {
       if (invalidIds.length > 0) {
         sendJSON(res, 400, { error: `Unknown dependency IDs: ${invalidIds.join(", ")}` });
         return;
+      }
+    }
+    // Auto-chain phases: if epicId + phaseOrder > 1, auto-set dependsOn to previous phase
+    if (data.epicId && data.phaseOrder && data.phaseOrder > 1) {
+      const siblingPhases = getDirectives().filter(d => d.epicId === data.epicId && d.phaseOrder != null);
+      const prevPhase = siblingPhases.find(d => d.phaseOrder === data.phaseOrder - 1);
+      if (prevPhase && !dependsOn.includes(prevPhase.id)) {
+        dependsOn.push(prevPhase.id);
       }
     }
 
@@ -1516,14 +1536,16 @@ async function handleRequest(req, res) {
       description: data.description,
       emoji: data.emoji || null,
       status: "pending",
-      plan: null,
+      plan: data.type === "epic" ? (data.plan || null) : null,
       directiveApprovalId: null,
       retryCount: 0,
       failureReason: null,
       priority,
       dependsOn: dependsOn.length > 0 ? dependsOn : null,
-      createdBy: "King Kazuma",
-      activity_log: [{ timestamp: Date.now(), type: "status_change", actor: "King Kazuma", message: "Directive created with status: pending" }],
+      epicId: data.epicId || null,
+      phaseOrder: data.phaseOrder || null,
+      createdBy: data.createdBy || "King Kazuma",
+      activity_log: [{ timestamp: Date.now(), type: "status_change", actor: data.createdBy || "King Kazuma", message: "Directive created with status: pending" }],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -1680,7 +1702,15 @@ async function handleRequest(req, res) {
       sendJSON(res, 404, { error: "Directive not found" });
       return;
     }
-    sendJSON(res, 200, directive);
+    // If this is an epic, include its phases (child directives)
+    if (directive.type === "epic") {
+      const phases = directives
+        .filter(d => d.epicId === id)
+        .sort((a, b) => (a.phaseOrder || 0) - (b.phaseOrder || 0));
+      sendJSON(res, 200, { ...directive, phases });
+    } else {
+      sendJSON(res, 200, directive);
+    }
     return;
   }
 
@@ -1775,6 +1805,8 @@ async function handleRequest(req, res) {
     if (data.priority !== undefined && [1, 2, 3, 4].includes(data.priority)) directive.priority = data.priority;
     if (data.buildRuns !== undefined) directive.buildRuns = data.buildRuns;
     if (data.emoji !== undefined) directive.emoji = data.emoji;
+    if (data.epicId !== undefined) directive.epicId = data.epicId;
+    if (data.phaseOrder !== undefined) directive.phaseOrder = data.phaseOrder;
     directive.updatedAt = Date.now();
     directive.lastActivity = Date.now(); // Track when agent last touched this directive
 
