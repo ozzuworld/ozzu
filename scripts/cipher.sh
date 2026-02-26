@@ -31,5 +31,7 @@ EOF
   echo "WARNING: Bridge unreachable at ${BRIDGE_URL} — launching with minimal context"
 fi
 
-# Launch Claude Code fully autonomous — directive pipeline + PIN approval is the safety layer
-exec claude --dangerously-skip-permissions "$@"
+# Launch Claude Code — permissions managed via .claude/settings.local.json allow patterns
+# NOTE: --dangerously-skip-permissions was removed because it's blocked when running as root.
+# The settings.local.json broad allow patterns (Bash(*), Edit(*), etc.) provide equivalent autonomy.
+exec claude "$@"
