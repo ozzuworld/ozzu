@@ -640,6 +640,129 @@ const EXTRACTION_RULES = [
       return { entities, relationships };
     },
   },
+
+  // exif-extract: GPS coordinates → location entity
+  {
+    module: "exif-extract",
+    match: (f) => f.raw_data?.latitude && f.raw_data?.longitude && f.raw_data?.gps,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "location", value: f.raw_data.latitude.toFixed(4) + "," + f.raw_data.longitude.toFixed(4),
+        label: "GPS: " + f.raw_data.latitude.toFixed(4) + ", " + f.raw_data.longitude.toFixed(4),
+        metadata: { latitude: f.raw_data.latitude, longitude: f.raw_data.longitude, altitude: f.raw_data.altitude, source: "exif" },
+        source_module: "exif-extract",
+      }],
+      relationships: [{
+        fromType: "image", fromValue: profile.value, toType: "location",
+        toValue: f.raw_data.latitude.toFixed(4) + "," + f.raw_data.longitude.toFixed(4),
+        relationship: "associated_with", confidence: 99, evidence: "EXIF GPS from uploaded image",
+      }],
+    }),
+  },
+
+  // exif-extract: author/copyright → person entity
+  {
+    module: "exif-extract",
+    match: (f) => f.raw_data?.author,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "person", value: f.raw_data.author.toLowerCase(), label: f.raw_data.author,
+        metadata: { source: "exif_author", copyright: f.raw_data.copyright }, source_module: "exif-extract",
+      }],
+      relationships: [{
+        fromType: "image", fromValue: profile.value, toType: "person",
+        toValue: f.raw_data.author.toLowerCase(),
+        relationship: "created_by", confidence: 85, evidence: "EXIF author: " + f.raw_data.author,
+      }],
+    }),
+  },
+
+  // exif-extract: camera serial → device fingerprint entity
+  {
+    module: "exif-extract",
+    match: (f) => f.raw_data?.serialNumber,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "device", value: "camera:" + f.raw_data.serialNumber, label: "Camera S/N: " + f.raw_data.serialNumber,
+        metadata: { serialNumber: f.raw_data.serialNumber, source: "exif" }, source_module: "exif-extract",
+      }],
+      relationships: [{
+        fromType: "image", fromValue: profile.value, toType: "device",
+        toValue: "camera:" + f.raw_data.serialNumber,
+        relationship: "taken_with", confidence: 90, evidence: "EXIF camera serial: " + f.raw_data.serialNumber,
+      }],
+    }),
+  },
+
+  // reverse-image: web detection pages → domain entities
+  {
+    module: "reverse-image",
+    match: (f) => f.raw_data?.fullMatches || f.raw_data?.partialMatches,
+    extract: (f, profile) => {
+      const entities = [];
+      const relationships = [];
+      const urls = [...(f.raw_data.fullMatches || []), ...(f.raw_data.partialMatches || [])];
+      const seen = new Set();
+      for (const url of urls.slice(0, 10)) {
+        try {
+          const domain = new URL(url).hostname.replace(/^www\./, "");
+          if (seen.has(domain)) continue;
+          seen.add(domain);
+          entities.push({
+            entity_type: "domain", value: domain, label: domain,
+            metadata: { source: "reverse_image", imageUrl: url }, source_module: "reverse-image",
+          });
+          relationships.push({
+            fromType: "image", fromValue: profile.value, toType: "domain", toValue: domain,
+            relationship: "found_on", confidence: 90, evidence: "Image found on: " + url,
+          });
+        } catch { /* invalid URL */ }
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // reverse-image: web entities → person entities
+  {
+    module: "reverse-image",
+    match: (f) => f.raw_data?.webEntities && Array.isArray(f.raw_data.webEntities),
+    extract: (f, profile) => {
+      const entities = [];
+      const relationships = [];
+      for (const we of f.raw_data.webEntities.slice(0, 5)) {
+        if (!we.description) continue;
+        entities.push({
+          entity_type: "person", value: we.description.toLowerCase(), label: we.description,
+          metadata: { score: we.score, source: "google_vision" }, source_module: "reverse-image",
+        });
+        relationships.push({
+          fromType: "image", fromValue: profile.value, toType: "person",
+          toValue: we.description.toLowerCase(),
+          relationship: "associated_with", confidence: Math.round((we.score || 0.5) * 100),
+          evidence: "Google Vision web entity: " + we.description,
+        });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // avatar-compare: pHash match → cross-profile relationship
+  {
+    module: "avatar-compare",
+    match: (f) => f.raw_data?.pHashMatch && f.raw_data?.matchedProfileId,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "image", value: f.raw_data.avatarUrl, label: "Matched avatar (" + (f.raw_data.matchedProfileLabel || f.raw_data.platform) + ")",
+        metadata: { similarity: f.raw_data.similarity, platform: f.raw_data.platform, matchedProfileId: f.raw_data.matchedProfileId },
+        source_module: "avatar-compare",
+      }],
+      relationships: [{
+        fromType: "image", fromValue: profile.value, toType: "image", toValue: f.raw_data.avatarUrl,
+        relationship: "same_as", confidence: f.raw_data.similarity,
+        evidence: "pHash match " + f.raw_data.similarity + "% with " + (f.raw_data.matchedProfileLabel || "profile #" + f.raw_data.matchedProfileId),
+      }],
+    }),
+  },
 ];
 
 // ── Core Correlation Functions ──
@@ -650,7 +773,7 @@ async function correlateScanResults(profileId, scanId) {
     if (!profile) return;
 
     // Skip profile types that aren't valid entity types (e.g. "password")
-    const VALID_ENTITY_TYPES = new Set(["person", "email", "username", "phone", "domain", "ip", "social_account", "organization", "location", "image"]);
+    const VALID_ENTITY_TYPES = new Set(["person", "email", "username", "phone", "domain", "ip", "social_account", "organization", "location", "image", "device"]);
     if (!VALID_ENTITY_TYPES.has(profile.profile_type)) return;
 
     // Get all findings for this profile (not just this scan — correlate everything)
@@ -809,6 +932,12 @@ const LOCATION_EXTRACTORS = [
   },
   { module: "phone-lookup", match: (f) => f.raw_data?.numverify?.country_name,
     extract: (f) => ({ location_text: f.raw_data.numverify.country_name, location_type: "carrier", confidence: 0.5, raw_data: { carrier: f.raw_data.numverify.carrier } }),
+  },
+  { module: "exif-extract", match: (f) => f.raw_data?.latitude && f.raw_data?.longitude && f.raw_data?.gps,
+    extract: (f) => ({ latitude: f.raw_data.latitude, longitude: f.raw_data.longitude, location_type: "gps_exif", confidence: 0.95, raw_data: { source: "exif_upload", fileHash: f.raw_data.fileHash } }),
+  },
+  { module: "exif-extract", match: (f) => f.raw_data?.city || f.raw_data?.country,
+    extract: (f) => ({ location_text: [f.raw_data.city, f.raw_data.province, f.raw_data.country].filter(Boolean).join(", "), location_type: "iptc", confidence: 0.8, raw_data: { source: "iptc_metadata" } }),
   },
 ];
 

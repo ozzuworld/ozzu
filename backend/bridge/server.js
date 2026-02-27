@@ -32,6 +32,9 @@ osintEngine.registerModule(require("./osint-modules/document-meta"));
 osintEngine.registerModule(require("./osint-modules/shodan-lookup"));
 osintEngine.registerModule(require("./osint-modules/web-crawler"));
 osintEngine.registerModule(require("./osint-modules/secret-scanner"));
+osintEngine.registerModule(require("./osint-modules/exif-extract"));
+osintEngine.registerModule(require("./osint-modules/reverse-image"));
+osintEngine.registerModule(require("./osint-modules/avatar-compare"));
 
 const log = {
   bridge: createLogger("bridge"),
@@ -6006,8 +6009,8 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         sendJSON(res, 400, { error: "Missing required fields: label, profileType, value" });
         return;
       }
-      if (!["email", "username", "password", "phone", "domain"].includes(profileType)) {
-        sendJSON(res, 400, { error: "profileType must be email, username, password, phone, or domain" });
+      if (!["email", "username", "password", "phone", "domain", "ip", "image"].includes(profileType)) {
+        sendJSON(res, 400, { error: "profileType must be email, username, password, phone, domain, ip, or image" });
         return;
       }
       const id = await db.createOsintProfile(label, profileType, value, tags || []);
@@ -6050,6 +6053,109 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
       sendJSON(res, 200, { ok: true });
     } catch (err) {
       log.bridge.error("OSINT delete profile error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── OSINT Image Upload/Serve ──
+
+  // POST /osint/images/upload — upload image, create profile + osint_images record
+  if (req.method === "POST" && pathname === "/osint/images/upload") {
+    try {
+      const data = await parseBody(req);
+      if (!data.base64 || !data.label) {
+        sendJSON(res, 400, { error: "Required: base64 (image data), label" });
+        return;
+      }
+      const crypto = require("crypto");
+      const sharp = require("sharp");
+      const fs = require("fs");
+      const path = require("path");
+
+      // Decode base64
+      const buf = Buffer.from(data.base64, "base64");
+      if (buf.length > 15 * 1024 * 1024) {
+        sendJSON(res, 400, { error: "Image too large (max 15MB)" });
+        return;
+      }
+
+      const hash = crypto.createHash("sha256").update(buf).digest("hex");
+      const imgDir = "/tmp/ozzu-bridge/osint-images";
+      fs.mkdirSync(imgDir, { recursive: true });
+
+      // Detect format and get dimensions via sharp
+      const meta = await sharp(buf).metadata();
+      const ext = meta.format || "jpg";
+      const filePath = path.join(imgDir, `${hash}.${ext}`);
+      const thumbPath = path.join(imgDir, `thumb-${hash}.jpg`);
+
+      // Write full image
+      fs.writeFileSync(filePath, buf);
+
+      // Generate 256px thumbnail
+      await sharp(buf).resize(256, 256, { fit: "cover" }).jpeg({ quality: 80 }).toFile(thumbPath);
+
+      // Create profile (value = hash for dedup)
+      const profileId = await db.createOsintProfile(data.label, "image", hash, data.tags || []);
+      if (!profileId) {
+        sendJSON(res, 500, { error: "Failed to create image profile" });
+        return;
+      }
+
+      // Create osint_images record
+      const imageRecord = await db.createOsintImage({
+        profile_id: profileId,
+        file_hash: hash,
+        file_path: filePath,
+        original_filename: data.filename || null,
+        mime_type: `image/${ext}`,
+        file_size: buf.length,
+        width: meta.width,
+        height: meta.height,
+        thumbnail_path: thumbPath,
+      });
+
+      const profile = await db.getOsintProfile(profileId);
+      sendJSON(res, 201, { ok: true, profile, image: imageRecord });
+    } catch (err) {
+      if (err.message.includes("duplicate key")) {
+        sendJSON(res, 409, { error: "An image profile with this hash already exists" });
+      } else {
+        log.bridge.error("OSINT image upload error:", err.message);
+        sendJSON(res, 500, { error: err.message });
+      }
+    }
+    return;
+  }
+
+  // GET /osint/images/:profileId — serve stored image
+  if (req.method === "GET" && pathname.match(/^\/osint\/images\/(\d+)$/)) {
+    try {
+      const profileId = parseInt(RegExp.$1, 10);
+      const image = await db.getOsintImageByProfile(profileId);
+      if (!image) { sendJSON(res, 404, { error: "Image not found" }); return; }
+      const fs = require("fs");
+      if (!fs.existsSync(image.file_path)) { sendJSON(res, 404, { error: "Image file missing from disk" }); return; }
+      res.writeHead(200, { "Content-Type": image.mime_type || "image/jpeg", "Cache-Control": "public, max-age=3600" });
+      fs.createReadStream(image.file_path).pipe(res);
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/images/:profileId/thumbnail — serve thumbnail
+  if (req.method === "GET" && pathname.match(/^\/osint\/images\/(\d+)\/thumbnail$/)) {
+    try {
+      const profileId = parseInt(RegExp.$1, 10);
+      const image = await db.getOsintImageByProfile(profileId);
+      if (!image || !image.thumbnail_path) { sendJSON(res, 404, { error: "Thumbnail not found" }); return; }
+      const fs = require("fs");
+      if (!fs.existsSync(image.thumbnail_path)) { sendJSON(res, 404, { error: "Thumbnail file missing" }); return; }
+      res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=3600" });
+      fs.createReadStream(image.thumbnail_path).pipe(res);
+    } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
     return;

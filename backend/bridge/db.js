@@ -71,7 +71,7 @@ async function init() {
     await pool.query(`CREATE TABLE IF NOT EXISTS osint_profiles (
       id SERIAL PRIMARY KEY,
       label TEXT NOT NULL,
-      profile_type VARCHAR(20) NOT NULL CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain', 'ip')),
+      profile_type VARCHAR(20) NOT NULL CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain', 'ip', 'image')),
       value TEXT NOT NULL,
       tags TEXT[] DEFAULT '{}',
       is_active BOOLEAN DEFAULT true,
@@ -222,6 +222,28 @@ async function init() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_locations_profile ON osint_locations(profile_id)`);
+
+    // OSINT Images (Epic 5)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_images (
+      id SERIAL PRIMARY KEY,
+      profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE CASCADE,
+      file_hash VARCHAR(64) NOT NULL,
+      file_path TEXT NOT NULL,
+      original_filename TEXT,
+      mime_type VARCHAR(50),
+      file_size INTEGER,
+      width INTEGER,
+      height INTEGER,
+      thumbnail_path TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(file_hash)
+    )`);
+
+    // Migration: add 'image' to existing profile_type constraint if needed
+    try {
+      await pool.query(`ALTER TABLE osint_profiles DROP CONSTRAINT IF EXISTS osint_profiles_profile_type_check`);
+      await pool.query(`ALTER TABLE osint_profiles ADD CONSTRAINT osint_profiles_profile_type_check CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain', 'ip', 'image'))`);
+    } catch { /* constraint already exists or column has no constraint */ }
 
     console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables; osint_score_history; osint entities/relationships; osint correlations/reports; osint metrics/locations)");
   } catch (err) {
@@ -1227,6 +1249,34 @@ async function getOsintLocations(filters = {}) {
   return res.rows;
 }
 
+// ── OSINT Images ──
+
+async function createOsintImage(data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_images (profile_id, file_hash, file_path, original_filename, mime_type, file_size, width, height, thumbnail_path)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (file_hash) DO UPDATE SET profile_id = $1
+     RETURNING *`,
+    [data.profile_id, data.file_hash, data.file_path, data.original_filename || null,
+     data.mime_type || null, data.file_size || null, data.width || null, data.height || null,
+     data.thumbnail_path || null]
+  );
+  return res.rows[0];
+}
+
+async function getOsintImage(imageId) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM osint_images WHERE id = $1`, [imageId]);
+  return res.rows[0] || null;
+}
+
+async function getOsintImageByProfile(profileId) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM osint_images WHERE profile_id = $1`, [profileId]);
+  return res.rows[0] || null;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -1307,6 +1357,10 @@ module.exports = {
   // OSINT Locations
   upsertOsintLocation,
   getOsintLocations,
+  // OSINT Images
+  createOsintImage,
+  getOsintImage,
+  getOsintImageByProfile,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

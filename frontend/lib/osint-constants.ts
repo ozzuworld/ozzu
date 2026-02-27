@@ -61,6 +61,7 @@ export const PROFILE_TYPE_EMOJI: Record<string, string> = {
   phone: "📱",
   domain: "🌐",
   ip: "📡",
+  image: "🖼",
 };
 
 export const CORRELATION_TYPE_EMOJI: Record<string, string> = {
@@ -99,6 +100,9 @@ export const MODULE_EMOJI: Record<string, string> = {
   "image-meta": "🖼",
   "dkim-probe": "🔏",
   "spf-check": "📧",
+  "exif-extract": "📸",
+  "reverse-image": "🔍",
+  "avatar-compare": "🪞",
 };
 
 export const MODULE_LABELS: Record<string, string> = {
@@ -113,6 +117,9 @@ export const MODULE_LABELS: Record<string, string> = {
   "image-meta": "IMG-META",
   "dkim-probe": "DKIM",
   "spf-check": "SPF",
+  "exif-extract": "EXIF",
+  "reverse-image": "REV-IMG",
+  "avatar-compare": "AVATAR",
 };
 
 export function scoreColor(score: number): string {

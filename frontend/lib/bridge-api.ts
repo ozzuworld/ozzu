@@ -466,6 +466,23 @@ export async function createOsintProfile(
   return res.json();
 }
 
+export async function uploadOsintImage(
+  label: string,
+  base64: string,
+  filename?: string
+): Promise<{ ok: boolean; profile: OsintProfile; image: any }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/images/upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label, base64, filename }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `Image upload failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function fetchOsintProfiles(): Promise<OsintProfile[]> {
   const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/profiles`);
   if (!res.ok) throw new Error(`OSINT profiles error: ${res.status}`);

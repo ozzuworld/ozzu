@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { View, Text, Modal, Pressable, TextInput, TouchableWithoutFeedback } from "react-native";
-import { createOsintProfile } from "../../lib/bridge-api";
+import { View, Text, Modal, Pressable, TextInput, TouchableWithoutFeedback, Image, ScrollView } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
+import { createOsintProfile, uploadOsintImage } from "../../lib/bridge-api";
 import { PROFILE_TYPE_EMOJI } from "../../lib/osint-constants";
 
 // Simple SHA-1 implementation for password hashing (no external deps)
@@ -48,7 +50,7 @@ function jsSha1(msg: string): string {
   return [h0, h1, h2, h3, h4].map(v => (v >>> 0).toString(16).padStart(8, "0")).join("").toUpperCase();
 }
 
-const PROFILE_TYPES = [
+const TEXT_PROFILE_TYPES = [
   { key: "email" as const, label: "Email", emoji: "📧" },
   { key: "username" as const, label: "Username", emoji: "👤" },
   { key: "password" as const, label: "Password", emoji: "🔑" },
@@ -57,6 +59,8 @@ const PROFILE_TYPES = [
   { key: "ip" as const, label: "IP", emoji: "📡" },
 ];
 
+type ProfileType = "email" | "username" | "password" | "phone" | "domain" | "ip" | "image";
+
 interface Props {
   visible: boolean;
   onClose: () => void;
@@ -64,13 +68,59 @@ interface Props {
 }
 
 export function AddProfileModal({ visible, onClose, onCreated }: Props) {
-  const [type, setType] = useState<"email" | "username" | "password" | "phone" | "domain" | "ip">("username");
+  const [type, setType] = useState<ProfileType>("username");
   const [label, setLabel] = useState("");
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageFilename, setImageFilename] = useState<string | null>(null);
+
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.9,
+      base64: false,
+      allowsEditing: false,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setImageUri(result.assets[0].uri);
+      setImageFilename(result.assets[0].fileName || "photo.jpg");
+      if (!label.trim()) {
+        setLabel("Photo " + new Date().toLocaleDateString());
+      }
+    }
+  };
 
   const handleSubmit = async () => {
+    if (type === "image") {
+      if (!imageUri) {
+        setError("Select an image first");
+        return;
+      }
+      if (!label.trim()) {
+        setError("Label is required");
+        return;
+      }
+      setSubmitting(true);
+      setError(null);
+      try {
+        const base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
+        await uploadOsintImage(label.trim(), base64, imageFilename || undefined);
+        setLabel("");
+        setImageUri(null);
+        setImageFilename(null);
+        setType("username");
+        onCreated();
+        onClose();
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (!label.trim() || !value.trim()) {
       setError("Label and value are required");
       return;
@@ -100,59 +150,127 @@ export function AddProfileModal({ visible, onClose, onCreated }: Props) {
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.85)" }}>
           <TouchableWithoutFeedback>
-            <View style={{ width: 320, backgroundColor: "#111111", borderWidth: 1, borderColor: "#333", borderRadius: 12, padding: 20 }}>
+            <View style={{ width: 340, maxHeight: "85%", backgroundColor: "#111111", borderWidth: 1, borderColor: "#333", borderRadius: 12, padding: 20 }}>
               <Text style={{ color: "#06B6D4", fontSize: 14, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2, textAlign: "center", marginBottom: 16 }}>
-                🛡 ADD PROFILE
+                ADD PROFILE
               </Text>
 
-              {/* Type selector — large tap targets */}
-              <View style={{ flexDirection: "row", gap: 6, marginBottom: 16 }}>
-                {PROFILE_TYPES.map((pt) => (
-                  <Pressable
-                    key={pt.key}
-                    onPress={() => setType(pt.key)}
-                    hitSlop={8}
-                    style={{
-                      flex: 1,
-                      backgroundColor: type === pt.key ? "#1E3A5F" : "#1A1A1A",
-                      borderWidth: 2,
-                      borderColor: type === pt.key ? "#3B82F6" : "#333",
-                      borderRadius: 10,
-                      paddingVertical: 12,
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text style={{ color: type === pt.key ? "#60A5FA" : "#737373", fontSize: 13, fontFamily: "monospace", fontWeight: "bold" }}>
-                      {pt.emoji} {pt.label.toUpperCase()}
-                    </Text>
-                  </Pressable>
-                ))}
+              {/* Mode toggle: Text vs Image */}
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                <Pressable
+                  onPress={() => setType("username")}
+                  style={{
+                    flex: 1, backgroundColor: type !== "image" ? "#1E3A5F" : "#1A1A1A",
+                    borderWidth: 2, borderColor: type !== "image" ? "#3B82F6" : "#333",
+                    borderRadius: 10, paddingVertical: 10, alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: type !== "image" ? "#60A5FA" : "#737373", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
+                    TEXT
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setType("image")}
+                  style={{
+                    flex: 1, backgroundColor: type === "image" ? "#1E3A5F" : "#1A1A1A",
+                    borderWidth: 2, borderColor: type === "image" ? "#3B82F6" : "#333",
+                    borderRadius: 10, paddingVertical: 10, alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: type === "image" ? "#60A5FA" : "#737373", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
+                    IMAGE
+                  </Text>
+                </Pressable>
               </View>
 
-              {/* Label input */}
-              <TextInput
-                value={label}
-                onChangeText={setLabel}
-                placeholder="Label (e.g. Personal Email)"
-                placeholderTextColor="#525252"
-                style={{ backgroundColor: "#1A1A1A", borderWidth: 1, borderColor: "#333", borderRadius: 8, color: "#E5E5E5", fontSize: 13, fontFamily: "monospace", padding: 12, marginBottom: 8 }}
-              />
+              {type !== "image" ? (
+                <>
+                  {/* Type selector — text profile types */}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                    <View style={{ flexDirection: "row", gap: 6 }}>
+                      {TEXT_PROFILE_TYPES.map((pt) => (
+                        <Pressable
+                          key={pt.key}
+                          onPress={() => setType(pt.key)}
+                          hitSlop={8}
+                          style={{
+                            backgroundColor: type === pt.key ? "#1E3A5F" : "#1A1A1A",
+                            borderWidth: 2,
+                            borderColor: type === pt.key ? "#3B82F6" : "#333",
+                            borderRadius: 10,
+                            paddingVertical: 10,
+                            paddingHorizontal: 12,
+                            alignItems: "center",
+                          }}
+                        >
+                          <Text style={{ color: type === pt.key ? "#60A5FA" : "#737373", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
+                            {pt.emoji} {pt.label.toUpperCase()}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </ScrollView>
 
-              {/* Value input */}
-              <TextInput
-                value={value}
-                onChangeText={setValue}
-                placeholder={type === "email" ? "email@example.com" : type === "username" ? "username" : type === "phone" ? "+14155551234" : type === "domain" ? "example.com" : type === "ip" ? "192.168.1.1 or 2001:db8::1" : "password (hashed locally)"}
-                placeholderTextColor="#525252"
-                secureTextEntry={type === "password"}
-                autoCapitalize="none"
-                style={{ backgroundColor: "#1A1A1A", borderWidth: 1, borderColor: "#333", borderRadius: 8, color: "#E5E5E5", fontSize: 13, fontFamily: "monospace", padding: 12, marginBottom: 4 }}
-              />
+                  {/* Label input */}
+                  <TextInput
+                    value={label}
+                    onChangeText={setLabel}
+                    placeholder="Label (e.g. Personal Email)"
+                    placeholderTextColor="#525252"
+                    style={{ backgroundColor: "#1A1A1A", borderWidth: 1, borderColor: "#333", borderRadius: 8, color: "#E5E5E5", fontSize: 13, fontFamily: "monospace", padding: 12, marginBottom: 8 }}
+                  />
 
-              {type === "password" && (
-                <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace", marginBottom: 8, textAlign: "center" }}>
-                  🔒 SHA-1 hashed locally — never sent as plaintext
-                </Text>
+                  {/* Value input */}
+                  <TextInput
+                    value={value}
+                    onChangeText={setValue}
+                    placeholder={type === "email" ? "email@example.com" : type === "username" ? "username" : type === "phone" ? "+14155551234" : type === "domain" ? "example.com" : type === "ip" ? "192.168.1.1 or 2001:db8::1" : "password (hashed locally)"}
+                    placeholderTextColor="#525252"
+                    secureTextEntry={type === "password"}
+                    autoCapitalize="none"
+                    style={{ backgroundColor: "#1A1A1A", borderWidth: 1, borderColor: "#333", borderRadius: 8, color: "#E5E5E5", fontSize: 13, fontFamily: "monospace", padding: 12, marginBottom: 4 }}
+                  />
+
+                  {type === "password" && (
+                    <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace", marginBottom: 8, textAlign: "center" }}>
+                      SHA-1 hashed locally — never sent as plaintext
+                    </Text>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Image picker */}
+                  <Pressable
+                    onPress={pickImage}
+                    style={{
+                      backgroundColor: "#1A1A1A", borderWidth: 2, borderColor: imageUri ? "#22C55E" : "#333",
+                      borderRadius: 10, borderStyle: imageUri ? "solid" : "dashed",
+                      paddingVertical: imageUri ? 8 : 32, alignItems: "center", marginBottom: 12,
+                    }}
+                  >
+                    {imageUri ? (
+                      <Image source={{ uri: imageUri }} style={{ width: 200, height: 200, borderRadius: 8 }} resizeMode="cover" />
+                    ) : (
+                      <>
+                        <Text style={{ color: "#525252", fontSize: 28, marginBottom: 4 }}>📷</Text>
+                        <Text style={{ color: "#737373", fontSize: 12, fontFamily: "monospace" }}>TAP TO SELECT IMAGE</Text>
+                      </>
+                    )}
+                  </Pressable>
+
+                  {/* Label input */}
+                  <TextInput
+                    value={label}
+                    onChangeText={setLabel}
+                    placeholder="Label (e.g. My Photo)"
+                    placeholderTextColor="#525252"
+                    style={{ backgroundColor: "#1A1A1A", borderWidth: 1, borderColor: "#333", borderRadius: 8, color: "#E5E5E5", fontSize: 13, fontFamily: "monospace", padding: 12, marginBottom: 4 }}
+                  />
+
+                  <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace", marginBottom: 8, textAlign: "center" }}>
+                    Scans EXIF metadata, reverse image search, avatar matching
+                  </Text>
+                </>
               )}
 
               {error && (
@@ -184,7 +302,7 @@ export function AddProfileModal({ visible, onClose, onCreated }: Props) {
                   })}
                 >
                   <Text style={{ color: "#60A5FA", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
-                    {submitting ? "ADDING..." : `${PROFILE_TYPE_EMOJI[type]} ADD`}
+                    {submitting ? (type === "image" ? "UPLOADING..." : "ADDING...") : `${PROFILE_TYPE_EMOJI[type]} ADD`}
                   </Text>
                 </Pressable>
               </View>
