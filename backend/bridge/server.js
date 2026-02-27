@@ -29,6 +29,9 @@ osintEngine.registerModule(require("./osint-modules/domain-recon"));
 osintEngine.registerModule(require("./osint-modules/social-deep"));
 osintEngine.registerModule(require("./osint-modules/image-search"));
 osintEngine.registerModule(require("./osint-modules/document-meta"));
+osintEngine.registerModule(require("./osint-modules/shodan-lookup"));
+osintEngine.registerModule(require("./osint-modules/web-crawler"));
+osintEngine.registerModule(require("./osint-modules/secret-scanner"));
 
 const log = {
   bridge: createLogger("bridge"),

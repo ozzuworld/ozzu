@@ -1,6 +1,9 @@
-// Reverse image search module — find where profile photos appear across the web
-// Collects avatar/image URLs from previous scan findings, checks TinEye/Yandex/Google Vision
+// Reverse image search + EXIF extraction module
+// Collects avatar/image URLs from previous scan findings, extracts EXIF metadata (GPS, camera, author),
+// checks TinEye/Yandex/Google Vision for reverse image matches
 const db = require("../db");
+let exifr;
+try { exifr = require("exifr"); } catch { exifr = null; }
 
 module.exports = {
   name: "image-search",
@@ -49,7 +52,94 @@ module.exports = {
       rawData: { imageUrls: [...imageUrls] },
     });
 
-    // 2. TinEye API (free non-commercial)
+    // 2. EXIF metadata extraction — GPS, camera model, author, creation date
+    if (exifr) {
+      for (const imageUrl of [...imageUrls].slice(0, 5)) {
+        const release = await rateLimiter.acquire();
+        try {
+          const res = await fetch(imageUrl, {
+            headers: { "User-Agent": "Mozilla/5.0 (compatible; OSINT-Scanner/1.0)" },
+            signal: AbortSignal.timeout(10000),
+          });
+          if (!res.ok) continue;
+          const buffer = Buffer.from(await res.arrayBuffer());
+
+          const exif = await exifr.parse(buffer, {
+            gps: true, exif: true, iptc: true, xmp: true, icc: false,
+            translateValues: true, reviveValues: true,
+          }).catch(() => null);
+
+          if (!exif) continue;
+
+          // GPS coordinates — critical location leak
+          if (exif.latitude && exif.longitude) {
+            findings.push({
+              category: "exposure",
+              severity: "critical",
+              title: `GPS coordinates found in image metadata`,
+              description: `Location: ${exif.latitude.toFixed(6)}, ${exif.longitude.toFixed(6)}\nImage: ${imageUrl}\nThis reveals the exact location where the photo was taken.`,
+              sourceUrl: imageUrl,
+              rawData: { imageUrl, latitude: exif.latitude, longitude: exif.longitude, altitude: exif.GPSAltitude },
+              remediation: "Strip EXIF metadata from all profile photos before uploading. Most social platforms do this automatically, but some don't.",
+            });
+          }
+
+          // Camera model — device fingerprint
+          if (exif.Make || exif.Model) {
+            findings.push({
+              category: "exposure",
+              severity: "medium",
+              title: `Camera/device info found in image metadata`,
+              description: `Make: ${exif.Make || "N/A"}\nModel: ${exif.Model || "N/A"}\nSoftware: ${exif.Software || "N/A"}\nImage: ${imageUrl}`,
+              sourceUrl: imageUrl,
+              rawData: { imageUrl, make: exif.Make, model: exif.Model, software: exif.Software },
+              remediation: "Camera model and software version can identify the device used. Strip metadata before sharing photos.",
+            });
+          }
+
+          // Author/copyright — real name leak
+          const author = exif.Artist || exif.Copyright || exif.Creator || (exif.XPAuthor ? String(exif.XPAuthor) : null);
+          if (author) {
+            findings.push({
+              category: "exposure",
+              severity: "medium",
+              title: `Author/copyright info found in image metadata`,
+              description: `Author: ${author}\nImage: ${imageUrl}\nThis may reveal the photographer's real name.`,
+              sourceUrl: imageUrl,
+              rawData: { imageUrl, author, copyright: exif.Copyright },
+              remediation: "Remove author metadata from photos before uploading to prevent real name exposure.",
+            });
+          }
+
+          // Creation date — timeline info
+          if (exif.DateTimeOriginal || exif.CreateDate) {
+            const date = exif.DateTimeOriginal || exif.CreateDate;
+            findings.push({
+              category: "exposure",
+              severity: "low",
+              title: `Creation date found in image metadata`,
+              description: `Date: ${date}\nImage: ${imageUrl}`,
+              sourceUrl: imageUrl,
+              rawData: { imageUrl, dateTimeOriginal: String(date) },
+            });
+          }
+        } catch {
+          // EXIF extraction failed — skip
+        } finally {
+          release();
+        }
+      }
+    } else {
+      findings.push({
+        category: "exposure",
+        severity: "info",
+        title: "EXIF extraction skipped — exifr package not available",
+        description: "Install exifr package for image metadata extraction: npm install exifr",
+        rawData: { reason: "no_exifr_package" },
+      });
+    }
+
+    // 3. TinEye API (free non-commercial)
     for (const imageUrl of [...imageUrls].slice(0, 3)) {
       const release = await rateLimiter.acquire();
       try {
@@ -69,7 +159,7 @@ module.exports = {
       }
     }
 
-    // 3. Google Vision API (1000 free/mo) — face detection, web entity detection
+    // 4. Google Vision API (1000 free/mo) — face detection, web entity detection
     const visionKey = process.env.GOOGLE_VISION_API_KEY;
     if (visionKey) {
       for (const imageUrl of [...imageUrls].slice(0, 2)) {
@@ -168,7 +258,7 @@ module.exports = {
       });
     }
 
-    // 4. Yandex reverse image — construct search URL
+    // 5. Yandex reverse image — construct search URL
     for (const imageUrl of [...imageUrls].slice(0, 2)) {
       const yandexUrl = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
       findings.push({
