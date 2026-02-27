@@ -161,6 +161,31 @@ export const rooms: Room[] = [
     ],
   },
   {
+    name: "Cleaning",
+    icon: "🤖",
+    items: [
+      {
+        id: "dusk_vader",
+        name: "Dusk Vader",
+        icon: "🤖",
+        rarity: "legendary",
+        lore: "A tireless automaton that patrols the halls, consuming dust and debris. It returns to its station when its dark work is done.",
+        primaryEntityId: "vacuum.dusk_vader",
+        entities: [
+          { entityId: "vacuum.dusk_vader", label: "Vacuum", icon: "🤖" },
+          { entityId: "sensor.dusk_vader_battery_level", label: "Battery", icon: "🔋" },
+          { entityId: "sensor.dusk_vader_status", label: "Status", icon: "📊" },
+          { entityId: "sensor.dusk_vader_cleaning_progress", label: "Progress", icon: "📶" },
+          { entityId: "sensor.dusk_vader_cleaned_area", label: "Area", icon: "📐" },
+          { entityId: "sensor.dusk_vader_cleaning_time", label: "Time", icon: "⏱" },
+          { entityId: "sensor.dusk_vader_current_room", label: "Room", icon: "🏠" },
+          { entityId: "select.dusk_vader_suction_level", label: "Suction", icon: "💨" },
+          { entityId: "select.dusk_vader_cleaning_mode", label: "Mode", icon: "🔄" },
+        ],
+      },
+    ],
+  },
+  {
     name: "General",
     icon: "📦",
     items: [

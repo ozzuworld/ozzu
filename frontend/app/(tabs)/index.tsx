@@ -10,10 +10,12 @@ import { useEntity } from "../../lib/useEntity";
 import { useMediaPlayer } from "../../lib/useMediaPlayer";
 import { rooms, RARITY_COLORS, type InventoryItem } from "../../lib/rooms";
 import { ACWidget } from "../../components/devices/ACWidget";
+import { VacuumWidget } from "../../components/devices/VacuumWidget";
 
 const TOP_BAR_HEIGHT = 48;
 const ACCENT = "#06B6D4";
 const AC_ENTITY_ID = "climate.living_room_ac";
+const VACUUM_ENTITY_ID = "vacuum.dusk_vader";
 
 // ── Device Card ──
 function DeviceCard({ item }: { item: InventoryItem }) {
@@ -292,6 +294,7 @@ function RoomSection({ name, icon, items }: { name: string; icon: string; items:
   const isLivingRoom = name === "Living Room";
   const isSecurity = name === "Security";
   const isKitchen = name === "Kitchen";
+  const isCleaning = name === "Cleaning";
   const isGeneral = name === "General";
 
   // Separate cameras from regular devices
@@ -340,6 +343,9 @@ function RoomSection({ name, icon, items }: { name: string; icon: string; items:
 
       {/* Washer status for Kitchen */}
       {isKitchen && <WasherStatus />}
+
+      {/* Vacuum widget for Cleaning */}
+      {isCleaning && <VacuumWidget entityId={VACUUM_ENTITY_ID} />}
     </View>
   );
 }
