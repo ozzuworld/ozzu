@@ -995,6 +995,23 @@ async function initStorage() {
         }
       } catch { /* auto-discover is best-effort */ }
 
+      // Dedup: remove duplicate buildRuns (same platform+runId) from all directives
+      for (const d of directives) {
+        if (!Array.isArray(d.buildRuns) || d.buildRuns.length <= 1) continue;
+        const seen = new Set();
+        const before = d.buildRuns.length;
+        d.buildRuns = d.buildRuns.filter((br) => {
+          const key = `${br.platform}:${br.runId}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        if (d.buildRuns.length < before) {
+          updated = true;
+          log.directive.info(`Deduped ${before - d.buildRuns.length} duplicate build run(s) on ${d.id}`);
+        }
+      }
+
       if (updated) saveDirectives(directives);
     } catch (err) { log.directive.error("build status updater:", err.message); }
   }, 60 * 1000));
@@ -2169,6 +2186,14 @@ async function handleRequest(req, res) {
       return;
     }
     if (!Array.isArray(directive.buildRuns)) directive.buildRuns = [];
+    // Dedup: skip if this (platform, runId) already registered
+    const alreadyExists = directive.buildRuns.some(
+      (br) => br.platform === data.platform && br.runId === data.runId
+    );
+    if (alreadyExists) {
+      sendJSON(res, 200, { ok: true, duplicate: true, buildRuns: directive.buildRuns });
+      return;
+    }
     directive.buildRuns.push({
       platform: data.platform,
       runId: data.runId,

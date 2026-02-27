@@ -1,7 +1,6 @@
 import { useState, useCallback } from "react";
-import { View, Text, Pressable, Alert } from "react-native";
+import { View, Text, Pressable, Alert, Linking } from "react-native";
 import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
 import { fetchDirectiveArtifacts, deployArtifact } from "../../lib/bridge-api";
 import { relativeTime } from "../../lib/directive-constants";
 
@@ -60,18 +59,32 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
 
       setDownloadProgress(1);
 
-      // Open share sheet so user can save to Files (iOS → install via AltStore)
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(result.uri, {
-          mimeType: fileName.endsWith(".ipa")
-            ? "application/octet-stream"
-            : "application/vnd.android.package-archive",
-          dialogTitle: `Save ${fileName}`,
-        });
-      } else {
-        Alert.alert("Downloaded", `Saved to app storage:\n${fileName}`);
+      // Try share sheet (expo-sharing) — dynamic import so old builds without native module don't crash
+      try {
+        const Sharing = await import("expo-sharing");
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(result.uri, {
+            mimeType: fileName.endsWith(".ipa")
+              ? "application/octet-stream"
+              : "application/vnd.android.package-archive",
+            dialogTitle: `Save ${fileName}`,
+          });
+          return;
+        }
+      } catch {
+        // expo-sharing native module not available — fall through to Linking fallback
       }
+
+      // Fallback: open URL in browser so user can download from Safari
+      Alert.alert(
+        "Download Complete",
+        `${fileName} downloaded.\n\nShare sheet unavailable — opening in browser instead. Save the file to Files, then install via AltStore.`,
+        [
+          { text: "OK", style: "cancel" },
+          { text: "Open in Browser", onPress: () => Linking.openURL(url) },
+        ]
+      );
     } catch (err: any) {
       Alert.alert("Download Failed", err.message);
     } finally {
