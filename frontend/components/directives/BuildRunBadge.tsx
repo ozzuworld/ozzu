@@ -47,14 +47,21 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
       const sizeMB = (artifact.sizeBytes / 1048576).toFixed(1);
 
       if (run.platform === "ios") {
-        // iOS: open download URL in browser so user can install the IPA
+        // iOS: try local cached IPA first (fast, no GitHub redirect), fall back to artifact download
         Alert.alert(
           "Download IPA",
           `${artifact.name}\n${sizeMB} MB\n\nDownload to this device?`,
           [
             { text: "Cancel", style: "cancel" },
             {
-              text: "Download",
+              text: "Download (Cached)",
+              onPress: () => {
+                const downloadUrl = `${BRIDGE_URL}/api/artifacts/latest/ipa`;
+                Linking.openURL(downloadUrl);
+              },
+            },
+            {
+              text: "Download (GitHub)",
               onPress: () => {
                 const downloadUrl = `${BRIDGE_URL}/api/artifacts/${artifact.artifactId}/download`;
                 Linking.openURL(downloadUrl);

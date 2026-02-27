@@ -2280,6 +2280,15 @@ async function handleRequest(req, res) {
       const ext = targetFile.endsWith(".ipa") ? "ipa" : "apk";
       const contentType = ext === "ipa" ? "application/octet-stream" : "application/vnd.android.package-archive";
 
+      // Cache locally for future direct downloads
+      const artifactsDir = path.resolve(__dirname, "../../artifacts");
+      try {
+        if (!fs.existsSync(artifactsDir)) fs.mkdirSync(artifactsDir, { recursive: true });
+        const cacheName = ext === "ipa" ? "ozzu-latest.ipa" : "ozzu-latest.apk";
+        fs.copyFileSync(filePath, path.join(artifactsDir, cacheName));
+        log.bridge.info(`[artifact-download] Cached ${cacheName} (${(stat.size / 1048576).toFixed(1)} MB)`);
+      } catch { /* cache failure is non-fatal */ }
+
       res.writeHead(200, {
         "Content-Type": contentType,
         "Content-Disposition": `attachment; filename="${targetFile}"`,
@@ -2288,9 +2297,40 @@ async function handleRequest(req, res) {
       const stream = fs.createReadStream(filePath);
       stream.pipe(res);
     } catch (err) {
-      log.bridge.warn(`[artifact-download] Failed: ${err.message}`);
+      log.bridge.warn(`[artifact-download] GitHub fetch failed: ${err.message}`);
       sendJSON(res, 500, { error: `Download failed: ${err.message}` });
     }
+    return;
+  }
+
+  // GET /api/artifacts/latest/:type — Download latest cached IPA or APK directly
+  const latestArtifactMatch = pathname.match(/^\/api\/artifacts\/latest\/(ipa|apk)$/);
+  if (req.method === "GET" && latestArtifactMatch) {
+    const type = latestArtifactMatch[1];
+    const fs = require("fs");
+    const artifactsDir = path.resolve(__dirname, "../../artifacts");
+    const fileName = type === "ipa" ? "ozzu-latest.ipa" : "ozzu-latest.apk";
+    const filePath = path.join(artifactsDir, fileName);
+
+    if (!fs.existsSync(filePath)) {
+      sendJSON(res, 404, { error: `No cached ${type.toUpperCase()} available. Wait for a CI build to complete.` });
+      return;
+    }
+
+    const stat = fs.statSync(filePath);
+    const contentType = type === "ipa" ? "application/octet-stream" : "application/vnd.android.package-archive";
+    const age = Date.now() - stat.mtimeMs;
+    const ageHours = (age / 3600000).toFixed(1);
+
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Content-Disposition": `attachment; filename="${fileName}"`,
+      "Content-Length": stat.size,
+      "X-Artifact-Age-Hours": ageHours,
+      "X-Artifact-Cached-At": new Date(stat.mtimeMs).toISOString(),
+    });
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
     return;
   }
 

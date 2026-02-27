@@ -1501,12 +1501,16 @@ function smartDeploy(directive) {
         `test "$APK_SIZE" -gt 1000000 || { echo "ERROR: APK too small ($APK_SIZE bytes), likely corrupt"; exit 1; }`,
         `rm -rf /tmp/ozzu-apk-verify`,
         `./scripts/deploy.sh`,
+        `echo "Caching APK artifact locally..."`,
+        `gh run download "$RUN_ID" --name ozzu-android --dir /tmp/ozzu-apk-cache -R ozzuworld/ozzu`,
+        `test -f /tmp/ozzu-apk-cache/app-debug.apk && cp /tmp/ozzu-apk-cache/app-debug.apk ${WORKDIR}/artifacts/ozzu-latest.apk && echo "APK cached" || echo "APK cache skipped"`,
+        `rm -rf /tmp/ozzu-apk-cache`,
       ].join(" && "));
     }
 
     // iOS IPA build — ALWAYS build iOS alongside Android
     // iPhone can't do OTA, so every frontend change needs a full rebuild
-    // IPA is downloadable from directive dashboard — no dev-01 needed
+    // IPA is cached locally after build for direct download from dashboard
     spawnDetachedDeploy("ios", [
       `cd ${WORKDIR}`,
       `gh workflow run build-ios.yml`,
@@ -1515,6 +1519,11 @@ function smartDeploy(directive) {
       `echo "iOS build started: run $RUN_ID"`,
       directive.id ? `curl -s -X POST ${BRIDGE}/directives/${directive.id}/build-run -H 'Content-Type: application/json' -d "{\\"platform\\":\\"ios\\",\\"runId\\":$RUN_ID,\\"url\\":\\"https://github.com/ozzuworld/ozzu/actions/runs/$RUN_ID\\"}" || true` : `echo "No directive ID — skipping build-run registration"`,
       `gh run watch "$RUN_ID" --exit-status`,
+      `echo "Caching IPA artifact locally..."`,
+      `rm -rf /tmp/ozzu-ipa-cache && gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ipa-cache -R ozzuworld/ozzu`,
+      `IPA_FILE=$(find /tmp/ozzu-ipa-cache -name "*.ipa" 2>/dev/null | head -1)`,
+      `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
+      `rm -rf /tmp/ozzu-ipa-cache`,
     ].join(" && "));
   } else {
     log("JS-only changes — deploying via OTA (Android) + CI build (iOS)");
@@ -1535,7 +1544,7 @@ function smartDeploy(directive) {
     });
 
     // iOS: always needs a full rebuild (no OTA for sideloaded apps)
-    // IPA is downloadable from directive dashboard — no dev-01 needed
+    // IPA is cached locally after build for direct download from dashboard
     spawnDetachedDeploy("ios", [
       `cd ${WORKDIR}`,
       `gh workflow run build-ios.yml`,
@@ -1544,6 +1553,11 @@ function smartDeploy(directive) {
       `echo "iOS build started: run $RUN_ID"`,
       directive.id ? `curl -s -X POST ${BRIDGE}/directives/${directive.id}/build-run -H 'Content-Type: application/json' -d "{\\"platform\\":\\"ios\\",\\"runId\\":$RUN_ID,\\"url\\":\\"https://github.com/ozzuworld/ozzu/actions/runs/$RUN_ID\\"}" || true` : `echo "No directive ID — skipping build-run registration"`,
       `gh run watch "$RUN_ID" --exit-status`,
+      `echo "Caching IPA artifact locally..."`,
+      `rm -rf /tmp/ozzu-ipa-cache && gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ipa-cache -R ozzuworld/ozzu`,
+      `IPA_FILE=$(find /tmp/ozzu-ipa-cache -name "*.ipa" 2>/dev/null | head -1)`,
+      `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
+      `rm -rf /tmp/ozzu-ipa-cache`,
     ].join(" && "));
   }
 
