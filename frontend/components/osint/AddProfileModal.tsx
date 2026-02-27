@@ -105,7 +105,19 @@ export function AddProfileModal({ visible, onClose, onCreated }: Props) {
       setSubmitting(true);
       setError(null);
       try {
-        const base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
+        let base64: string;
+        try {
+          base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
+        } catch (readErr: any) {
+          setError("Failed to read image: " + (readErr.message || "file may be missing or inaccessible"));
+          setSubmitting(false);
+          return;
+        }
+        if (!base64 || typeof base64 !== "string" || base64.length < 100) {
+          setError("Image data is empty or invalid. Try selecting a different image.");
+          setSubmitting(false);
+          return;
+        }
         await uploadOsintImage(label.trim(), base64, imageFilename || undefined);
         setLabel("");
         setImageUri(null);
@@ -114,7 +126,7 @@ export function AddProfileModal({ visible, onClose, onCreated }: Props) {
         onCreated();
         onClose();
       } catch (err: any) {
-        setError(err.message);
+        setError(err.message || "Upload failed");
       } finally {
         setSubmitting(false);
       }
