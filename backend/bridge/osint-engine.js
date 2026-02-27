@@ -239,19 +239,14 @@ let _alertBroadcast = null;
 function setAlertBroadcast(fn) { _alertBroadcast = fn; }
 
 async function detectDeltasAndAlert(profileId, scanId, scoreBefore) {
-  // Get all findings for this profile
-  const allFindings = await db.getOsintFindings({ profileId, limit: 1000 });
-  if (!allFindings || allFindings.length === 0) return;
-
-  // Mark findings from this scan as first_seen if their title+module combo is new
-  const currentScanFindings = allFindings.filter((f) => f.scan_id === scanId);
-  const previousFindings = allFindings.filter((f) => f.scan_id !== scanId);
-  const prevKeys = new Set(previousFindings.map((f) => `${f.module}:${f.title}`));
+  // Get all findings for this scan (upsert updates scan_id on existing rows)
+  const currentScanFindings = await db.getOsintFindings({ profileId, scanId, limit: 1000 });
+  if (!currentScanFindings || currentScanFindings.length === 0) return;
 
   let newCount = 0;
   for (const f of currentScanFindings) {
-    const key = `${f.module}:${f.title}`;
-    const isNew = !prevKeys.has(key);
+    // A finding is genuinely new if it has no first_seen_at (never seen before)
+    const isNew = !f.first_seen_at;
     if (isNew) {
       newCount++;
       // Update is_new flag
@@ -259,7 +254,7 @@ async function detectDeltasAndAlert(profileId, scanId, scoreBefore) {
         await db.query(`UPDATE osint_findings SET is_new = true, first_seen_at = NOW() WHERE id = $1`, [f.id]);
       } catch {}
 
-      // Generate alert for new critical/high findings
+      // Generate alert for new critical/high findings (dedup handled in createOsintAlert)
       if (f.severity === "critical" || f.severity === "high") {
         const alert = await db.createOsintAlert({
           profile_id: profileId,

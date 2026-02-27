@@ -991,7 +991,7 @@ async function getOsintFindingCounts() {
   if (!_pgConnected) return [];
   const res = await query(
     `SELECT severity, COUNT(*) as count FROM osint_findings
-     WHERE status != 'false_positive'
+     WHERE status NOT IN ('false_positive', 'acknowledged')
      GROUP BY severity`
   );
   return res.rows;
@@ -1419,6 +1419,14 @@ async function deleteOsintSchedule(id) {
 
 async function createOsintAlert(data) {
   if (!_pgConnected) return null;
+  // Dedup: skip if an alert for the same finding_id already exists (within 24h)
+  if (data.finding_id) {
+    const existing = await query(
+      `SELECT id FROM osint_alerts WHERE finding_id = $1 AND created_at > NOW() - INTERVAL '24 hours' LIMIT 1`,
+      [data.finding_id]
+    );
+    if (existing.rows.length > 0) return null;
+  }
   const res = await query(
     `INSERT INTO osint_alerts (profile_id, alert_type, severity, title, description, finding_id)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
