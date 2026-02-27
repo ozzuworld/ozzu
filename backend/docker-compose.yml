@@ -57,6 +57,7 @@ services:
       - /root/.gitconfig:/root/.gitconfig:ro
       - /root/.ssh:/root/.ssh:ro
       - /usr/bin/gh:/usr/local/bin/gh:ro
+      - /usr/bin/docker:/usr/local/bin/docker:ro
       - /tmp/osint-data:/tmp/osint-data
     environment:
       - BRIDGE_PIN=${BRIDGE_PIN:-1234}
