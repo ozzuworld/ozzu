@@ -26,6 +26,7 @@ import {
   fetchOsintReport,
   triggerOsintCorrelation,
   fetchOsintCorrelations,
+  bulkUpdateOsintFindings,
   type OsintProfile,
   type OsintCorrelation,
 } from "../lib/bridge-api";
@@ -104,6 +105,8 @@ export default function OsintScreen() {
   const [correlating, setCorrelating] = useState(false);
   const [groupBy, setGroupBy] = useState<GroupBy>("severity");
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("new");
+  const [bulkUpdating, setBulkUpdating] = useState(false);
   const [profilesExpanded, setProfilesExpanded] = useState(true);
 
   const onRefresh = useCallback(async () => {
@@ -192,9 +195,12 @@ export default function OsintScreen() {
     }
   };
 
-  // Filtered + searched findings
+  // Filtered + searched findings (status filter + text search)
   const filteredFindings = useMemo(() => {
     let ff = findings;
+    if (statusFilter !== "all") {
+      ff = ff.filter((f) => f.status === statusFilter);
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       ff = ff.filter(
@@ -205,7 +211,7 @@ export default function OsintScreen() {
       );
     }
     return ff;
-  }, [findings, searchQuery]);
+  }, [findings, searchQuery, statusFilter]);
 
   // Grouped findings
   const groupedFindings = useMemo(() => {
@@ -833,48 +839,152 @@ export default function OsintScreen() {
           <>
             {findings.length > 0 && (
               <>
-                {/* Status summary strip */}
+                {/* Status filter pills */}
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  style={{ marginBottom: 10 }}
+                  style={{ marginBottom: 8 }}
                 >
-                  <View style={{ flexDirection: "row", gap: 8 }}>
-                    <View style={{ backgroundColor: "#1A1A1A", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
-                      <Text style={{ color: "#E5E5E5", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-                        {findings.length} TOTAL
-                      </Text>
-                    </View>
-                    {Object.entries(statusCounts).map(([status, count]) =>
-                      count > 0 ? (
-                        <View
-                          key={status}
-                          style={{
-                            backgroundColor: `${FINDING_STATUS_COLORS[status] || "#525252"}15`,
-                            paddingHorizontal: 10,
-                            paddingVertical: 4,
+                  <View style={{ flexDirection: "row", gap: 6 }}>
+                    {([
+                      { key: "new", label: "NEW", emoji: "\uD83C\uDD95" },
+                      { key: "acknowledged", label: "ACK", emoji: "\uD83D\uDC41" },
+                      { key: "remediated", label: "FIXED", emoji: "\u2705" },
+                      { key: "false_positive", label: "FP", emoji: "\uD83D\uDEAB" },
+                      { key: "all", label: "ALL", emoji: "" },
+                    ] as const).map((pill) => {
+                      const active = statusFilter === pill.key;
+                      const count = pill.key === "all" ? findings.length : (statusCounts[pill.key] || 0);
+                      const pillColor = pill.key === "all" ? "#525252" : (FINDING_STATUS_COLORS[pill.key] || "#525252");
+                      return (
+                        <Pressable key={pill.key} onPress={() => setStatusFilter(pill.key)}>
+                          <View style={{
+                            backgroundColor: active ? `${pillColor}25` : "#1A1A1A",
+                            borderWidth: 1,
+                            borderColor: active ? pillColor : "#252525",
                             borderRadius: 6,
+                            paddingHorizontal: 10,
+                            paddingVertical: 5,
                             flexDirection: "row",
                             gap: 4,
                             alignItems: "center",
-                          }}
-                        >
-                          <Text style={{ fontSize: 10 }}>{FINDING_STATUS_EMOJI[status]}</Text>
-                          <Text
-                            style={{
-                              color: FINDING_STATUS_COLORS[status] || "#525252",
+                          }}>
+                            {pill.emoji ? <Text style={{ fontSize: 10 }}>{pill.emoji}</Text> : null}
+                            <Text style={{
+                              color: active ? pillColor : "#525252",
                               fontSize: 10,
                               fontFamily: "monospace",
-                              fontWeight: "bold",
-                            }}
-                          >
-                            {count}
-                          </Text>
-                        </View>
-                      ) : null
-                    )}
+                              fontWeight: active ? "bold" : "normal",
+                            }}>
+                              {pill.label} {count}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 </ScrollView>
+
+                {/* Bulk action bar */}
+                {statusFilter === "new" && statusCounts.new > 0 && (
+                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+                    {statusCounts.new > 0 && (statusCounts as any).info !== undefined && findings.filter((f) => f.status === "new" && f.severity === "info").length > 0 && (
+                      <Pressable
+                        disabled={bulkUpdating}
+                        onPress={() => {
+                          const infoCount = findings.filter((f) => f.status === "new" && f.severity === "info").length;
+                          Alert.alert("Acknowledge Info", `Mark ${infoCount} info-level findings as acknowledged?`, [
+                            { text: "Cancel", style: "cancel" },
+                            { text: "ACK ALL INFO", onPress: async () => {
+                              setBulkUpdating(true);
+                              try {
+                                await bulkUpdateOsintFindings({ status: "acknowledged", severity: "info", currentStatus: "new" });
+                                refresh();
+                              } catch (e: any) { Alert.alert("Error", e.message); }
+                              setBulkUpdating(false);
+                            }},
+                          ]);
+                        }}
+                      >
+                        <View style={{ backgroundColor: "#1A1A0A", borderWidth: 1, borderColor: "#444", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
+                          <Text style={{ color: "#EAB308", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                            {bulkUpdating ? "..." : `\uD83D\uDC41 ACK ALL INFO (${findings.filter((f) => f.status === "new" && f.severity === "info").length})`}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    )}
+                    <Pressable
+                      disabled={bulkUpdating}
+                      onPress={() => {
+                        Alert.alert("Acknowledge All", `Mark all ${statusCounts.new} new findings as acknowledged?`, [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "ACK ALL", onPress: async () => {
+                            setBulkUpdating(true);
+                            try {
+                              await bulkUpdateOsintFindings({ status: "acknowledged", currentStatus: "new" });
+                              refresh();
+                            } catch (e: any) { Alert.alert("Error", e.message); }
+                            setBulkUpdating(false);
+                          }},
+                        ]);
+                      }}
+                    >
+                      <View style={{ backgroundColor: "#0A1A1A", borderWidth: 1, borderColor: "#444", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
+                        <Text style={{ color: "#06B6D4", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                          {bulkUpdating ? "..." : `\uD83D\uDC41 ACK ALL (${statusCounts.new})`}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  </View>
+                )}
+                {statusFilter === "acknowledged" && statusCounts.acknowledged > 0 && (
+                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+                    <Pressable
+                      disabled={bulkUpdating}
+                      onPress={() => {
+                        Alert.alert("Fix All", `Mark all ${statusCounts.acknowledged} acknowledged findings as fixed?`, [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "FIXED ALL", onPress: async () => {
+                            setBulkUpdating(true);
+                            try {
+                              await bulkUpdateOsintFindings({ status: "remediated", currentStatus: "acknowledged" });
+                              refresh();
+                            } catch (e: any) { Alert.alert("Error", e.message); }
+                            setBulkUpdating(false);
+                          }},
+                        ]);
+                      }}
+                    >
+                      <View style={{ backgroundColor: "#0A1A0A", borderWidth: 1, borderColor: "#444", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
+                        <Text style={{ color: "#22C55E", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                          {bulkUpdating ? "..." : `\u2705 FIXED ALL (${statusCounts.acknowledged})`}
+                        </Text>
+                      </View>
+                    </Pressable>
+                    <Pressable
+                      disabled={bulkUpdating}
+                      onPress={() => {
+                        Alert.alert("Reopen All", `Reopen all ${statusCounts.acknowledged} acknowledged findings?`, [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "REOPEN ALL", onPress: async () => {
+                            setBulkUpdating(true);
+                            try {
+                              await bulkUpdateOsintFindings({ status: "new", currentStatus: "acknowledged" });
+                              refresh();
+                            } catch (e: any) { Alert.alert("Error", e.message); }
+                            setBulkUpdating(false);
+                          }},
+                        ]);
+                      }}
+                    >
+                      <View style={{ backgroundColor: "#1A0A0A", borderWidth: 1, borderColor: "#444", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
+                        <Text style={{ color: "#EF4444", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                          {bulkUpdating ? "..." : `\uD83C\uDD95 REOPEN ALL (${statusCounts.acknowledged})`}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  </View>
+                )}
 
                 {/* Search bar */}
                 <View

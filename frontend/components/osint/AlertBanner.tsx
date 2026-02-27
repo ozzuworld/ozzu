@@ -11,15 +11,21 @@ interface Props {
 export function AlertBanner({ alerts, unreadCount, onPress }: Props) {
   if (unreadCount === 0) return null;
 
-  // Find highest severity unread alert
+  // Find highest severity unread alert + count by severity
   const unread = alerts.filter((a) => !a.is_read);
   const severityOrder = ["critical", "high", "medium", "low", "info"];
   let highestSeverity = "info";
+  const sevCounts: Record<string, number> = {};
   for (const a of unread) {
+    sevCounts[a.severity] = (sevCounts[a.severity] || 0) + 1;
     if (severityOrder.indexOf(a.severity) < severityOrder.indexOf(highestSeverity)) {
       highestSeverity = a.severity;
     }
   }
+  const sevEmojis: Record<string, string> = { critical: "\uD83D\uDD34", high: "\uD83D\uDFE0", medium: "\uD83D\uDFE1", low: "\uD83D\uDD35", info: "\u26AA" };
+  const breakdownParts = severityOrder
+    .filter((s) => sevCounts[s])
+    .map((s) => `${sevEmojis[s] || ""} ${sevCounts[s]} ${s}`);
 
   const bgColor = highestSeverity === "critical" ? "#7F1D1D" :
     highestSeverity === "high" ? "#7C2D12" :
@@ -52,7 +58,7 @@ export function AlertBanner({ alerts, unreadCount, onPress }: Props) {
             fontSize: 12,
             fontWeight: "700",
           }}>
-            {unreadCount} UNREAD ALERT{unreadCount > 1 ? "S" : ""}
+            {unreadCount} ALERT{unreadCount > 1 ? "S" : ""}{breakdownParts.length > 0 ? ` | ${breakdownParts.join("  ")}` : ""}
           </Text>
           {latest && (
             <Text style={{

@@ -987,6 +987,31 @@ async function updateOsintFinding(id, status) {
   return res.rows[0] || null;
 }
 
+async function bulkUpdateOsintFindings(newStatus, { findingIds, severity, module, currentStatus } = {}) {
+  if (!_pgConnected) return 0;
+  const validStatuses = ["new", "acknowledged", "remediated", "false_positive"];
+  if (!validStatuses.includes(newStatus)) return 0;
+
+  if (findingIds && findingIds.length > 0) {
+    const res = await query(
+      `UPDATE osint_findings SET status = $1, updated_at = NOW() WHERE id = ANY($2) RETURNING id`,
+      [newStatus, findingIds]
+    );
+    return res.rowCount;
+  }
+
+  // Filter-based bulk update
+  const params = [newStatus];
+  const clauses = [];
+  if (severity) { params.push(severity); clauses.push(`severity = $${params.length}`); }
+  if (module) { params.push(module); clauses.push(`module = $${params.length}`); }
+  if (currentStatus) { params.push(currentStatus); clauses.push(`status = $${params.length}`); }
+  if (clauses.length === 0) return 0; // safety: require at least one filter
+  const sql = `UPDATE osint_findings SET status = $1, updated_at = NOW() WHERE ${clauses.join(" AND ")} RETURNING id`;
+  const res = await query(sql, params);
+  return res.rowCount;
+}
+
 async function getOsintFindingCounts() {
   if (!_pgConnected) return [];
   const res = await query(
@@ -1821,6 +1846,7 @@ module.exports = {
   upsertOsintFinding,
   getOsintFindings,
   updateOsintFinding,
+  bulkUpdateOsintFindings,
   getOsintFindingCounts,
   recordOsintScore,
   getOsintScoreHistory,

@@ -6273,6 +6273,29 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
+  // PATCH /osint/findings/bulk — bulk update finding statuses
+  if (req.method === "PATCH" && pathname === "/osint/findings/bulk") {
+    try {
+      const body = await parseBody(req);
+      const validStatuses = ["new", "acknowledged", "remediated", "false_positive"];
+      if (!body.status || !validStatuses.includes(body.status)) {
+        sendJSON(res, 400, { error: "Invalid status. Must be: new, acknowledged, remediated, false_positive" });
+        return;
+      }
+      const updated = await db.bulkUpdateOsintFindings(body.status, {
+        findingIds: body.findingIds,
+        severity: body.severity,
+        module: body.module,
+        currentStatus: body.currentStatus,
+      });
+      sendJSON(res, 200, { ok: true, updated });
+    } catch (err) {
+      log.bridge.error("OSINT bulk update findings error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
   // PATCH /osint/findings/:id — update finding status
   const osintFindingMatch = pathname.match(/^\/osint\/findings\/(\d+)$/);
   if (req.method === "PATCH" && osintFindingMatch) {

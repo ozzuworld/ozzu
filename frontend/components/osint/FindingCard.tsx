@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, Pressable, LayoutAnimation, Platform, UIManager, Linking } from "react-native";
+import { View, Text, Pressable, LayoutAnimation, Platform, UIManager, Linking, Alert } from "react-native";
 import { updateOsintFinding, type OsintFinding } from "../../lib/bridge-api";
 import {
   SEVERITY_EMOJI,
@@ -36,6 +36,22 @@ export function FindingCard({ finding, onStatusChange }: Props) {
     setExpanded(!expanded);
   };
 
+  const handleLongPress = () => {
+    const options: Array<{ text: string; onPress?: () => void; style?: "cancel" | "destructive" }> = [];
+    if (finding.status === "new") {
+      options.push({ text: "👁 Acknowledge", onPress: () => handleStatusUpdate("acknowledged") });
+      options.push({ text: "🚫 False Positive", onPress: () => handleStatusUpdate("false_positive") });
+      options.push({ text: "✅ Fixed", onPress: () => handleStatusUpdate("remediated") });
+    } else if (finding.status === "acknowledged") {
+      options.push({ text: "✅ Fixed", onPress: () => handleStatusUpdate("remediated") });
+      options.push({ text: "🚫 False Positive", onPress: () => handleStatusUpdate("false_positive") });
+    } else {
+      options.push({ text: "🆕 Reopen", onPress: () => handleStatusUpdate("new") });
+    }
+    options.push({ text: "Cancel", style: "cancel" });
+    Alert.alert("Quick Action", finding.title, options);
+  };
+
   const handleStatusUpdate = async (newStatus: string) => {
     setUpdating(true);
     try {
@@ -58,7 +74,7 @@ export function FindingCard({ finding, onStatusChange }: Props) {
   };
 
   return (
-    <Pressable onPress={toggle}>
+    <Pressable onPress={toggle} onLongPress={handleLongPress}>
       <View
         style={{
           backgroundColor: "#1A1A1A",

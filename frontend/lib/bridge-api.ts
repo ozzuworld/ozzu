@@ -552,6 +552,22 @@ export async function updateOsintFinding(
   return res.json();
 }
 
+export async function bulkUpdateOsintFindings(body: {
+  status: string;
+  findingIds?: number[];
+  severity?: string;
+  module?: string;
+  currentStatus?: string;
+}): Promise<{ ok: boolean; updated: number }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/findings/bulk`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Bulk update findings error: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchOsintScore(): Promise<ExposureScore> {
   const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/score`);
   if (!res.ok) throw new Error(`Fetch score error: ${res.status}`);
