@@ -1,8 +1,6 @@
 import ExpoModulesCore
 import UIKit
-
-// Meta DAT SDK imports (uncomment when SPM dependency is available):
-// import MWDATCore
+import MWDATCore
 
 /// Handles URL callbacks from the Meta AI app during device registration.
 /// The Meta DAT SDK uses a URL scheme callback to complete OAuth registration.
@@ -15,11 +13,9 @@ public class GlassesAppDelegate: ExpoAppDelegateSubscriber {
         // Check if this URL is a Meta Wearables callback
         if url.absoluteString.contains("metaWearablesAction") ||
            url.scheme == "ozzu" {
-            // TODO: Uncomment when SDK is available:
-            // Task {
-            //     _ = try? await Wearables.shared.handleUrl(url)
-            // }
-            print("[ExpoGlasses] Handled URL callback: \(url.scheme ?? "unknown")")
+            Task {
+                _ = try? await Wearables.shared.handleUrl(url)
+            }
             return true
         }
         return false

@@ -9,6 +9,7 @@ const {
   withInfoPlist,
   withProjectBuildGradle,
   withGradleProperties,
+  withXcodeProject,
 } = require("expo/config-plugins");
 
 function withMetaDATAndroid(config) {
@@ -148,10 +149,95 @@ function withMetaDATMinSdk(config) {
 // Facebook classes (fbjni, fbcore, proguard-annotations) and is
 // included as a local file in expo-glasses/android/libs/.
 
+function withMetaDATSPM(config) {
+  return withXcodeProject(config, (config) => {
+    const project = config.modResults;
+    const pbx = project.hash.project.objects;
+
+    // Skip if already added
+    if (pbx.XCRemoteSwiftPackageReference) {
+      const existing = Object.values(pbx.XCRemoteSwiftPackageReference).find(
+        (ref) =>
+          ref.repositoryURL &&
+          ref.repositoryURL.includes("meta-wearables-dat-ios")
+      );
+      if (existing) return config;
+    }
+
+    const pkgRefUuid = project.generateUuid();
+    const mwdatCoreUuid = project.generateUuid();
+    const mwdatCameraUuid = project.generateUuid();
+
+    // 1. Add XCRemoteSwiftPackageReference
+    if (!pbx.XCRemoteSwiftPackageReference) {
+      pbx.XCRemoteSwiftPackageReference = {};
+    }
+    pbx.XCRemoteSwiftPackageReference[pkgRefUuid] = {
+      isa: "XCRemoteSwiftPackageReference",
+      repositoryURL:
+        "https://github.com/facebook/meta-wearables-dat-ios",
+      requirement: {
+        kind: "upToNextMajorVersion",
+        minimumVersion: "0.4.0",
+      },
+    };
+    pbx.XCRemoteSwiftPackageReference[`${pkgRefUuid}_comment`] =
+      'XCRemoteSwiftPackageReference "meta-wearables-dat-ios"';
+
+    // 2. Add XCSwiftPackageProductDependency
+    if (!pbx.XCSwiftPackageProductDependency) {
+      pbx.XCSwiftPackageProductDependency = {};
+    }
+    pbx.XCSwiftPackageProductDependency[mwdatCoreUuid] = {
+      isa: "XCSwiftPackageProductDependency",
+      package: pkgRefUuid,
+      productName: "MWDATCore",
+    };
+    pbx.XCSwiftPackageProductDependency[`${mwdatCoreUuid}_comment`] =
+      "MWDATCore";
+    pbx.XCSwiftPackageProductDependency[mwdatCameraUuid] = {
+      isa: "XCSwiftPackageProductDependency",
+      package: pkgRefUuid,
+      productName: "MWDATCamera",
+    };
+    pbx.XCSwiftPackageProductDependency[`${mwdatCameraUuid}_comment`] =
+      "MWDATCamera";
+
+    // 3. Add package reference to root project
+    const projectUuid = project.getFirstProject().uuid;
+    const projectObj = pbx.PBXProject[projectUuid];
+    if (!projectObj.packageReferences) {
+      projectObj.packageReferences = [];
+    }
+    projectObj.packageReferences.push({
+      value: pkgRefUuid,
+      comment: 'XCRemoteSwiftPackageReference "meta-wearables-dat-ios"',
+    });
+
+    // 4. Add product dependencies to main target
+    const targetUuid = project.getFirstTarget().uuid;
+    const nativeTarget = pbx.PBXNativeTarget[targetUuid];
+    if (!nativeTarget.packageProductDependencies) {
+      nativeTarget.packageProductDependencies = [];
+    }
+    nativeTarget.packageProductDependencies.push({
+      value: mwdatCoreUuid,
+      comment: "MWDATCore",
+    });
+    nativeTarget.packageProductDependencies.push({
+      value: mwdatCameraUuid,
+      comment: "MWDATCamera",
+    });
+
+    return config;
+  });
+}
+
 module.exports = function withMetaDAT(config) {
   config = withMetaDATAndroid(config);
   config = withMetaDATMaven(config);
   config = withMetaDATMinSdk(config);
   config = withMetaDATiOS(config);
+  config = withMetaDATSPM(config);
   return config;
 };

@@ -1,24 +1,21 @@
 import ExpoModulesCore
 import UIKit
-
-// Meta DAT SDK imports (uncomment when SPM dependency is available):
-// import MWDATCore
-// import MWDATCamera
+import MWDATCore
+import MWDATCamera
 
 /// GlassesModule — Expo native module wrapping Meta's Wearables DAT SDK (iOS).
-///
-/// When the actual DAT SDK is available via SPM (MWDATCore + MWDATCamera),
-/// uncomment the SDK imports and implementation blocks. The module currently
-/// provides the full API surface with stub implementations so the JS layer
-/// and Glasses screen can be built and tested without the SDK present.
 public class GlassesModule: Module {
     private static let jpegQuality: CGFloat = 0.6
     private static let defaultFrameRate = 15
 
-    // SDK objects (uncomment with real SDK):
-    // private var streamSession: StreamSession?
-    // private var registrationTask: Task<Void, Never>?
-    // private var devicesTask: Task<Void, Never>?
+    private var streamSession: StreamSession?
+    private var deviceSelector: AutoDeviceSelector?
+
+    private var registrationToken: AnyListenerToken?
+    private var devicesToken: AnyListenerToken?
+    private var stateToken: AnyListenerToken?
+    private var frameToken: AnyListenerToken?
+    private var photoToken: AnyListenerToken?
 
     private var connectionState = "disconnected"
     private var streaming = false
@@ -38,10 +35,7 @@ public class GlassesModule: Module {
         // ── Availability check ──
 
         Function("isAvailable") { () -> Bool in
-            if #available(iOS 17.0, *) {
-                return true
-            }
-            return false
+            return true
         }
 
         // ── Registration ──
@@ -49,37 +43,33 @@ public class GlassesModule: Module {
         AsyncFunction("initialize") { () -> Bool in
             if self.initialized { return true }
 
-            guard #available(iOS 17.0, *) else {
-                self.sendEvent("onError", [
-                    "code": "UNSUPPORTED_DEVICE",
-                    "message": "DAT SDK requires iOS 17+"
-                ])
-                return false
-            }
-
             do {
-                // TODO: Replace with actual SDK call when SPM dependency is available:
-                // try Wearables.configure()
-                //
-                // // Collect registration state changes
-                // self.registrationTask = Task {
-                //     for await state in Wearables.shared.registrationStateStream() {
-                //         let stateStr: String
-                //         switch state {
-                //         case .connected: stateStr = "connected"
-                //         case .connecting: stateStr = "connecting"
-                //         case .disconnected: stateStr = "disconnected"
-                //         default: stateStr = "unavailable"
-                //         }
-                //         self.connectionState = stateStr
-                //         self.sendEvent("onConnectionChanged", ["state": stateStr])
-                //     }
-                // }
+                try Wearables.configure()
+
+                // Listen for registration state changes
+                self.registrationToken = Wearables.shared.registrationStatePublisher.listen { [weak self] state in
+                    guard let self = self else { return }
+                    let stateStr: String
+                    switch state {
+                    case .registered:
+                        stateStr = "connected"
+                    case .registering:
+                        stateStr = "connecting"
+                    case .unregistered:
+                        stateStr = "disconnected"
+                    case .unregistering:
+                        stateStr = "disconnected"
+                    @unknown default:
+                        stateStr = "unavailable"
+                    }
+                    self.connectionState = stateStr
+                    self.sendEvent("onConnectionChanged", ["state": stateStr])
+                }
 
                 self.initialized = true
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
-                print("[ExpoGlasses] Initialized (stub mode — SDK not yet linked)")
+                print("[ExpoGlasses] Initialized with Meta DAT SDK v0.4.0")
                 return true
             } catch {
                 print("[ExpoGlasses] Initialize failed: \(error)")
@@ -104,10 +94,7 @@ public class GlassesModule: Module {
                 self.connectionState = "connecting"
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
 
-                // TODO: Replace with actual SDK call:
-                // try await Wearables.shared.startRegistration()
-
-                print("[ExpoGlasses] registerDevice called (stub)")
+                try Wearables.shared.startRegistration()
             } catch {
                 print("[ExpoGlasses] Registration failed: \(error)")
                 self.connectionState = "disconnected"
@@ -120,12 +107,12 @@ public class GlassesModule: Module {
 
         AsyncFunction("unregisterDevice") {
             do {
-                // TODO: Replace with actual SDK call:
-                // try await Wearables.shared.startUnregistration()
-
+                if self.streaming {
+                    await self.stopStream()
+                }
+                try Wearables.shared.startUnregistration()
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
-                print("[ExpoGlasses] unregisterDevice called (stub)")
             } catch {
                 print("[ExpoGlasses] Unregistration failed: \(error)")
                 self.sendEvent("onError", [
@@ -154,70 +141,91 @@ public class GlassesModule: Module {
                 return
             }
 
-            let quality = options["quality"] as? String ?? "medium"
+            let qualityStr = options["quality"] as? String ?? "medium"
             let frameRate = options["frameRate"] as? Int ?? GlassesModule.defaultFrameRate
 
-            do {
-                // TODO: Replace with actual SDK call:
-                // let config = StreamSessionConfig(
-                //     videoCodec: .h264,
-                //     resolution: quality == "high" ? .high : quality == "low" ? .low : .medium,
-                //     frameRate: min(max(frameRate, 2), 30)
-                // )
-                // self.streamSession = StreamSession(config: config)
-                //
-                // self.streamSession?.addVideoFrameListener { [weak self] frame in
-                //     guard let self = self else { return }
-                //     if let image = frame.image,
-                //        let jpegData = image.jpegData(compressionQuality: GlassesModule.jpegQuality) {
-                //         let base64 = jpegData.base64EncodedString()
-                //         self.sendEvent("onVideoFrame", [
-                //             "data": base64,
-                //             "width": image.size.width,
-                //             "height": image.size.height,
-                //             "timestamp": frame.timestamp
-                //         ])
-                //     }
-                // }
-                //
-                // self.streamSession?.addStateListener { [weak self] state in
-                //     self?.sendEvent("onStreamStateChanged", ["state": "\(state)"])
-                // }
-                //
-                // try await self.streamSession?.start()
+            let resolution: StreamingResolution
+            switch qualityStr {
+            case "high": resolution = .high
+            case "low": resolution = .low
+            default: resolution = .medium
+            }
 
-                self.streaming = true
-                self.sendEvent("onStreamStateChanged", ["state": "started"])
-                print("[ExpoGlasses] startVideoStream: quality=\(quality), frameRate=\(frameRate) (stub)")
-            } catch {
-                print("[ExpoGlasses] startVideoStream failed: \(error)")
-                self.sendEvent("onError", [
-                    "code": "STREAM_FAILED",
-                    "message": error.localizedDescription
+            let config = StreamSessionConfig(
+                videoCodec: .raw,
+                resolution: resolution,
+                frameRate: frameRate
+            )
+
+            self.deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
+            let session = StreamSession(
+                streamSessionConfig: config,
+                deviceSelector: self.deviceSelector!
+            )
+            self.streamSession = session
+
+            // Listen for state changes
+            self.stateToken = session.statePublisher.listen { [weak self] state in
+                guard let self = self else { return }
+                let stateStr: String
+                switch state {
+                case .stopped:
+                    stateStr = "stopped"
+                    self.streaming = false
+                case .waitingForDevice:
+                    stateStr = "waiting"
+                case .starting:
+                    stateStr = "starting"
+                case .streaming:
+                    stateStr = "started"
+                    self.streaming = true
+                case .paused:
+                    stateStr = "paused"
+                case .stopping:
+                    stateStr = "stopping"
+                @unknown default:
+                    stateStr = "unknown"
+                }
+                self.sendEvent("onStreamStateChanged", ["state": stateStr])
+            }
+
+            // Listen for video frames
+            self.frameToken = session.videoFramePublisher.listen { [weak self] frame in
+                guard let self = self else { return }
+                guard let image = frame.makeUIImage(),
+                      let jpegData = image.jpegData(compressionQuality: GlassesModule.jpegQuality) else {
+                    return
+                }
+                let base64 = jpegData.base64EncodedString()
+                self.sendEvent("onVideoFrame", [
+                    "data": base64,
+                    "width": Int(image.size.width),
+                    "height": Int(image.size.height),
+                    "timestamp": Int(Date().timeIntervalSince1970 * 1000)
                 ])
             }
+
+            // Listen for photo captures
+            self.photoToken = session.photoDataPublisher.listen { [weak self] photoData in
+                guard let self = self else { return }
+                let base64 = Data(photoData.bytes).base64EncodedString()
+                self.sendEvent("onPhotoCaptured", [
+                    "data": base64,
+                    "format": "jpeg"
+                ])
+            }
+
+            // Start the stream
+            await session.start()
+            print("[ExpoGlasses] Stream started: quality=\(qualityStr), frameRate=\(frameRate)")
         }
 
         AsyncFunction("stopVideoStream") {
-            do {
-                // TODO: Replace with actual SDK call:
-                // try await self.streamSession?.stop()
-                // self.streamSession = nil
-
-                self.streaming = false
-                self.sendEvent("onStreamStateChanged", ["state": "stopped"])
-                print("[ExpoGlasses] stopVideoStream (stub)")
-            } catch {
-                print("[ExpoGlasses] stopVideoStream failed: \(error)")
-                self.sendEvent("onError", [
-                    "code": "STOP_FAILED",
-                    "message": error.localizedDescription
-                ])
-            }
+            await self.stopStream()
         }
 
         AsyncFunction("capturePhoto") { () -> String? in
-            guard self.streaming else {
+            guard let session = self.streamSession, self.streaming else {
                 self.sendEvent("onError", [
                     "code": "NO_STREAM",
                     "message": "Start a video stream before capturing photos"
@@ -225,33 +233,9 @@ public class GlassesModule: Module {
                 return nil
             }
 
-            do {
-                // TODO: Replace with actual SDK call:
-                // let photo = try await self.streamSession?.capturePhoto()
-                // if let image = photo?.image,
-                //    let jpegData = image.jpegData(compressionQuality: 0.85) {
-                //     let base64 = jpegData.base64EncodedString()
-                //     self.sendEvent("onPhotoCaptured", [
-                //         "data": base64,
-                //         "format": "jpeg"
-                //     ])
-                //     return base64
-                // }
-
-                print("[ExpoGlasses] capturePhoto (stub — no real photo)")
-                self.sendEvent("onError", [
-                    "code": "STUB_MODE",
-                    "message": "Photo capture unavailable in stub mode"
-                ])
-                return nil
-            } catch {
-                print("[ExpoGlasses] capturePhoto failed: \(error)")
-                self.sendEvent("onError", [
-                    "code": "CAPTURE_FAILED",
-                    "message": error.localizedDescription
-                ])
-                return nil
-            }
+            session.capturePhoto(format: .jpeg)
+            print("[ExpoGlasses] Photo capture triggered")
+            return nil
         }
 
         // ── Lifecycle ──
@@ -261,20 +245,32 @@ public class GlassesModule: Module {
         }
     }
 
+    private func stopStream() async {
+        stateToken = nil
+        frameToken = nil
+        photoToken = nil
+        await streamSession?.stop()
+        streamSession = nil
+        deviceSelector = nil
+        streaming = false
+        sendEvent("onStreamStateChanged", ["state": "stopped"])
+        print("[ExpoGlasses] Stream stopped")
+    }
+
     private func handleBackground() {
         if streaming {
-            // Stop streaming when app enters background to conserve resources
-            streaming = false
-            // streamSession?.stop()
-            // streamSession = nil
-            sendEvent("onStreamStateChanged", ["state": "stopped"])
+            Task {
+                await self.stopStream()
+            }
         }
     }
 
     deinit {
-        // registrationTask?.cancel()
-        // devicesTask?.cancel()
-        // streamSession?.stop()
+        registrationToken = nil
+        devicesToken = nil
+        stateToken = nil
+        frameToken = nil
+        photoToken = nil
         streaming = false
         initialized = false
     }
