@@ -35,6 +35,24 @@ osintEngine.registerModule(require("./osint-modules/secret-scanner"));
 osintEngine.registerModule(require("./osint-modules/exif-extract"));
 osintEngine.registerModule(require("./osint-modules/reverse-image"));
 osintEngine.registerModule(require("./osint-modules/avatar-compare"));
+// CLI-based modules (Epic 6) — run in osint-tools Docker container
+osintEngine.registerModule(require("./osint-modules/sherlock-cli"));
+osintEngine.registerModule(require("./osint-modules/maigret-cli"));
+osintEngine.registerModule(require("./osint-modules/holehe-cli"));
+osintEngine.registerModule(require("./osint-modules/phoneinfoga-cli"));
+osintEngine.registerModule(require("./osint-modules/amass-cli"));
+osintEngine.registerModule(require("./osint-modules/nuclei-cli"));
+osintEngine.registerModule(require("./osint-modules/exiftool-cli"));
+osintEngine.registerModule(require("./osint-modules/h8mail-cli"));
+osintEngine.registerModule(require("./osint-modules/theharvester-cli"));
+// Threat intel feeds (Epic 6)
+osintEngine.registerModule(require("./osint-modules/virustotal-lookup"));
+osintEngine.registerModule(require("./osint-modules/abuseipdb-lookup"));
+osintEngine.registerModule(require("./osint-modules/otx-lookup"));
+osintEngine.registerModule(require("./osint-modules/urlhaus-check"));
+// OSINT monitoring + CLI runner
+const osintMonitor = require("./osint-monitor");
+const cliRunner = require("./osint-cli-runner");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -6319,6 +6337,145 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
+  // ── OSINT Persons (Family Grouping) ──
+
+  // POST /osint/persons — create person
+  if (req.method === "POST" && pathname === "/osint/persons") {
+    try {
+      const body = await parseBody(req);
+      if (!body.name) { sendJSON(res, 400, { error: "name is required" }); return; }
+      const person = await db.createOsintPerson(body);
+      sendJSON(res, 201, { ok: true, person });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/persons — list persons
+  if (req.method === "GET" && pathname === "/osint/persons") {
+    try {
+      const persons = await db.getOsintPersons();
+      sendJSON(res, 200, { ok: true, persons });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // PATCH /osint/persons/:id — update person
+  const personPatchMatch = pathname.match(/^\/osint\/persons\/(\d+)$/);
+  if (req.method === "PATCH" && personPatchMatch) {
+    try {
+      const body = await parseBody(req);
+      const person = await db.updateOsintPerson(parseInt(personPatchMatch[1], 10), body);
+      sendJSON(res, 200, { ok: true, person });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/profiles/:id/assign-person — link profile to person
+  const assignPersonMatch = pathname.match(/^\/osint\/profiles\/(\d+)\/assign-person$/);
+  if (req.method === "POST" && assignPersonMatch) {
+    try {
+      const body = await parseBody(req);
+      const profile = await db.assignProfileToPerson(parseInt(assignPersonMatch[1], 10), body.personId);
+      sendJSON(res, 200, { ok: true, profile });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── OSINT Alerts ──
+
+  // GET /osint/alerts — list alerts
+  if (req.method === "GET" && pathname === "/osint/alerts") {
+    try {
+      const unreadOnly = url.searchParams.get("unread") === "true";
+      const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+      const alerts = await db.getOsintAlerts({ unreadOnly, limit });
+      const unreadCount = await db.getOsintAlertCount();
+      sendJSON(res, 200, { ok: true, alerts, unreadCount });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/alerts/:id/read — mark alert as read
+  const alertReadMatch = pathname.match(/^\/osint\/alerts\/(\d+)\/read$/);
+  if (req.method === "POST" && alertReadMatch) {
+    try {
+      await db.markOsintAlertRead(parseInt(alertReadMatch[1], 10));
+      sendJSON(res, 200, { ok: true });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/alerts/read-all — mark all as read
+  if (req.method === "POST" && pathname === "/osint/alerts/read-all") {
+    try {
+      await db.markAllOsintAlertsRead();
+      sendJSON(res, 200, { ok: true });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/alerts/count — unread count
+  if (req.method === "GET" && pathname === "/osint/alerts/count") {
+    try {
+      const count = await db.getOsintAlertCount();
+      sendJSON(res, 200, { ok: true, unreadCount: count });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── OSINT Schedules (Persistent) ──
+
+  // GET /osint/schedules — list active schedules
+  if (req.method === "GET" && pathname === "/osint/schedules") {
+    try {
+      const schedules = await db.getOsintSchedules();
+      sendJSON(res, 200, { ok: true, schedules });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/schedules — create schedule
+  if (req.method === "POST" && pathname === "/osint/schedules") {
+    try {
+      const body = await parseBody(req);
+      const schedule = await db.upsertOsintSchedule(body);
+      sendJSON(res, 201, { ok: true, schedule });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // DELETE /osint/schedules/:id
+  const schedDeleteMatch = pathname.match(/^\/osint\/schedules\/(\d+)$/);
+  if (req.method === "DELETE" && schedDeleteMatch) {
+    try {
+      await db.deleteOsintSchedule(parseInt(schedDeleteMatch[1], 10));
+      sendJSON(res, 200, { ok: true });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
   // ── OSINT Entity/Graph Endpoints ──
 
   // GET /osint/entities — list entities (optional ?type= filter)
@@ -6733,6 +6890,208 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
       });
     } catch (err) {
       log.bridge.error("OSINT readiness error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── OSINT Alerts API (Epic 6) ──
+
+  // GET /osint/alerts — list alerts
+  if (req.method === "GET" && pathname === "/osint/alerts") {
+    try {
+      const unreadOnly = params.get("unreadOnly") === "true";
+      const profileId = params.get("profileId") ? parseInt(params.get("profileId")) : undefined;
+      const limit = params.get("limit") ? parseInt(params.get("limit")) : 50;
+      const alerts = await db.getOsintAlerts({ unreadOnly, profileId, limit });
+      sendJSON(res, 200, { ok: true, alerts });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // PATCH /osint/alerts/:id — mark alert as read
+  const alertPatchMatch = pathname.match(/^\/osint\/alerts\/(\d+)$/);
+  if (req.method === "PATCH" && alertPatchMatch) {
+    try {
+      await db.markOsintAlertRead(parseInt(alertPatchMatch[1]));
+      sendJSON(res, 200, { ok: true });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/alerts/read-all — mark all alerts as read
+  if (req.method === "POST" && pathname === "/osint/alerts/read-all") {
+    try {
+      await db.markAllOsintAlertsRead();
+      sendJSON(res, 200, { ok: true });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/alerts/unread-count — badge count
+  if (req.method === "GET" && pathname === "/osint/alerts/unread-count") {
+    try {
+      const count = await db.getOsintAlertCount();
+      sendJSON(res, 200, { ok: true, count });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── OSINT Per-Profile Scheduling (Epic 6) ──
+
+  // GET /osint/schedule/:profileId — get per-profile schedule
+  const schedGetMatch = pathname.match(/^\/osint\/schedule\/(\d+)$/);
+  if (req.method === "GET" && schedGetMatch) {
+    try {
+      const profileId = parseInt(schedGetMatch[1]);
+      const schedules = await db.getOsintSchedules();
+      const schedule = schedules.find((s) => s.profile_id === profileId);
+      sendJSON(res, 200, { ok: true, schedule: schedule || null });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/schedule/:profileId — set per-profile schedule
+  const schedPostMatch = pathname.match(/^\/osint\/schedule\/(\d+)$/);
+  if (req.method === "POST" && schedPostMatch) {
+    try {
+      const profileId = parseInt(schedPostMatch[1]);
+      const body = await parseBody(req);
+      const intervalHours = body.intervalHours || 24;
+
+      if (intervalHours <= 0) {
+        await osintMonitor.removeSchedule(profileId);
+        sendJSON(res, 200, { ok: true, message: "Schedule disabled" });
+      } else {
+        const sched = await osintMonitor.addSchedule(profileId, intervalHours, osintEngine.runScan);
+        sendJSON(res, 200, { ok: true, schedule: sched });
+      }
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── OSINT Groups API (Epic 6) ──
+
+  // POST /osint/groups — create group
+  if (req.method === "POST" && pathname === "/osint/groups") {
+    try {
+      const body = await parseBody(req);
+      const group = await db.createOsintGroup(body);
+      sendJSON(res, 200, { ok: true, group });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/groups — list groups with member count + aggregate score
+  if (req.method === "GET" && pathname === "/osint/groups") {
+    try {
+      const groups = await db.getOsintGroups();
+      sendJSON(res, 200, { ok: true, groups });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // PATCH /osint/groups/:id — update group
+  const groupPatchMatch = pathname.match(/^\/osint\/groups\/(\d+)$/);
+  if (req.method === "PATCH" && groupPatchMatch) {
+    try {
+      const body = await parseBody(req);
+      const group = await db.updateOsintGroup(parseInt(groupPatchMatch[1]), body);
+      sendJSON(res, 200, { ok: true, group });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // DELETE /osint/groups/:id — delete group
+  const groupDeleteMatch = pathname.match(/^\/osint\/groups\/(\d+)$/);
+  if (req.method === "DELETE" && groupDeleteMatch) {
+    try {
+      await db.deleteOsintGroup(parseInt(groupDeleteMatch[1]));
+      sendJSON(res, 200, { ok: true });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // PATCH /osint/profiles/:id/group — assign profile to group
+  const profileGroupMatch = pathname.match(/^\/osint\/profiles\/(\d+)\/group$/);
+  if (req.method === "PATCH" && profileGroupMatch) {
+    try {
+      const body = await parseBody(req);
+      const profile = await db.assignProfileToGroup(parseInt(profileGroupMatch[1]), body.groupId || null);
+      sendJSON(res, 200, { ok: true, profile });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/groups/:id/score — aggregate exposure score for group
+  const groupScoreMatch = pathname.match(/^\/osint\/groups\/(\d+)\/score$/);
+  if (req.method === "GET" && groupScoreMatch) {
+    try {
+      const groupId = parseInt(groupScoreMatch[1]);
+      const counts = await db.getOsintGroupScore(groupId);
+      const WEIGHTS = { critical: 10, high: 5, medium: 2, low: 1, info: 0 };
+      let rawScore = 0;
+      let totalFindings = 0;
+      const breakdown = {};
+      for (const row of counts) {
+        const weight = WEIGHTS[row.severity] || 0;
+        const count = parseInt(row.count, 10);
+        rawScore += weight * count;
+        totalFindings += count;
+        breakdown[row.severity] = count;
+      }
+      const score = rawScore === 0 ? 0 : Math.min(100, Math.round(Math.log(rawScore + 1) * 20));
+      sendJSON(res, 200, { ok: true, score, breakdown, totalFindings });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/groups/:id/findings — all findings across group members
+  const groupFindingsMatch = pathname.match(/^\/osint\/groups\/(\d+)\/findings$/);
+  if (req.method === "GET" && groupFindingsMatch) {
+    try {
+      const groupId = parseInt(groupFindingsMatch[1]);
+      const limit = params.get("limit") ? parseInt(params.get("limit")) : 100;
+      const findings = await db.getOsintGroupFindings(groupId, limit);
+      sendJSON(res, 200, { ok: true, findings });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── OSINT Tools Status (Epic 6) ──
+
+  // GET /osint/tools/status — CLI tool health check
+  if (req.method === "GET" && pathname === "/osint/tools/status") {
+    try {
+      const status = await cliRunner.healthCheck();
+      sendJSON(res, 200, { ok: true, ...status });
+    } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
     return;
@@ -8712,6 +9071,8 @@ function broadcastToAll(msg) {
 
 // Wire up broadcast function for agent-spawner to emit agentUpdate events
 setBroadcast(broadcastToAll);
+// Wire up OSINT monitor broadcast for push alerts
+osintMonitor.setBroadcast(broadcastToAll);
 
 function broadcastToRole(role, msg) {
   const data = JSON.stringify(msg);
@@ -10328,6 +10689,13 @@ wss.on("connection", (ws) => {
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
     startWatchdog();
     metrics.startFlushTimer();
+    // Initialize OSINT persistent scheduler + alert broadcast + monitoring
+    osintEngine.setAlertBroadcast(broadcastToAll);
+    osintEngine.initScheduler().catch((e) => log.bridge.error("OSINT scheduler init error:", e.message));
+    osintMonitor.loadSchedules(osintEngine.runScan).catch((e) => log.bridge.error("OSINT monitor init error:", e.message));
+    cliRunner.healthCheck().then((status) => {
+      log.bridge.info(`OSINT CLI tools: container=${status.containerRunning ? "running" : "not running"}, tools=${Object.entries(status.tools).filter(([,v]) => v.available).length} available`);
+    }).catch(() => {});
 
     // Notify June about restart if this isn't the first boot
     if (_restartCount > 0 && _previousStartedAt) {

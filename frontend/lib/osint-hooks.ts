@@ -7,6 +7,10 @@ import {
   fetchOsintSchedule,
   fetchOsintScoreHistory,
   fetchOsintGraph,
+  fetchOsintAlerts,
+  fetchOsintUnreadAlertCount,
+  fetchOsintGroups,
+  fetchOsintToolStatus,
   type OsintProfile,
   type OsintFinding,
   type ExposureScore,
@@ -15,6 +19,9 @@ import {
   type OsintEntity,
   type OsintRelationship,
   type OsintCorrelationSummary,
+  type OsintAlert,
+  type OsintGroup,
+  type OsintToolStatus,
 } from "./bridge-api";
 
 interface UseOsintResult {
@@ -138,4 +145,115 @@ export function useOsintGraph(profileId?: number): UseOsintGraphResult {
   }, [fetchGraph]);
 
   return { entities, relationships, summary, loading, error, refresh: fetchGraph };
+}
+
+// useOsintAlerts() hook — fetch alerts with polling
+interface UseOsintAlertsResult {
+  alerts: OsintAlert[];
+  unreadCount: number;
+  loading: boolean;
+  refresh: () => Promise<void>;
+}
+
+export function useOsintAlerts(): UseOsintAlertsResult {
+  const [alerts, setAlerts] = useState<OsintAlert[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [a, count] = await Promise.all([
+        fetchOsintAlerts({ limit: 50 }),
+        fetchOsintUnreadAlertCount(),
+      ]);
+      if (!mountedRef.current) return;
+      setAlerts(a);
+      setUnreadCount(count);
+    } catch (_) {}
+    finally { if (mountedRef.current) setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchData();
+    return () => { mountedRef.current = false; };
+  }, [fetchData]);
+
+  // Poll every 10s for alert updates
+  useEffect(() => {
+    const interval = setInterval(fetchData, 10000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  return { alerts, unreadCount, loading, refresh: fetchData };
+}
+
+// useOsintGroups() hook — fetch groups
+interface UseOsintGroupsResult {
+  groups: OsintGroup[];
+  loading: boolean;
+  refresh: () => Promise<void>;
+}
+
+export function useOsintGroups(): UseOsintGroupsResult {
+  const [groups, setGroups] = useState<OsintGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const g = await fetchOsintGroups();
+      if (mountedRef.current) setGroups(g);
+    } catch (_) {}
+    finally { if (mountedRef.current) setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchData();
+    return () => { mountedRef.current = false; };
+  }, [fetchData]);
+
+  return { groups, loading, refresh: fetchData };
+}
+
+// useOsintToolStatus() hook — CLI tool availability
+interface UseOsintToolStatusResult {
+  toolStatus: OsintToolStatus | null;
+  availableCount: number;
+  totalCount: number;
+  loading: boolean;
+  refresh: () => Promise<void>;
+}
+
+export function useOsintToolStatus(): UseOsintToolStatusResult {
+  const [toolStatus, setToolStatus] = useState<OsintToolStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const s = await fetchOsintToolStatus();
+      if (mountedRef.current) setToolStatus(s);
+    } catch (_) {}
+    finally { if (mountedRef.current) setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchData();
+    return () => { mountedRef.current = false; };
+  }, [fetchData]);
+
+  // Refresh every 60s (tool status doesn't change often)
+  useEffect(() => {
+    const interval = setInterval(fetchData, 60000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  const availableCount = toolStatus ? Object.values(toolStatus.tools).filter((t) => t.available).length : 0;
+  const totalCount = toolStatus ? Object.keys(toolStatus.tools).length : 0;
+
+  return { toolStatus, availableCount, totalCount, loading, refresh: fetchData };
 }

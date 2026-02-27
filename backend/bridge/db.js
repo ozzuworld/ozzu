@@ -245,7 +245,59 @@ async function init() {
       await pool.query(`ALTER TABLE osint_profiles ADD CONSTRAINT osint_profiles_profile_type_check CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain', 'ip', 'image'))`);
     } catch { /* constraint already exists or column has no constraint */ }
 
-    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables; osint_score_history; osint entities/relationships; osint correlations/reports; osint metrics/locations)");
+    // OSINT Schedules (Epic 6)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_schedules (
+      id SERIAL PRIMARY KEY,
+      profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE CASCADE,
+      interval_hours INTEGER NOT NULL DEFAULT 24,
+      last_run TIMESTAMPTZ,
+      next_run TIMESTAMPTZ,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // OSINT Alerts (Epic 6)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_alerts (
+      id SERIAL PRIMARY KEY,
+      profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE CASCADE,
+      alert_type VARCHAR(50) NOT NULL,
+      severity VARCHAR(20) NOT NULL DEFAULT 'medium',
+      title TEXT NOT NULL,
+      description TEXT,
+      finding_id INTEGER,
+      is_read BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_alerts_unread ON osint_alerts(is_read) WHERE is_read = false`);
+
+    // OSINT Persons — family profile grouping (Epic 6)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_persons (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      relationship VARCHAR(50) DEFAULT 'self',
+      avatar_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // Migration: add person_id to osint_profiles
+    try { await pool.query(`ALTER TABLE osint_profiles ADD COLUMN IF NOT EXISTS person_id INTEGER REFERENCES osint_persons(id) ON DELETE SET NULL`); } catch {}
+    // Migration: add first_seen_at and is_new to osint_findings for delta detection
+    try { await pool.query(`ALTER TABLE osint_findings ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMPTZ DEFAULT NOW()`); } catch {}
+    try { await pool.query(`ALTER TABLE osint_findings ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ DEFAULT NOW()`); } catch {}
+    try { await pool.query(`ALTER TABLE osint_findings ADD COLUMN IF NOT EXISTS is_new BOOLEAN DEFAULT true`); } catch {}
+
+    // OSINT Groups — family/group profile management (Epic 6)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_groups (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      emoji TEXT DEFAULT '👪',
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    // Migration: add group_id to osint_profiles
+    try { await pool.query(`ALTER TABLE osint_profiles ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES osint_groups(id) ON DELETE SET NULL`); } catch {}
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -1277,6 +1329,218 @@ async function getOsintImageByProfile(profileId) {
   return res.rows[0] || null;
 }
 
+// ── OSINT Schedules ──
+
+async function getOsintSchedules() {
+  if (!_pgConnected) return [];
+  const res = await query(`SELECT s.*, p.label as profile_label, p.profile_type FROM osint_schedules s LEFT JOIN osint_profiles p ON s.profile_id = p.id WHERE s.is_active = true ORDER BY s.next_run ASC`);
+  return res.rows;
+}
+
+async function upsertOsintSchedule(data) {
+  if (!_pgConnected) return null;
+  const nextRun = new Date(Date.now() + (data.interval_hours || 24) * 3600000);
+  const res = await query(
+    `INSERT INTO osint_schedules (profile_id, interval_hours, next_run, is_active)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT DO NOTHING RETURNING *`,
+    [data.profile_id || null, data.interval_hours || 24, nextRun, data.is_active !== false]
+  );
+  return res.rows[0] || null;
+}
+
+async function updateOsintSchedule(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const vals = [];
+  let idx = 1;
+  if (updates.interval_hours != null) { fields.push(`interval_hours = $${idx++}`); vals.push(updates.interval_hours); }
+  if (updates.last_run != null) { fields.push(`last_run = $${idx++}`); vals.push(updates.last_run); }
+  if (updates.next_run != null) { fields.push(`next_run = $${idx++}`); vals.push(updates.next_run); }
+  if (updates.is_active != null) { fields.push(`is_active = $${idx++}`); vals.push(updates.is_active); }
+  if (fields.length === 0) return null;
+  vals.push(id);
+  const res = await query(`UPDATE osint_schedules SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+async function deleteOsintSchedule(id) {
+  if (!_pgConnected) return;
+  await query(`DELETE FROM osint_schedules WHERE id = $1`, [id]);
+}
+
+// ── OSINT Alerts ──
+
+async function createOsintAlert(data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_alerts (profile_id, alert_type, severity, title, description, finding_id)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [data.profile_id || null, data.alert_type, data.severity || "medium", data.title, data.description || null, data.finding_id || null]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintAlerts(opts = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT a.*, p.label as profile_label FROM osint_alerts a LEFT JOIN osint_profiles p ON a.profile_id = p.id WHERE 1=1`;
+  const vals = [];
+  let idx = 1;
+  if (opts.unreadOnly) { sql += ` AND a.is_read = false`; }
+  if (opts.profileId) { sql += ` AND a.profile_id = $${idx++}`; vals.push(opts.profileId); }
+  sql += ` ORDER BY a.created_at DESC LIMIT $${idx++}`;
+  vals.push(opts.limit || 50);
+  const res = await query(sql, vals);
+  return res.rows;
+}
+
+async function markOsintAlertRead(id) {
+  if (!_pgConnected) return;
+  await query(`UPDATE osint_alerts SET is_read = true WHERE id = $1`, [id]);
+}
+
+async function markAllOsintAlertsRead() {
+  if (!_pgConnected) return;
+  await query(`UPDATE osint_alerts SET is_read = true WHERE is_read = false`);
+}
+
+async function getOsintAlertCount() {
+  if (!_pgConnected) return 0;
+  const res = await query(`SELECT COUNT(*) as count FROM osint_alerts WHERE is_read = false`);
+  return parseInt(res.rows[0]?.count || "0");
+}
+
+// ── OSINT Persons ──
+
+async function createOsintPerson(data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_persons (name, relationship, avatar_url) VALUES ($1, $2, $3) RETURNING *`,
+    [data.name, data.relationship || "self", data.avatar_url || null]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintPersons() {
+  if (!_pgConnected) return [];
+  const res = await query(`SELECT p.*, COUNT(pr.id) as profile_count FROM osint_persons p LEFT JOIN osint_profiles pr ON pr.person_id = p.id GROUP BY p.id ORDER BY p.created_at ASC`);
+  return res.rows;
+}
+
+async function updateOsintPerson(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const vals = [];
+  let idx = 1;
+  if (updates.name != null) { fields.push(`name = $${idx++}`); vals.push(updates.name); }
+  if (updates.relationship != null) { fields.push(`relationship = $${idx++}`); vals.push(updates.relationship); }
+  if (updates.avatar_url !== undefined) { fields.push(`avatar_url = $${idx++}`); vals.push(updates.avatar_url); }
+  if (fields.length === 0) return null;
+  vals.push(id);
+  const res = await query(`UPDATE osint_persons SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+async function assignProfileToPerson(profileId, personId) {
+  if (!_pgConnected) return null;
+  const res = await query(`UPDATE osint_profiles SET person_id = $1 WHERE id = $2 RETURNING *`, [personId, profileId]);
+  return res.rows[0] || null;
+}
+
+// ── OSINT Groups ──
+
+async function createOsintGroup(data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_groups (name, emoji, description) VALUES ($1, $2, $3) RETURNING *`,
+    [data.name, data.emoji || '👪', data.description || null]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintGroups() {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT g.*, COUNT(p.id) as member_count
+     FROM osint_groups g LEFT JOIN osint_profiles p ON p.group_id = g.id
+     GROUP BY g.id ORDER BY g.created_at ASC`
+  );
+  return res.rows;
+}
+
+async function updateOsintGroup(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const vals = [];
+  let idx = 1;
+  if (updates.name != null) { fields.push(`name = $${idx++}`); vals.push(updates.name); }
+  if (updates.emoji != null) { fields.push(`emoji = $${idx++}`); vals.push(updates.emoji); }
+  if (updates.description !== undefined) { fields.push(`description = $${idx++}`); vals.push(updates.description); }
+  if (fields.length === 0) return null;
+  vals.push(id);
+  const res = await query(`UPDATE osint_groups SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+async function deleteOsintGroup(id) {
+  if (!_pgConnected) return;
+  await query(`UPDATE osint_profiles SET group_id = NULL WHERE group_id = $1`, [id]);
+  await query(`DELETE FROM osint_groups WHERE id = $1`, [id]);
+}
+
+async function assignProfileToGroup(profileId, groupId) {
+  if (!_pgConnected) return null;
+  const res = await query(`UPDATE osint_profiles SET group_id = $1 WHERE id = $2 RETURNING *`, [groupId, profileId]);
+  return res.rows[0] || null;
+}
+
+async function getOsintGroupScore(groupId) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `SELECT f.severity, COUNT(*) as count
+     FROM osint_findings f
+     JOIN osint_profiles p ON f.profile_id = p.id
+     WHERE p.group_id = $1 AND f.status NOT IN ('false_positive', 'remediated')
+     GROUP BY f.severity`,
+    [groupId]
+  );
+  return res.rows;
+}
+
+async function getOsintGroupFindings(groupId, limit = 100) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT f.*, p.label as profile_label, p.profile_type
+     FROM osint_findings f
+     JOIN osint_profiles p ON f.profile_id = p.id
+     WHERE p.group_id = $1
+     ORDER BY f.created_at DESC LIMIT $2`,
+    [groupId, limit]
+  );
+  return res.rows;
+}
+
+async function getOsintFindingsForDelta(profileId) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT id, module, title, severity, category, is_new, first_seen_at, last_seen_at
+     FROM osint_findings WHERE profile_id = $1 AND status NOT IN ('false_positive')
+     ORDER BY created_at DESC`,
+    [profileId]
+  );
+  return res.rows;
+}
+
+async function markFindingsSeen(findingIds) {
+  if (!_pgConnected || findingIds.length === 0) return;
+  await query(`UPDATE osint_findings SET last_seen_at = NOW(), is_new = false WHERE id = ANY($1)`, [findingIds]);
+}
+
+async function cleanupOldAlerts(daysOld = 30) {
+  if (!_pgConnected) return;
+  await query(`DELETE FROM osint_alerts WHERE is_read = true AND created_at < NOW() - interval '${daysOld} days'`);
+}
+
 module.exports = {
   init,
   isConnected,
@@ -1361,6 +1625,34 @@ module.exports = {
   createOsintImage,
   getOsintImage,
   getOsintImageByProfile,
+  // OSINT Schedules
+  getOsintSchedules,
+  upsertOsintSchedule,
+  updateOsintSchedule,
+  deleteOsintSchedule,
+  // OSINT Alerts
+  createOsintAlert,
+  getOsintAlerts,
+  markOsintAlertRead,
+  markAllOsintAlertsRead,
+  getOsintAlertCount,
+  // OSINT Persons
+  createOsintPerson,
+  getOsintPersons,
+  updateOsintPerson,
+  assignProfileToPerson,
+  // OSINT Groups
+  createOsintGroup,
+  getOsintGroups,
+  updateOsintGroup,
+  deleteOsintGroup,
+  assignProfileToGroup,
+  getOsintGroupScore,
+  getOsintGroupFindings,
+  // OSINT Delta Detection
+  getOsintFindingsForDelta,
+  markFindingsSeen,
+  cleanupOldAlerts,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

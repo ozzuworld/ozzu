@@ -103,6 +103,21 @@ export const MODULE_EMOJI: Record<string, string> = {
   "exif-extract": "📸",
   "reverse-image": "🔍",
   "avatar-compare": "🪞",
+  // CLI tools (Epic 6)
+  "sherlock-cli": "🔎",
+  "maigret-cli": "🕵",
+  "holehe-cli": "📬",
+  "phoneinfoga-cli": "📞",
+  "amass-cli": "🗺",
+  "nuclei-cli": "☢",
+  "exiftool-cli": "🏷",
+  "h8mail-cli": "📨",
+  "theharvester-cli": "🌾",
+  // Threat intel (Epic 6)
+  "virustotal-lookup": "🦠",
+  "abuseipdb-lookup": "🚨",
+  "otx-lookup": "🛰",
+  "urlhaus-check": "🕸",
 };
 
 export const MODULE_LABELS: Record<string, string> = {
@@ -120,6 +135,43 @@ export const MODULE_LABELS: Record<string, string> = {
   "exif-extract": "EXIF",
   "reverse-image": "REV-IMG",
   "avatar-compare": "AVATAR",
+  // CLI tools (Epic 6)
+  "sherlock-cli": "SHERLOCK",
+  "maigret-cli": "MAIGRET",
+  "holehe-cli": "HOLEHE",
+  "phoneinfoga-cli": "PHONEINFOGA",
+  "amass-cli": "AMASS",
+  "nuclei-cli": "NUCLEI",
+  "exiftool-cli": "EXIFTOOL",
+  "h8mail-cli": "H8MAIL",
+  "theharvester-cli": "HARVESTER",
+  // Threat intel (Epic 6)
+  "virustotal-lookup": "VIRUSTOTAL",
+  "abuseipdb-lookup": "ABUSEIPDB",
+  "otx-lookup": "OTX",
+  "urlhaus-check": "URLHAUS",
+};
+
+export const ALERT_TYPE_EMOJI: Record<string, string> = {
+  new_finding: "🆕",
+  critical_finding: "🔴",
+  high_finding: "🟠",
+  score_increase: "📈",
+  score_decrease: "📉",
+  new_breach: "💀",
+  finding_resolved: "✅",
+  scan_complete: "🔄",
+};
+
+export const ALERT_TYPE_LABELS: Record<string, string> = {
+  new_finding: "NEW FINDING",
+  critical_finding: "CRITICAL",
+  high_finding: "HIGH RISK",
+  score_increase: "SCORE UP",
+  score_decrease: "SCORE DOWN",
+  new_breach: "NEW BREACH",
+  finding_resolved: "RESOLVED",
+  scan_complete: "SCAN DONE",
 };
 
 export function scoreColor(score: number): string {

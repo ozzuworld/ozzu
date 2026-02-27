@@ -763,6 +763,106 @@ const EXTRACTION_RULES = [
       }],
     }),
   },
+
+  // maigret-enum: found account → social_account entity
+  {
+    module: "maigret-enum",
+    match: (f) => f.category === "account_found" && f.raw_data?.found === true,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "social_account", value: (f.raw_data.platform || "unknown").toLowerCase() + ":" + profile.value,
+        label: (f.raw_data.platform || "unknown") + " (" + profile.value + ")",
+        metadata: { platform: f.raw_data.platform, url: f.raw_data.url, source: "maigret" },
+        source_module: "maigret-enum",
+      }],
+      relationships: [{
+        fromType: "username", fromValue: profile.value,
+        toType: "social_account", toValue: (f.raw_data.platform || "unknown").toLowerCase() + ":" + profile.value,
+        relationship: "uses", confidence: CONFIDENCE.PLATFORM_CONFIRMED,
+        evidence: "Maigret: account found on " + (f.raw_data.platform || "unknown"),
+      }],
+    }),
+  },
+
+  // holehe-check: email registered → social_account entity
+  {
+    module: "holehe-check",
+    match: (f) => f.category === "account_found" && f.raw_data?.found === true,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "social_account", value: (f.raw_data.platform || "unknown").toLowerCase() + ":" + profile.value,
+        label: (f.raw_data.platform || "unknown") + " (email)",
+        metadata: { platform: f.raw_data.platform, emailRecovery: f.raw_data.emailRecovery, phoneRecovery: f.raw_data.phoneRecovery, source: "holehe" },
+        source_module: "holehe-check",
+      }],
+      relationships: [{
+        fromType: "email", fromValue: profile.value,
+        toType: "social_account", toValue: (f.raw_data.platform || "unknown").toLowerCase() + ":" + profile.value,
+        relationship: "registered_on", confidence: 85,
+        evidence: "Holehe: email registered on " + (f.raw_data.platform || "unknown"),
+      }],
+    }),
+  },
+
+  // virustotal-lookup: detection → threat entity
+  {
+    module: "virustotal-lookup",
+    match: (f) => f.raw_data?.stats && (f.raw_data.stats.malicious > 0 || f.raw_data.stats.suspicious > 0),
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "organization", value: "threat:virustotal_flagged",
+        label: "VirusTotal Detection",
+        metadata: { stats: f.raw_data.stats, source: "virustotal" },
+        source_module: "virustotal-lookup",
+      }],
+      relationships: [{
+        fromType: profile.profile_type, fromValue: profile.value,
+        toType: "organization", toValue: "threat:virustotal_flagged",
+        relationship: "flagged_by", confidence: 90,
+        evidence: "VirusTotal: " + (f.raw_data.stats.malicious || 0) + " malicious detections",
+      }],
+    }),
+  },
+
+  // otx-intel: threat pulses → threat entity
+  {
+    module: "otx-intel",
+    match: (f) => f.raw_data?.pulseCount > 0,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "organization", value: "threat:otx_pulses",
+        label: "OTX Threat Intelligence",
+        metadata: { pulseCount: f.raw_data.pulseCount, source: "otx" },
+        source_module: "otx-intel",
+      }],
+      relationships: [{
+        fromType: profile.profile_type, fromValue: profile.value,
+        toType: "organization", toValue: "threat:otx_pulses",
+        relationship: "flagged_by", confidence: 80,
+        evidence: "AlienVault OTX: " + f.raw_data.pulseCount + " threat pulse(s)",
+      }],
+    }),
+  },
+
+  // h8mail-breach: breach data → organization entity
+  {
+    module: "h8mail-breach",
+    match: (f) => f.category === "breach" && f.raw_data?.breachSource,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "organization", value: "breach:" + f.raw_data.breachSource.toLowerCase().replace(/\s+/g, "_"),
+        label: f.raw_data.breachSource + " (breach)",
+        metadata: { hasPassword: f.raw_data.hasPassword, source: "h8mail" },
+        source_module: "h8mail-breach",
+      }],
+      relationships: [{
+        fromType: "email", fromValue: profile.value,
+        toType: "organization", toValue: "breach:" + f.raw_data.breachSource.toLowerCase().replace(/\s+/g, "_"),
+        relationship: "found_on", confidence: 85,
+        evidence: "h8mail breach: " + f.raw_data.breachSource,
+      }],
+    }),
+  },
 ];
 
 // ── Core Correlation Functions ──

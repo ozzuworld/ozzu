@@ -890,6 +890,142 @@ export async function fetchOsintReadiness(): Promise<OsintReadiness> {
   return res.json();
 }
 
+// ── OSINT Alerts (Epic 6) ──
+
+export interface OsintAlert {
+  id: number;
+  profile_id: number | null;
+  alert_type: string;
+  severity: string;
+  title: string;
+  description: string | null;
+  finding_id: number | null;
+  is_read: boolean;
+  created_at: string;
+  profile_label?: string;
+}
+
+export async function fetchOsintAlerts(opts?: { unreadOnly?: boolean; profileId?: number; limit?: number }): Promise<OsintAlert[]> {
+  const parts: string[] = [];
+  if (opts?.unreadOnly) parts.push("unreadOnly=true");
+  if (opts?.profileId) parts.push(`profileId=${opts.profileId}`);
+  if (opts?.limit) parts.push(`limit=${opts.limit}`);
+  const qs = parts.length > 0 ? `?${parts.join("&")}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/alerts${qs}`);
+  if (!res.ok) throw new Error(`Alerts error: ${res.status}`);
+  const data = await res.json();
+  return data.alerts || [];
+}
+
+export async function markOsintAlertRead(id: number): Promise<void> {
+  await fetchWithTimeout(`${BRIDGE_URL}/osint/alerts/${id}`, { method: "PATCH" });
+}
+
+export async function markAllOsintAlertsRead(): Promise<void> {
+  await fetchWithTimeout(`${BRIDGE_URL}/osint/alerts/read-all`, { method: "POST" });
+}
+
+export async function fetchOsintUnreadAlertCount(): Promise<number> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/alerts/unread-count`);
+  if (!res.ok) return 0;
+  const data = await res.json();
+  return data.count || 0;
+}
+
+// ── OSINT Groups (Epic 6) ──
+
+export interface OsintGroup {
+  id: number;
+  name: string;
+  emoji: string;
+  description: string | null;
+  member_count: number;
+  created_at: string;
+}
+
+export async function createOsintGroup(data: { name: string; emoji?: string; description?: string }): Promise<OsintGroup> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/groups`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const json = await res.json();
+  return json.group;
+}
+
+export async function fetchOsintGroups(): Promise<OsintGroup[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/groups`);
+  if (!res.ok) throw new Error(`Groups error: ${res.status}`);
+  const data = await res.json();
+  return data.groups || [];
+}
+
+export async function updateOsintGroup(id: number, updates: Partial<OsintGroup>): Promise<OsintGroup> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/groups/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  const json = await res.json();
+  return json.group;
+}
+
+export async function deleteOsintGroup(id: number): Promise<void> {
+  await fetchWithTimeout(`${BRIDGE_URL}/osint/groups/${id}`, { method: "DELETE" });
+}
+
+export async function assignProfileToGroup(profileId: number, groupId: number | null): Promise<void> {
+  await fetchWithTimeout(`${BRIDGE_URL}/osint/profiles/${profileId}/group`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ groupId }),
+  });
+}
+
+export async function fetchOsintGroupScore(groupId: number): Promise<{ score: number; breakdown: Record<string, number>; totalFindings: number }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/groups/${groupId}/score`);
+  if (!res.ok) throw new Error(`Group score error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintGroupFindings(groupId: number, limit?: number): Promise<OsintFinding[]> {
+  const qs = limit ? `?limit=${limit}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/groups/${groupId}/findings${qs}`);
+  if (!res.ok) throw new Error(`Group findings error: ${res.status}`);
+  const data = await res.json();
+  return data.findings || [];
+}
+
+// ── OSINT Tool Status (Epic 6) ──
+
+export interface OsintToolStatus {
+  containerRunning: boolean;
+  tools: Record<string, { available: boolean; checkedAt: number; reason?: string }>;
+}
+
+export async function fetchOsintToolStatus(): Promise<OsintToolStatus> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/tools/status`);
+  if (!res.ok) throw new Error(`Tool status error: ${res.status}`);
+  return res.json();
+}
+
+// ── OSINT Per-Profile Scheduling (Epic 6) ──
+
+export async function fetchOsintProfileSchedule(profileId: number): Promise<any> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/schedule/${profileId}`);
+  if (!res.ok) throw new Error(`Schedule error: ${res.status}`);
+  const data = await res.json();
+  return data.schedule;
+}
+
+export async function setOsintProfileSchedule(profileId: number, intervalHours: number): Promise<void> {
+  await fetchWithTimeout(`${BRIDGE_URL}/osint/schedule/${profileId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ intervalHours }),
+  });
+}
+
 // ── Epics (integrated into directives — type="epic" with epicId/phaseOrder) ──
 
 export interface EpicProgress {

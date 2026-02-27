@@ -17,7 +17,7 @@ import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
-import { useOsint, useOsintGraph } from "../lib/osint-hooks";
+import { useOsint, useOsintGraph, useOsintAlerts, useOsintGroups, useOsintToolStatus } from "../lib/osint-hooks";
 import {
   deleteOsintProfile,
   triggerOsintScan,
@@ -49,6 +49,9 @@ import { AddProfileModal } from "../components/osint/AddProfileModal";
 import { EntityGraph } from "../components/osint/EntityGraph";
 import { ReportModal } from "../components/osint/ReportModal";
 import { ReportList } from "../components/osint/ReportList";
+import { AlertBanner } from "../components/osint/AlertBanner";
+import { AlertList } from "../components/osint/AlertList";
+import { GroupManager } from "../components/osint/GroupManager";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -82,8 +85,13 @@ export default function OsintScreen() {
     setIsScanning,
   } = useOsint();
   const graph = useOsintGraph();
+  const { alerts, unreadCount, refresh: refreshAlerts } = useOsintAlerts();
+  const { groups, refresh: refreshGroups } = useOsintGroups();
+  const { availableCount, totalCount } = useOsintToolStatus();
 
   const [activeView, setActiveView] = useState("findings");
+  const [showAlerts, setShowAlerts] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showReport, setShowReport] = useState(false);
@@ -317,6 +325,33 @@ export default function OsintScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#525252" />
         }
       >
+        {/* ─── ALERT BANNER ─── */}
+        {showAlerts ? (
+          <View style={{ height: 300, marginBottom: 12 }}>
+            <AlertList alerts={alerts} onRefresh={refreshAlerts} onClose={() => setShowAlerts(false)} />
+          </View>
+        ) : (
+          <AlertBanner alerts={alerts} unreadCount={unreadCount} onPress={() => setShowAlerts(true)} />
+        )}
+
+        {/* ─── GROUP SELECTOR ─── */}
+        <GroupManager
+          groups={groups}
+          profiles={profiles}
+          selectedGroupId={selectedGroupId}
+          onSelectGroup={setSelectedGroupId}
+          onRefresh={() => { refreshGroups(); refresh(); }}
+        />
+
+        {/* ─── TOOL STATUS ─── */}
+        {totalCount > 0 && (
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 4 }}>
+            <Text style={{ color: "#555", fontFamily: "monospace", fontSize: 9 }}>
+              CLI TOOLS: {availableCount}/{totalCount}
+            </Text>
+          </View>
+        )}
+
         {/* ─── SCORE HERO CARD ─── */}
         <View
           style={{

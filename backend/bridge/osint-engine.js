@@ -137,6 +137,13 @@ async function runScan(profileId, scanType = "full") {
       } catch (corrErr) {
         console.error(`[osint] Correlation error for scan ${scanId}:`, corrErr.message);
       }
+
+      // Delta detection + alert generation
+      try {
+        await detectDeltasAndAlert(profileId, scanId, scoreBefore);
+      } catch (deltaErr) {
+        console.error(`[osint] Delta/alert error for scan ${scanId}:`, deltaErr.message);
+      }
     } catch (err) {
       console.error(`[osint] Scan ${scanId} failed:`, err.message);
       await db.updateOsintScan(scanId, {
@@ -208,51 +215,167 @@ async function recordScoreSnapshot() {
   }
 }
 
-// ── Scheduled Scanning ──
-let _scheduleTimer = null;
-let _scheduleIntervalMs = 0; // 0 = disabled
+// ── Delta Detection + Alerts ──
 
+// Callback for broadcasting alerts (set by server.js)
+let _alertBroadcast = null;
+function setAlertBroadcast(fn) { _alertBroadcast = fn; }
+
+async function detectDeltasAndAlert(profileId, scanId, scoreBefore) {
+  // Get all findings for this profile
+  const allFindings = await db.getOsintFindings({ profileId, limit: 1000 });
+  if (!allFindings || allFindings.length === 0) return;
+
+  // Mark findings from this scan as first_seen if their title+module combo is new
+  const currentScanFindings = allFindings.filter((f) => f.scan_id === scanId);
+  const previousFindings = allFindings.filter((f) => f.scan_id !== scanId);
+  const prevKeys = new Set(previousFindings.map((f) => `${f.module}:${f.title}`));
+
+  let newCount = 0;
+  for (const f of currentScanFindings) {
+    const key = `${f.module}:${f.title}`;
+    const isNew = !prevKeys.has(key);
+    if (isNew) {
+      newCount++;
+      // Update is_new flag
+      try {
+        await db.query(`UPDATE osint_findings SET is_new = true, first_seen_at = NOW() WHERE id = $1`, [f.id]);
+      } catch {}
+
+      // Generate alert for new critical/high findings
+      if (f.severity === "critical" || f.severity === "high") {
+        const alert = await db.createOsintAlert({
+          profile_id: profileId,
+          alert_type: f.severity === "critical" ? "critical_finding" : "high_finding",
+          severity: f.severity,
+          title: `New ${f.severity}: ${f.title}`,
+          description: f.description || f.title,
+          finding_id: f.id,
+        });
+        if (alert && _alertBroadcast) {
+          _alertBroadcast({ type: "osint_alert", alert });
+        }
+      }
+    } else {
+      // Update last_seen_at for existing findings
+      try {
+        await db.query(`UPDATE osint_findings SET is_new = false, last_seen_at = NOW() WHERE id = $1`, [f.id]);
+      } catch {}
+    }
+  }
+
+  // Score change alert
+  try {
+    const postScore = await calculateExposureScore();
+    const delta = postScore.score - scoreBefore;
+    if (delta > 10) {
+      const alert = await db.createOsintAlert({
+        profile_id: profileId,
+        alert_type: "score_increase",
+        severity: delta > 20 ? "high" : "medium",
+        title: `Risk score increased by ${delta} points (${scoreBefore} → ${postScore.score})`,
+        description: `${newCount} new finding(s) detected`,
+      });
+      if (alert && _alertBroadcast) {
+        _alertBroadcast({ type: "osint_alert", alert });
+      }
+    }
+  } catch {}
+}
+
+// ── Persistent Scheduled Scanning ──
+let _scheduleTimer = null;
+let _scheduleCheckInterval = null;
+
+async function initScheduler() {
+  // Check for due schedules every 5 minutes
+  if (_scheduleCheckInterval) clearInterval(_scheduleCheckInterval);
+
+  _scheduleCheckInterval = setInterval(async () => {
+    try {
+      await runDueSchedules();
+    } catch (err) {
+      console.error("[osint] Scheduler check error:", err.message);
+    }
+  }, 5 * 60 * 1000);
+
+  // Run once on startup
+  setTimeout(async () => {
+    try { await runDueSchedules(); } catch {}
+  }, 30000); // Wait 30s for DB to be ready
+
+  console.log("[osint] Persistent scheduler initialized (checking every 5 min)");
+}
+
+async function runDueSchedules() {
+  const schedules = await db.getOsintSchedules();
+  const now = new Date();
+
+  for (const sched of schedules) {
+    if (!sched.is_active) continue;
+    if (sched.next_run && new Date(sched.next_run) > now) continue;
+
+    console.log(`[osint] Running scheduled scan for ${sched.profile_id ? `profile #${sched.profile_id}` : "all profiles"}`);
+    try {
+      if (sched.profile_id) {
+        await runScan(sched.profile_id, "full");
+      } else {
+        await runScanAll();
+      }
+
+      // Update schedule
+      const nextRun = new Date(Date.now() + sched.interval_hours * 3600000);
+      await db.updateOsintSchedule(sched.id, { last_run: now, next_run: nextRun });
+
+      // Record score snapshot 30s after
+      setTimeout(() => recordScoreSnapshot(), 30000);
+    } catch (err) {
+      console.error(`[osint] Scheduled scan failed for schedule #${sched.id}:`, err.message);
+    }
+  }
+}
+
+// Legacy API compatibility
 function startScheduledScans(intervalHours) {
   stopScheduledScans();
   if (!intervalHours || intervalHours <= 0) return;
 
-  _scheduleIntervalMs = intervalHours * 60 * 60 * 1000;
-  console.log(`[osint] Scheduled scans enabled: every ${intervalHours}h`);
-
-  _scheduleTimer = setInterval(async () => {
-    console.log("[osint] Running scheduled scan-all...");
-    try {
-      const result = await runScanAll();
-      console.log(`[osint] Scheduled scan complete: ${result.profilesScanned} profiles, ${result.scans.length} scans`);
-
-      // Record score snapshot after scheduled scan
-      setTimeout(() => recordScoreSnapshot(), 30000); // Wait 30s for scans to finish
-    } catch (err) {
-      console.error("[osint] Scheduled scan failed:", err.message);
-    }
-  }, _scheduleIntervalMs);
+  // Create a global schedule (null profile_id = scan all)
+  db.upsertOsintSchedule({ profile_id: null, interval_hours: intervalHours }).catch(() => {});
+  initScheduler();
 }
 
 function stopScheduledScans() {
+  if (_scheduleCheckInterval) {
+    clearInterval(_scheduleCheckInterval);
+    _scheduleCheckInterval = null;
+  }
   if (_scheduleTimer) {
     clearInterval(_scheduleTimer);
     _scheduleTimer = null;
-    _scheduleIntervalMs = 0;
-    console.log("[osint] Scheduled scans disabled");
   }
+  console.log("[osint] Scheduled scans disabled");
 }
 
 function getScheduleStatus() {
   return {
-    enabled: _scheduleTimer !== null,
-    intervalMs: _scheduleIntervalMs,
-    intervalHours: _scheduleIntervalMs > 0 ? _scheduleIntervalMs / (60 * 60 * 1000) : 0,
+    enabled: _scheduleCheckInterval !== null,
+    persistent: true,
   };
+}
+
+function getRegisteredModules() {
+  return _modules.map((m) => ({
+    name: m.name,
+    profileTypes: m.profileTypes,
+    isCli: m.name.endsWith("-cli"),
+  }));
 }
 
 module.exports = {
   registerModule,
   getModulesForProfile,
+  getRegisteredModules,
   runScan,
   runScanAll,
   calculateExposureScore,
@@ -260,5 +383,7 @@ module.exports = {
   startScheduledScans,
   stopScheduledScans,
   getScheduleStatus,
+  initScheduler,
+  setAlertBroadcast,
   RateLimiter,
 };

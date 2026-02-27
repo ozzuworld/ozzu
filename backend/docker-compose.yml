@@ -57,6 +57,7 @@ services:
       - /root/.gitconfig:/root/.gitconfig:ro
       - /root/.ssh:/root/.ssh:ro
       - /usr/bin/gh:/usr/local/bin/gh:ro
+      - /tmp/osint-data:/tmp/osint-data
     environment:
       - BRIDGE_PIN=${BRIDGE_PIN:-1234}
       - HA_URL=${HA_URL:-http://localhost:8123}
@@ -97,6 +98,20 @@ services:
     command: redis-server --appendonly yes --maxmemory 100mb --maxmemory-policy noeviction
     volumes:
       - redis-data:/data
+
+  osint-tools:
+    build: ./osint-tools
+    container_name: osint-tools
+    network_mode: host
+    volumes:
+      - /tmp/osint-data:/tmp/osint-data
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+          cpus: '2.0'
+    restart: unless-stopped
+    command: tail -f /dev/null
 
   # wyze-bridge now runs on dev-01 (172.168.0.59) for LAN camera access
   # See ~/wyze-bridge/docker-compose.yml on dev-01
