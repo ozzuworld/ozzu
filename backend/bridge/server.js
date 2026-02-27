@@ -949,6 +949,52 @@ async function initStorage() {
           }
         }
       }
+      // Auto-discover unregistered iOS/Android builds and attach to recent directives
+      try {
+        const { execFile: ef2 } = require("child_process");
+        const { promisify: p2 } = require("util");
+        const ef2Async = p2(ef2);
+
+        // Get recent iOS builds
+        for (const workflow of ["build-ios.yml", "build-android.yml"]) {
+          const platform = workflow.includes("ios") ? "ios" : "android";
+          const result = await ef2Async("gh", ["run", "list", "--workflow=" + workflow, "--limit", "3", "--json", "databaseId,status,conclusion,createdAt,headBranch", "-R", "ozzuworld/ozzu"], { timeout: 15000 });
+          const runs = JSON.parse(result.stdout);
+
+          for (const run of runs) {
+            if (run.headBranch !== "main") continue;
+            const runId = run.databaseId;
+
+            // Check if this run is already registered on any directive
+            const alreadyRegistered = directives.some((d) =>
+              Array.isArray(d.buildRuns) && d.buildRuns.some((br) => br.runId === runId)
+            );
+            if (alreadyRegistered) continue;
+
+            // Find the most recent directive that was completed around the time this build triggered
+            const buildTime = new Date(run.createdAt).getTime();
+            const candidate = directives
+              .filter((d) => d.completedAt && Math.abs(d.completedAt - buildTime) < 5 * 60 * 1000) // within 5 min
+              .sort((a, b) => Math.abs(a.completedAt - buildTime) - Math.abs(b.completedAt - buildTime))[0];
+
+            if (candidate) {
+              if (!Array.isArray(candidate.buildRuns)) candidate.buildRuns = [];
+              candidate.buildRuns.push({
+                platform,
+                runId,
+                triggeredAt: buildTime,
+                status: run.status || "queued",
+                conclusion: run.conclusion || null,
+                url: `https://github.com/ozzuworld/ozzu/actions/runs/${runId}`,
+                lastChecked: Date.now(),
+              });
+              updated = true;
+              log.directive.info(`Auto-registered ${platform} build #${runId} on ${candidate.id}`);
+            }
+          }
+        }
+      } catch { /* auto-discover is best-effort */ }
+
       if (updated) saveDirectives(directives);
     } catch (err) { log.directive.error("build status updater:", err.message); }
   }, 60 * 1000));
@@ -7045,6 +7091,13 @@ function syncDirectiveFromApproval(approvalId, approved) {
   const directives = getDirectives();
   const directive = directives.find((d) => d.directiveApprovalId === approvalId);
   if (!directive) return;
+
+  // Never regress terminal statuses — completed/cancelled/failed directives stay that way
+  const terminalStatuses = new Set(["completed", "cancelled", "failed"]);
+  if (terminalStatuses.has(directive.status)) {
+    log.directive.info(`${directive.id} already ${directive.status} — ignoring stale approval ${approvalId}`);
+    return;
+  }
 
   const prevStatus = directive.status;
   if (approved) {
