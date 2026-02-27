@@ -194,7 +194,36 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_reports_created ON osint_reports(created_at DESC)`);
 
-    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables; osint_score_history; osint entities/relationships; osint correlations/reports)");
+    // OSINT Metrics (Epic 3)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_metrics (
+      id SERIAL PRIMARY KEY,
+      scan_id INTEGER REFERENCES osint_scans(id) ON DELETE SET NULL,
+      profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE CASCADE,
+      metric_type VARCHAR(30) NOT NULL,
+      value REAL NOT NULL,
+      metadata JSONB DEFAULT '{}',
+      recorded_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_metrics_type ON osint_metrics(metric_type)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_metrics_profile ON osint_metrics(profile_id)`);
+
+    // OSINT Locations (Epic 3)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_locations (
+      id SERIAL PRIMARY KEY,
+      profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE CASCADE,
+      latitude REAL,
+      longitude REAL,
+      location_text TEXT,
+      source_module VARCHAR(50),
+      source_finding_id INTEGER REFERENCES osint_findings(id) ON DELETE SET NULL,
+      confidence REAL DEFAULT 0.5,
+      location_type VARCHAR(20),
+      raw_data JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_locations_profile ON osint_locations(profile_id)`);
+
+    console.log("[pg] Migrations applied (conversation_turns: content_type, metadata, search; usage_metrics; osint tables; osint_score_history; osint entities/relationships; osint correlations/reports; osint metrics/locations)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -1114,6 +1143,90 @@ async function getOsintReportById(id) {
   return res.rows[0] || null;
 }
 
+// ── OSINT Metrics ──
+
+async function recordOsintMetric(scanId, profileId, metricType, value, metadata = {}) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_metrics (scan_id, profile_id, metric_type, value, metadata)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [scanId, profileId, metricType, value, JSON.stringify(metadata)]
+  );
+  return res.rows[0];
+}
+
+async function getOsintMetrics(filters = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT * FROM osint_metrics WHERE 1=1`;
+  const params = [];
+  let idx = 1;
+  if (filters.metric_type) {
+    sql += ` AND metric_type = $${idx++}`;
+    params.push(filters.metric_type);
+  }
+  if (filters.profile_id) {
+    sql += ` AND profile_id = $${idx++}`;
+    params.push(filters.profile_id);
+  }
+  if (filters.days) {
+    sql += ` AND recorded_at > NOW() - INTERVAL '1 day' * $${idx++}`;
+    params.push(filters.days);
+  }
+  sql += ` ORDER BY recorded_at DESC`;
+  if (filters.limit) {
+    sql += ` LIMIT $${idx++}`;
+    params.push(filters.limit);
+  }
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function getOsintMetricsSummary(days = 30) {
+  if (!_pgConnected) return { totalScans: 0, avgDuration: 0, totalFindings: 0 };
+  const res = await query(
+    `SELECT
+      COUNT(*) FILTER (WHERE metric_type = 'scan_timing') as total_scans,
+      COALESCE(AVG(value) FILTER (WHERE metric_type = 'scan_timing'), 0) as avg_duration,
+      COALESCE(SUM(value) FILTER (WHERE metric_type = 'score_delta'), 0) as total_score_delta
+     FROM osint_metrics WHERE recorded_at > NOW() - INTERVAL '1 day' * $1`,
+    [days]
+  );
+  const row = res.rows[0] || {};
+  return {
+    totalScans: parseInt(row.total_scans) || 0,
+    avgDuration: Math.round(parseFloat(row.avg_duration) || 0),
+    totalScoreDelta: parseFloat(row.total_score_delta) || 0,
+  };
+}
+
+// ── OSINT Locations ──
+
+async function upsertOsintLocation(profileId, data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_locations (profile_id, latitude, longitude, location_text, source_module, source_finding_id, confidence, location_type, raw_data)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+    [profileId, data.latitude || null, data.longitude || null, data.location_text || null,
+     data.source_module || null, data.source_finding_id || null, data.confidence || 0.5,
+     data.location_type || null, JSON.stringify(data.raw_data || {})]
+  );
+  return res.rows[0];
+}
+
+async function getOsintLocations(filters = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT * FROM osint_locations WHERE 1=1`;
+  const params = [];
+  let idx = 1;
+  if (filters.profile_id) {
+    sql += ` AND profile_id = $${idx++}`;
+    params.push(filters.profile_id);
+  }
+  sql += ` ORDER BY confidence DESC, created_at DESC`;
+  const res = await query(sql, params);
+  return res.rows;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -1187,6 +1300,13 @@ module.exports = {
   createOsintReport,
   getOsintReports,
   getOsintReportById,
+  // OSINT Metrics
+  recordOsintMetric,
+  getOsintMetrics,
+  getOsintMetricsSummary,
+  // OSINT Locations
+  upsertOsintLocation,
+  getOsintLocations,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

@@ -79,6 +79,42 @@ export const CORRELATION_TYPE_LABELS: Record<string, string> = {
   domain_association: "DOMAIN LINK",
 };
 
+export const CORRELATION_TYPE_COLORS: Record<string, string> = {
+  name_match: "#06B6D4",
+  email_username_link: "#3B82F6",
+  shared_breach: "#EF4444",
+  platform_overlap: "#A855F7",
+  domain_association: "#22C55E",
+};
+
+export const MODULE_EMOJI: Record<string, string> = {
+  "hibp-email": "💀",
+  "hibp-password": "🔑",
+  "username-enum": "👤",
+  "dns-recon": "🌐",
+  "whois-lookup": "📋",
+  "ip-lookup": "📡",
+  "social-media": "🔗",
+  "phone-lookup": "📱",
+  "image-meta": "🖼",
+  "dkim-probe": "🔏",
+  "spf-check": "📧",
+};
+
+export const MODULE_LABELS: Record<string, string> = {
+  "hibp-email": "HIBP",
+  "hibp-password": "HIBP-PW",
+  "username-enum": "USER-ENUM",
+  "dns-recon": "DNS",
+  "whois-lookup": "WHOIS",
+  "ip-lookup": "IP",
+  "social-media": "SOCIAL",
+  "phone-lookup": "PHONE",
+  "image-meta": "IMG-META",
+  "dkim-probe": "DKIM",
+  "spf-check": "SPF",
+};
+
 export function scoreColor(score: number): string {
   if (score >= 70) return "#EF4444";
   if (score >= 40) return "#F97316";

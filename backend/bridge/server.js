@@ -6339,6 +6339,242 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
+  // GET /osint/metrics — aggregated metrics summary
+  if (req.method === "GET" && pathname === "/osint/metrics") {
+    try {
+      const days = parseInt(params.get("days") || "30", 10);
+      const summary = await db.getOsintMetricsSummary(days);
+
+      // Time-to-lockdown: time from first profile to all profiles having at least one completed scan
+      const profiles = await db.getOsintProfiles();
+      let timeToLockdown = null;
+      if (profiles.length > 0) {
+        const earliest = profiles.reduce((min, p) => {
+          const t = new Date(p.created_at).getTime();
+          return t < min ? t : min;
+        }, Infinity);
+        const scanRes = await db.query(
+          `SELECT profile_id, MAX(completed_at) as last_completed FROM osint_scans
+           WHERE status = 'completed' GROUP BY profile_id`
+        );
+        const scannedProfiles = new Set(scanRes.rows.map((r) => r.profile_id));
+        const allScanned = profiles.every((p) => scannedProfiles.has(p.id));
+        if (allScanned && scanRes.rows.length > 0) {
+          const latest = scanRes.rows.reduce((max, r) => {
+            const t = new Date(r.last_completed).getTime();
+            return t > max ? t : max;
+          }, 0);
+          timeToLockdown = latest - earliest;
+        }
+      }
+
+      // Coverage metrics
+      const correlations = await db.getOsintCorrelations();
+      const profilesWithCorrelation = new Set();
+      for (const c of correlations) {
+        if (c.confidence >= 0.5) {
+          profilesWithCorrelation.add(c.source_profile_id);
+          profilesWithCorrelation.add(c.target_profile_id);
+        }
+      }
+      const locations = await db.getOsintLocations({});
+      const profilesWithLocation = new Set(locations.map((l) => l.profile_id));
+
+      sendJSON(res, 200, {
+        ok: true,
+        summary,
+        timeToLockdown,
+        coverage: {
+          totalProfiles: profiles.length,
+          correlationCoverage: profiles.length > 0 ? profilesWithCorrelation.size / profiles.length : 0,
+          locationCoverage: profiles.length > 0 ? profilesWithLocation.size / profiles.length : 0,
+          profilesWithCorrelation: profilesWithCorrelation.size,
+          profilesWithLocation: profilesWithLocation.size,
+        },
+      });
+    } catch (err) {
+      log.bridge.error("OSINT metrics error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/metrics/timeline — time-series for charts
+  if (req.method === "GET" && pathname === "/osint/metrics/timeline") {
+    try {
+      const days = parseInt(params.get("days") || "30", 10);
+      const metricType = params.get("type") || "scan_timing";
+      const metrics = await db.getOsintMetrics({ metric_type: metricType, days, limit: 500 });
+      sendJSON(res, 200, { ok: true, metrics, metricType, days });
+    } catch (err) {
+      log.bridge.error("OSINT metrics timeline error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/metrics/modules — per-module performance breakdown
+  if (req.method === "GET" && pathname === "/osint/metrics/modules") {
+    try {
+      const days = parseInt(params.get("days") || "30", 10);
+      const metrics = await db.getOsintMetrics({ metric_type: "module_perf", days, limit: 1000 });
+      // Aggregate by module name
+      const byModule = {};
+      for (const m of metrics) {
+        const name = m.metadata?.module || "unknown";
+        if (!byModule[name]) byModule[name] = { scans: 0, totalDuration: 0, totalFindings: 0, errors: 0 };
+        byModule[name].scans++;
+        byModule[name].totalDuration += m.value;
+        byModule[name].totalFindings += m.metadata?.findings || 0;
+        if (!m.metadata?.success) byModule[name].errors++;
+      }
+      const modules = Object.entries(byModule).map(([name, stats]) => ({
+        name,
+        scans: stats.scans,
+        avgDuration: Math.round(stats.totalDuration / stats.scans),
+        totalFindings: stats.totalFindings,
+        successRate: stats.scans > 0 ? (stats.scans - stats.errors) / stats.scans : 0,
+        errors: stats.errors,
+      })).sort((a, b) => b.scans - a.scans);
+      sendJSON(res, 200, { ok: true, modules });
+    } catch (err) {
+      log.bridge.error("OSINT module metrics error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/locations — all location signals with clustering
+  if (req.method === "GET" && pathname === "/osint/locations") {
+    try {
+      const locations = await db.getOsintLocations({});
+      // Cluster by proximity (50km) and text similarity
+      const clusters = [];
+      const used = new Set();
+      for (let i = 0; i < locations.length; i++) {
+        if (used.has(i)) continue;
+        const cluster = { locations: [locations[i]], confidence: locations[i].confidence };
+        used.add(i);
+        for (let j = i + 1; j < locations.length; j++) {
+          if (used.has(j)) continue;
+          const a = locations[i];
+          const b = locations[j];
+          let match = false;
+          // GPS proximity (within ~50km)
+          if (a.latitude && b.latitude && a.longitude && b.longitude) {
+            const dlat = Math.abs(a.latitude - b.latitude);
+            const dlon = Math.abs(a.longitude - b.longitude);
+            if (dlat < 0.45 && dlon < 0.45) match = true;
+          }
+          // Text similarity (case-insensitive containment)
+          if (a.location_text && b.location_text) {
+            const ta = a.location_text.toLowerCase();
+            const tb = b.location_text.toLowerCase();
+            if (ta.includes(tb) || tb.includes(ta)) match = true;
+          }
+          if (match) {
+            cluster.locations.push(locations[j]);
+            cluster.confidence = Math.max(cluster.confidence, locations[j].confidence);
+            used.add(j);
+          }
+        }
+        cluster.label = cluster.locations[0].location_text;
+        cluster.sources = cluster.locations.length;
+        clusters.push(cluster);
+      }
+      clusters.sort((a, b) => b.confidence - a.confidence);
+      sendJSON(res, 200, { ok: true, locations, clusters });
+    } catch (err) {
+      log.bridge.error("OSINT locations error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/locations/:profileId — per-profile location signals
+  const locationProfileMatch = pathname.match(/^\/osint\/locations\/(\d+)$/);
+  if (req.method === "GET" && locationProfileMatch) {
+    try {
+      const profileId = parseInt(locationProfileMatch[1], 10);
+      const locations = await db.getOsintLocations({ profile_id: profileId });
+      sendJSON(res, 200, { ok: true, locations });
+    } catch (err) {
+      log.bridge.error("OSINT profile locations error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/readiness — composite OSINT readiness score
+  if (req.method === "GET" && pathname === "/osint/readiness") {
+    try {
+      const profiles = await db.getOsintProfiles();
+      if (profiles.length === 0) {
+        sendJSON(res, 200, { ok: true, readiness: 0, components: {}, message: "No profiles" });
+        return;
+      }
+
+      // 1. Exposure score (0-100)
+      const { score: exposureScore } = await osintEngine.calculateExposureScore();
+
+      // 2. Correlation coverage (0-100)
+      const correlations = await db.getOsintCorrelations();
+      const profilesWithCorr = new Set();
+      for (const c of correlations) {
+        if (c.confidence >= 0.5) {
+          profilesWithCorr.add(c.source_profile_id);
+          profilesWithCorr.add(c.target_profile_id);
+        }
+      }
+      const correlationCoverage = (profilesWithCorr.size / profiles.length) * 100;
+
+      // 3. Location coverage (0-100)
+      const locations = await db.getOsintLocations({});
+      const profilesWithLoc = new Set(locations.map((l) => l.profile_id));
+      const locationCoverage = (profilesWithLoc.size / profiles.length) * 100;
+
+      // 4. Scan freshness — % profiles scanned in last 24h (0-100)
+      const scanRes = await db.query(
+        `SELECT DISTINCT profile_id FROM osint_scans WHERE status = 'completed' AND completed_at > NOW() - INTERVAL '24 hours'`
+      );
+      const recentlyScanned = scanRes.rows.length;
+      const scanFreshness = (recentlyScanned / profiles.length) * 100;
+
+      // 5. Module success rate — from recent metrics (0-100)
+      const moduleMetrics = await db.getOsintMetrics({ metric_type: "module_perf", days: 7, limit: 500 });
+      let moduleSuccessRate = 100;
+      if (moduleMetrics.length > 0) {
+        const successes = moduleMetrics.filter((m) => m.metadata?.success).length;
+        moduleSuccessRate = (successes / moduleMetrics.length) * 100;
+      }
+
+      // Composite score
+      const readiness = Math.round(
+        exposureScore * 0.3 +
+        correlationCoverage * 0.25 +
+        locationCoverage * 0.15 +
+        scanFreshness * 0.15 +
+        moduleSuccessRate * 0.15
+      );
+
+      sendJSON(res, 200, {
+        ok: true,
+        readiness: Math.min(100, readiness),
+        components: {
+          exposure: Math.round(exposureScore),
+          correlation: Math.round(correlationCoverage),
+          location: Math.round(locationCoverage),
+          freshness: Math.round(scanFreshness),
+          moduleHealth: Math.round(moduleSuccessRate),
+        },
+      });
+    } catch (err) {
+      log.bridge.error("OSINT readiness error:", err.message);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
   sendJSON(res, 404, { error: "Not found" });
 }
 
