@@ -2327,7 +2327,7 @@ async function handleRequest(req, res) {
       const contentType = ext === "ipa" ? "application/octet-stream" : "application/vnd.android.package-archive";
 
       // Cache locally for future direct downloads
-      const artifactsDir = path.resolve(__dirname, "../../artifacts");
+      const artifactsDir = "/home/gcp/ozzu/artifacts";
       try {
         if (!fs.existsSync(artifactsDir)) fs.mkdirSync(artifactsDir, { recursive: true });
         const cacheName = ext === "ipa" ? "ozzu-latest.ipa" : "ozzu-latest.apk";
@@ -2354,7 +2354,7 @@ async function handleRequest(req, res) {
   if (req.method === "GET" && latestArtifactMatch) {
     const type = latestArtifactMatch[1];
     const fs = require("fs");
-    const artifactsDir = path.resolve(__dirname, "../../artifacts");
+    const artifactsDir = "/home/gcp/ozzu/artifacts";
     const fileName = type === "ipa" ? "ozzu-latest.ipa" : "ozzu-latest.apk";
     const filePath = path.join(artifactsDir, fileName);
 
