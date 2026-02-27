@@ -950,13 +950,17 @@ export interface OsintRemediation {
   finding_title?: string;
   finding_severity?: string;
   finding_module?: string;
+  profile_label?: string;
+  profile_type?: string;
 }
 
 export interface OsintRemediationStats {
   total: number;
   pending: number;
+  in_progress: number;
   completed: number;
   dismissed: number;
+  byPriority: Record<string, { total: number; pending: number; completed: number }>;
 }
 
 export async function fetchOsintRemediations(profileId: number, status?: string): Promise<OsintRemediation[]> {
@@ -990,6 +994,33 @@ export async function generateOsintRemediations(profileId: number): Promise<{ ge
   if (!res.ok) return { generated: 0, remediations: [] };
   const data = await res.json();
   return { generated: data.generated || 0, remediations: data.remediations || [] };
+}
+
+export async function fetchAllOsintRemediations(opts?: { status?: string; priority?: number; profileId?: number; limit?: number }): Promise<OsintRemediation[]> {
+  const params = new URLSearchParams();
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.priority) params.set("priority", String(opts.priority));
+  if (opts?.profileId) params.set("profileId", String(opts.profileId));
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/remediations${qs}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.remediations || [];
+}
+
+export async function fetchAllOsintRemediationStats(profileId?: number): Promise<OsintRemediationStats> {
+  const qs = profileId ? `?profileId=${profileId}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/remediations/stats${qs}`);
+  if (!res.ok) return { total: 0, pending: 0, in_progress: 0, completed: 0, dismissed: 0, byPriority: {} };
+  const data = await res.json();
+  return data.stats;
+}
+
+export async function generateAllOsintRemediations(): Promise<{ generated: number }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/remediations/generate`, { method: "POST" });
+  if (!res.ok) return { generated: 0 };
+  return res.json();
 }
 
 // ── OSINT Groups (Epic 6) ──

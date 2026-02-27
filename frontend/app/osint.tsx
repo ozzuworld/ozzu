@@ -52,6 +52,7 @@ import { ReportList } from "../components/osint/ReportList";
 import { AlertBanner } from "../components/osint/AlertBanner";
 import { AlertList } from "../components/osint/AlertList";
 import { GroupManager } from "../components/osint/GroupManager";
+import { RemediationList } from "../components/osint/RemediationList";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -64,6 +65,7 @@ const VIEW_TABS = [
   { key: "graph", label: "GRAPH", emoji: "🕸" },
   { key: "correlations", label: "LINKS", emoji: "🔗" },
   { key: "reports", label: "REPORTS", emoji: "📊" },
+  { key: "fixit", label: "FIX IT", emoji: "🔧" },
 ];
 
 type GroupBy = "severity" | "module" | "profile";
@@ -1194,6 +1196,11 @@ export default function OsintScreen() {
             </Pressable>
             <ReportList onError={(msg) => Alert.alert("Error", msg)} />
           </View>
+        )}
+
+        {/* ─── FIX IT VIEW ─── */}
+        {activeView === "fixit" && (
+          <RemediationList />
         )}
 
         {error && (
