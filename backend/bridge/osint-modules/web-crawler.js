@@ -22,7 +22,8 @@ const SOCIAL_PATTERNS = [
 ];
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-const PHONE_REGEX = /(?:\+?1[-.\s]?)?(?:\(?[0-9]{3}\)?[-.\s]?)?[0-9]{3}[-.\s]?[0-9]{4}/g;
+// Require + prefix or (area code) format to reduce false positives from random digit sequences
+const PHONE_REGEX = /(?:\+[1-9]\d{0,2}[-.\s]?)(?:\(?[0-9]{2,3}\)?[-.\s]?)?[0-9]{3,4}[-.\s]?[0-9]{3,4}|\(?[0-9]{3}\)[-.\s][0-9]{3}[-.\s]?[0-9]{4}/g;
 
 const MAX_PAGES = 20;
 const PAGE_TIMEOUT = 5000;
@@ -81,7 +82,11 @@ function extractPhones(html) {
   const matches = html.match(PHONE_REGEX) || [];
   return [...new Set(matches)].filter((p) => {
     const digits = p.replace(/\D/g, "");
-    return digits.length >= 10 && digits.length <= 15;
+    if (digits.length < 10 || digits.length > 15) return false;
+    // Filter out sequential/repeated patterns (0123456789, 1111111111, etc.)
+    if (/^(\d)\1+$/.test(digits)) return false;
+    if (/0123456789|1234567890|9876543210/.test(digits)) return false;
+    return true;
   });
 }
 

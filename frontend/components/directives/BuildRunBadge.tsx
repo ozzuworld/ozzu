@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { View, Text, Pressable, Alert, Linking } from "react-native";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { fetchDirectiveArtifacts, deployArtifact } from "../../lib/bridge-api";
 import { relativeTime } from "../../lib/directive-constants";
 

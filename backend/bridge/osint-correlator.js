@@ -460,6 +460,10 @@ async function correlateScanResults(profileId, scanId) {
     const profile = await db.getOsintProfile(profileId);
     if (!profile) return;
 
+    // Skip profile types that aren't valid entity types (e.g. "password")
+    const VALID_ENTITY_TYPES = new Set(["person", "email", "username", "phone", "domain", "ip", "social_account", "organization", "location", "image"]);
+    if (!VALID_ENTITY_TYPES.has(profile.profile_type)) return;
+
     // Get all findings for this profile (not just this scan — correlate everything)
     const findings = await db.getOsintFindings({ profileId, limit: 500 });
     if (!findings || findings.length === 0) return;
