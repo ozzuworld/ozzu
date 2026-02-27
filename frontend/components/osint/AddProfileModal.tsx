@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { View, Text, Modal, Pressable, TextInput, TouchableWithoutFeedback, Image, ScrollView } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
 import { createOsintProfile, uploadOsintImage } from "../../lib/bridge-api";
 import { PROFILE_TYPE_EMOJI } from "../../lib/osint-constants";
 
@@ -74,17 +73,19 @@ export function AddProfileModal({ visible, onClose, onCreated }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageFilename, setImageFilename] = useState<string | null>(null);
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       quality: 0.9,
-      base64: false,
+      base64: true,
       allowsEditing: false,
     });
     if (!result.canceled && result.assets[0]) {
       setImageUri(result.assets[0].uri);
+      setImageBase64(result.assets[0].base64 || null);
       setImageFilename(result.assets[0].fileName || "photo.jpg");
       if (!label.trim()) {
         setLabel("Photo " + new Date().toLocaleDateString());
@@ -105,22 +106,15 @@ export function AddProfileModal({ visible, onClose, onCreated }: Props) {
       setSubmitting(true);
       setError(null);
       try {
-        let base64: string;
-        try {
-          base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
-        } catch (readErr: any) {
-          setError("Failed to read image: " + (readErr.message || "file may be missing or inaccessible"));
-          setSubmitting(false);
-          return;
-        }
-        if (!base64 || typeof base64 !== "string" || base64.length < 100) {
+        if (!imageBase64 || imageBase64.length < 100) {
           setError("Image data is empty or invalid. Try selecting a different image.");
           setSubmitting(false);
           return;
         }
-        await uploadOsintImage(label.trim(), base64, imageFilename || undefined);
+        await uploadOsintImage(label.trim(), imageBase64, imageFilename || undefined);
         setLabel("");
         setImageUri(null);
+        setImageBase64(null);
         setImageFilename(null);
         setType("username");
         onCreated();
