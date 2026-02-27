@@ -299,9 +299,107 @@ async function generateAll() {
   return totalCreated;
 }
 
+/**
+ * Auto-remediate: triage noise, mark known FPs, generate remediation tasks.
+ * Runs after scan completes — only touches findings with status='new'.
+ */
+async function autoRemediate(profileId, scanId) {
+  const findings = await db.getOsintFindings({ profileId, scanId, status: "new", limit: 500 });
+  if (!findings || findings.length === 0) return { acknowledged: 0, falsePositives: 0, remediationsGenerated: 0 };
+
+  const fpIds = [];
+  const ackIds = [];
+
+  // Build set of previously-reviewed finding keys for re-scan dedup
+  let prevKeys = null;
+
+  for (const f of findings) {
+    // ── Never auto-triage: critical/high (except paste-monitor FP), breach category, hibp-password with hits
+    if (f.category === "breach") continue;
+    if (f.module === "hibp-password" && f.raw_data?.count > 0) continue;
+
+    // ── False Positive rules
+    if (isFalsePositive(f)) {
+      fpIds.push(f.id);
+      continue;
+    }
+
+    // ── High/critical findings that passed FP check stay as new
+    if (f.severity === "critical" || f.severity === "high") continue;
+
+    // ── Acknowledge rules (info/low noise)
+    if (shouldAcknowledge(f)) {
+      ackIds.push(f.id);
+      continue;
+    }
+
+    // ── Re-scan duplicate: same (profile_id, module, title) already exists with status != 'new'
+    if (!prevKeys) {
+      const allFindings = await db.getOsintFindings({ profileId, limit: 500 });
+      prevKeys = new Set();
+      for (const prev of allFindings) {
+        if (prev.scan_id !== scanId && prev.status !== "new") {
+          prevKeys.add(`${prev.module}:${prev.title}`);
+        }
+      }
+    }
+    const key = `${f.module}:${f.title}`;
+    if (prevKeys.has(key)) {
+      ackIds.push(f.id);
+    }
+  }
+
+  // Bulk updates
+  const fpUpdated = await db.bulkUpdateOsintFindings(fpIds, "false_positive");
+  const ackUpdated = await db.bulkUpdateOsintFindings(ackIds, "acknowledged");
+
+  // Generate remediation tasks for remaining actionable findings
+  let remediationsGenerated = 0;
+  try {
+    const created = await generateForProfile(profileId);
+    remediationsGenerated = created.length;
+  } catch (e) {
+    console.error(`[remediation] Auto-generate error:`, e.message);
+  }
+
+  return {
+    acknowledged: ackUpdated.length,
+    falsePositives: fpUpdated.length,
+    remediationsGenerated,
+  };
+}
+
+function isFalsePositive(f) {
+  // Paste-monitor generic GitHub Gists hits
+  if (f.module === "paste-monitor" && f.severity === "high" && f.raw_data?.site === "GitHub Gists") {
+    const title = (f.title || "").toLowerCase();
+    if (!f.raw_data?.piiFound && (title.includes("search") || title.includes("match"))) return true;
+  }
+  // Web-crawler bulk phone number regex noise (> 20 matches = noise)
+  if (f.module === "web-crawler" && (f.title || "").toLowerCase().includes("phone number")) {
+    const count = f.raw_data?.count || f.raw_data?.phoneCount || 0;
+    if (count > 20) return true;
+  }
+  return false;
+}
+
+function shouldAcknowledge(f) {
+  // All info severity = tool status messages, not exposure
+  if (f.severity === "info") return true;
+  // Low severity social-deep = "profile exists" baseline
+  if (f.severity === "low" && f.module === "social-deep") return true;
+  // Title indicates skipped/unavailable tool
+  const title = (f.title || "").toLowerCase();
+  if (title.includes("skipped") || title.includes("not available")) return true;
+  // Clean baseline "No X found" info results
+  if (title.startsWith("no ") && f.severity === "info") return true;
+  return false;
+}
+
 module.exports = {
   generateForFinding,
   generateForProfile,
   generateAll,
+  autoRemediate,
   REMEDIATION_RULES,
 };

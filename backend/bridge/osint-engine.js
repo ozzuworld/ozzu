@@ -1,6 +1,7 @@
 // OSINT Scanner Engine — module registry, rate limiter, scan orchestration, score calculation
 const db = require("./db");
 const correlator = require("./osint-correlator");
+const remEngine = require("./osint-remediation-engine");
 
 // ── Rate Limiter ──
 class RateLimiter {
@@ -136,6 +137,14 @@ async function runScan(profileId, scanType = "full") {
         await correlator.correlateScanResults(profileId, scanId);
       } catch (corrErr) {
         console.error(`[osint] Correlation error for scan ${scanId}:`, corrErr.message);
+      }
+
+      // Auto-remediation: triage noise + generate remediations
+      try {
+        const remResult = await remEngine.autoRemediate(profileId, scanId);
+        console.log(`[osint] Auto-remediation: ${remResult.acknowledged} ack, ${remResult.falsePositives} FP, ${remResult.remediationsGenerated} remediations`);
+      } catch (remErr) {
+        console.error(`[osint] Auto-remediation error:`, remErr.message);
       }
 
       // Delta detection + alert generation
