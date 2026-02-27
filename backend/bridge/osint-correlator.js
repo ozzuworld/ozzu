@@ -311,7 +311,196 @@ const EXTRACTION_RULES = [
       ],
     }),
   },
-// shodan-lookup: open ports → ip entities
+
+  // social-deep: Instagram profile → social_account entity
+  {
+    module: "social-deep",
+    match: (f) => f.raw_data?.platform === "instagram" && f.raw_data?.profileData,
+    extract: (f, profile) => {
+      const d = f.raw_data.profileData;
+      const entities = [{
+        entity_type: "social_account", value: `instagram:${d.username || profile.value}`, label: `Instagram (${d.username || profile.value})`,
+        metadata: { ...d, platform: "instagram" }, source_module: "social-deep",
+      }];
+      const relationships = [{
+        fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `instagram:${d.username || profile.value}`,
+        relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: "Instagram profile data",
+      }];
+      if (d.full_name || d.name) {
+        const name = d.full_name || d.name;
+        entities.push({ entity_type: "person", value: name.toLowerCase(), label: name, metadata: { source: "instagram" }, source_module: "social-deep" });
+        relationships.push({ fromType: "social_account", fromValue: `instagram:${d.username || profile.value}`, toType: "person", toValue: name.toLowerCase(), relationship: "linked_to", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Instagram name: ${name}` });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // social-deep: TikTok profile → social_account entity
+  {
+    module: "social-deep",
+    match: (f) => f.raw_data?.platform === "tiktok" && f.raw_data?.profileData,
+    extract: (f, profile) => {
+      const d = f.raw_data.profileData;
+      const entities = [{
+        entity_type: "social_account", value: `tiktok:${d.uniqueId || profile.value}`, label: `TikTok (${d.uniqueId || profile.value})`,
+        metadata: { ...d, platform: "tiktok" }, source_module: "social-deep",
+      }];
+      const relationships = [{
+        fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `tiktok:${d.uniqueId || profile.value}`,
+        relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: "TikTok profile data",
+      }];
+      if (d.nickname || d.name) {
+        const name = d.nickname || d.name;
+        entities.push({ entity_type: "person", value: name.toLowerCase(), label: name, metadata: { source: "tiktok" }, source_module: "social-deep" });
+        relationships.push({ fromType: "social_account", fromValue: `tiktok:${d.uniqueId || profile.value}`, toType: "person", toValue: name.toLowerCase(), relationship: "linked_to", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `TikTok name: ${name}` });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // social-deep: Twitter/X profile → social_account entity
+  {
+    module: "social-deep",
+    match: (f) => f.raw_data?.platform === "twitter" && f.raw_data?.profileData,
+    extract: (f, profile) => {
+      const d = f.raw_data.profileData;
+      const entities = [{
+        entity_type: "social_account", value: `twitter:${d.screen_name || profile.value}`, label: `Twitter (${d.screen_name || profile.value})`,
+        metadata: { ...d, platform: "twitter" }, source_module: "social-deep",
+      }];
+      const relationships = [{
+        fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `twitter:${d.screen_name || profile.value}`,
+        relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: "Twitter profile data",
+      }];
+      if (d.name) {
+        entities.push({ entity_type: "person", value: d.name.toLowerCase(), label: d.name, metadata: { source: "twitter" }, source_module: "social-deep" });
+        relationships.push({ fromType: "social_account", fromValue: `twitter:${d.screen_name || profile.value}`, toType: "person", toValue: d.name.toLowerCase(), relationship: "linked_to", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Twitter name: ${d.name}` });
+      }
+      if (d.location) {
+        entities.push({ entity_type: "location", value: d.location.toLowerCase(), label: d.location, metadata: { source: "twitter" }, source_module: "social-deep" });
+        relationships.push({ fromType: "social_account", fromValue: `twitter:${d.screen_name || profile.value}`, toType: "location", toValue: d.location.toLowerCase(), relationship: "associated_with", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Twitter location: ${d.location}` });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // social-deep: GitHub twitter_username → linked social_account
+  {
+    module: "social-deep",
+    match: (f) => f.raw_data?.platform === "github" && f.raw_data?.profileData?.twitter_username,
+    extract: (f, profile) => {
+      const tw = f.raw_data.profileData.twitter_username;
+      return {
+        entities: [{
+          entity_type: "social_account", value: `twitter:${tw}`, label: `Twitter (@${tw})`,
+          metadata: { platform: "twitter", linkedFrom: "github" }, source_module: "social-deep",
+        }],
+        relationships: [{
+          fromType: "social_account", fromValue: `github:${profile.value}`, toType: "social_account", toValue: `twitter:${tw}`,
+          relationship: "linked_to", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `GitHub profile links Twitter: @${tw}`,
+        }],
+      };
+    },
+  },
+
+  // web-crawler: discovered social links → social_account entities
+  {
+    module: "web-crawler",
+    match: (f) => f.raw_data?.socialLinks && Array.isArray(f.raw_data.socialLinks) && f.raw_data.socialLinks.length > 0,
+    extract: (f, profile) => {
+      const entities = [];
+      const relationships = [];
+      const platformPatterns = [
+        { pattern: /twitter\.com\/(\w+)/i, platform: "twitter" },
+        { pattern: /x\.com\/(\w+)/i, platform: "twitter" },
+        { pattern: /instagram\.com\/(\w+)/i, platform: "instagram" },
+        { pattern: /facebook\.com\/(\w+)/i, platform: "facebook" },
+        { pattern: /linkedin\.com\/in\/([^/]+)/i, platform: "linkedin" },
+        { pattern: /github\.com\/(\w+)/i, platform: "github" },
+        { pattern: /tiktok\.com\/@?(\w+)/i, platform: "tiktok" },
+        { pattern: /youtube\.com\/(channel|c|@)\/([^/]+)/i, platform: "youtube" },
+      ];
+      for (const link of f.raw_data.socialLinks.slice(0, 15)) {
+        const url = typeof link === "string" ? link : link.url || link.href || "";
+        for (const pp of platformPatterns) {
+          const m = url.match(pp.pattern);
+          if (m) {
+            const username = pp.platform === "youtube" ? m[2] : m[1];
+            entities.push({
+              entity_type: "social_account", value: `${pp.platform}:${username}`, label: `${pp.platform} (${username})`,
+              metadata: { platform: pp.platform, url, source: "web_crawler" }, source_module: "web-crawler",
+            });
+            relationships.push({
+              fromType: profile.profile_type, fromValue: profile.value, toType: "social_account", toValue: `${pp.platform}:${username}`,
+              relationship: "associated_with", confidence: 80, evidence: `Social link found on page: ${url}`,
+            });
+            break;
+          }
+        }
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // document-meta: author → person entity
+  {
+    module: "document-meta",
+    match: (f) => f.raw_data?.metadata?.Author,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "person", value: f.raw_data.metadata.Author.toLowerCase(), label: f.raw_data.metadata.Author,
+        metadata: { source: "document_metadata", document: f.source_url || f.title }, source_module: "document-meta",
+      }],
+      relationships: [{
+        fromType: profile.profile_type, fromValue: profile.value, toType: "person", toValue: f.raw_data.metadata.Author.toLowerCase(),
+        relationship: "associated_with", confidence: 70, evidence: `Document author: ${f.raw_data.metadata.Author}`,
+      }],
+    }),
+  },
+
+  // shodan-lookup: SSL SANs → domain entities
+  {
+    module: "shodan-lookup",
+    match: (f) => f.raw_data?.sslCert?.extensions?.subjectAltName,
+    extract: (f, profile) => {
+      const san = f.raw_data.sslCert.extensions.subjectAltName;
+      const domains = (typeof san === "string" ? san.split(",") : Array.isArray(san) ? san : [])
+        .map(s => s.replace(/^DNS:/i, "").trim()).filter(s => s && s.includes(".")).slice(0, 20);
+      const entities = [];
+      const relationships = [];
+      for (const domain of domains) {
+        entities.push({
+          entity_type: "domain", value: domain.toLowerCase(), label: domain,
+          metadata: { source: "ssl_san", ip: profile.value }, source_module: "shodan-lookup",
+        });
+        relationships.push({
+          fromType: profile.profile_type, fromValue: profile.value, toType: "domain", toValue: domain.toLowerCase(),
+          relationship: "associated_with", confidence: 85, evidence: `SSL SAN: ${domain}`,
+        });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // paste-monitor: source site → organization entity
+  {
+    module: "paste-monitor",
+    match: (f) => f.raw_data?.source && f.severity !== "info",
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "organization", value: `pastesite:${(f.raw_data.source || "unknown").toLowerCase().replace(/\s+/g, "_")}`,
+        label: `${f.raw_data.source} (paste site)`,
+        metadata: { type: "paste_site", pasteId: f.raw_data.pasteId }, source_module: "paste-monitor",
+      }],
+      relationships: [{
+        fromType: profile.profile_type, fromValue: profile.value,
+        toType: "organization", toValue: `pastesite:${(f.raw_data.source || "unknown").toLowerCase().replace(/\s+/g, "_")}`,
+        relationship: "found_on", confidence: 75, evidence: `Found in ${f.raw_data.source} paste`,
+      }],
+    }),
+  },
+
+  // shodan-lookup: open ports → ip entities
   {
     module: "shodan-lookup",
     match: (f) => f.raw_data?.ports && Array.isArray(f.raw_data.ports),
@@ -530,10 +719,18 @@ async function correlateScanResults(profileId, scanId) {
       }
     }
 
+    // Extract location signals from findings
+    let locationsExtracted = 0;
+    try {
+      locationsExtracted = await extractLocationSignals(profileId, findings, profile);
+    } catch (locErr) {
+      console.error(`[correlator] Location extraction error:`, locErr.message);
+    }
+
     // Cross-profile correlation: find shared entities
     await crossProfileCorrelation(profileId);
 
-    console.log(`[correlator] Profile ${profileId}: ${entitiesCreated} entities, ${relationshipsCreated} relationships`);
+    console.log(`[correlator] Profile ${profileId}: ${entitiesCreated} entities, ${relationshipsCreated} relationships, ${locationsExtracted} locations`);
   } catch (err) {
     console.error(`[correlator] Error correlating profile ${profileId}:`, err.message);
   }
@@ -580,8 +777,71 @@ async function crossProfileCorrelation(profileId) {
   }
 }
 
+// ── Location Signal Extraction ──
+
+const LOCATION_EXTRACTORS = [
+  { module: "image-search", match: (f) => f.raw_data?.exif?.latitude && f.raw_data?.exif?.longitude,
+    extract: (f) => ({ latitude: f.raw_data.exif.latitude, longitude: f.raw_data.exif.longitude, location_type: "gps_exif", confidence: 0.95, raw_data: { camera: f.raw_data.exif.camera, imageUrl: f.source_url } }),
+  },
+  { module: "gravatar-lookup", match: (f) => f.raw_data?.currentLocation || f.raw_data?.location,
+    extract: (f) => ({ location_text: f.raw_data.currentLocation || f.raw_data.location, location_type: "profile_text", confidence: 0.7, raw_data: { source: "gravatar" } }),
+  },
+  { module: "social-deep", match: (f) => f.raw_data?.platform === "github" && f.raw_data?.profileData?.location,
+    extract: (f) => ({ location_text: f.raw_data.profileData.location, location_type: "profile_text", confidence: 0.7, raw_data: { source: "github" } }),
+  },
+  { module: "social-deep", match: (f) => f.raw_data?.platform === "twitter" && f.raw_data?.profileData?.location,
+    extract: (f) => ({ location_text: f.raw_data.profileData.location, location_type: "profile_text", confidence: 0.6, raw_data: { source: "twitter" } }),
+  },
+  { module: "social-deep", match: (f) => f.raw_data?.platform === "instagram" && f.raw_data?.profileData?.location,
+    extract: (f) => ({ location_text: f.raw_data.profileData.location, location_type: "profile_text", confidence: 0.6, raw_data: { source: "instagram" } }),
+  },
+  { module: "domain-recon", match: (f) => f.raw_data?.whois?.registrant?.city || f.raw_data?.whois?.registrant?.country,
+    extract: (f) => {
+      const reg = f.raw_data.whois.registrant;
+      return { location_text: [reg.city, reg.state, reg.country].filter(Boolean).join(", "), location_type: "whois", confidence: 0.6, raw_data: { ...reg, source: "whois" } };
+    },
+  },
+  { module: "domain-recon", match: (f) => f.raw_data?.geoip?.latitude && f.raw_data?.geoip?.longitude,
+    extract: (f) => ({ latitude: f.raw_data.geoip.latitude, longitude: f.raw_data.geoip.longitude, location_text: [f.raw_data.geoip.city, f.raw_data.geoip.country].filter(Boolean).join(", ") || null, location_type: "ip_geo", confidence: 0.4, raw_data: f.raw_data.geoip }),
+  },
+  { module: "shodan-lookup", match: (f) => f.raw_data?.latitude && f.raw_data?.longitude,
+    extract: (f) => ({ latitude: f.raw_data.latitude, longitude: f.raw_data.longitude, location_text: [f.raw_data.city, f.raw_data.country_name].filter(Boolean).join(", ") || null, location_type: "ip_geo", confidence: 0.4, raw_data: { ip: f.raw_data.ip, isp: f.raw_data.isp } }),
+  },
+  { module: "phone-lookup", match: (f) => f.raw_data?.numverify?.country_name,
+    extract: (f) => ({ location_text: f.raw_data.numverify.country_name, location_type: "carrier", confidence: 0.5, raw_data: { carrier: f.raw_data.numverify.carrier } }),
+  },
+];
+
+async function extractLocationSignals(profileId, findings, profile) {
+  let count = 0;
+  for (const finding of findings) {
+    for (const extractor of LOCATION_EXTRACTORS) {
+      if (finding.module !== extractor.module) continue;
+      if (!extractor.match(finding)) continue;
+      try {
+        const loc = extractor.extract(finding);
+        await db.upsertOsintLocation(profileId, {
+          latitude: loc.latitude || null,
+          longitude: loc.longitude || null,
+          location_text: loc.location_text || null,
+          source_module: finding.module,
+          source_finding_id: finding.id,
+          confidence: loc.confidence || 0.5,
+          location_type: loc.location_type || null,
+          raw_data: loc.raw_data || {},
+        });
+        count++;
+      } catch (err) {
+        console.error(`[correlator] Location extraction error (${finding.module}):`, err.message);
+      }
+    }
+  }
+  return count;
+}
+
 module.exports = {
   correlateScanResults,
   crossProfileCorrelation,
+  extractLocationSignals,
   CONFIDENCE,
 };

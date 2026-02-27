@@ -68,10 +68,23 @@ async function runScan(profileId, scanType = "full") {
   // Run async — don't block the response
   setImmediate(async () => {
     let totalFindings = 0;
+    const scanStartTime = Date.now();
+    const moduleResults = [];
     try {
+      // Get score before scan for delta calculation
+      let scoreBefore = 0;
+      try {
+        const preScore = await calculateExposureScore();
+        scoreBefore = preScore.score;
+      } catch (e) { /* ignore */ }
+
       await db.updateOsintScan(scanId, { status: "running" });
 
       for (const mod of modules) {
+        const modStart = Date.now();
+        let modFindings = 0;
+        let modStatus = "success";
+        let modError = null;
         try {
           const findings = await mod.scan(profile, _rateLimiter);
           for (const finding of findings) {
@@ -88,16 +101,35 @@ async function runScan(profileId, scanType = "full") {
               remediation: finding.remediation || null,
             });
             totalFindings++;
+            modFindings++;
           }
         } catch (err) {
           console.error(`[osint] Module ${mod.name} error:`, err.message);
+          modStatus = "error";
+          modError = err.message;
         }
+        const modDuration = Date.now() - modStart;
+        moduleResults.push({ module: mod.name, duration: modDuration, findings: modFindings, status: modStatus, error: modError });
       }
 
       await db.updateOsintScan(scanId, {
         status: "completed",
         findings_count: totalFindings,
       });
+
+      // Record operational metrics
+      try {
+        const totalDuration = Date.now() - scanStartTime;
+        await db.recordOsintMetric(scanId, profileId, "scan_timing", totalDuration, { modules: modules.length, findings: totalFindings });
+        for (const mr of moduleResults) {
+          await db.recordOsintMetric(scanId, profileId, "module_perf", mr.findings, { module: mr.module, duration: mr.duration, status: mr.status, success: mr.status === "success", error: mr.error });
+        }
+        const postScore = await calculateExposureScore();
+        const scoreDelta = postScore.score - scoreBefore;
+        await db.recordOsintMetric(scanId, profileId, "score_delta", scoreDelta, { before: scoreBefore, after: postScore.score });
+      } catch (metricErr) {
+        console.error(`[osint] Metrics recording error:`, metricErr.message);
+      }
 
       // Run entity correlation after scan completes
       try {

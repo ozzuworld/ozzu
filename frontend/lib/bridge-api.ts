@@ -775,6 +775,104 @@ export async function fetchStoredReport(id: number): Promise<StoredReport> {
   return data.report;
 }
 
+// ── OSINT Metrics ──
+
+export interface OsintMetricsSummary {
+  ok: boolean;
+  summary: { totalScans: number; avgDuration: number; totalScoreDelta: number };
+  timeToLockdown: number | null;
+  coverage: {
+    totalProfiles: number;
+    correlationCoverage: number;
+    locationCoverage: number;
+    profilesWithCorrelation: number;
+    profilesWithLocation: number;
+  };
+}
+
+export async function fetchOsintMetrics(days?: number): Promise<OsintMetricsSummary> {
+  const qs = days ? `?days=${days}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/metrics${qs}`);
+  if (!res.ok) throw new Error(`Metrics error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintMetricsTimeline(days?: number, metricType?: string): Promise<{ ok: boolean; metrics: any[]; metricType: string; days: number }> {
+  const params = new URLSearchParams();
+  if (days) params.set("days", String(days));
+  if (metricType) params.set("type", metricType);
+  const qs = params.toString() ? `?${params}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/metrics/timeline${qs}`);
+  if (!res.ok) throw new Error(`Metrics timeline error: ${res.status}`);
+  return res.json();
+}
+
+export interface ModuleMetric {
+  name: string;
+  scans: number;
+  avgDuration: number;
+  totalFindings: number;
+  successRate: number;
+  errors: number;
+}
+
+export async function fetchOsintModuleMetrics(days?: number): Promise<{ ok: boolean; modules: ModuleMetric[] }> {
+  const qs = days ? `?days=${days}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/metrics/modules${qs}`);
+  if (!res.ok) throw new Error(`Module metrics error: ${res.status}`);
+  return res.json();
+}
+
+// ── OSINT Locations ──
+
+export interface OsintLocation {
+  id: number;
+  profile_id: number;
+  latitude: number | null;
+  longitude: number | null;
+  location_text: string | null;
+  source_module: string | null;
+  source_finding_id: number | null;
+  confidence: number;
+  location_type: string | null;
+  raw_data: Record<string, any>;
+  created_at: string;
+}
+
+export interface LocationCluster {
+  label: string | null;
+  locations: OsintLocation[];
+  confidence: number;
+  sources: number;
+}
+
+export async function fetchOsintLocations(profileId?: number): Promise<{ ok: boolean; locations: OsintLocation[]; clusters: LocationCluster[] }> {
+  const path = profileId ? `/osint/locations/${profileId}` : "/osint/locations";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}${path}`);
+  if (!res.ok) throw new Error(`Locations error: ${res.status}`);
+  return res.json();
+}
+
+// ── OSINT Readiness ──
+
+export interface OsintReadiness {
+  ok: boolean;
+  readiness: number;
+  components: {
+    exposure: number;
+    correlation: number;
+    location: number;
+    freshness: number;
+    moduleHealth: number;
+  };
+}
+
+export async function fetchOsintReadiness(): Promise<OsintReadiness> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/readiness`);
+  if (!res.ok) throw new Error(`Readiness error: ${res.status}`);
+  return res.json();
+}
+
 // ── Epics (integrated into directives — type="epic" with epicId/phaseOrder) ──
 
 export interface EpicProgress {

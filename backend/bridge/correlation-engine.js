@@ -191,6 +191,43 @@ async function runCorrelation() {
     }
   }
 
+  // Bridge correlations → entity graph relationships
+  try {
+    const allCorrelations = await db.getOsintCorrelations();
+    for (const corr of allCorrelations) {
+      const sourceProfile = profiles.find(p => p.id === corr.source_profile_id);
+      const targetProfile = profiles.find(p => p.id === corr.target_profile_id);
+      if (!sourceProfile || !targetProfile) continue;
+      const sourceEntities = await db.getOsintEntities({ profileId: corr.source_profile_id, limit: 500 });
+      const targetEntities = await db.getOsintEntities({ profileId: corr.target_profile_id, limit: 500 });
+      const sourceRoot = sourceEntities.find(e => e.entity_type === sourceProfile.profile_type && e.value === sourceProfile.value);
+      const targetRoot = targetEntities.find(e => e.entity_type === targetProfile.profile_type && e.value === targetProfile.value);
+      if (sourceRoot && targetRoot) {
+        await db.upsertOsintRelationship({
+          source_entity_id: sourceRoot.id,
+          target_entity_id: targetRoot.id,
+          relationship: "associated_with",
+          confidence: Math.round(corr.confidence * 100),
+          source_module: "correlation-engine",
+          evidence: `Cross-profile: ${corr.correlation_type} (${Math.round(corr.confidence * 100)}%)`,
+        });
+      }
+    }
+  } catch (bridgeErr) {
+    console.error("[correlation-engine] Bridge to entity graph error:", bridgeErr.message);
+  }
+
+  // Record correlation coverage metric
+  try {
+    const covCorrelations = await db.getOsintCorrelations({ minConfidence: 0.5 });
+    const correlatedIds = new Set();
+    for (const c of covCorrelations) { correlatedIds.add(c.source_profile_id); correlatedIds.add(c.target_profile_id); }
+    const coveragePct = profiles.length > 1 ? (correlatedIds.size / profiles.length) * 100 : 100;
+    await db.recordOsintMetric(null, null, "coverage", coveragePct, { type: "correlation_coverage", correlatedProfiles: correlatedIds.size, totalProfiles: profiles.length });
+  } catch (covErr) {
+    console.error("[correlation-engine] Coverage metric error:", covErr.message);
+  }
+
   return { correlationsFound };
 }
 
