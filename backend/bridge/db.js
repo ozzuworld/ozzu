@@ -338,6 +338,9 @@ async function init() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
+    // Auto-remediation triage stats on scans
+    try { await pool.query(`ALTER TABLE osint_scans ADD COLUMN IF NOT EXISTS triage_stats JSONB DEFAULT NULL`); } catch {}
+
     console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
@@ -908,6 +911,7 @@ async function updateOsintScan(id, updates) {
   if (updates.status) { params.push(updates.status); sets.push(`status = $${params.length}`); }
   if (updates.findings_count !== undefined) { params.push(updates.findings_count); sets.push(`findings_count = $${params.length}`); }
   if (updates.error_message) { params.push(updates.error_message); sets.push(`error_message = $${params.length}`); }
+  if (updates.triage_stats !== undefined) { params.push(JSON.stringify(updates.triage_stats)); sets.push(`triage_stats = $${params.length}::jsonb`); }
   if (updates.status === "completed" || updates.status === "failed") sets.push(`completed_at = NOW()`);
   if (sets.length === 0) return;
   await query(`UPDATE osint_scans SET ${sets.join(", ")} WHERE id = $1`, params);

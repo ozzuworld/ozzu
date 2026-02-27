@@ -139,10 +139,18 @@ async function runScan(profileId, scanType = "full") {
         console.error(`[osint] Correlation error for scan ${scanId}:`, corrErr.message);
       }
 
-      // Auto-remediation: triage noise + generate remediations
+      // Auto-remediation: triage noise + generate remediations + store stats
       try {
         const remResult = await remEngine.autoRemediate(profileId, scanId);
-        console.log(`[osint] Auto-remediation: ${remResult.acknowledged} ack, ${remResult.falsePositives} FP, ${remResult.remediationsGenerated} remediations`);
+        console.log(`[osint] Auto-remediation: ${remResult.acknowledged} ack, ${remResult.falsePositives} FP, ${remResult.remediationsGenerated} remediations, ${remResult.remainingNew} remaining`);
+        await db.updateOsintScan(scanId, {
+          triage_stats: {
+            autoAcked: remResult.acknowledged,
+            autoFP: remResult.falsePositives,
+            remediationsGenerated: remResult.remediationsGenerated,
+            remainingNew: remResult.remainingNew,
+          },
+        });
       } catch (remErr) {
         console.error(`[osint] Auto-remediation error:`, remErr.message);
       }

@@ -318,8 +318,8 @@ async function autoRemediate(profileId, scanId) {
     if (f.category === "breach") continue;
     if (f.module === "hibp-password" && f.raw_data?.count > 0) continue;
 
-    // ── False Positive rules
-    if (isFalsePositive(f)) {
+    // ── False Positive rules (noise pattern registry)
+    if (matchesNoisePattern(f)) {
       fpIds.push(f.id);
       continue;
     }
@@ -349,6 +349,24 @@ async function autoRemediate(profileId, scanId) {
     }
   }
 
+  // ── Bulk username-enum ack: if >20 accounts found, keep top 10 important platforms, ack the rest
+  const usernameFindings = findings.filter(f =>
+    f.module === "username-enum" && f.category === "account_found" && f.status === "new"
+    && !fpIds.includes(f.id) && !ackIds.includes(f.id)
+  );
+  if (usernameFindings.length > 20) {
+    const importantPlatforms = ["github", "twitter", "linkedin", "instagram", "facebook",
+                                "reddit", "tiktok", "youtube", "pinterest", "snapchat"];
+    const sorted = [...usernameFindings].sort((a, b) => {
+      const aIdx = importantPlatforms.indexOf((a.raw_data?.platform || "").toLowerCase());
+      const bIdx = importantPlatforms.indexOf((b.raw_data?.platform || "").toLowerCase());
+      return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+    });
+    for (const f of sorted.slice(10)) {
+      ackIds.push(f.id);
+    }
+  }
+
   // Bulk updates
   const fpUpdated = await db.bulkUpdateOsintFindings(fpIds, "false_positive");
   const ackUpdated = await db.bulkUpdateOsintFindings(ackIds, "acknowledged");
@@ -362,25 +380,77 @@ async function autoRemediate(profileId, scanId) {
     console.error(`[remediation] Auto-generate error:`, e.message);
   }
 
+  // Count remaining new findings
+  const triaged = new Set([...fpIds, ...ackIds]);
+  const remainingNew = findings.filter(f => f.status === "new" && !triaged.has(f.id)).length;
+
   return {
     acknowledged: ackUpdated.length,
     falsePositives: fpUpdated.length,
     remediationsGenerated,
+    remainingNew,
   };
 }
 
-function isFalsePositive(f) {
-  // Paste-monitor generic GitHub Gists hits
-  if (f.module === "paste-monitor" && f.severity === "high" && f.raw_data?.site === "GitHub Gists") {
+// ── Noise Pattern Registry ──
+// Each pattern identifies a known false-positive source by module + test function
+const NOISE_PATTERNS = [
+  // Paste search generic hits — no verification that value appears in paste body
+  { module: "paste-monitor", test: (f) => {
+    const rd = f.raw_data || {};
+    return rd.hasResults === true && !rd.confirmedMatch;
+  }},
+  // Paste-monitor GitHub Gists search page hits without PII confirmation
+  { module: "paste-monitor", test: (f) => {
+    if (f.severity !== "high" || f.raw_data?.site !== "GitHub Gists") return false;
     const title = (f.title || "").toLowerCase();
-    if (!f.raw_data?.piiFound && (title.includes("search") || title.includes("match"))) return true;
-  }
-  // Web-crawler bulk phone number regex noise (> 20 matches = noise)
-  if (f.module === "web-crawler" && (f.title || "").toLowerCase().includes("phone number")) {
-    const count = f.raw_data?.count || f.raw_data?.phoneCount || 0;
-    if (count > 20) return true;
-  }
-  return false;
+    return !f.raw_data?.piiFound && (title.includes("search") || title.includes("match"));
+  }},
+  // Google dork hits without API key — unverified search results
+  { module: "paste-monitor", test: (f) => {
+    return f.category === "exposure" && f.raw_data?.reason === "no_google_api_key";
+  }},
+  // Web-crawler phone spam — sequential/repeated digit patterns or bulk regex noise
+  { module: "web-crawler", test: (f) => {
+    if (f.category !== "exposure" || !(f.title || "").toLowerCase().includes("phone")) return false;
+    const phones = f.raw_data?.phones || [];
+    if (phones.length === 0) {
+      const count = f.raw_data?.count || f.raw_data?.phoneCount || 0;
+      return count > 20;
+    }
+    return phones.every(p => {
+      const digits = p.replace(/\D/g, "");
+      return /^(\d)\1+$/.test(digits) || /0123456789|9876543210|1234567890/.test(digits);
+    });
+  }},
+  // Web-crawler test/example emails from known junk domains
+  { module: "web-crawler", test: (f) => {
+    if (f.category !== "exposure" || !(f.title || "").toLowerCase().includes("email")) return false;
+    const emails = f.raw_data?.emails || [];
+    const junkDomains = ["example.com", "example.org", "test.com", "localhost",
+                         "sentry.io", "webpack.js.org", "w3.org", "schema.org"];
+    return emails.length > 0 && emails.every(e =>
+      junkDomains.some(d => e.endsWith("@" + d)) || /^(test|admin|noreply|no-reply|postmaster|webmaster)@/.test(e)
+    );
+  }},
+  // Phone lookup — WhatsApp always returns 200 (100% FP)
+  { module: "phone-lookup", test: (f) => {
+    return f.category === "account_found" && f.raw_data?.platform === "WhatsApp";
+  }},
+  // Data broker — generic 200 without content verification
+  { module: "data-broker", test: (f) => {
+    return f.severity === "low" && f.raw_data?.statusCode === 200 && !f.raw_data?.confirmedMatch;
+  }},
+  // h8mail "no results" that slipped through (safety net after ANSI fix)
+  { module: "h8mail-cli", test: (f) => {
+    return f.severity === "info" && (f.title?.includes("No breach") || f.title?.includes("no results"));
+  }},
+];
+
+function matchesNoisePattern(finding) {
+  return NOISE_PATTERNS.some(p =>
+    (p.module === "*" || p.module === finding.module) && p.test(finding)
+  );
 }
 
 function shouldAcknowledge(f) {
