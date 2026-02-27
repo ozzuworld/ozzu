@@ -16,10 +16,10 @@ import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
 import { Ionicons } from "@expo/vector-icons";
-import { StatusBadge } from "../components/StatusBadge";
-import { useMediaPlayer } from "../lib/useMediaPlayer";
-import { usePhoneLayout } from "../lib/usePhoneLayout";
-import { HA_URL, HA_TOKEN } from "../lib/config";
+import { StatusBadge } from "../../components/StatusBadge";
+import { useMediaPlayer } from "../../lib/useMediaPlayer";
+import { usePhoneLayout } from "../../lib/usePhoneLayout";
+import { HA_URL, HA_TOKEN } from "../../lib/config";
 
 const BRIDGE_URL =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333";

@@ -15,9 +15,9 @@ import {
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
-import { StatusBadge } from "../components/StatusBadge";
-import { usePhoneLayout } from "../lib/usePhoneLayout";
-import { useOsint, useOsintGraph, useOsintAlerts, useOsintGroups, useOsintToolStatus } from "../lib/osint-hooks";
+import { StatusBadge } from "../../components/StatusBadge";
+import { usePhoneLayout } from "../../lib/usePhoneLayout";
+import { useOsint, useOsintGraph, useOsintAlerts, useOsintGroups, useOsintToolStatus } from "../../lib/osint-hooks";
 import {
   deleteOsintProfile,
   triggerOsintScan,
@@ -29,7 +29,7 @@ import {
   bulkUpdateOsintFindings,
   type OsintProfile,
   type OsintCorrelation,
-} from "../lib/bridge-api";
+} from "../../lib/bridge-api";
 import {
   SEVERITY_EMOJI,
   SEVERITY_COLORS,
@@ -41,19 +41,19 @@ import {
   FINDING_STATUS_COLORS,
   scoreColor,
   scoreLabel,
-} from "../lib/osint-constants";
-import { FindingCard } from "../components/osint/FindingCard";
-import { FindingGroup } from "../components/osint/FindingGroup";
-import { CorrelationCard } from "../components/osint/CorrelationCard";
-import { ScoreTrend } from "../components/osint/ScoreTrend";
-import { AddProfileModal } from "../components/osint/AddProfileModal";
-import { EntityGraph } from "../components/osint/EntityGraph";
-import { ReportModal } from "../components/osint/ReportModal";
-import { ReportList } from "../components/osint/ReportList";
-import { AlertBanner } from "../components/osint/AlertBanner";
-import { AlertList } from "../components/osint/AlertList";
-import { GroupManager } from "../components/osint/GroupManager";
-import { RemediationList } from "../components/osint/RemediationList";
+} from "../../lib/osint-constants";
+import { FindingCard } from "../../components/osint/FindingCard";
+import { FindingGroup } from "../../components/osint/FindingGroup";
+import { CorrelationCard } from "../../components/osint/CorrelationCard";
+import { ScoreTrend } from "../../components/osint/ScoreTrend";
+import { AddProfileModal } from "../../components/osint/AddProfileModal";
+import { EntityGraph } from "../../components/osint/EntityGraph";
+import { ReportModal } from "../../components/osint/ReportModal";
+import { ReportList } from "../../components/osint/ReportList";
+import { AlertBanner } from "../../components/osint/AlertBanner";
+import { AlertList } from "../../components/osint/AlertList";
+import { GroupManager } from "../../components/osint/GroupManager";
+import { RemediationList } from "../../components/osint/RemediationList";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);

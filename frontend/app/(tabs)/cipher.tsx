@@ -3,22 +3,22 @@ import { View, Text, Animated, Easing, useWindowDimensions, PermissionsAndroid, 
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { StatusBadge } from "../components/StatusBadge";
-import { HamburgerMenu } from "../components/HamburgerMenu";
+import { StatusBadge } from "../../components/StatusBadge";
+import { HamburgerMenu } from "../../components/HamburgerMenu";
 import LottieView from "lottie-react-native";
-import { TranscriptBubble } from "../components/TranscriptBubble";
-import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
-import { StreamingPlayer, MicRecorder } from "../lib/audio";
-import { getDeviceType } from "../modules/pcm-player";
-import { Keypad } from "../components/Keypad";
-import { canUseBiometric, authenticateWithBiometric, BRIDGE_PIN } from "../lib/biometric-auth";
-import { fetchPendingApprovals, resolveApproval } from "../lib/bridge-api";
-import { CameraOverlay } from "../components/CameraOverlay";
-import { ContentPanel } from "../components/ContentPanel";
-import { useEntity } from "../lib/useEntity";
+import { TranscriptBubble } from "../../components/TranscriptBubble";
+import { BridgeSession, type BridgeCallbacks } from "../../lib/bridge-session";
+import { StreamingPlayer, MicRecorder } from "../../lib/audio";
+import { getDeviceType } from "../../modules/pcm-player";
+import { Keypad } from "../../components/Keypad";
+import { canUseBiometric, authenticateWithBiometric, BRIDGE_PIN } from "../../lib/biometric-auth";
+import { fetchPendingApprovals, resolveApproval } from "../../lib/bridge-api";
+import { CameraOverlay } from "../../components/CameraOverlay";
+import { ContentPanel } from "../../components/ContentPanel";
+
 import { useKeepAwake } from "expo-keep-awake";
-import { usePhoneLayout } from "../lib/usePhoneLayout";
-import * as CipherVoice from "../modules/cipher-voice";
+import { usePhoneLayout } from "../../lib/usePhoneLayout";
+import * as CipherVoice from "../../modules/cipher-voice";
 
 // ── HUD corner bracket ──
 const BRACKET_LEN = 20;
@@ -133,7 +133,7 @@ export default function LandingScreen() {
   const [sessionReady, setSessionReady] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const isMutedRef = useRef(false);
-  const spotifyEntity = useEntity("media_player.spotify_king_kazuma");
+
 
   // Detect cipher-voice availability (iPhone with on-device STT/TTS)
   const hasCipherVoice = useRef(false);
@@ -474,7 +474,7 @@ export default function LandingScreen() {
         }}
       >
         <LottieView
-          source={require("../assets/talking.json")}
+          source={require("../../assets/talking.json")}
           autoPlay
           loop
           resizeMode="contain"
@@ -522,28 +522,6 @@ export default function LandingScreen() {
           setContentPanel({ visible: false, title: "", content: "" })
         }
       />
-
-      {/* Floating bottom-right — music button only */}
-      {spotifyEntity && spotifyEntity.state !== "unavailable" && (
-        <Pressable
-          onPress={() => router.push("/music")}
-          style={({ pressed }) => ({
-            position: "absolute",
-            bottom: Math.max(24, insets.bottom + 8),
-            right: Math.max(24, insets.right + 8),
-            zIndex: 90,
-            width: 44,
-            height: 44,
-            borderRadius: 22,
-            backgroundColor: "rgba(255,255,255,0.1)",
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: pressed ? 0.5 : 1,
-          })}
-        >
-          <Ionicons name="musical-notes" size={22} color="#FFFFFF" />
-        </Pressable>
-      )}
 
       <Keypad
         visible={showKeypad}
