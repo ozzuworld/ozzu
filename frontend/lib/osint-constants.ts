@@ -187,27 +187,33 @@ export const ALERT_TYPE_LABELS: Record<string, string> = {
 };
 
 export const REMEDIATION_TYPE_EMOJI: Record<string, string> = {
+  opt_out: "🚫",
   password_change: "🔑",
+  account_delete: "🗑",
+  privacy_setting: "🔒",
+  abuse_report: "📋",
+  metadata_strip: "🧹",
+  dns_config: "🌐",
+  "2fa_enable": "🛡",
   enable_2fa: "🛡",
   identity_monitoring: "👁",
   credential_rotation: "🔄",
-  abuse_report: "📋",
   domain_monitoring: "🌐",
   cert_review: "📜",
-  privacy_settings: "🔒",
-  opt_out: "🚫",
   account_review: "👤",
   investigate: "🔍",
 };
 
 export const REMEDIATION_STATUS_EMOJI: Record<string, string> = {
   pending: "⏳",
+  in_progress: "🔧",
   completed: "✅",
   dismissed: "🚫",
 };
 
 export const REMEDIATION_STATUS_COLORS: Record<string, string> = {
   pending: "#EAB308",
+  in_progress: "#3B82F6",
   completed: "#22C55E",
   dismissed: "#6B7280",
 };

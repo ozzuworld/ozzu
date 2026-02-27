@@ -866,50 +866,99 @@ const EXTRACTION_RULES = [
 
   // ── Defensive Intelligence (Epic 7) ──
 
-  // ghunt-email: Google profile data → person entity
+  // ghunt-email: Google display name → person entity
   {
     module: "ghunt-email",
-    match: (f) => f.raw_data?.source === "ghunt" && f.raw_data?.name,
+    match: (f) => f.raw_data?.tool === "ghunt" && f.raw_data?.displayName,
     extract: (f, profile) => ({
       entities: [{
-        entity_type: "person", value: "google:" + f.raw_data.name.toLowerCase().replace(/\s+/g, "_"),
-        label: f.raw_data.name + " (Google)",
+        entity_type: "person", value: f.raw_data.displayName.toLowerCase().replace(/\s+/g, "_"),
+        label: f.raw_data.displayName + " (Google)",
         metadata: { gaiaId: f.raw_data.gaiaId, source: "ghunt" },
         source_module: "ghunt-email",
       }],
       relationships: [{
         fromType: "email", fromValue: profile.value,
-        toType: "person", toValue: "google:" + f.raw_data.name.toLowerCase().replace(/\s+/g, "_"),
+        toType: "person", toValue: f.raw_data.displayName.toLowerCase().replace(/\s+/g, "_"),
         relationship: "owns", confidence: 95,
-        evidence: "GHunt: Google account name " + f.raw_data.name,
+        evidence: "GHunt: Google account display name",
       }],
     }),
   },
 
-  // dnstwist-scan: lookalike domain → domain entity
+  // ghunt-email: YouTube channels → social_account entities
+  {
+    module: "ghunt-email",
+    match: (f) => f.raw_data?.tool === "ghunt" && f.raw_data?.youtube,
+    extract: (f, profile) => {
+      const channels = Array.isArray(f.raw_data.youtube) ? f.raw_data.youtube : [f.raw_data.youtube];
+      return {
+        entities: channels.map((c) => ({
+          entity_type: "social_account", value: `youtube:${(c.name || c.title || "channel").toLowerCase()}`,
+          label: `YouTube (${c.name || c.title || "channel"})`,
+          metadata: { url: c.url || c.channelUrl, source: "ghunt" },
+          source_module: "ghunt-email",
+        })),
+        relationships: channels.map((c) => ({
+          fromType: "email", fromValue: profile.value,
+          toType: "social_account", toValue: `youtube:${(c.name || c.title || "channel").toLowerCase()}`,
+          relationship: "linked_to", confidence: 90,
+          evidence: "GHunt: YouTube channel linked to Google account",
+        })),
+      };
+    },
+  },
+
+  // ghunt-email: Maps reviews → location entities
+  {
+    module: "ghunt-email",
+    match: (f) => f.raw_data?.tool === "ghunt" && f.raw_data?.reviews && Array.isArray(f.raw_data.reviews),
+    extract: (f, profile) => {
+      const reviews = f.raw_data.reviews.slice(0, 10);
+      return {
+        entities: reviews.filter((r) => r.place || r.name || r.location).map((r) => ({
+          entity_type: "location", value: (r.place || r.name || r.location).toLowerCase(),
+          label: r.place || r.name || r.location,
+          metadata: { source: "google_maps_review" },
+          source_module: "ghunt-email",
+        })),
+        relationships: reviews.filter((r) => r.place || r.name || r.location).map((r) => ({
+          fromType: "email", fromValue: profile.value,
+          toType: "location", toValue: (r.place || r.name || r.location).toLowerCase(),
+          relationship: "visited", confidence: 85,
+          evidence: "GHunt: Google Maps review",
+        })),
+      };
+    },
+  },
+
+  // dnstwist-scan: lookalike domains → domain entities
   {
     module: "dnstwist-scan",
-    match: (f) => f.raw_data?.source === "dnstwist" && f.raw_data?.domain,
-    extract: (f, profile) => ({
-      entities: [{
-        entity_type: "domain", value: f.raw_data.domain,
-        label: f.raw_data.domain + " (lookalike)",
-        metadata: { fuzzer: f.raw_data.fuzzer, registrar: f.raw_data.whoisRegistrar, source: "dnstwist" },
-        source_module: "dnstwist-scan",
-      }],
-      relationships: [{
-        fromType: "domain", fromValue: profile.value,
-        toType: "domain", toValue: f.raw_data.domain,
-        relationship: "impersonated_by", confidence: 80,
-        evidence: "dnstwist: " + f.raw_data.fuzzer + " lookalike",
-      }],
-    }),
+    match: (f) => f.raw_data?.tool === "dnstwist" && f.raw_data?.domains && Array.isArray(f.raw_data.domains),
+    extract: (f, profile) => {
+      const domains = f.raw_data.domains.slice(0, 15);
+      return {
+        entities: domains.map((d) => ({
+          entity_type: "domain", value: d.domain,
+          label: d.domain + " (lookalike)",
+          metadata: { fuzzer: d.fuzzer, registrar: d.whois_registrar, source: "dnstwist" },
+          source_module: "dnstwist-scan",
+        })),
+        relationships: domains.map((d) => ({
+          fromType: "domain", fromValue: profile.value,
+          toType: "domain", toValue: d.domain,
+          relationship: "impersonated_by", confidence: 80,
+          evidence: "dnstwist: " + (d.fuzzer || "unknown") + " lookalike",
+        })),
+      };
+    },
   },
 
   // crtsh-monitor: certificate subdomains → domain entities
   {
     module: "crtsh-monitor",
-    match: (f) => f.raw_data?.source === "crtsh" && f.raw_data?.subdomains?.length > 0,
+    match: (f) => f.raw_data?.tool === "crtsh" && f.raw_data?.subdomains && f.raw_data.subdomains.length > 0,
     extract: (f, profile) => {
       const subs = f.raw_data.subdomains.slice(0, 20);
       return {
@@ -929,44 +978,50 @@ const EXTRACTION_RULES = [
     },
   },
 
-  // darkweb-search: dark web mentions → organization entity
+  // darkweb-search: dark web mentions → threat entities
   {
     module: "darkweb-search",
-    match: (f) => f.raw_data?.source === "ahmia" && f.raw_data?.onionResults?.length > 0,
-    extract: (f, profile) => ({
-      entities: [{
-        entity_type: "organization", value: "darkweb:ahmia_hit",
-        label: "Dark Web Mention (Ahmia)",
-        metadata: { resultCount: f.raw_data.onionResults.length, source: "ahmia" },
-        source_module: "darkweb-search",
-      }],
-      relationships: [{
-        fromType: profile.profile_type, fromValue: profile.value,
-        toType: "organization", toValue: "darkweb:ahmia_hit",
-        relationship: "found_on", confidence: 75,
-        evidence: f.raw_data.onionResults.length + " dark web result(s) via Ahmia",
-      }],
-    }),
+    match: (f) => f.raw_data?.tool === "darkweb-search" && f.severity !== "info",
+    extract: (f, profile) => {
+      const results = f.raw_data.marketplaces || f.raw_data.forums || f.raw_data.results || [];
+      return {
+        entities: [{
+          entity_type: "organization", value: "darkweb:ahmia_mention:" + profile.value.replace(/[^a-z0-9]/gi, "_"),
+          label: "Dark Web Mention (" + profile.value + ")",
+          metadata: { resultCount: results.length, source: "ahmia" },
+          source_module: "darkweb-search",
+        }],
+        relationships: [{
+          fromType: profile.profile_type, fromValue: profile.value,
+          toType: "organization", toValue: "darkweb:ahmia_mention:" + profile.value.replace(/[^a-z0-9]/gi, "_"),
+          relationship: "found_on", confidence: 75,
+          evidence: results.length + " dark web result(s) via Ahmia",
+        }],
+      };
+    },
   },
 
-  // leak-search: IntelX leak/darknet records → organization entity
+  // leak-search: IntelX leak records → breach entities
   {
     module: "leak-search",
-    match: (f) => f.raw_data?.source === "intelx" && f.raw_data?.bucket,
-    extract: (f, profile) => ({
-      entities: [{
-        entity_type: "organization", value: "intelx:" + f.raw_data.bucket,
-        label: "IntelX " + f.raw_data.bucket + " record",
-        metadata: { bucket: f.raw_data.bucket, recordCount: f.raw_data.records?.length, source: "intelx" },
-        source_module: "leak-search",
-      }],
-      relationships: [{
-        fromType: profile.profile_type, fromValue: profile.value,
-        toType: "organization", toValue: "intelx:" + f.raw_data.bucket,
-        relationship: "found_on", confidence: 85,
-        evidence: "IntelX: " + (f.raw_data.records?.length || 0) + " " + f.raw_data.bucket + " record(s)",
-      }],
-    }),
+    match: (f) => f.raw_data?.tool === "leak-search" && f.raw_data?.source === "intelx" && f.severity !== "info",
+    extract: (f, profile) => {
+      const records = f.raw_data.leaks || f.raw_data.pastes || f.raw_data.darknet || f.raw_data.other || [];
+      return {
+        entities: records.slice(0, 10).map((r) => ({
+          entity_type: "organization", value: "intelx:" + (r.name || "unknown").toLowerCase().replace(/[^a-z0-9]/g, "_"),
+          label: (r.name || "Unknown") + " (IntelX)",
+          metadata: { bucket: r.bucket, date: r.date, source: "intelx" },
+          source_module: "leak-search",
+        })),
+        relationships: records.slice(0, 10).map((r) => ({
+          fromType: profile.profile_type, fromValue: profile.value,
+          toType: "organization", toValue: "intelx:" + (r.name || "unknown").toLowerCase().replace(/[^a-z0-9]/g, "_"),
+          relationship: "found_on", confidence: 85,
+          evidence: "IntelX: found in " + (r.bucket || "unknown source"),
+        })),
+      };
+    },
   },
 ];
 
