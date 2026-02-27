@@ -863,6 +863,111 @@ const EXTRACTION_RULES = [
       }],
     }),
   },
+
+  // ── Defensive Intelligence (Epic 7) ──
+
+  // ghunt-email: Google profile data → person entity
+  {
+    module: "ghunt-email",
+    match: (f) => f.raw_data?.source === "ghunt" && f.raw_data?.name,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "person", value: "google:" + f.raw_data.name.toLowerCase().replace(/\s+/g, "_"),
+        label: f.raw_data.name + " (Google)",
+        metadata: { gaiaId: f.raw_data.gaiaId, source: "ghunt" },
+        source_module: "ghunt-email",
+      }],
+      relationships: [{
+        fromType: "email", fromValue: profile.value,
+        toType: "person", toValue: "google:" + f.raw_data.name.toLowerCase().replace(/\s+/g, "_"),
+        relationship: "owns", confidence: 95,
+        evidence: "GHunt: Google account name " + f.raw_data.name,
+      }],
+    }),
+  },
+
+  // dnstwist-scan: lookalike domain → domain entity
+  {
+    module: "dnstwist-scan",
+    match: (f) => f.raw_data?.source === "dnstwist" && f.raw_data?.domain,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "domain", value: f.raw_data.domain,
+        label: f.raw_data.domain + " (lookalike)",
+        metadata: { fuzzer: f.raw_data.fuzzer, registrar: f.raw_data.whoisRegistrar, source: "dnstwist" },
+        source_module: "dnstwist-scan",
+      }],
+      relationships: [{
+        fromType: "domain", fromValue: profile.value,
+        toType: "domain", toValue: f.raw_data.domain,
+        relationship: "impersonated_by", confidence: 80,
+        evidence: "dnstwist: " + f.raw_data.fuzzer + " lookalike",
+      }],
+    }),
+  },
+
+  // crtsh-monitor: certificate subdomains → domain entities
+  {
+    module: "crtsh-monitor",
+    match: (f) => f.raw_data?.source === "crtsh" && f.raw_data?.subdomains?.length > 0,
+    extract: (f, profile) => {
+      const subs = f.raw_data.subdomains.slice(0, 20);
+      return {
+        entities: subs.map((s) => ({
+          entity_type: "domain", value: s,
+          label: s + " (CT log)",
+          metadata: { source: "crtsh" },
+          source_module: "crtsh-monitor",
+        })),
+        relationships: subs.map((s) => ({
+          fromType: "domain", fromValue: profile.value,
+          toType: "domain", toValue: s,
+          relationship: "has_subdomain", confidence: CONFIDENCE.CERT_TRANSPARENCY,
+          evidence: "crt.sh certificate transparency log",
+        })),
+      };
+    },
+  },
+
+  // darkweb-search: dark web mentions → organization entity
+  {
+    module: "darkweb-search",
+    match: (f) => f.raw_data?.source === "ahmia" && f.raw_data?.onionResults?.length > 0,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "organization", value: "darkweb:ahmia_hit",
+        label: "Dark Web Mention (Ahmia)",
+        metadata: { resultCount: f.raw_data.onionResults.length, source: "ahmia" },
+        source_module: "darkweb-search",
+      }],
+      relationships: [{
+        fromType: profile.profile_type, fromValue: profile.value,
+        toType: "organization", toValue: "darkweb:ahmia_hit",
+        relationship: "found_on", confidence: 75,
+        evidence: f.raw_data.onionResults.length + " dark web result(s) via Ahmia",
+      }],
+    }),
+  },
+
+  // leak-search: IntelX leak/darknet records → organization entity
+  {
+    module: "leak-search",
+    match: (f) => f.raw_data?.source === "intelx" && f.raw_data?.bucket,
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "organization", value: "intelx:" + f.raw_data.bucket,
+        label: "IntelX " + f.raw_data.bucket + " record",
+        metadata: { bucket: f.raw_data.bucket, recordCount: f.raw_data.records?.length, source: "intelx" },
+        source_module: "leak-search",
+      }],
+      relationships: [{
+        fromType: profile.profile_type, fromValue: profile.value,
+        toType: "organization", toValue: "intelx:" + f.raw_data.bucket,
+        relationship: "found_on", confidence: 85,
+        evidence: "IntelX: " + (f.raw_data.records?.length || 0) + " " + f.raw_data.bucket + " record(s)",
+      }],
+    }),
+  },
 ];
 
 // ── Core Correlation Functions ──

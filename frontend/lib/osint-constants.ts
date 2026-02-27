@@ -118,6 +118,12 @@ export const MODULE_EMOJI: Record<string, string> = {
   "abuseipdb-lookup": "🚨",
   "otx-lookup": "🛰",
   "urlhaus-check": "🕸",
+  // Defensive intelligence (Epic 7)
+  "ghunt-email": "🔍",
+  "dnstwist-scan": "🎭",
+  "crtsh-monitor": "📜",
+  "darkweb-search": "🕵",
+  "leak-search": "💧",
 };
 
 export const MODULE_LABELS: Record<string, string> = {
@@ -150,6 +156,12 @@ export const MODULE_LABELS: Record<string, string> = {
   "abuseipdb-lookup": "ABUSEIPDB",
   "otx-lookup": "OTX",
   "urlhaus-check": "URLHAUS",
+  // Defensive intelligence (Epic 7)
+  "ghunt-email": "GHUNT",
+  "dnstwist-scan": "DNSTWIST",
+  "crtsh-monitor": "CRT.SH",
+  "darkweb-search": "DARK WEB",
+  "leak-search": "INTELX",
 };
 
 export const ALERT_TYPE_EMOJI: Record<string, string> = {
@@ -172,6 +184,32 @@ export const ALERT_TYPE_LABELS: Record<string, string> = {
   new_breach: "NEW BREACH",
   finding_resolved: "RESOLVED",
   scan_complete: "SCAN DONE",
+};
+
+export const REMEDIATION_TYPE_EMOJI: Record<string, string> = {
+  password_change: "🔑",
+  enable_2fa: "🛡",
+  identity_monitoring: "👁",
+  credential_rotation: "🔄",
+  abuse_report: "📋",
+  domain_monitoring: "🌐",
+  cert_review: "📜",
+  privacy_settings: "🔒",
+  opt_out: "🚫",
+  account_review: "👤",
+  investigate: "🔍",
+};
+
+export const REMEDIATION_STATUS_EMOJI: Record<string, string> = {
+  pending: "⏳",
+  completed: "✅",
+  dismissed: "🚫",
+};
+
+export const REMEDIATION_STATUS_COLORS: Record<string, string> = {
+  pending: "#EAB308",
+  completed: "#22C55E",
+  dismissed: "#6B7280",
 };
 
 export function scoreColor(score: number): string {

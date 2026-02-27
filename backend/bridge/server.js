@@ -50,6 +50,12 @@ osintEngine.registerModule(require("./osint-modules/virustotal-lookup"));
 osintEngine.registerModule(require("./osint-modules/abuseipdb-lookup"));
 osintEngine.registerModule(require("./osint-modules/otx-lookup"));
 osintEngine.registerModule(require("./osint-modules/urlhaus-check"));
+// Defensive intelligence (Epic 7)
+osintEngine.registerModule(require("./osint-modules/ghunt-email"));
+osintEngine.registerModule(require("./osint-modules/dnstwist-scan"));
+osintEngine.registerModule(require("./osint-modules/crtsh-monitor"));
+osintEngine.registerModule(require("./osint-modules/darkweb-search"));
+osintEngine.registerModule(require("./osint-modules/leak-search"));
 // OSINT monitoring + CLI runner
 const osintMonitor = require("./osint-monitor");
 const cliRunner = require("./osint-cli-runner");
@@ -6939,6 +6945,109 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     try {
       const count = await db.getOsintAlertCount();
       sendJSON(res, 200, { ok: true, count });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ── OSINT Remediations (Epic 7) ──
+
+  // GET /osint/remediations/:profileId — list remediations for a profile
+  const remListMatch = pathname.match(/^\/osint\/remediations\/(\d+)$/);
+  if (req.method === "GET" && remListMatch) {
+    try {
+      const profileId = parseInt(remListMatch[1]);
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const status = url.searchParams.get("status") || undefined;
+      const remediations = await db.getOsintRemediations(profileId, { status });
+      sendJSON(res, 200, { ok: true, remediations });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // PATCH /osint/remediations/item/:id — update a remediation (complete/dismiss)
+  const remUpdateMatch = pathname.match(/^\/osint\/remediations\/item\/(\d+)$/);
+  if (req.method === "PATCH" && remUpdateMatch) {
+    try {
+      const id = parseInt(remUpdateMatch[1]);
+      const body = await parseBody(req);
+      const updated = await db.updateOsintRemediation(id, body);
+      if (!updated) {
+        sendJSON(res, 404, { error: "Remediation not found" });
+        return;
+      }
+      sendJSON(res, 200, { ok: true, remediation: updated });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/remediations/:profileId/stats — remediation progress stats
+  const remStatsMatch = pathname.match(/^\/osint\/remediations\/(\d+)\/stats$/);
+  if (req.method === "GET" && remStatsMatch) {
+    try {
+      const profileId = parseInt(remStatsMatch[1]);
+      const stats = await db.getOsintRemediationStats(profileId);
+      sendJSON(res, 200, { ok: true, stats });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/remediations/:profileId/generate — auto-generate remediations from findings
+  const remGenMatch = pathname.match(/^\/osint\/remediations\/(\d+)\/generate$/);
+  if (req.method === "POST" && remGenMatch) {
+    try {
+      const profileId = parseInt(remGenMatch[1]);
+      const remEngine = require("./osint-remediation-engine");
+      const created = await remEngine.generateForProfile(profileId);
+      sendJSON(res, 200, { ok: true, generated: created.length, remediations: created });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/remediations — list ALL remediations (global, filterable)
+  if (req.method === "GET" && pathname === "/osint/remediations") {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const status = url.searchParams.get("status") || undefined;
+      const priority = url.searchParams.get("priority") ? parseInt(url.searchParams.get("priority")) : undefined;
+      const profileId = url.searchParams.get("profileId") ? parseInt(url.searchParams.get("profileId")) : undefined;
+      const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")) : 100;
+      const remediations = await db.getOsintRemediations(profileId, { status, priority, limit });
+      sendJSON(res, 200, { ok: true, remediations });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/remediations/stats — global remediation stats
+  if (req.method === "GET" && pathname === "/osint/remediations/stats") {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const profileId = url.searchParams.get("profileId") ? parseInt(url.searchParams.get("profileId")) : undefined;
+      const stats = await db.getOsintRemediationStats(profileId);
+      sendJSON(res, 200, { ok: true, stats });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/remediations/generate — generate for ALL profiles
+  if (req.method === "POST" && pathname === "/osint/remediations/generate") {
+    try {
+      const remEngine = require("./osint-remediation-engine");
+      const totalCreated = await remEngine.generateAll();
+      sendJSON(res, 200, { ok: true, generated: totalCreated });
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }

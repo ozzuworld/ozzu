@@ -297,7 +297,23 @@ async function init() {
     // Migration: add group_id to osint_profiles
     try { await pool.query(`ALTER TABLE osint_profiles ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES osint_groups(id) ON DELETE SET NULL`); } catch {}
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups)");
+    // Remediation engine (Epic 7)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_remediations (
+      id SERIAL PRIMARY KEY,
+      finding_id INTEGER REFERENCES osint_findings(id) ON DELETE CASCADE,
+      profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE CASCADE,
+      remediation_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      action_url TEXT,
+      action_type TEXT DEFAULT 'link',
+      priority INTEGER DEFAULT 3,
+      status TEXT DEFAULT 'pending',
+      completed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -1541,6 +1557,96 @@ async function cleanupOldAlerts(daysOld = 30) {
   await query(`DELETE FROM osint_alerts WHERE is_read = true AND created_at < NOW() - interval '${daysOld} days'`);
 }
 
+// ── OSINT Remediations ──────────────────────────────────────────────
+async function createOsintRemediation({ findingId, profileId, remediationType, title, description, actionUrl, actionType, priority }) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_remediations (finding_id, profile_id, remediation_type, title, description, action_url, action_type, priority)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT DO NOTHING
+     RETURNING *`,
+    [findingId, profileId, remediationType, title, description || null, actionUrl || null, actionType || 'link', priority || 3]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintRemediations(profileId, { status, priority, limit = 50 } = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT r.*, f.title as finding_title, f.severity as finding_severity, f.module as finding_module,
+     p.label as profile_label, p.profile_type
+     FROM osint_remediations r
+     LEFT JOIN osint_findings f ON r.finding_id = f.id
+     LEFT JOIN osint_profiles p ON r.profile_id = p.id`;
+  const vals = [];
+  const conditions = [];
+  if (profileId) {
+    vals.push(profileId);
+    conditions.push(`r.profile_id = $${vals.length}`);
+  }
+  if (status) {
+    vals.push(status);
+    conditions.push(`r.status = $${vals.length}`);
+  }
+  if (priority) {
+    vals.push(priority);
+    conditions.push(`r.priority = $${vals.length}`);
+  }
+  if (conditions.length > 0) sql += ` WHERE ${conditions.join(" AND ")}`;
+  vals.push(limit);
+  sql += ` ORDER BY r.priority ASC, r.created_at DESC LIMIT $${vals.length}`;
+  const res = await query(sql, vals);
+  return res.rows;
+}
+
+async function updateOsintRemediation(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const vals = [];
+  let idx = 1;
+  if (updates.status != null) {
+    fields.push(`status = $${idx++}`);
+    vals.push(updates.status);
+    if (updates.status === 'completed') {
+      fields.push(`completed_at = NOW()`);
+    }
+  }
+  if (updates.priority != null) { fields.push(`priority = $${idx++}`); vals.push(updates.priority); }
+  if (fields.length === 0) return null;
+  vals.push(id);
+  const res = await query(`UPDATE osint_remediations SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+async function getOsintRemediationStats(profileId) {
+  if (!_pgConnected) return { total: 0, pending: 0, in_progress: 0, completed: 0, dismissed: 0, byPriority: {} };
+  let sql = `SELECT status, priority, COUNT(*) as count FROM osint_remediations`;
+  const vals = [];
+  if (profileId) { vals.push(profileId); sql += ` WHERE profile_id = $1`; }
+  sql += ` GROUP BY status, priority`;
+  const res = await query(sql, vals);
+  const stats = { total: 0, pending: 0, in_progress: 0, completed: 0, dismissed: 0, byPriority: {} };
+  for (const row of res.rows) {
+    const count = parseInt(row.count);
+    stats[row.status] = (stats[row.status] || 0) + count;
+    stats.total += count;
+    const p = `p${row.priority}`;
+    if (!stats.byPriority[p]) stats.byPriority[p] = { total: 0, pending: 0, completed: 0 };
+    stats.byPriority[p].total += count;
+    stats.byPriority[p][row.status] = (stats.byPriority[p][row.status] || 0) + count;
+  }
+  return stats;
+}
+
+async function bulkCreateRemediations(remediations) {
+  if (!_pgConnected || remediations.length === 0) return [];
+  const created = [];
+  for (const r of remediations) {
+    const result = await createOsintRemediation(r);
+    if (result) created.push(result);
+  }
+  return created;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -1653,6 +1759,12 @@ module.exports = {
   getOsintFindingsForDelta,
   markFindingsSeen,
   cleanupOldAlerts,
+  // OSINT Remediations
+  createOsintRemediation,
+  getOsintRemediations,
+  updateOsintRemediation,
+  getOsintRemediationStats,
+  bulkCreateRemediations,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,
