@@ -1,5 +1,7 @@
-import { useState } from "react";
-import { View, Text, Pressable, Alert, Linking } from "react-native";
+import { useState, useCallback } from "react";
+import { View, Text, Pressable, Alert } from "react-native";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import { fetchDirectiveArtifacts, deployArtifact } from "../../lib/bridge-api";
 import { relativeTime } from "../../lib/directive-constants";
 
@@ -22,19 +24,63 @@ interface BuildRunBadgeProps {
 
 export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
   const [loadingArtifacts, setLoadingArtifacts] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
 
   const isActive = run.status === "in_progress" || run.status === "queued";
   const succeeded = run.status === "completed" && run.conclusion === "success";
   const failed = run.status === "completed" && (run.conclusion === "failure" || run.conclusion === "cancelled");
 
-  const platformEmoji = run.platform === "ios" ? "🍎" : "📱";
-  const statusEmoji = isActive ? "🔄" : succeeded ? "✅" : failed ? "❌" : "⏳";
+  const platformEmoji = run.platform === "ios" ? "\u{1F34E}" : "\u{1F4F1}";
+  const statusEmoji = isActive ? "\u{1F504}" : succeeded ? "\u2705" : failed ? "\u274C" : "\u23F3";
   const badgeColor = isActive ? "#3B82F6" : succeeded ? "#10B981" : failed ? "#EF4444" : "#6B7280";
   const statusText = isActive
     ? run.status === "in_progress" ? "building" : "queued"
     : run.conclusion || run.status;
 
+  const isDownloading = downloadProgress !== null;
+
+  const downloadInApp = useCallback(async (url: string, fileName: string) => {
+    const fileUri = FileSystem.documentDirectory + fileName;
+    setDownloadProgress(0);
+    try {
+      const downloadResumable = FileSystem.createDownloadResumable(
+        url,
+        fileUri,
+        {},
+        (progress) => {
+          const pct = progress.totalBytesWritten / progress.totalBytesExpectedToWrite;
+          setDownloadProgress(pct);
+        }
+      );
+      const result = await downloadResumable.downloadAsync();
+      if (!result) {
+        Alert.alert("Error", "Download returned no result");
+        return;
+      }
+
+      setDownloadProgress(1);
+
+      // Open share sheet so user can save to Files (iOS → install via AltStore)
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(result.uri, {
+          mimeType: fileName.endsWith(".ipa")
+            ? "application/octet-stream"
+            : "application/vnd.android.package-archive",
+          dialogTitle: `Save ${fileName}`,
+        });
+      } else {
+        Alert.alert("Downloaded", `Saved to app storage:\n${fileName}`);
+      }
+    } catch (err: any) {
+      Alert.alert("Download Failed", err.message);
+    } finally {
+      setDownloadProgress(null);
+    }
+  }, []);
+
   const handleDownload = async () => {
+    if (isDownloading) return;
     setLoadingArtifacts(true);
     try {
       const { artifacts } = await fetchDirectiveArtifacts(directiveId);
@@ -47,33 +93,25 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
       const sizeMB = (artifact.sizeBytes / 1048576).toFixed(1);
 
       if (run.platform === "ios") {
-        // iOS: try local cached IPA first (fast, no GitHub redirect), fall back to artifact download
         Alert.alert(
-          "Download IPA",
-          `${artifact.name}\n${sizeMB} MB\n\nDownload to this device?`,
+          "\u{1F34E} Download IPA",
+          `${artifact.name}\n${sizeMB} MB\n\nDownload to this device? After download, save to Files and install via AltStore.`,
           [
             { text: "Cancel", style: "cancel" },
             {
-              text: "Download (Cached)",
+              text: "Download",
               onPress: () => {
-                const downloadUrl = `${BRIDGE_URL}/api/artifacts/latest/ipa`;
-                Linking.openURL(downloadUrl);
-              },
-            },
-            {
-              text: "Download (GitHub)",
-              onPress: () => {
-                const downloadUrl = `${BRIDGE_URL}/api/artifacts/${artifact.artifactId}/download`;
-                Linking.openURL(downloadUrl);
+                const url = `${BRIDGE_URL}/api/artifacts/latest/ipa`;
+                downloadInApp(url, "ozzu-latest.ipa");
               },
             },
           ]
         );
       } else {
-        // Android: deploy to devices via server
+        // Android: deploy to devices via server-side ADB
         Alert.alert(
-          "Deploy Artifact",
-          `${artifact.name}\n${sizeMB} MB\n\nDeploy to devices?`,
+          "\u{1F4F1} Deploy Android",
+          `${artifact.name}\n${sizeMB} MB\n\nDeploy to all Android devices?`,
           [
             { text: "Cancel", style: "cancel" },
             {
@@ -146,8 +184,14 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
         {relativeTime(run.triggeredAt)}
       </Text>
       {succeeded ? (
-        <Pressable onPress={handleDownload} disabled={loadingArtifacts}>
-          <Text style={{ fontSize: 12, opacity: loadingArtifacts ? 0.4 : 1 }}>📥</Text>
+        <Pressable onPress={handleDownload} disabled={loadingArtifacts || isDownloading}>
+          {isDownloading ? (
+            <Text style={{ fontSize: 9, color: "#3B82F6", fontFamily: "monospace", fontWeight: "bold" }}>
+              {Math.round((downloadProgress || 0) * 100)}%
+            </Text>
+          ) : (
+            <Text style={{ fontSize: 12, opacity: loadingArtifacts ? 0.4 : 1 }}>{"\u{1F4E5}"}</Text>
+          )}
         </Pressable>
       ) : null}
     </View>

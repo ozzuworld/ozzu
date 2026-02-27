@@ -25,7 +25,7 @@ There is NO valid reason to skip these steps — not "it's a quick fix", not "I'
 - **NEVER manually trigger builds.** smartDeploy handles CI builds (Android + iOS) and deployment automatically after merge to main.
 - **Every change needs a directive** for tracking, audit trail, and dashboard visibility — even quick fixes.
 - **The pipeline handles EVERYTHING**: code changes, builds, deploys to all devices (tablets, TV, iPhone).
-- **iPhone NEVER receives OTA updates.** ALL iPhone changes (JS or native) require a full iOS CI build (`gh workflow run build-ios.yml`) + sideload via `deploy-ios.sh`. NEVER say OTA will update the iPhone. NEVER run `ota-deploy.sh` expecting it to reach the iPhone. This is a hard platform limitation.
+- **iPhone NEVER receives OTA updates.** ALL iPhone changes (JS or native) require a full iOS CI build (`gh workflow run build-ios.yml`). King Kazuma downloads the IPA from the directive dashboard and installs via AltStore. The `deploy-ios.sh` dev-01 approach is a last resort fallback only. NEVER say OTA will update the iPhone. NEVER run `ota-deploy.sh` expecting it to reach the iPhone.
 - **Cipher MUST monitor the pipeline proactively.** Check for `deploy_failed`, `blocked`, and stuck directives. Fix merge failures, retry failed deploys, resolve blockers. Do NOT wait for King Kazuma to notice — that is Cipher's job.
 - **Every commit MUST reference a directive ID** in the commit message (e.g., `Directive: dir_1234567890`).
 - **iPhone is the ONLY device that handles PIN approvals.** Tablets and TV NEVER show keypads or biometric prompts. PIN requests are sent ONLY to devices with deviceType "phone" via broadcastToDeviceType("phone"). This is enforced server-side.
@@ -199,10 +199,13 @@ Naming convention: `ozzu-{type}-{location}-{number}`
   2. Deploy: `./scripts/deploy.sh` (downloads artifact + installs all devices)
   3. Target specific devices: `./scripts/deploy.sh tab-lroom tv-lroom`
   4. Local build: `./scripts/deploy.sh --local`
-- **Frontend deploy — iOS** (via dev-01 + AltServer):
+- **Frontend deploy — iOS** (preferred: in-app download + AltStore):
   1. Trigger build: `gh workflow run build-ios.yml` (~15 min on macOS runner)
-  2. Deploy: `./scripts/deploy-ios.sh` (downloads IPA, signs + installs via dev-01)
-  3. iPhone must be USB-connected to dev-01 for sideloading
+  2. IPA is auto-cached at `/home/gcp/ozzu/artifacts/ozzu-latest.ipa` after CI build
+  3. King Kazuma downloads IPA from the directive dashboard (tap download icon on iOS build badge)
+  4. IPA downloads in-app with progress → share sheet opens → save to Files
+  5. King Kazuma opens AltStore on iPhone and installs from Files
+  6. **Fallback (last resort only)**: `./scripts/deploy-ios.sh` via dev-01 — requires iPhone USB-connected to dev-01
 - **Local build** (only if needed — uses server CPU):
   1. `cd frontend/android && ./gradlew assembleDebug -x lint -x test -PreactNativeArchitectures=armeabi-v7a,arm64-v8a`
   2. `./scripts/deploy.sh --local`
@@ -220,19 +223,26 @@ Naming convention: `ozzu-{type}-{location}-{number}`
   - iPhone must be on home Wi-Fi (172.168.0.0/24) to reach bridge at `http://10.8.0.1:3333`
 - June talks to Bridge at `http://10.8.0.1:3333` from the devices
 
-## iOS Sideloading (via dev-01)
+## iOS Sideloading
 
-iPhone apps are sideloaded through dev-01 (172.168.0.61, SSH alias `dev-01`) using AltServer-Linux (`~/bin/AltServer`).
-Anisette v3 server runs on GCP VM (Docker, port 6969), reachable from dev-01 at `http://10.8.0.1:6969`.
-dev-01 has no DNS — all downloads must go through GCP VM and be SCPed over.
+**Primary method**: King Kazuma downloads IPA from the directive dashboard in the React Native app, saves to Files, installs via AltStore.
+**Fallback method (last resort)**: dev-01 USB sideloading via AltServer-Linux — only use when in-app download is broken or unavailable.
 
-- **First-time setup** (from GCP VM): `./scripts/setup-ios-sideloading.sh`
-- **Pair iPhone** (USB required): `./scripts/pair-iphone.sh`
-- **Deploy iOS app**: `./scripts/deploy-ios.sh` (downloads CI artifact, signs + installs via dev-01)
-- **Local IPA**: `./scripts/deploy-ios.sh --local /path/to/ozzu.ipa`
+- **IPA cached at**: `/home/gcp/ozzu/artifacts/ozzu-latest.ipa` (auto-cached after CI builds)
+- **In-app download**: Directive dashboard → tap download icon on iOS build badge → downloads with progress → share sheet → save to Files → install via AltStore
 - **Trigger iOS build**: `gh workflow run build-ios.yml`
 - **Free Apple ID limits**: 3 sideloaded apps max, 7-day certificate refresh (SideStore auto-refreshes via WireGuard)
 - **Bundle ID**: `com.ozzu.app` (iOS), `com.anonymous.ozzu` (Android)
+
+### dev-01 Fallback (last resort)
+
+dev-01 (172.168.0.61, SSH alias `dev-01`) runs AltServer-Linux for USB sideloading.
+Anisette v3 server runs on GCP VM (Docker, port 6969), reachable from dev-01 at `http://10.8.0.1:6969`.
+
+- **Deploy iOS app**: `./scripts/deploy-ios.sh` (requires iPhone USB-connected to dev-01)
+- **Local IPA**: `./scripts/deploy-ios.sh --local /path/to/ozzu.ipa`
+- **First-time setup**: `./scripts/setup-ios-sideloading.sh`
+- **Pair iPhone**: `./scripts/pair-iphone.sh`
 - **SSH to dev-01**: Uses `~/.ssh/config` alias `dev-01` → `hadmin@172.168.0.61` with `~/.ssh/dev01_key`
 
 ### iOS Deploy Troubleshooting
