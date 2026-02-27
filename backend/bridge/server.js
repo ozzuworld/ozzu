@@ -7088,6 +7088,221 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
+  // ── OSINT SOC Incidents (Compliance) ──
+
+  // GET /osint/incidents — list incidents (filterable by status, severity, profileId)
+  if (req.method === "GET" && pathname === "/osint/incidents") {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const incidents = await db.getOsintIncidents({
+        status: url.searchParams.get("status") || undefined,
+        severity: url.searchParams.get("severity") || undefined,
+        profileId: url.searchParams.get("profileId") ? parseInt(url.searchParams.get("profileId")) : undefined,
+      });
+      sendJSON(res, 200, { ok: true, incidents });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/incidents — create an incident
+  if (req.method === "POST" && pathname === "/osint/incidents") {
+    try {
+      const body = await parseBody(req);
+      if (!body.title || !body.category) {
+        sendJSON(res, 400, { error: "Required: title, category" });
+        return;
+      }
+      const incidentId = "INC-" + Date.now().toString(36).toUpperCase() + "-" + Math.random().toString(36).substring(2, 6).toUpperCase();
+      const incident = await db.createOsintIncident({ incidentId, ...body });
+      sendJSON(res, 201, { ok: true, incident });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // PATCH /osint/incidents/:id — update incident status/severity/assignment
+  const incUpdateMatch = pathname.match(/^\/osint\/incidents\/(\d+)$/);
+  if (req.method === "PATCH" && incUpdateMatch) {
+    try {
+      const id = parseInt(incUpdateMatch[1]);
+      const body = await parseBody(req);
+      const updated = await db.updateOsintIncident(id, body);
+      if (!updated) { sendJSON(res, 404, { error: "Incident not found" }); return; }
+      if (body.timelineAction) {
+        await db.addIncidentTimelineEvent(id, body.timelineAction, body.actor || "cipher", body.timelineDetails);
+      }
+      sendJSON(res, 200, { ok: true, incident: updated });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/incidents/:id/timeline — add timeline event
+  const incTimelineMatch = pathname.match(/^\/osint\/incidents\/(\d+)\/timeline$/);
+  if (req.method === "POST" && incTimelineMatch) {
+    try {
+      const id = parseInt(incTimelineMatch[1]);
+      const body = await parseBody(req);
+      const updated = await db.addIncidentTimelineEvent(id, body.action, body.actor || "cipher", body.details);
+      if (!updated) { sendJSON(res, 404, { error: "Incident not found" }); return; }
+      sendJSON(res, 200, { ok: true, incident: updated });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/incidents/stats — SOC dashboard stats
+  if (req.method === "GET" && pathname === "/osint/incidents/stats") {
+    try {
+      const stats = await db.getOsintIncidentStats();
+      sendJSON(res, 200, { ok: true, stats });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // POST /osint/incidents/generate — auto-create incidents from high/critical findings
+  if (req.method === "POST" && pathname === "/osint/incidents/generate") {
+    try {
+      const profiles = await db.getOsintProfiles();
+      let created = 0;
+      for (const profile of profiles) {
+        const findings = await db.getOsintFindings({ profileId: profile.id });
+        const critical = findings.filter((f) => f.severity === "critical" || f.severity === "high");
+        if (critical.length === 0) continue;
+
+        // Group by module to create one incident per module with high/critical findings
+        const byModule = {};
+        for (const f of critical) {
+          if (!byModule[f.module]) byModule[f.module] = [];
+          byModule[f.module].push(f);
+        }
+
+        for (const [mod, modFindings] of Object.entries(byModule)) {
+          const worstSev = modFindings.some((f) => f.severity === "critical") ? "critical" : "high";
+          const incidentId = `INC-${profile.id}-${mod}-${Date.now().toString(36)}`.toUpperCase();
+
+          // Map modules to NIST categories
+          const nistMap = {
+            "hibp-email": { classification: "data_breach", attackVector: "credential_compromise", nistPhase: "identification" },
+            "hibp-password": { classification: "data_breach", attackVector: "credential_compromise", nistPhase: "containment" },
+            "h8mail-cli": { classification: "data_breach", attackVector: "credential_compromise", nistPhase: "identification" },
+            "leak-search": { classification: "data_breach", attackVector: "dark_web_exposure", nistPhase: "identification" },
+            "darkweb-search": { classification: "exposure", attackVector: "dark_web_mention", nistPhase: "identification" },
+            "dnstwist-scan": { classification: "phishing", attackVector: "typosquatting", nistPhase: "identification" },
+            "crtsh-monitor": { classification: "infrastructure", attackVector: "certificate_abuse", nistPhase: "identification" },
+            "domain-recon": { classification: "exposure", attackVector: "dns_reconnaissance", nistPhase: "identification" },
+            "paste-monitor": { classification: "exposure", attackVector: "paste_site_leak", nistPhase: "identification" },
+            "data-broker": { classification: "privacy", attackVector: "data_aggregation", nistPhase: "identification" },
+            "ghunt-email": { classification: "privacy", attackVector: "google_profile_exposure", nistPhase: "identification" },
+          };
+
+          const nist = nistMap[mod] || { classification: "exposure", attackVector: "unknown", nistPhase: "identification" };
+
+          const incident = await db.createOsintIncident({
+            incidentId,
+            title: `[${worstSev.toUpperCase()}] ${mod}: ${modFindings.length} finding(s) for ${profile.label || profile.value}`,
+            description: modFindings.map((f) => `- ${f.title}`).join("\n"),
+            severity: worstSev,
+            category: modFindings[0].category || "exposure",
+            profileId: profile.id,
+            findingIds: modFindings.map((f) => f.id),
+            classification: nist.classification,
+            affectedAssets: [profile.value],
+            attackVector: nist.attackVector,
+            indicators: { module: mod, findingCount: modFindings.length, profileType: profile.profile_type },
+          });
+          if (incident) created++;
+        }
+      }
+      sendJSON(res, 200, { ok: true, generated: created });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /osint/compliance/report — full SOC compliance report (NIST SP 800-61 format)
+  if (req.method === "GET" && pathname === "/osint/compliance/report") {
+    try {
+      const incidents = await db.getOsintIncidents({});
+      const profiles = await db.getOsintProfiles();
+      const incidentStats = await db.getOsintIncidentStats();
+
+      // Build NIST-aligned report
+      const report = {
+        reportId: "RPT-" + Date.now().toString(36).toUpperCase(),
+        generatedAt: new Date().toISOString(),
+        framework: "NIST SP 800-61 Rev. 2 (Incident Handling)",
+        organization: "OZZU Security Operations",
+
+        executiveSummary: {
+          totalIncidents: incidentStats.total,
+          openIncidents: incidentStats.open || 0,
+          investigating: incidentStats.investigating || 0,
+          contained: incidentStats.contained || 0,
+          resolved: incidentStats.resolved || 0,
+          criticalCount: incidentStats.bySeverity?.critical || 0,
+          highCount: incidentStats.bySeverity?.high || 0,
+          mediumCount: incidentStats.bySeverity?.medium || 0,
+          lowCount: incidentStats.bySeverity?.low || 0,
+          profilesCovered: profiles.length,
+        },
+
+        incidentCategories: {
+          data_breach: incidents.filter((i) => i.classification === "data_breach").length,
+          exposure: incidents.filter((i) => i.classification === "exposure").length,
+          phishing: incidents.filter((i) => i.classification === "phishing").length,
+          infrastructure: incidents.filter((i) => i.classification === "infrastructure").length,
+          privacy: incidents.filter((i) => i.classification === "privacy").length,
+        },
+
+        nistPhaseDistribution: {
+          preparation: incidents.filter((i) => i.nist_phase === "preparation").length,
+          identification: incidents.filter((i) => i.nist_phase === "identification").length,
+          containment: incidents.filter((i) => i.nist_phase === "containment").length,
+          eradication: incidents.filter((i) => i.nist_phase === "eradication").length,
+          recovery: incidents.filter((i) => i.nist_phase === "recovery").length,
+          lessons_learned: incidents.filter((i) => i.nist_phase === "lessons_learned").length,
+        },
+
+        incidents: incidents.map((i) => ({
+          incidentId: i.incident_id,
+          title: i.title,
+          severity: i.severity,
+          status: i.status,
+          classification: i.classification,
+          nistPhase: i.nist_phase,
+          attackVector: i.attack_vector,
+          affectedAssets: i.affected_assets,
+          profileLabel: i.profile_label,
+          profileType: i.profile_type,
+          createdAt: i.created_at,
+          resolvedAt: i.resolved_at,
+          timeline: i.timeline,
+        })),
+
+        assetsMonitored: profiles.map((p) => ({
+          id: p.id,
+          type: p.profile_type,
+          value: p.value || p.label,
+          incidentCount: incidents.filter((i) => i.profile_id === p.id).length,
+        })),
+      };
+
+      sendJSON(res, 200, { ok: true, report });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
   // ── OSINT Per-Profile Scheduling (Epic 6) ──
 
   // GET /osint/schedule/:profileId — get per-profile schedule

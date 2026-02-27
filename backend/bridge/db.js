@@ -313,7 +313,32 @@ async function init() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations)");
+    // SOC compliance: incident tracking with NIST SP 800-61 aligned fields
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_incidents (
+      id SERIAL PRIMARY KEY,
+      incident_id TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      severity TEXT NOT NULL DEFAULT 'medium',
+      category TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE SET NULL,
+      finding_ids INTEGER[] DEFAULT '{}',
+      remediation_ids INTEGER[] DEFAULT '{}',
+      nist_phase TEXT DEFAULT 'identification',
+      classification TEXT DEFAULT 'exposure',
+      affected_assets TEXT[] DEFAULT '{}',
+      attack_vector TEXT,
+      indicators JSONB DEFAULT '{}',
+      timeline JSONB DEFAULT '[]',
+      assigned_to TEXT,
+      escalated BOOLEAN DEFAULT false,
+      resolved_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -1647,6 +1672,79 @@ async function bulkCreateRemediations(remediations) {
   return created;
 }
 
+// ── OSINT Incidents (SOC Compliance) ──────────────────────────────
+
+async function createOsintIncident({ incidentId, title, description, severity, category, profileId, findingIds, remediationIds, classification, affectedAssets, attackVector, indicators, assignedTo }) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_incidents (incident_id, title, description, severity, category, profile_id, finding_ids, remediation_ids, classification, affected_assets, attack_vector, indicators, assigned_to, timeline)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     RETURNING *`,
+    [incidentId, title, description || null, severity || 'medium', category, profileId || null,
+     findingIds || [], remediationIds || [], classification || 'exposure', affectedAssets || [],
+     attackVector || null, JSON.stringify(indicators || {}), assignedTo || null,
+     JSON.stringify([{ timestamp: new Date().toISOString(), action: 'incident_created', actor: 'system' }])]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintIncidents({ status, severity, profileId, limit = 50 } = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT i.*, p.label as profile_label, p.profile_type FROM osint_incidents i LEFT JOIN osint_profiles p ON i.profile_id = p.id`;
+  const vals = [];
+  const conds = [];
+  if (status) { vals.push(status); conds.push(`i.status = $${vals.length}`); }
+  if (severity) { vals.push(severity); conds.push(`i.severity = $${vals.length}`); }
+  if (profileId) { vals.push(profileId); conds.push(`i.profile_id = $${vals.length}`); }
+  if (conds.length) sql += ` WHERE ${conds.join(" AND ")}`;
+  vals.push(limit);
+  sql += ` ORDER BY CASE i.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, i.created_at DESC LIMIT $${vals.length}`;
+  const res = await query(sql, vals);
+  return res.rows;
+}
+
+async function updateOsintIncident(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const vals = [];
+  let idx = 1;
+  if (updates.status != null) { fields.push(`status = $${idx++}`); vals.push(updates.status); if (updates.status === 'resolved') fields.push(`resolved_at = NOW()`); }
+  if (updates.severity != null) { fields.push(`severity = $${idx++}`); vals.push(updates.severity); }
+  if (updates.nistPhase != null) { fields.push(`nist_phase = $${idx++}`); vals.push(updates.nistPhase); }
+  if (updates.assignedTo !== undefined) { fields.push(`assigned_to = $${idx++}`); vals.push(updates.assignedTo); }
+  if (updates.escalated != null) { fields.push(`escalated = $${idx++}`); vals.push(updates.escalated); }
+  if (updates.description != null) { fields.push(`description = $${idx++}`); vals.push(updates.description); }
+  fields.push(`updated_at = NOW()`);
+  if (fields.length <= 1) return null;
+  vals.push(id);
+  const res = await query(`UPDATE osint_incidents SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+async function addIncidentTimelineEvent(id, action, actor, details) {
+  if (!_pgConnected) return null;
+  const event = JSON.stringify({ timestamp: new Date().toISOString(), action, actor: actor || 'system', details: details || null });
+  const res = await query(
+    `UPDATE osint_incidents SET timeline = timeline || $2::jsonb, updated_at = NOW() WHERE id = $1 RETURNING *`,
+    [id, event]
+  );
+  return res.rows[0] || null;
+}
+
+async function getOsintIncidentStats() {
+  if (!_pgConnected) return { total: 0, open: 0, investigating: 0, contained: 0, resolved: 0 };
+  const res = await query(`SELECT status, severity, COUNT(*) as count FROM osint_incidents GROUP BY status, severity`);
+  const stats = { total: 0, open: 0, investigating: 0, contained: 0, resolved: 0, bySeverity: {} };
+  for (const row of res.rows) {
+    const count = parseInt(row.count);
+    stats.total += count;
+    stats[row.status] = (stats[row.status] || 0) + count;
+    if (!stats.bySeverity[row.severity]) stats.bySeverity[row.severity] = 0;
+    stats.bySeverity[row.severity] += count;
+  }
+  return stats;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -1765,6 +1863,12 @@ module.exports = {
   updateOsintRemediation,
   getOsintRemediationStats,
   bulkCreateRemediations,
+  // OSINT Incidents (SOC)
+  createOsintIncident,
+  getOsintIncidents,
+  updateOsintIncident,
+  addIncidentTimelineEvent,
+  getOsintIncidentStats,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

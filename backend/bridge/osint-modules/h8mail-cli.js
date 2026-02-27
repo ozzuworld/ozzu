@@ -79,7 +79,16 @@ module.exports = {
       // Parse stdout as fallback
       if (findings.length === 0) {
         const stdout = result.stdout || "";
-        const breachLines = stdout.split("\n").filter((l) => l.includes("[") && (l.includes("breach") || l.includes("found") || l.includes("leak")));
+        // Strip ANSI color codes before parsing — h8mail uses heavy terminal formatting
+        // that causes false positives (e.g. "[01m[94m[~]" matches as "[" + "found")
+        const clean = stdout.replace(/\x1b\[[0-9;]*m/g, "").replace(/\[0m/g, "");
+        const breachLines = clean.split("\n").filter((l) => {
+          const lower = l.toLowerCase();
+          // Must contain actual breach indicators, not just status messages
+          return (lower.includes("breach") || lower.includes("leak") || lower.includes("dump")) &&
+            !lower.includes("no results") && !lower.includes("not found") && !lower.includes("0 results") &&
+            l.trim().length > 10;
+        });
 
         if (breachLines.length > 0) {
           findings.push({

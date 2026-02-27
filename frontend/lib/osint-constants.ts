@@ -218,6 +218,42 @@ export const REMEDIATION_STATUS_COLORS: Record<string, string> = {
   dismissed: "#6B7280",
 };
 
+// SOC Incident Status
+export const INCIDENT_STATUS_EMOJI: Record<string, string> = {
+  open: "🔴",
+  investigating: "🔍",
+  contained: "🛡",
+  eradication: "🧹",
+  resolved: "✅",
+  closed: "🔒",
+};
+
+export const INCIDENT_STATUS_COLORS: Record<string, string> = {
+  open: "#EF4444",
+  investigating: "#F97316",
+  contained: "#EAB308",
+  eradication: "#3B82F6",
+  resolved: "#22C55E",
+  closed: "#6B7280",
+};
+
+export const NIST_PHASE_LABELS: Record<string, string> = {
+  preparation: "1. PREPARATION",
+  identification: "2. IDENTIFICATION",
+  containment: "3. CONTAINMENT",
+  eradication: "4. ERADICATION",
+  recovery: "5. RECOVERY",
+  lessons_learned: "6. LESSONS LEARNED",
+};
+
+export const INCIDENT_CLASSIFICATION_EMOJI: Record<string, string> = {
+  data_breach: "💀",
+  exposure: "🌐",
+  phishing: "🎣",
+  infrastructure: "🏗",
+  privacy: "🔒",
+};
+
 export function scoreColor(score: number): string {
   if (score >= 70) return "#EF4444";
   if (score >= 40) return "#F97316";

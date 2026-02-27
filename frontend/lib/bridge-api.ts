@@ -1023,6 +1023,98 @@ export async function generateAllOsintRemediations(): Promise<{ generated: numbe
   return res.json();
 }
 
+// ── OSINT SOC Incidents (Compliance) ──
+
+export interface OsintIncident {
+  id: number;
+  incident_id: string;
+  title: string;
+  description: string | null;
+  severity: string;
+  category: string;
+  status: string;
+  profile_id: number | null;
+  finding_ids: number[];
+  remediation_ids: number[];
+  nist_phase: string;
+  classification: string;
+  affected_assets: string[];
+  attack_vector: string | null;
+  indicators: Record<string, any>;
+  timeline: Array<{ timestamp: string; action: string; actor: string; details?: string }>;
+  assigned_to: string | null;
+  escalated: boolean;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+  profile_label?: string;
+  profile_type?: string;
+}
+
+export interface OsintIncidentStats {
+  total: number;
+  open: number;
+  investigating: number;
+  contained: number;
+  resolved: number;
+  bySeverity: Record<string, number>;
+}
+
+export async function fetchOsintIncidents(filters?: { status?: string; severity?: string; profileId?: number }): Promise<OsintIncident[]> {
+  const params = new URLSearchParams();
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.severity) params.set("severity", filters.severity);
+  if (filters?.profileId) params.set("profileId", String(filters.profileId));
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/incidents${qs}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.incidents || [];
+}
+
+export async function createOsintIncident(data: { title: string; category: string; severity?: string; description?: string; profileId?: number; findingIds?: number[] }): Promise<OsintIncident | null> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/incidents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json.incident;
+}
+
+export async function updateOsintIncident(id: number, updates: { status?: string; severity?: string; nistPhase?: string; assignedTo?: string; escalated?: boolean; timelineAction?: string; actor?: string }): Promise<OsintIncident | null> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/incidents/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.incident;
+}
+
+export async function fetchOsintIncidentStats(): Promise<OsintIncidentStats> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/incidents/stats`);
+  if (!res.ok) return { total: 0, open: 0, investigating: 0, contained: 0, resolved: 0, bySeverity: {} };
+  const data = await res.json();
+  return data.stats;
+}
+
+export async function generateOsintIncidents(): Promise<number> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/incidents/generate`, { method: "POST" });
+  if (!res.ok) return 0;
+  const data = await res.json();
+  return data.generated || 0;
+}
+
+export async function fetchOsintComplianceReport(): Promise<any> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/compliance/report`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.report;
+}
+
 // ── OSINT Groups (Epic 6) ──
 
 export interface OsintGroup {
