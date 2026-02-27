@@ -1,7 +1,5 @@
-import { useCallback } from "react";
 import { View, Text, Pressable } from "react-native";
-import { useEntity } from "../../lib/useEntity";
-import { useHA } from "../../lib/ha-context";
+import { useVacuum } from "../../lib/useVacuum";
 
 interface VacuumWidgetProps {
   entityId: string;
@@ -28,41 +26,12 @@ const STATE_EMOJI: Record<string, string> = {
 };
 
 export function VacuumWidget({ entityId }: VacuumWidgetProps) {
-  const entity = useEntity(entityId);
-  const battery = useEntity("sensor.dusk_vader_battery_level");
-  const status = useEntity("sensor.dusk_vader_status");
-  const progress = useEntity("sensor.dusk_vader_cleaning_progress");
-  const area = useEntity("sensor.dusk_vader_cleaned_area");
-  const currentRoom = useEntity("sensor.dusk_vader_current_room");
-  const { callService } = useHA();
+  const { state, controls } = useVacuum();
 
-  const vacState = entity?.state ?? "unavailable";
-  const batteryPct = battery?.state ? parseInt(battery.state, 10) : null;
-  const statusText = status?.state ?? vacState;
-  const progressPct = progress?.state ? parseInt(progress.state, 10) : 0;
-  const areaM2 = area?.state ?? null;
-  const roomName = currentRoom?.state ?? null;
+  const stateColor = STATE_COLORS[state.state] ?? "#525252";
+  const stateEmoji = STATE_EMOJI[state.state] ?? "🤖";
 
-  const isCleaning = vacState === "cleaning";
-  const isDocked = vacState === "docked" || vacState === "idle";
-  const isPaused = vacState === "paused";
-  const isReturning = vacState === "returning";
-  const stateColor = STATE_COLORS[vacState] ?? "#525252";
-  const stateEmoji = STATE_EMOJI[vacState] ?? "🤖";
-
-  const handleStart = useCallback(() => {
-    callService("vacuum", "start", {}, { entity_id: entityId });
-  }, [callService, entityId]);
-
-  const handlePause = useCallback(() => {
-    callService("vacuum", "pause", {}, { entity_id: entityId });
-  }, [callService, entityId]);
-
-  const handleDock = useCallback(() => {
-    callService("vacuum", "return_to_base", {}, { entity_id: entityId });
-  }, [callService, entityId]);
-
-  if (!entity) return null;
+  if (state.state === "unavailable") return null;
 
   return (
     <View style={{ marginTop: 8 }}>
@@ -72,36 +41,36 @@ export function VacuumWidget({ entityId }: VacuumWidgetProps) {
         <Text style={{ color: "#D4D4D4", fontFamily: "monospace", fontSize: 13, fontWeight: "bold" }}>
           Dusk Vader
         </Text>
-        {batteryPct !== null && (
-          <Text style={{ color: batteryPct < 20 ? "#EF4444" : "#A3A3A3", fontFamily: "monospace", fontSize: 11 }}>
-            🔋 {batteryPct}%
+        {state.battery !== null && (
+          <Text style={{ color: state.battery < 20 ? "#EF4444" : "#A3A3A3", fontFamily: "monospace", fontSize: 11 }}>
+            🔋 {state.battery}%
           </Text>
         )}
         <Text style={{ color: stateColor, fontFamily: "monospace", fontSize: 11, marginLeft: "auto" }}>
-          {stateEmoji} {statusText.toUpperCase()}
+          {stateEmoji} {state.status.toUpperCase()}
         </Text>
       </View>
 
       {/* Cleaning info (when active) */}
-      {(isCleaning || isPaused) && (
+      {(state.isCleaning || state.isPaused) && (
         <View style={{ marginBottom: 8 }}>
           <View style={{ flexDirection: "row", gap: 12, marginBottom: 6 }}>
-            {roomName && roomName !== "unknown" && (
+            {state.currentRoom && state.currentRoom !== "unknown" && (
               <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 10 }}>
-                🏠 {roomName}
+                🏠 {state.currentRoom}
               </Text>
             )}
-            {areaM2 && (
+            {state.area && (
               <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 10 }}>
-                📐 {areaM2} m²
+                📐 {state.area} m²
               </Text>
             )}
           </View>
-          {progressPct > 0 && (
+          {state.progress > 0 && (
             <View style={{ height: 4, backgroundColor: "#333", borderRadius: 2 }}>
               <View
                 style={{
-                  width: `${Math.min(100, progressPct)}%`,
+                  width: `${Math.min(100, state.progress)}%`,
                   height: 4,
                   backgroundColor: "#22C55E",
                   borderRadius: 2,
@@ -115,9 +84,9 @@ export function VacuumWidget({ entityId }: VacuumWidgetProps) {
       {/* Control buttons */}
       <View style={{ flexDirection: "row", gap: 8 }}>
         {/* Start / Resume */}
-        {(isDocked || isPaused) && (
+        {(state.isDocked || state.isPaused) && (
           <Pressable
-            onPress={handleStart}
+            onPress={controls.start}
             style={({ pressed }) => ({
               flex: 1,
               paddingVertical: 8,
@@ -129,15 +98,15 @@ export function VacuumWidget({ entityId }: VacuumWidgetProps) {
             })}
           >
             <Text style={{ color: "#22C55E", fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
-              {isPaused ? "▶ RESUME" : "▶ START"}
+              {state.isPaused ? "▶ RESUME" : "▶ START"}
             </Text>
           </Pressable>
         )}
 
         {/* Pause */}
-        {isCleaning && (
+        {state.isCleaning && (
           <Pressable
-            onPress={handlePause}
+            onPress={controls.pause}
             style={({ pressed }) => ({
               flex: 1,
               paddingVertical: 8,
@@ -155,9 +124,9 @@ export function VacuumWidget({ entityId }: VacuumWidgetProps) {
         )}
 
         {/* Dock / Return */}
-        {(isCleaning || isPaused) && (
+        {(state.isCleaning || state.isPaused) && (
           <Pressable
-            onPress={handleDock}
+            onPress={controls.dock}
             style={({ pressed }) => ({
               flex: 1,
               paddingVertical: 8,
@@ -175,7 +144,7 @@ export function VacuumWidget({ entityId }: VacuumWidgetProps) {
         )}
 
         {/* Docked/returning state info */}
-        {isReturning && (
+        {state.isReturning && (
           <View style={{ flex: 1, paddingVertical: 8, alignItems: "center" }}>
             <Text style={{ color: "#EAB308", fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
               Returning to dock...

@@ -11,6 +11,7 @@ import { useMediaPlayer } from "../../lib/useMediaPlayer";
 import { rooms, RARITY_COLORS, type InventoryItem } from "../../lib/rooms";
 import { ACWidget } from "../../components/devices/ACWidget";
 import { VacuumWidget } from "../../components/devices/VacuumWidget";
+import { VacuumMapCard } from "../../components/devices/VacuumMapCard";
 
 const TOP_BAR_HEIGHT = 48;
 const ACCENT = "#06B6D4";
@@ -346,6 +347,7 @@ function RoomSection({ name, icon, items }: { name: string; icon: string; items:
 
       {/* Vacuum widget for Cleaning */}
       {isCleaning && <VacuumWidget entityId={VACUUM_ENTITY_ID} />}
+      {isCleaning && <VacuumMapCard />}
     </View>
   );
 }
