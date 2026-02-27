@@ -2,7 +2,7 @@
 // Tablets connect as "mic", TV connects as "speaker"
 
 import { getDeviceType } from "../modules/pcm-player";
-import { Dimensions } from "react-native";
+import { Dimensions, Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
 
 // Module-level cache: survives reconnects even if FileSystem persistence fails (e.g. iOS sideloaded apps)
@@ -328,6 +328,25 @@ export class BridgeSession {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "debugLog", msg }));
     }
+  }
+
+  /** Send crash report via HTTP (works even when WS is down) */
+  sendCrashReport(error: string, stack?: string | null, componentStack?: string | null, context?: string | null): void {
+    const bridgeUrl = (process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333");
+    const body = JSON.stringify({
+      deviceId: this.deviceId,
+      deviceType: this._deviceType,
+      platform: Platform.OS,
+      error,
+      stack: stack || null,
+      componentStack: componentStack || null,
+      context: context || null,
+    });
+    fetch(`${bridgeUrl}/api/crash-reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    }).catch(() => {}); // fire-and-forget
   }
 
   sendGlassesFrame(data: string, width: number, height: number): void {

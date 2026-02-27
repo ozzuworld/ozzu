@@ -5819,6 +5819,63 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
+  // ── Crash Reports ──
+
+  // In-memory ring buffer for crash reports (last 200)
+  if (!global._crashLogs) global._crashLogs = [];
+  const crashLogs = global._crashLogs;
+  const CRASH_LOG_MAX = 200;
+
+  // POST /api/crash-reports — receive crash report from device
+  if (req.method === "POST" && pathname === "/api/crash-reports") {
+    try {
+      const data = await parseBody(req);
+      const entry = {
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        deviceId: data.deviceId || "unknown",
+        deviceType: data.deviceType || "unknown",
+        platform: data.platform || "unknown",
+        error: data.error || "Unknown error",
+        stack: data.stack || null,
+        componentStack: data.componentStack || null,
+        context: data.context || null,
+        appVersion: data.appVersion || null,
+      };
+      crashLogs.push(entry);
+      if (crashLogs.length > CRASH_LOG_MAX) crashLogs.shift();
+      console.error(`[crash-report] ${entry.deviceId} (${entry.platform}): ${entry.error}`);
+      if (entry.stack) console.error(`[crash-report] Stack: ${entry.stack.split("\n").slice(0, 5).join("\n")}`);
+      sendJSON(res, 200, { ok: true, id: entry.id });
+    } catch (err) {
+      sendJSON(res, 400, { error: err.message });
+    }
+    return;
+  }
+
+  // GET /api/crash-logs — query crash reports (for Cipher)
+  if (req.method === "GET" && pathname === "/api/crash-logs") {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+    const deviceId = url.searchParams.get("deviceId");
+    const since = url.searchParams.get("since"); // ISO timestamp
+    let logs = [...crashLogs].reverse(); // newest first
+    if (deviceId) logs = logs.filter(l => l.deviceId === deviceId);
+    if (since) {
+      const sinceMs = new Date(since).getTime();
+      logs = logs.filter(l => new Date(l.timestamp).getTime() >= sinceMs);
+    }
+    sendJSON(res, 200, { ok: true, count: logs.length, logs: logs.slice(0, limit) });
+    return;
+  }
+
+  // DELETE /api/crash-logs — clear crash logs
+  if (req.method === "DELETE" && pathname === "/api/crash-logs") {
+    crashLogs.length = 0;
+    sendJSON(res, 200, { ok: true, message: "Crash logs cleared" });
+    return;
+  }
+
   // ── Epic/Project Endpoints ──
 
   // POST /epics — create a multi-phase epic
