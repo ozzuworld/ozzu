@@ -6,15 +6,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv libimage-exiftool-perl && \
     rm -rf /var/lib/apt/lists/*
 
-# System packages for dnstwist DNS resolution
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3-dnspython python3-tld python3-whois && \
-    rm -rf /var/lib/apt/lists/*
-
-# Python OSINT tools in isolated venv
+# Python OSINT tools in isolated venv (light — heavy tools live in osint-tools container)
 RUN python3 -m venv /opt/osint-venv --system-site-packages && \
     /opt/osint-venv/bin/pip install --no-cache-dir \
-    maigret holehe h8mail ghunt "dnstwist[full]"
+    maigret holehe h8mail
 
 # PhoneInfoga Go binary (single static file, zero deps)
 RUN ARCH=$(dpkg --print-architecture) && \

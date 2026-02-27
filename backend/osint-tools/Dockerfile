@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir \
     maigret \
     holehe \
     h8mail \
-    sherlock-project
+    sherlock-project \
+    dnstwist
 
 # theHarvester — install from git (PyPI package is broken/empty)
 RUN pip install --no-cache-dir git+https://github.com/laramies/theHarvester.git || \

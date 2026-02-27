@@ -9,7 +9,7 @@ module.exports = {
     const findings = [];
     const domain = profile.value;
 
-    const available = await cliRunner.isToolAvailable("/opt/osint-venv/bin/dnstwist");
+    const available = await cliRunner.isToolAvailable("dnstwist");
     if (!available) {
       findings.push({
         category: "infrastructure",
@@ -23,7 +23,7 @@ module.exports = {
 
     const release = await rateLimiter.acquire();
     try {
-      const result = await cliRunner.runTool("/opt/osint-venv/bin/dnstwist", [
+      const result = await cliRunner.runTool("dnstwist", [
         "--format", "json",
         "--registered",
         "--whois",

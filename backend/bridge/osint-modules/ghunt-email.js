@@ -23,7 +23,7 @@ module.exports = {
     }
 
     // Check if ghunt is available
-    const available = await cliRunner.isToolAvailable("/opt/osint-venv/bin/ghunt");
+    const available = await cliRunner.isToolAvailable("ghunt");
     if (!available) {
       findings.push({
         category: "exposure",
@@ -46,7 +46,7 @@ module.exports = {
           category: "exposure",
           severity: "info",
           title: "GHunt requires authentication setup",
-          description: "GHunt needs Google cookies for auth. Run: docker exec -it bridge /opt/osint-venv/bin/ghunt login",
+          description: "GHunt needs Google cookies for auth. Run: docker exec -it bridge ghunt login",
           rawData: { reason: "no_auth", tool: "ghunt" },
         });
         return findings;
@@ -60,7 +60,7 @@ module.exports = {
       const crypto = require("crypto");
       const outputFile = `/tmp/ghunt-${crypto.randomUUID()}.json`;
 
-      const result = await cliRunner.runTool("/opt/osint-venv/bin/ghunt", [
+      const result = await cliRunner.runTool("ghunt", [
         "email", email, "--json", outputFile,
       ], { timeout: 60000, parseJson: false });
 
@@ -202,7 +202,7 @@ module.exports = {
         category: "exposure",
         severity: "info",
         title: `GHunt scan error: ${err.message}`,
-        description: `Failed to run GHunt for "${email}". Run: docker exec -it bridge /opt/osint-venv/bin/ghunt login`,
+        description: `Failed to run GHunt for "${email}". Run: docker exec -it bridge ghunt login`,
         rawData: { error: err.message, tool: "ghunt" },
       });
     } finally {
