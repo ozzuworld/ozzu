@@ -311,6 +311,146 @@ const EXTRACTION_RULES = [
       ],
     }),
   },
+// shodan-lookup: open ports → ip entities
+  {
+    module: "shodan-lookup",
+    match: (f) => f.raw_data?.ports && Array.isArray(f.raw_data.ports),
+    extract: (f, profile) => {
+      const entities = [];
+      const relationships = [];
+      const ip = f.raw_data.ip || profile.value;
+      entities.push({
+        entity_type: "ip", value: ip, label: ip,
+        metadata: { ports: f.raw_data.ports, os: f.raw_data.os, hostnames: f.raw_data.hostnames },
+        source_module: "shodan-lookup",
+      });
+      relationships.push({
+        fromType: profile.profile_type, fromValue: profile.value, toType: "ip", toValue: ip,
+        relationship: "resolves_to", confidence: 95, evidence: "Shodan host lookup: " + ip,
+      });
+      if (f.raw_data.org) {
+        entities.push({
+          entity_type: "organization", value: "hosting:" + f.raw_data.org.toLowerCase(), label: f.raw_data.org + " (hosting)",
+          metadata: { type: "hosting_provider", isp: f.raw_data.isp }, source_module: "shodan-lookup",
+        });
+        relationships.push({
+          fromType: "ip", fromValue: ip, toType: "organization", toValue: "hosting:" + f.raw_data.org.toLowerCase(),
+          relationship: "hosted_on", confidence: 95, evidence: "Shodan org: " + f.raw_data.org,
+        });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // image-search: EXIF GPS coordinates → location entity
+  {
+    module: "image-search",
+    match: (f) => f.raw_data?.exif?.latitude && f.raw_data?.exif?.longitude,
+    extract: (f, profile) => {
+      const lat = f.raw_data.exif.latitude;
+      const lon = f.raw_data.exif.longitude;
+      return {
+        entities: [{
+          entity_type: "location", value: lat.toFixed(4) + "," + lon.toFixed(4), label: "GPS: " + lat.toFixed(4) + ", " + lon.toFixed(4),
+          metadata: { latitude: lat, longitude: lon, source: "exif", imageUrl: f.source_url }, source_module: "image-search",
+        }],
+        relationships: [{
+          fromType: profile.profile_type, fromValue: profile.value, toType: "location", toValue: lat.toFixed(4) + "," + lon.toFixed(4),
+          relationship: "associated_with", confidence: 99, evidence: "EXIF GPS from image: " + (f.source_url || "avatar"),
+        }],
+      };
+    },
+  },
+
+  // web-crawler: discovered emails → email entities
+  {
+    module: "web-crawler",
+    match: (f) => f.raw_data?.emails && Array.isArray(f.raw_data.emails) && f.raw_data.emails.length > 0,
+    extract: (f, profile) => {
+      const entities = [];
+      const relationships = [];
+      for (const email of f.raw_data.emails.slice(0, 10)) {
+        entities.push({
+          entity_type: "email", value: email.toLowerCase(), label: email,
+          metadata: { source: "web_crawler", pageUrl: f.source_url }, source_module: "web-crawler",
+        });
+        relationships.push({
+          fromType: profile.profile_type, fromValue: profile.value, toType: "email", toValue: email.toLowerCase(),
+          relationship: "associated_with", confidence: 85, evidence: "Found on page: " + (f.source_url || profile.value),
+        });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // web-crawler: discovered phone numbers → phone entities
+  {
+    module: "web-crawler",
+    match: (f) => f.raw_data?.phones && Array.isArray(f.raw_data.phones) && f.raw_data.phones.length > 0,
+    extract: (f, profile) => {
+      const entities = [];
+      const relationships = [];
+      for (const phone of f.raw_data.phones.slice(0, 5)) {
+        entities.push({
+          entity_type: "phone", value: phone, label: phone,
+          metadata: { source: "web_crawler", pageUrl: f.source_url }, source_module: "web-crawler",
+        });
+        relationships.push({
+          fromType: profile.profile_type, fromValue: profile.value, toType: "phone", toValue: phone,
+          relationship: "associated_with", confidence: 85, evidence: "Found on page: " + (f.source_url || profile.value),
+        });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // secret-scanner: leaked API key → service entity
+  {
+    module: "secret-scanner",
+    match: (f) => f.raw_data?.secretType && f.severity !== "info",
+    extract: (f, profile) => ({
+      entities: [{
+        entity_type: "organization", value: "service:" + (f.raw_data.secretType || "unknown").toLowerCase().replace(/\s+/g, "_"),
+        label: f.raw_data.secretType,
+        metadata: { type: "leaked_credential", severity: f.severity, source: f.raw_data.source },
+        source_module: "secret-scanner",
+      }],
+      relationships: [{
+        fromType: profile.profile_type, fromValue: profile.value,
+        toType: "organization", toValue: "service:" + (f.raw_data.secretType || "unknown").toLowerCase().replace(/\s+/g, "_"),
+        relationship: "uses", confidence: 90, evidence: "Leaked " + f.raw_data.secretType + " credential found",
+      }],
+    }),
+  },
+
+  // email-domain: DKIM infrastructure → organization entity
+  {
+    module: "email-domain",
+    match: (f) => f.raw_data?.dkimSelectors && Array.isArray(f.raw_data.dkimSelectors),
+    extract: (f, profile) => {
+      const domain = profile.value.split("@")[1] || profile.value;
+      const entities = [];
+      const relationships = [];
+      const infraSet = new Set();
+      for (const dk of f.raw_data.dkimSelectors) {
+        if (dk.infrastructure && dk.infrastructure !== "Unknown" && !infraSet.has(dk.infrastructure)) {
+          infraSet.add(dk.infrastructure);
+          entities.push({
+            entity_type: "organization", value: "mailinfra:" + dk.infrastructure.toLowerCase().replace(/\s+/g, "_"),
+            label: dk.infrastructure + " (email)",
+            metadata: { type: "email_infrastructure", selector: dk.selector, domain },
+            source_module: "email-domain",
+          });
+          relationships.push({
+            fromType: "domain", fromValue: domain,
+            toType: "organization", toValue: "mailinfra:" + dk.infrastructure.toLowerCase().replace(/\s+/g, "_"),
+            relationship: "uses", confidence: 90, evidence: 'DKIM selector "' + dk.selector + '" \u2192 ' + dk.infrastructure,
+          });
+        }
+      }
+      return { entities, relationships };
+    },
+  },
 ];
 
 // ── Core Correlation Functions ──

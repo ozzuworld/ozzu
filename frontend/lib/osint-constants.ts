@@ -30,6 +30,8 @@ export const CATEGORY_EMOJI: Record<string, string> = {
   exposure: "🌐",
   infrastructure: "🏗",
   metadata: "🔬",
+  secret: "🔐",
+  vulnerability: "⚠️",
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -58,6 +60,7 @@ export const PROFILE_TYPE_EMOJI: Record<string, string> = {
   password: "🔑",
   phone: "📱",
   domain: "🌐",
+  ip: "📡",
 };
 
 export const CORRELATION_TYPE_EMOJI: Record<string, string> = {

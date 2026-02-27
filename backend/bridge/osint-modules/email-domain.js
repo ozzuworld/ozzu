@@ -178,6 +178,145 @@ module.exports = {
       remediation: null,
     });
 
+    // 8. DKIM selector probing — reveals email infrastructure
+    const DKIM_SELECTORS = [
+      "google", "default", "selector1", "selector2", "k1", "dkim", "mail",
+      "s1", "s2", "mandrill", "amazonses", "smtp", "cm", "mxvault",
+      "protonmail", "zoho", "everlytickey1", "dkim1",
+    ];
+    const DKIM_INFRA_MAP = {
+      google: "Google Workspace", selector1: "Microsoft 365", selector2: "Microsoft 365",
+      mandrill: "Mailchimp/Mandrill", amazonses: "Amazon SES", k1: "Mailchimp",
+      cm: "Campaign Monitor", protonmail: "ProtonMail", zoho: "Zoho Mail",
+      s1: "Generic", s2: "Generic", smtp: "Custom SMTP",
+    };
+
+    const dkimResults = [];
+    const release3 = await rateLimiter.acquire();
+    try {
+      for (const selector of DKIM_SELECTORS) {
+        try {
+          const records = await dns.resolveTxt(`${selector}._domainkey.${domain}`);
+          const record = records.flat().join("");
+          if (record.includes("v=DKIM1") || record.includes("p=")) {
+            const keyMatch = record.match(/p=([A-Za-z0-9+/=]+)/);
+            const keyLength = keyMatch && keyMatch[1] !== "" ? Math.floor(Buffer.from(keyMatch[1], "base64").length * 8) : null;
+            const infra = DKIM_INFRA_MAP[selector] || "Unknown";
+            dkimResults.push({ selector, record, keyLength, infrastructure: infra });
+          }
+        } catch (_) { /* selector not found — normal */ }
+      }
+    } finally {
+      release3();
+    }
+
+    if (dkimResults.length > 0) {
+      const weakKeys = dkimResults.filter((d) => d.keyLength && d.keyLength < 1024);
+      const infraList = [...new Set(dkimResults.map((d) => d.infrastructure).filter((i) => i !== "Unknown"))];
+
+      if (weakKeys.length > 0) {
+        findings.push({
+          category: "exposure",
+          severity: "high",
+          title: `Weak DKIM key detected for ${domain}`,
+          description: `DKIM selector(s) ${weakKeys.map((d) => d.selector).join(", ")} use key sizes under 1024 bits. These are vulnerable to factoring attacks and should be upgraded to 2048-bit keys.`,
+          rawData: { domain, weakKeys: weakKeys.map((d) => ({ selector: d.selector, keyLength: d.keyLength })) },
+          remediation: "Upgrade DKIM keys to 2048-bit RSA. Rotate selectors after upgrade.",
+        });
+      }
+
+      findings.push({
+        category: "exposure",
+        severity: "info",
+        title: `DKIM: ${dkimResults.length} active selector(s) — ${infraList.join(", ") || "custom"}`,
+        description: `Active DKIM selectors: ${dkimResults.map((d) => `${d.selector} (${d.infrastructure}${d.keyLength ? `, ${d.keyLength}-bit` : ""})`).join(", ")}. DKIM selectors reveal which email services the domain uses for sending.`,
+        rawData: { domain, dkimSelectors: dkimResults, detectedInfrastructure: infraList },
+        remediation: null,
+      });
+    } else {
+      findings.push({
+        category: "exposure",
+        severity: "medium",
+        title: `No DKIM selectors found for ${domain}`,
+        description: `None of the ${DKIM_SELECTORS.length} common DKIM selectors were found for ${domain}. Email from this domain is not DKIM-signed, making it easier to spoof.`,
+        rawData: { domain, selectorsChecked: DKIM_SELECTORS },
+        remediation: "If you own this domain, configure DKIM signing to authenticate outbound email.",
+      });
+    }
+
+    // 9. SPF recursion — fully resolve include: and redirect= chains
+    const release4 = await rateLimiter.acquire();
+    try {
+      const txtRecords2 = await dns.resolveTxt(domain);
+      const spfRecord2 = txtRecords2.flat().find((r) => r.startsWith("v=spf1"));
+      if (spfRecord2) {
+        const spfChain = [{ domain, record: spfRecord2 }];
+        const visited = new Set([domain]);
+        const includes = spfRecord2.match(/include:([^\s]+)/g) || [];
+        const redirect = spfRecord2.match(/redirect=([^\s]+)/);
+
+        const toResolve = [
+          ...includes.map((i) => i.replace("include:", "")),
+          ...(redirect ? [redirect[1]] : []),
+        ];
+
+        for (const target of toResolve) {
+          if (visited.has(target)) continue;
+          visited.add(target);
+          try {
+            const subTxt = await dns.resolveTxt(target);
+            const subSpf = subTxt.flat().find((r) => r.startsWith("v=spf1"));
+            if (subSpf) {
+              spfChain.push({ domain: target, record: subSpf });
+              const nestedIncludes = subSpf.match(/include:([^\s]+)/g) || [];
+              for (const ni of nestedIncludes) {
+                const niDomain = ni.replace("include:", "");
+                if (!visited.has(niDomain)) {
+                  visited.add(niDomain);
+                  try {
+                    const niTxt = await dns.resolveTxt(niDomain);
+                    const niSpf = niTxt.flat().find((r) => r.startsWith("v=spf1"));
+                    if (niSpf) spfChain.push({ domain: niDomain, record: niSpf });
+                  } catch (_) {}
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (spfChain.length > 1) {
+          findings.push({
+            category: "exposure",
+            severity: "info",
+            title: `SPF chain: ${spfChain.length} records resolved for ${domain}`,
+            description: `Full SPF resolution chain: ${spfChain.map((s) => s.domain).join(" → ")}. This reveals all authorized mail senders.`,
+            rawData: { domain, spfChain },
+            remediation: null,
+          });
+        }
+      }
+    } catch (_) {}
+    release4();
+
+    // 10. BIMI record check — brand indicator
+    const release5 = await rateLimiter.acquire();
+    try {
+      const bimiRecords = await dns.resolveTxt(`default._bimi.${domain}`);
+      const bimi = bimiRecords.flat().find((r) => r.startsWith("v=BIMI1"));
+      if (bimi) {
+        const logoMatch = bimi.match(/l=([^\s;]+)/);
+        findings.push({
+          category: "exposure",
+          severity: "info",
+          title: `BIMI record found for ${domain}`,
+          description: `${domain} has a Brand Indicators for Message Identification (BIMI) record configured.${logoMatch ? ` Logo URL: ${logoMatch[1]}` : ""}`,
+          rawData: { domain, bimi, logoUrl: logoMatch?.[1] || null },
+          remediation: null,
+        });
+      }
+    } catch (_) { /* No BIMI record — normal for most domains */ }
+    release5();
+
     return findings;
   },
 };

@@ -71,7 +71,7 @@ async function init() {
     await pool.query(`CREATE TABLE IF NOT EXISTS osint_profiles (
       id SERIAL PRIMARY KEY,
       label TEXT NOT NULL,
-      profile_type VARCHAR(20) NOT NULL CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain')),
+      profile_type VARCHAR(20) NOT NULL CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain', 'ip')),
       value TEXT NOT NULL,
       tags TEXT[] DEFAULT '{}',
       is_active BOOLEAN DEFAULT true,
@@ -120,11 +120,11 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_osint_score_history_date ON osint_score_history(recorded_at DESC)`);
 
-    // Migration: Add phone + domain profile types
+    // Migration: Add phone + domain + ip profile types
     await pool.query(`DO $$ BEGIN
       ALTER TABLE osint_profiles DROP CONSTRAINT IF EXISTS osint_profiles_profile_type_check;
       ALTER TABLE osint_profiles ADD CONSTRAINT osint_profiles_profile_type_check
-        CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain'));
+        CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain', 'ip'));
     EXCEPTION WHEN others THEN NULL;
     END $$`);
 
