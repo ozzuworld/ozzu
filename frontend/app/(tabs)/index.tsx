@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useState, useCallback } from "react";
 import { View, Text, ScrollView, Pressable } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
@@ -12,6 +12,9 @@ import { rooms, RARITY_COLORS, type InventoryItem } from "../../lib/rooms";
 import { ACWidget } from "../../components/devices/ACWidget";
 import { VacuumWidget } from "../../components/devices/VacuumWidget";
 import { VacuumMapCard } from "../../components/devices/VacuumMapCard";
+import { FloorPlanMap } from "../../components/home/FloorPlanMap";
+import { DeviceSheet } from "../../components/home/DeviceSheet";
+import type { MapPin } from "../../lib/map-config";
 
 const TOP_BAR_HEIGHT = 48;
 const ACCENT = "#06B6D4";
@@ -105,7 +108,7 @@ function WasherStatus() {
   return (
     <View style={{ marginTop: 8, padding: 10, backgroundColor: "#1A1A1A", borderRadius: 8, borderWidth: 1, borderColor: "#2A2A2A" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Text style={{ fontSize: 14 }}>🫧</Text>
+        <Text style={{ fontSize: 14 }}>{"\uD83E\uDEE7"}</Text>
         <Text style={{ color: "#D4D4D4", fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
           Washer: {status.state}
         </Text>
@@ -155,7 +158,7 @@ function SpotifyMini() {
         opacity: pressed ? 0.7 : 1,
       })}
     >
-      <Text style={{ fontSize: 16 }}>🎵</Text>
+      <Text style={{ fontSize: 16 }}>{"\uD83C\uDFB5"}</Text>
       <Text
         style={{ color: "#1DB954", fontFamily: "monospace", fontSize: 11, fontWeight: "bold", flex: 1 }}
         numberOfLines={1}
@@ -284,7 +287,7 @@ function StatusCard({ item }: { item: InventoryItem }) {
         {item.name.replace("Kazuma ", "KK ").replace("King ", "")}
       </Text>
       <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>
-        {batteryPct ? `${batteryPct}${isCharging ? " ⚡" : ""}` : state}
+        {batteryPct ? `${batteryPct}${isCharging ? " \u26A1" : ""}` : state}
       </Text>
     </View>
   );
@@ -293,7 +296,6 @@ function StatusCard({ item }: { item: InventoryItem }) {
 // ── Room Section ──
 function RoomSection({ name, icon, items }: { name: string; icon: string; items: InventoryItem[] }) {
   const isLivingRoom = name === "Living Room";
-  const isSecurity = name === "Security";
   const isKitchen = name === "Kitchen";
   const isCleaning = name === "Cleaning";
   const isGeneral = name === "General";
@@ -355,6 +357,27 @@ function RoomSection({ name, icon, items }: { name: string; icon: string; items:
 // ── Home Screen ──
 export default function HomeScreen() {
   const { insets } = usePhoneLayout();
+  const [viewMode, setViewMode] = useState<"map" | "list">("map");
+  const [activePin, setActivePin] = useState<MapPin | null>(null);
+  const [sheetVisible, setSheetVisible] = useState(false);
+
+  const toggleView = useCallback(() => {
+    setViewMode((v) => (v === "map" ? "list" : "map"));
+  }, []);
+
+  const handlePinPress = useCallback((pin: MapPin) => {
+    setActivePin(pin);
+    setSheetVisible(true);
+  }, []);
+
+  const handleMapLoadError = useCallback(() => {
+    setViewMode("list");
+  }, []);
+
+  const closeSheet = useCallback(() => {
+    setSheetVisible(false);
+    setActivePin(null);
+  }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#111111" }}>
@@ -379,22 +402,51 @@ export default function HomeScreen() {
             HOME
           </Text>
         </View>
-        <StatusBadge />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <Pressable
+            onPress={toggleView}
+            style={({ pressed }) => ({
+              paddingHorizontal: 8,
+              paddingVertical: 4,
+              borderRadius: 6,
+              backgroundColor: pressed ? "rgba(6,182,212,0.15)" : "transparent",
+            })}
+          >
+            <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 16 }}>
+              {viewMode === "map" ? "\u2630" : "\uD83D\uDDFA"}
+            </Text>
+          </Pressable>
+          <StatusBadge />
+        </View>
       </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: 12, paddingBottom: 24 + insets.bottom }}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Spotify Mini Widget */}
-        <SpotifyMini />
+      {/* Map mode */}
+      {viewMode === "map" ? (
+        <View style={{ flex: 1 }}>
+          <FloorPlanMap
+            onPinPress={handlePinPress}
+            onMapLoadError={handleMapLoadError}
+          />
+          {/* SpotifyMini floating at bottom */}
+          <View style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}>
+            <SpotifyMini />
+          </View>
+        </View>
+      ) : (
+        /* List mode — existing ScrollView with room sections */
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingTop: 12, paddingBottom: 24 + insets.bottom }}
+          showsVerticalScrollIndicator={false}
+        >
+          <SpotifyMini />
+          {rooms.map((room) => (
+            <RoomSection key={room.name} name={room.name} icon={room.icon} items={room.items} />
+          ))}
+        </ScrollView>
+      )}
 
-        {/* Room sections */}
-        {rooms.map((room) => (
-          <RoomSection key={room.name} name={room.name} icon={room.icon} items={room.items} />
-        ))}
-      </ScrollView>
+      <DeviceSheet visible={sheetVisible} pin={activePin} onDismiss={closeSheet} />
 
       <StatusBar style="light" />
     </View>
