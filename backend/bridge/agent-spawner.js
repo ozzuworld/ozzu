@@ -521,6 +521,15 @@ function mergeWorktreeToMain(directiveId, branch) {
   const { execSync } = require("child_process");
   const MAX_RETRIES = 3;
 
+  // Safety helper: verify HEAD is on main before running destructive resets
+  const ensureOnMain = () => {
+    const currentBranch = execSync(`git rev-parse --abbrev-ref HEAD`, { cwd: WORKDIR, encoding: "utf8", timeout: 5000 }).trim();
+    if (currentBranch !== "main") {
+      log(`SAFETY: expected to be on main but on ${currentBranch} — switching to main first`);
+      execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+    }
+  };
+
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       // 1. Fetch latest refs from origin
@@ -528,6 +537,7 @@ function mergeWorktreeToMain(directiveId, branch) {
 
       // 2. Ensure we're on main and up to date
       execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+      ensureOnMain(); // Double-check before destructive reset
       execSync(`git reset --hard origin/main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
 
       // 2b. Ensure local branch exists — may have been pruned by worktree cleanup or race condition
@@ -588,12 +598,23 @@ function mergeWorktreeToMain(directiveId, branch) {
           continue;
         }
       }
-      // Real conflict or final retry exhausted
+      // Real conflict or final retry exhausted — clean up but NEVER reset a non-main branch
       log(`Merge completely failed for ${branch} (attempt ${attempt}): ${msg}`);
       try { execSync(`git merge --abort`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
       try { execSync(`git rebase --abort`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
-      try { execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
-      try { execSync(`git reset --hard origin/main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" }); } catch {}
+      // CRITICAL: Only reset if we are actually on main — never destroy a feature branch
+      try {
+        const currentBranch = execSync(`git rev-parse --abbrev-ref HEAD`, { cwd: WORKDIR, encoding: "utf8", timeout: 5000 }).trim();
+        if (currentBranch === "main") {
+          execSync(`git reset --hard origin/main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+        } else {
+          log(`SAFETY: on branch ${currentBranch} after failure — NOT resetting (would destroy commits). Switching to main.`);
+          execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+          execSync(`git reset --hard origin/main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
+        }
+      } catch (resetErr) {
+        log(`Cleanup failed: ${resetErr.message} — repo may need manual intervention`);
+      }
       return false;
     }
   }
@@ -1465,6 +1486,9 @@ function smartDeploy(directive) {
   const { execSync, exec } = require("child_process");
   const http = require("http");
 
+  // Track when smartDeploy runs (used by post-merge safety net to avoid double-trigger)
+  module.exports._lastSmartDeployTime = Date.now();
+
   const notify = (message) => {
     const payload = JSON.stringify({ message });
     const req = http.request(
@@ -1607,4 +1631,5 @@ module.exports = {
   cleanupWorktree,
   cleanupStaleBranches,
   smartDeploy,
+  _lastSmartDeployTime: 0,
 };

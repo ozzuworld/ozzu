@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Post-merge hook — triggers smartDeploy when main receives new commits
+# This is the safety net: if Cipher manually merges (bypassing merge-and-deploy endpoint),
+# the iOS build and OTA deploy still get triggered via the bridge API.
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+
+# Only trigger on main branch merges
+if [ "$BRANCH" != "main" ]; then
+  exit 0
+fi
+
+BRIDGE="http://localhost:3333"
+
+# Notify bridge that main was updated — bridge will trigger smartDeploy
+# Fire-and-forget: don't block the merge if bridge is down
+curl -sf -X POST "${BRIDGE}/api/post-merge-deploy" \
+  -H 'Content-Type: application/json' \
+  -d "{\"branch\":\"main\",\"trigger\":\"post-merge-hook\"}" \
+  --max-time 5 2>/dev/null &
+
+exit 0

@@ -5708,6 +5708,38 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
+  // ── Post-Merge Deploy Safety Net ──
+  // Called by .githooks/post-merge when main receives new commits
+  // Prevents iOS build from being skipped when Cipher manually merges
+
+  if (req.method === "POST" && pathname === "/api/post-merge-deploy") {
+    try {
+      const body = await parseBody(req);
+      const agentSpawner = require("./agent-spawner");
+
+      // Check if smartDeploy already ran recently (within last 60s) to avoid double-trigger
+      const lastDeployTime = agentSpawner._lastSmartDeployTime || 0;
+      const elapsed = Date.now() - lastDeployTime;
+      if (elapsed < 60000) {
+        log(`[post-merge] smartDeploy already ran ${Math.round(elapsed / 1000)}s ago — skipping (triggered by ${body.trigger || "unknown"})`);
+        sendJSON(res, 200, { ok: true, skipped: true, reason: "smartDeploy ran recently" });
+        return;
+      }
+
+      log(`[post-merge] Safety net triggered by ${body.trigger || "unknown"} — running smartDeploy`);
+      // Find the most recent completed directive to pass context
+      const directives = _directives.filter((d) => d.status === "completed").sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+      const latestDirective = directives[0] || { id: "manual_merge", title: "Manual merge to main" };
+      agentSpawner.smartDeploy(latestDirective);
+      agentSpawner._lastSmartDeployTime = Date.now();
+      sendJSON(res, 200, { ok: true, triggered: true, directive: latestDirective.id });
+    } catch (err) {
+      log(`[post-merge] Deploy trigger failed: ${err.message}`);
+      sendJSON(res, 500, { error: err.message });
+    }
+    return;
+  }
+
   // ── Pipeline Violations API ──
 
   // POST /api/pipeline-violations — Record a violation (called by git hook or scanner)
