@@ -189,7 +189,7 @@ public class GlassesModule: Module {
             )
 
             let deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
-            let session = StreamSession(
+            let session = await StreamSession(
                 streamSessionConfig: config,
                 deviceSelector: deviceSelector
             )
@@ -287,7 +287,7 @@ public class GlassesModule: Module {
                 return nil
             }
 
-            await MainActor.run { session.capturePhoto(format: .jpeg) }
+            _ = await MainActor.run { session.capturePhoto(format: .jpeg) }
             print("[ExpoGlasses] Photo capture triggered")
 #endif
             return nil
