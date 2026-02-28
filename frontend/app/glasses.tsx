@@ -341,7 +341,17 @@ export default function GlassesScreen() {
     try {
       await Glasses.registerDevice();
     } catch (e: any) {
-      setError(e.message || "Failed to register");
+      // If already registered (e.g. after crash), unregister first then retry
+      if (e.message?.includes("already registered")) {
+        try {
+          await Glasses.unregisterDevice();
+          await Glasses.registerDevice();
+        } catch (retryErr: any) {
+          setError(retryErr.message || "Failed to register after retry");
+        }
+      } else {
+        setError(e.message || "Failed to register");
+      }
     }
   }, []);
 
@@ -1279,7 +1289,7 @@ export default function GlassesScreen() {
                   })}
                 </View>
                 <TVPressable
-                  onPress={handleVisionRequest}
+                  onPress={() => handleVisionAnalyze()}
                   style={{
                     paddingVertical: 8,
                     borderRadius: 6,
