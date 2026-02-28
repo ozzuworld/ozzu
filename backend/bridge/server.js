@@ -3043,6 +3043,27 @@ async function handleRequest(req, res) {
       sendJSON(res, 500, { error: "Corrupt OTA metadata" });
       return;
     }
+    // iPhone NEVER receives OTA updates — always return noUpdateAvailable for iOS
+    // iOS requires a full native build + sideload via AltStore
+    if (platform === "ios") {
+      const boundary = "ota-boundary";
+      res.writeHead(200, {
+        "expo-protocol-version": "1",
+        "expo-sfv-version": "0",
+        "cache-control": "private, max-age=0",
+        "content-type": `multipart/mixed; boundary=${boundary}`,
+        ...CORS_HEADERS,
+      });
+      res.end(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="directive"\r\n` +
+        `Content-Type: application/json\r\n\r\n` +
+        `{"type":"noUpdateAvailable"}\r\n` +
+        `--${boundary}--\r\n`
+      );
+      return;
+    }
+
     const platformMeta = metadata.fileMetadata?.[platform];
     if (!platformMeta) {
       sendJSON(res, 404, { error: `No ${platform} update found` });
@@ -3075,7 +3096,28 @@ async function handleRequest(req, res) {
 
     // Build launch asset info (async to avoid blocking event loop)
     const bundlePath = path.join(updateDir, platformMeta.bundle);
-    const bundleData = await fs.promises.readFile(bundlePath);
+    let bundleData;
+    try {
+      bundleData = await fs.promises.readFile(bundlePath);
+    } catch (err) {
+      log.bridge.error(`OTA bundle missing: ${platformMeta.bundle} — returning noUpdateAvailable`);
+      const boundary = "ota-boundary";
+      res.writeHead(200, {
+        "expo-protocol-version": "1",
+        "expo-sfv-version": "0",
+        "cache-control": "private, max-age=0",
+        "content-type": `multipart/mixed; boundary=${boundary}`,
+        ...CORS_HEADERS,
+      });
+      res.end(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="directive"\r\n` +
+        `Content-Type: application/json\r\n\r\n` +
+        `{"type":"noUpdateAvailable"}\r\n` +
+        `--${boundary}--\r\n`
+      );
+      return;
+    }
     const bundleHash = crypto.createHash("sha256").update(bundleData).digest("base64url");
     const bundleKey = crypto.createHash("md5").update(bundleData).digest("hex");
 
@@ -3089,18 +3131,24 @@ async function handleRequest(req, res) {
       url: `${baseUrl}&asset=${encodeURIComponent(platformMeta.bundle)}`,
     };
 
-    // Build assets list (async — parallel reads)
-    const assets = await Promise.all((platformMeta.assets || []).map(async (a) => {
+    // Build assets list (async — parallel reads, skip missing files)
+    const assetResults = await Promise.all((platformMeta.assets || []).map(async (a) => {
       const assetPath = path.join(updateDir, a.path);
-      const assetData = await fs.promises.readFile(assetPath);
-      return {
-        hash: crypto.createHash("sha256").update(assetData).digest("base64url"),
-        key: crypto.createHash("md5").update(assetData).digest("hex"),
-        fileExtension: `.${a.ext}`,
-        contentType: a.ext === "png" ? "image/png" : a.ext === "jpg" ? "image/jpeg" : "application/octet-stream",
-        url: `${baseUrl}&asset=${encodeURIComponent(a.path)}`,
-      };
+      try {
+        const assetData = await fs.promises.readFile(assetPath);
+        return {
+          hash: crypto.createHash("sha256").update(assetData).digest("base64url"),
+          key: crypto.createHash("md5").update(assetData).digest("hex"),
+          fileExtension: `.${a.ext}`,
+          contentType: a.ext === "png" ? "image/png" : a.ext === "jpg" ? "image/jpeg" : "application/octet-stream",
+          url: `${baseUrl}&asset=${encodeURIComponent(a.path)}`,
+        };
+      } catch (err) {
+        log.bridge.error(`OTA asset missing: ${a.path} — skipping`);
+        return null;
+      }
     }));
+    const assets = assetResults.filter(Boolean);
 
     // Load expoConfig if available
     const expoConfigPath = path.join(updateDir, "expoConfig.json");
