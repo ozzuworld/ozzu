@@ -119,7 +119,7 @@ public class GlassesModule: Module {
                 self.connectionState = "connecting"
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
 
-                try Wearables.shared.startRegistration()
+                try await Wearables.shared.startRegistration()
             } catch {
                 print("[ExpoGlasses] Registration failed: \(error)")
                 self.connectionState = "disconnected"
@@ -137,7 +137,7 @@ public class GlassesModule: Module {
                 if self.streaming {
                     await self.stopStream()
                 }
-                try Wearables.shared.startUnregistration()
+                try await Wearables.shared.startUnregistration()
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
             } catch {
@@ -193,9 +193,9 @@ public class GlassesModule: Module {
             )
             self.streamSession = session
 
-            // Listen for state changes via Announcer
+            // Listen for state changes
             self.listenerTokens.append(
-                session.statePublisher.listen { [weak self] state in
+                await session.statePublisher.listen { [weak self] state in
                     guard let self = self else { return }
                     let stateStr: String
                     switch state {
@@ -220,9 +220,9 @@ public class GlassesModule: Module {
                 }
             )
 
-            // Listen for video frames via Announcer
+            // Listen for video frames
             self.listenerTokens.append(
-                session.videoFramePublisher.listen { [weak self] frame in
+                await session.videoFramePublisher.listen { [weak self] frame in
                     guard let self = self else { return }
                     guard let image = frame.makeUIImage(),
                           let jpegData = image.jpegData(compressionQuality: GlassesModule.jpegQuality) else {
@@ -238,9 +238,9 @@ public class GlassesModule: Module {
                 }
             )
 
-            // Listen for photo captures via Announcer
+            // Listen for photo captures
             self.listenerTokens.append(
-                session.photoDataPublisher.listen { [weak self] photo in
+                await session.photoDataPublisher.listen { [weak self] photo in
                     guard let self = self else { return }
                     let base64 = photo.data.base64EncodedString()
                     self.sendEvent("onPhotoCaptured", [
@@ -250,9 +250,9 @@ public class GlassesModule: Module {
                 }
             )
 
-            // Listen for errors via Announcer
+            // Listen for errors
             self.listenerTokens.append(
-                session.errorPublisher.listen { [weak self] error in
+                await session.errorPublisher.listen { [weak self] error in
                     self?.sendEvent("onError", [
                         "code": "STREAM_ERROR",
                         "message": "\(error)"
@@ -285,7 +285,7 @@ public class GlassesModule: Module {
                 return nil
             }
 
-            session.capturePhoto(format: .jpeg)
+            await session.capturePhoto(format: .jpeg)
             print("[ExpoGlasses] Photo capture triggered")
 #endif
             return nil
