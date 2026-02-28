@@ -106,13 +106,13 @@ function withMetaDATiOS(config) {
     // Meta DAT SDK configuration — Developer Mode
     // Developer Mode: OMIT MetaAppID (do not set to "0" — the SDK treats string "0"
     // as an invalid app ID and throws "configuration is invalid or incomplete").
-    // The Meta docs say "omit or use 0 for Developer Mode" — omitting works.
-    // The Flutter wrapper example also omits MetaAppID entirely.
-    // AppLinkURLScheme tells Meta AI app which URL scheme to callback with.
-    // The scheme must also be registered in CFBundleURLTypes (Expo handles this
-    // via "scheme": "ozzu" in app.json).
+    // AppLinkURLScheme MUST include "://" suffix — the official sample app uses
+    // "cameraaccess://", not "cameraaccess". Without "://", Meta AI constructs a
+    // malformed callback URL and the registration callback never arrives.
+    // TeamID is also required — maps to $(DEVELOPMENT_TEAM) in Xcode.
     plist.MWDAT = {
-      AppLinkURLScheme: "ozzu",
+      AppLinkURLScheme: "ozzu://",
+      TeamID: "$(DEVELOPMENT_TEAM)",
       Analytics: { OptOut: true },
     };
 
