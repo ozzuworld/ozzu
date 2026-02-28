@@ -110,7 +110,7 @@ function withMetaDATiOS(config) {
     plist.MWDAT = {
       MetaAppID: process.env.EXPO_PUBLIC_META_APP_ID || "",
       ClientToken: process.env.EXPO_PUBLIC_META_CLIENT_TOKEN || "",
-      TeamID: "$(DEVELOPMENT_TEAM)",
+      TeamID: process.env.EXPO_PUBLIC_META_TEAM_ID || "G7PCS9PALV",
       AppLinkURLScheme: "ozzu://",
       Analytics: { OptOut: true },
     };
