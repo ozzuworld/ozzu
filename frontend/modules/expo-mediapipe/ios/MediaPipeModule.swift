@@ -4,14 +4,17 @@ import MediaPipeTasksVision
 
 public class MediaPipeModule: Module {
     private var handLandmarker: HandLandmarker?
-    private var modelLoaded = false
+    private var handModelLoaded = false
+    private var faceLandmarker: FaceLandmarker?
+    private var faceModelLoaded = false
 
     public func definition() -> ModuleDefinition {
         Name("ExpoMediaPipe")
 
-        // Load model on first use
+        // ── Hand detection ──
+
         AsyncFunction("initialize") { () -> Bool in
-            guard !self.modelLoaded else { return true }
+            guard !self.handModelLoaded else { return true }
 
             let bundle = Bundle(for: MediaPipeModule.self)
             guard let modelPath = bundle.path(
@@ -20,7 +23,7 @@ public class MediaPipeModule: Module {
                 inDirectory: "MediaPipeModels.bundle"
             ) else {
                 throw NSError(domain: "MediaPipe", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Model file not found in bundle"])
+                    userInfo: [NSLocalizedDescriptionKey: "Hand model file not found in bundle"])
             }
 
             let options = HandLandmarkerOptions()
@@ -32,11 +35,10 @@ public class MediaPipeModule: Module {
             options.minTrackingConfidence = 0.5
 
             self.handLandmarker = try HandLandmarker(options: options)
-            self.modelLoaded = true
+            self.handModelLoaded = true
             return true
         }
 
-        // Detect hands from base64 JPEG
         AsyncFunction("detectHands") { (base64: String) -> [[String: Any]] in
             guard let landmarker = self.handLandmarker else { return [] }
             guard let data = Data(base64Encoded: base64),
@@ -61,7 +63,83 @@ public class MediaPipeModule: Module {
 
         AsyncFunction("dispose") { () -> Void in
             self.handLandmarker = nil
-            self.modelLoaded = false
+            self.handModelLoaded = false
+        }
+
+        // ── Face detection ──
+
+        AsyncFunction("initializeFaces") { () -> Bool in
+            guard !self.faceModelLoaded else { return true }
+
+            let bundle = Bundle(for: MediaPipeModule.self)
+            guard let modelPath = bundle.path(
+                forResource: "face_landmarker",
+                ofType: "task",
+                inDirectory: "MediaPipeModels.bundle"
+            ) else {
+                throw NSError(domain: "MediaPipe", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Face model file not found in bundle"])
+            }
+
+            let options = FaceLandmarkerOptions()
+            options.baseOptions.modelAssetPath = modelPath
+            options.runningMode = .image
+            options.numFaces = 3
+            options.minFaceDetectionConfidence = 0.5
+            options.minFacePresenceConfidence = 0.5
+            options.minTrackingConfidence = 0.5
+            options.outputFaceBlendshapes = true
+
+            self.faceLandmarker = try FaceLandmarker(options: options)
+            self.faceModelLoaded = true
+            return true
+        }
+
+        AsyncFunction("detectFaces") { (base64: String) -> [[String: Any]] in
+            guard let landmarker = self.faceLandmarker else { return [] }
+            guard let data = Data(base64Encoded: base64),
+                  let uiImage = UIImage(data: data) else { return [] }
+
+            let mpImage = try MPImage(uiImage: uiImage)
+            let result = try landmarker.detect(image: mpImage)
+
+            return result.faceLandmarks.enumerated().map { (idx, landmarks) in
+                // Compute bounding box from landmarks
+                var minX: Float = 1.0, minY: Float = 1.0
+                var maxX: Float = 0.0, maxY: Float = 0.0
+                for lm in landmarks {
+                    minX = min(minX, lm.x)
+                    minY = min(minY, lm.y)
+                    maxX = max(maxX, lm.x)
+                    maxY = max(maxY, lm.y)
+                }
+
+                // Extract blendshapes if available
+                var blendshapes: [String: Float] = [:]
+                if let faceBlendshapes = result.faceBlendshapes,
+                   idx < faceBlendshapes.count {
+                    for category in faceBlendshapes[idx] {
+                        if let name = category.categoryName {
+                            blendshapes[name] = category.score
+                        }
+                    }
+                }
+
+                return [
+                    "boundingBox": [
+                        "x": minX, "y": minY,
+                        "width": maxX - minX, "height": maxY - minY
+                    ],
+                    "landmarkCount": landmarks.count,
+                    "blendshapes": blendshapes,
+                    "confidence": idx < (result.faceBlendshapes?.count ?? 0) ? 0.9 : 0.7
+                ] as [String: Any]
+            }
+        }
+
+        AsyncFunction("disposeFaces") { () -> Void in
+            self.faceLandmarker = nil
+            self.faceModelLoaded = false
         }
     }
 }

@@ -6,6 +6,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
+import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.framework.image.BitmapImageBuilder
@@ -13,14 +14,18 @@ import kotlinx.coroutines.*
 
 class MediaPipeModule : Module() {
     private var handLandmarker: HandLandmarker? = null
-    private var modelLoaded = false
+    private var handModelLoaded = false
+    private var faceLandmarker: FaceLandmarker? = null
+    private var faceModelLoaded = false
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     override fun definition() = ModuleDefinition {
         Name("ExpoMediaPipe")
 
+        // ── Hand detection ──
+
         AsyncFunction("initialize") { promise: Promise ->
-            if (modelLoaded) {
+            if (handModelLoaded) {
                 promise.resolve(true)
                 return@AsyncFunction
             }
@@ -46,10 +51,10 @@ class MediaPipeModule : Module() {
                         .build()
 
                     handLandmarker = HandLandmarker.createFromOptions(context, options)
-                    modelLoaded = true
+                    handModelLoaded = true
                     promise.resolve(true)
                 } catch (e: Exception) {
-                    promise.reject("ERR_INIT", "Failed to initialize MediaPipe: ${e.message}", e)
+                    promise.reject("ERR_INIT", "Failed to initialize hand detection: ${e.message}", e)
                 }
             }
         }
@@ -100,14 +105,123 @@ class MediaPipeModule : Module() {
         AsyncFunction("dispose") { promise: Promise ->
             handLandmarker?.close()
             handLandmarker = null
-            modelLoaded = false
+            handModelLoaded = false
+            promise.resolve(null)
+        }
+
+        // ── Face detection ──
+
+        AsyncFunction("initializeFaces") { promise: Promise ->
+            if (faceModelLoaded) {
+                promise.resolve(true)
+                return@AsyncFunction
+            }
+
+            scope.launch {
+                try {
+                    val context = appContext.reactContext ?: run {
+                        promise.reject("ERR_NO_CONTEXT", "React context not available", null)
+                        return@launch
+                    }
+
+                    val baseOptions = BaseOptions.builder()
+                        .setModelAssetPath("face_landmarker.task")
+                        .build()
+
+                    val options = FaceLandmarker.FaceLandmarkerOptions.builder()
+                        .setBaseOptions(baseOptions)
+                        .setRunningMode(RunningMode.IMAGE)
+                        .setNumFaces(3)
+                        .setMinFaceDetectionConfidence(0.5f)
+                        .setMinFacePresenceConfidence(0.5f)
+                        .setMinTrackingConfidence(0.5f)
+                        .setOutputFaceBlendshapes(true)
+                        .build()
+
+                    faceLandmarker = FaceLandmarker.createFromOptions(context, options)
+                    faceModelLoaded = true
+                    promise.resolve(true)
+                } catch (e: Exception) {
+                    promise.reject("ERR_INIT_FACE", "Failed to initialize face detection: ${e.message}", e)
+                }
+            }
+        }
+
+        AsyncFunction("detectFaces") { base64: String, promise: Promise ->
+            val landmarker = faceLandmarker
+            if (landmarker == null) {
+                promise.resolve(emptyList<Map<String, Any>>())
+                return@AsyncFunction
+            }
+
+            scope.launch {
+                try {
+                    val bytes = Base64.decode(base64, Base64.DEFAULT)
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap == null) {
+                        promise.resolve(emptyList<Map<String, Any>>())
+                        return@launch
+                    }
+
+                    val mpImage = BitmapImageBuilder(bitmap).build()
+                    val result = landmarker.detect(mpImage)
+
+                    val faces = result.faceLandmarks().mapIndexed { idx, landmarks ->
+                        // Compute bounding box from landmarks
+                        var minX = 1.0f; var minY = 1.0f
+                        var maxX = 0.0f; var maxY = 0.0f
+                        for (lm in landmarks) {
+                            if (lm.x() < minX) minX = lm.x()
+                            if (lm.y() < minY) minY = lm.y()
+                            if (lm.x() > maxX) maxX = lm.x()
+                            if (lm.y() > maxY) maxY = lm.y()
+                        }
+
+                        // Extract blendshapes
+                        val blendshapes = mutableMapOf<String, Float>()
+                        result.faceBlendshapes().ifPresent { fbs ->
+                            if (idx < fbs.size) {
+                                for (cat in fbs[idx]) {
+                                    cat.categoryName()?.let { name ->
+                                        blendshapes[name] = cat.score()
+                                    }
+                                }
+                            }
+                        }
+
+                        mapOf(
+                            "boundingBox" to mapOf(
+                                "x" to minX, "y" to minY,
+                                "width" to (maxX - minX), "height" to (maxY - minY)
+                            ),
+                            "landmarkCount" to landmarks.size,
+                            "blendshapes" to blendshapes,
+                            "confidence" to if (blendshapes.isNotEmpty()) 0.9f else 0.7f
+                        )
+                    }
+
+                    bitmap.recycle()
+                    promise.resolve(faces)
+                } catch (e: Exception) {
+                    promise.resolve(emptyList<Map<String, Any>>())
+                }
+            }
+        }
+
+        AsyncFunction("disposeFaces") { promise: Promise ->
+            faceLandmarker?.close()
+            faceLandmarker = null
+            faceModelLoaded = false
             promise.resolve(null)
         }
 
         OnDestroy {
             handLandmarker?.close()
             handLandmarker = null
-            modelLoaded = false
+            handModelLoaded = false
+            faceLandmarker?.close()
+            faceLandmarker = null
+            faceModelLoaded = false
             scope.cancel()
         }
     }

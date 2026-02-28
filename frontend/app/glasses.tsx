@@ -18,8 +18,10 @@ import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import * as Glasses from "../modules/expo-glasses";
 import * as MediaPipe from "../modules/expo-mediapipe";
-import type { HandResult } from "../modules/expo-mediapipe";
+import type { HandResult, FaceResult } from "../modules/expo-mediapipe";
 import HandOverlay from "../components/glasses/HandOverlay";
+import FaceOverlay from "../components/glasses/FaceOverlay";
+import { detectExpression, type ExpressionResult } from "../lib/expressions";
 import { detectGesture, gestureEmoji, gestureLabel, resetSwipeTracking, type GestureResult } from "../lib/gestures";
 import { GestureCommandManager, type GestureCommand } from "../lib/gesture-commands";
 import { executeGestureCommand, type GestureAction } from "../lib/gesture-actions";
@@ -63,6 +65,14 @@ export default function GlassesScreen() {
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
   const mediapipeReady = useRef(false);
   const processingFrame = useRef(false);
+
+  // Face detection state
+  const [faceMode, setFaceMode] = useState(false);
+  const [faces, setFaces] = useState<FaceResult[]>([]);
+  const [expressions, setExpressions] = useState<ExpressionResult[]>([]);
+  const faceReady = useRef(false);
+  const processingFace = useRef(false);
+  const frameCounter = useRef(0); // for alternating hand/face frames
 
   // Gesture command system
   const [commandMode, setCommandMode] = useState(false);
@@ -200,11 +210,15 @@ export default function GlassesScreen() {
           );
         }
 
+        // Track frame number for alternating hand/face detection
+        frameCounter.current++;
+
         // AR hand detection (skip if already processing to prevent pile-up)
-        if (
-          mediapipeReady.current &&
-          !processingFrame.current
-        ) {
+        // When both hand+face active, alternate frames (even→hands, odd→faces)
+        const shouldDetectHands = mediapipeReady.current && !processingFrame.current &&
+          (!faceReady.current || frameCounter.current % 2 === 0);
+
+        if (shouldDetectHands) {
           processingFrame.current = true;
           MediaPipe.detectHands(event.data)
             .then((results) => {
@@ -212,7 +226,6 @@ export default function GlassesScreen() {
               if (results.length > 0) {
                 const gesture = detectGesture(results[0].landmarks);
                 setCurrentGesture(gesture);
-                // Feed to gesture command system for debounced action triggering
                 gestureManager.current.update(gesture);
               } else {
                 setCurrentGesture(null);
@@ -222,6 +235,23 @@ export default function GlassesScreen() {
             .catch(() => {})
             .finally(() => {
               processingFrame.current = false;
+            });
+        }
+
+        // Face detection (alternates with hand detection when both active)
+        const shouldDetectFaces = faceReady.current && !processingFace.current &&
+          (!mediapipeReady.current || frameCounter.current % 2 === 1);
+
+        if (shouldDetectFaces) {
+          processingFace.current = true;
+          MediaPipe.detectFaces(event.data)
+            .then((results) => {
+              setFaces(results);
+              setExpressions(results.map((f) => detectExpression(f.blendshapes)));
+            })
+            .catch(() => {})
+            .finally(() => {
+              processingFace.current = false;
             });
         }
       }),
@@ -256,6 +286,28 @@ export default function GlassesScreen() {
     }
   }, []);
 
+  const handleToggleFace = useCallback(async () => {
+    if (!faceMode) {
+      try {
+        const ok = await MediaPipe.initializeFaces();
+        if (ok) {
+          faceReady.current = true;
+          setFaceMode(true);
+        } else {
+          setError("Face detection not available on this device");
+        }
+      } catch (e: any) {
+        setError(e.message || "Failed to initialize face detection");
+      }
+    } else {
+      setFaceMode(false);
+      faceReady.current = false;
+      setFaces([]);
+      setExpressions([]);
+      await MediaPipe.disposeFaces();
+    }
+  }, [faceMode]);
+
   const handleDisconnect = useCallback(async () => {
     setError(null);
     try {
@@ -270,6 +322,14 @@ export default function GlassesScreen() {
         resetSwipeTracking();
         await MediaPipe.dispose();
       }
+      // Clean up face mode
+      if (faceMode) {
+        setFaceMode(false);
+        faceReady.current = false;
+        setFaces([]);
+        setExpressions([]);
+        await MediaPipe.disposeFaces();
+      }
       if (streamState !== "stopped") {
         await Glasses.stopVideoStream();
       }
@@ -280,7 +340,7 @@ export default function GlassesScreen() {
     } catch (e: any) {
       setError(e.message || "Failed to disconnect");
     }
-  }, [streamState, arMode]);
+  }, [streamState, arMode, faceMode]);
 
   const handleStartStream = useCallback(async () => {
     setError(null);
@@ -307,6 +367,13 @@ export default function GlassesScreen() {
         gestureManager.current.reset();
         resetSwipeTracking();
         await MediaPipe.dispose();
+      }
+      if (faceMode) {
+        setFaceMode(false);
+        faceReady.current = false;
+        setFaces([]);
+        setExpressions([]);
+        await MediaPipe.disposeFaces();
       }
       await Glasses.stopVideoStream();
       setFrameData(null);
@@ -706,6 +773,18 @@ export default function GlassesScreen() {
                 </View>
               )}
 
+              {/* Face Overlay */}
+              {faceMode && faces.length > 0 && frameSize.width > 0 && (
+                <View style={StyleSheet.absoluteFill}>
+                  <FaceOverlay
+                    faces={faces}
+                    expressions={expressions}
+                    width={frameSize.width}
+                    height={frameSize.height}
+                  />
+                </View>
+              )}
+
               {/* Gesture label pill */}
               {arMode &&
                 currentGesture &&
@@ -840,6 +919,18 @@ export default function GlassesScreen() {
                         }}
                       >
                         CMD
+                      </Text>
+                    )}
+                    {faceMode && (
+                      <Text
+                        style={{
+                          color: "#FF6B9D",
+                          fontSize: 9,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        FACE
                       </Text>
                     )}
                     <Text
@@ -1089,6 +1180,36 @@ export default function GlassesScreen() {
                         }}
                       >
                         {commandMode ? "CMD: ON" : "CMD: OFF"}
+                      </Text>
+                    </TVPressable>
+                  )}
+                  {/* Face Detection Toggle */}
+                  {MediaPipe.isAvailable() && (
+                    <TVPressable
+                      onPress={handleToggleFace}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 14,
+                        borderRadius: 8,
+                        backgroundColor: faceMode
+                          ? "rgba(255,107,157,0.15)"
+                          : "#1A1A1A",
+                        borderWidth: 1,
+                        borderColor: faceMode ? "#FF6B9D" : "#333",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: faceMode ? "#FF6B9D" : "#737373",
+                          fontSize: 11,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                          letterSpacing: 1,
+                        }}
+                      >
+                        {faceMode ? "FACE: ON" : "FACE: OFF"}
                       </Text>
                     </TVPressable>
                   )}
