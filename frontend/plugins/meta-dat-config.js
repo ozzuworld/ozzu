@@ -103,11 +103,15 @@ function withMetaDATiOS(config) {
   return withInfoPlist(config, (config) => {
     const plist = config.modResults;
 
-    // Meta DAT SDK configuration — Developer Mode (MetaAppID=0 bypasses portal validation)
-    // Official MWDAT plist keys: MetaAppID, AppLinkURLScheme, Analytics
-    // ClientToken and TeamID are NOT recognized MWDAT keys — removed
+    // Meta DAT SDK configuration — Developer Mode
+    // Developer Mode: OMIT MetaAppID (do not set to "0" — the SDK treats string "0"
+    // as an invalid app ID and throws "configuration is invalid or incomplete").
+    // The Meta docs say "omit or use 0 for Developer Mode" — omitting works.
+    // The Flutter wrapper example also omits MetaAppID entirely.
+    // AppLinkURLScheme tells Meta AI app which URL scheme to callback with.
+    // The scheme must also be registered in CFBundleURLTypes (Expo handles this
+    // via "scheme": "ozzu" in app.json).
     plist.MWDAT = {
-      MetaAppID: "0",
       AppLinkURLScheme: "ozzu",
       Analytics: { OptOut: true },
     };
