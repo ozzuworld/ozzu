@@ -1142,6 +1142,65 @@ export default function GlassesScreen() {
               )}
             </View>
 
+            {/* Vision Mode Picker — visible when streaming */}
+            {isStreaming && (
+              <View style={{ gap: 8 }}>
+                <Text style={{ color: "#737373", fontSize: 10, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                  VISION
+                </Text>
+                <View style={{ flexDirection: "row", gap: 6 }}>
+                  {(["describe", "ocr", "identify", "translate"] as VisionMode[]).map((m) => {
+                    const colors: Record<VisionMode, string> = {
+                      describe: "#06B6D4",
+                      ocr: "#A855F7",
+                      identify: "#10B981",
+                      translate: "#F59E0B",
+                    };
+                    const c = colors[m];
+                    const active = visionMode === m;
+                    return (
+                      <TVPressable
+                        key={m}
+                        onPress={() => handleVisionAnalyze(m)}
+                        style={{
+                          flex: 1,
+                          paddingVertical: 10,
+                          borderRadius: 8,
+                          backgroundColor: active ? `${c}22` : "#1A1A1A",
+                          borderWidth: 1,
+                          borderColor: active ? c : "#333",
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: active ? c : "#737373",
+                            fontSize: 9,
+                            fontFamily: "monospace",
+                            fontWeight: "bold",
+                            letterSpacing: 1,
+                          }}
+                        >
+                          {m.toUpperCase()}
+                        </Text>
+                      </TVPressable>
+                    );
+                  })}
+                </View>
+                {/* Dismiss vision result */}
+                {(visionResult || visionLoading) && (
+                  <TVPressable
+                    onPress={() => { setVisionResult(null); setVisionLoading(false); }}
+                    style={{ alignSelf: "center", paddingHorizontal: 12, paddingVertical: 4 }}
+                  >
+                    <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
+                      DISMISS RESULT
+                    </Text>
+                  </TVPressable>
+                )}
+              </View>
+            )}
+
             {/* Captured Photo Preview */}
             {capturedPhoto && (
               <View style={{ gap: 8 }}>
