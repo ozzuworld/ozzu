@@ -11,18 +11,16 @@ import MWDATCamera
 /// GlassesModule — Expo native module wrapping Meta's Wearables DAT SDK (iOS).
 public class GlassesModule: Module {
     private static let jpegQuality: CGFloat = 0.6
-    private static let defaultFrameRate = 15
+    private static let defaultFrameRate: UInt = 15
 
+#if canImport(MWDATCore)
+    private var registrationTask: Task<Void, Never>?
+#endif
 #if canImport(MWDATCamera)
     private var streamSession: StreamSession?
-    private var deviceSelector: AutoDeviceSelector?
+    private var streamTasks: [Task<Void, Never>] = []
+    private var listenerTokens: [AnyListenerToken] = []
 #endif
-
-    private var registrationToken: AnyObject?
-    private var devicesToken: AnyObject?
-    private var stateToken: AnyObject?
-    private var frameToken: AnyObject?
-    private var photoToken: AnyObject?
 
     private var connectionState = "disconnected"
     private var streaming = false
@@ -62,24 +60,27 @@ public class GlassesModule: Module {
             do {
                 try Wearables.configure()
 
-                // Listen for registration state changes
-                self.registrationToken = Wearables.shared.registrationStatePublisher.listen { [weak self] state in
+                // Listen for registration state changes via AsyncStream
+                self.registrationTask?.cancel()
+                self.registrationTask = Task { @MainActor [weak self] in
                     guard let self = self else { return }
-                    let stateStr: String
-                    switch state {
-                    case .registered:
-                        stateStr = "connected"
-                    case .registering:
-                        stateStr = "connecting"
-                    case .unregistered:
-                        stateStr = "disconnected"
-                    case .unregistering:
-                        stateStr = "disconnected"
-                    @unknown default:
-                        stateStr = "unavailable"
+                    for await state in Wearables.shared.registrationStateStream() {
+                        let stateStr: String
+                        switch state {
+                        case .registered:
+                            stateStr = "connected"
+                        case .registering:
+                            stateStr = "connecting"
+                        case .available:
+                            stateStr = "disconnected"
+                        case .unavailable:
+                            stateStr = "unavailable"
+                        @unknown default:
+                            stateStr = "unavailable"
+                        }
+                        self.connectionState = stateStr
+                        self.sendEvent("onConnectionChanged", ["state": stateStr])
                     }
-                    self.connectionState = stateStr
-                    self.sendEvent("onConnectionChanged", ["state": stateStr])
                 }
 
                 self.initialized = true
@@ -171,7 +172,7 @@ public class GlassesModule: Module {
             }
 
             let qualityStr = options["quality"] as? String ?? "medium"
-            let frameRate = options["frameRate"] as? Int ?? GlassesModule.defaultFrameRate
+            let frameRate = options["frameRate"] as? UInt ?? GlassesModule.defaultFrameRate
 
             let resolution: StreamingResolution
             switch qualityStr {
@@ -186,63 +187,79 @@ public class GlassesModule: Module {
                 frameRate: frameRate
             )
 
-            self.deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
+            let deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
             let session = StreamSession(
                 streamSessionConfig: config,
-                deviceSelector: self.deviceSelector!
+                deviceSelector: deviceSelector
             )
             self.streamSession = session
 
-            // Listen for state changes
-            self.stateToken = session.statePublisher.listen { [weak self] state in
+            // Listen for state changes via AsyncStream
+            self.streamTasks.append(Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                let stateStr: String
-                switch state {
-                case .stopped:
-                    stateStr = "stopped"
-                    self.streaming = false
-                case .waitingForDevice:
-                    stateStr = "waiting"
-                case .starting:
-                    stateStr = "starting"
-                case .streaming:
-                    stateStr = "started"
-                    self.streaming = true
-                case .paused:
-                    stateStr = "paused"
-                case .stopping:
-                    stateStr = "stopping"
-                @unknown default:
-                    stateStr = "unknown"
+                for await state in session.statePublisher {
+                    let stateStr: String
+                    switch state {
+                    case .stopped:
+                        stateStr = "stopped"
+                        self.streaming = false
+                    case .waitingForDevice:
+                        stateStr = "waiting"
+                    case .starting:
+                        stateStr = "starting"
+                    case .streaming:
+                        stateStr = "started"
+                        self.streaming = true
+                    case .paused:
+                        stateStr = "paused"
+                    case .stopping:
+                        stateStr = "stopping"
+                    @unknown default:
+                        stateStr = "unknown"
+                    }
+                    self.sendEvent("onStreamStateChanged", ["state": stateStr])
                 }
-                self.sendEvent("onStreamStateChanged", ["state": stateStr])
-            } as AnyObject
+            })
 
-            // Listen for video frames
-            self.frameToken = session.videoFramePublisher.listen { [weak self] frame in
+            // Listen for video frames via AsyncStream
+            self.streamTasks.append(Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                guard let image = frame.makeUIImage(),
-                      let jpegData = image.jpegData(compressionQuality: GlassesModule.jpegQuality) else {
-                    return
+                for await frame in session.videoFramePublisher {
+                    guard let image = frame.makeUIImage(),
+                          let jpegData = image.jpegData(compressionQuality: GlassesModule.jpegQuality) else {
+                        continue
+                    }
+                    let base64 = jpegData.base64EncodedString()
+                    self.sendEvent("onVideoFrame", [
+                        "data": base64,
+                        "width": Int(image.size.width),
+                        "height": Int(image.size.height),
+                        "timestamp": Int(Date().timeIntervalSince1970 * 1000)
+                    ])
                 }
-                let base64 = jpegData.base64EncodedString()
-                self.sendEvent("onVideoFrame", [
-                    "data": base64,
-                    "width": Int(image.size.width),
-                    "height": Int(image.size.height),
-                    "timestamp": Int(Date().timeIntervalSince1970 * 1000)
-                ])
-            } as AnyObject
+            })
 
-            // Listen for photo captures
-            self.photoToken = session.photoDataPublisher.listen { [weak self] photoData in
+            // Listen for photo captures via AsyncStream
+            self.streamTasks.append(Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                let base64 = Data(photoData.bytes).base64EncodedString()
-                self.sendEvent("onPhotoCaptured", [
-                    "data": base64,
-                    "format": "jpeg"
-                ])
-            } as AnyObject
+                for await photo in session.photoDataPublisher {
+                    let base64 = photo.data.base64EncodedString()
+                    self.sendEvent("onPhotoCaptured", [
+                        "data": base64,
+                        "format": "jpeg"
+                    ])
+                }
+            })
+
+            // Listen for errors via listener
+            self.listenerTokens.append(
+                session.errorPublisher.listen { [weak self] error in
+                    self?.sendEvent("onError", [
+                        "code": "STREAM_ERROR",
+                        "message": error.description
+                    ])
+                }
+            )
 
             // Start the stream
             await session.start()
@@ -283,13 +300,12 @@ public class GlassesModule: Module {
     }
 
     private func stopStream() async {
-        stateToken = nil
-        frameToken = nil
-        photoToken = nil
 #if canImport(MWDATCamera)
+        streamTasks.forEach { $0.cancel() }
+        streamTasks.removeAll()
+        listenerTokens.removeAll()
         await streamSession?.stop()
         streamSession = nil
-        deviceSelector = nil
 #endif
         streaming = false
         sendEvent("onStreamStateChanged", ["state": "stopped"])
@@ -305,11 +321,14 @@ public class GlassesModule: Module {
     }
 
     deinit {
-        registrationToken = nil
-        devicesToken = nil
-        stateToken = nil
-        frameToken = nil
-        photoToken = nil
+#if canImport(MWDATCore)
+        registrationTask?.cancel()
+#endif
+#if canImport(MWDATCamera)
+        streamTasks.forEach { $0.cancel() }
+        streamTasks.removeAll()
+        listenerTokens.removeAll()
+#endif
         streaming = false
         initialized = false
     }
