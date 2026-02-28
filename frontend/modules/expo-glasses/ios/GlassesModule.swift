@@ -195,8 +195,8 @@ public class GlassesModule: Module {
             )
             self.streamSession = session
 
-            // Subscribe to state changes (same pattern as Meta's official sample)
-            self.stateListenerToken = session.statePublisher.listen { [weak self] state in
+            // Subscribe to state changes
+            self.stateListenerToken = await session.statePublisher.listen { [weak self] state in
                 Task { @MainActor [weak self] in
                     guard let self = self else { return }
                     let stateStr: String
@@ -223,7 +223,7 @@ public class GlassesModule: Module {
             }
 
             // Subscribe to video frames
-            self.videoFrameListenerToken = session.videoFramePublisher.listen { [weak self] frame in
+            self.videoFrameListenerToken = await session.videoFramePublisher.listen { [weak self] frame in
                 Task { @MainActor [weak self] in
                     guard let self = self else { return }
                     guard let image = frame.makeUIImage(),
@@ -241,7 +241,7 @@ public class GlassesModule: Module {
             }
 
             // Subscribe to photo captures
-            self.photoDataListenerToken = session.photoDataPublisher.listen { [weak self] photoData in
+            self.photoDataListenerToken = await session.photoDataPublisher.listen { [weak self] photoData in
                 Task { @MainActor [weak self] in
                     guard let self = self else { return }
                     let base64 = photoData.data.base64EncodedString()
@@ -253,7 +253,7 @@ public class GlassesModule: Module {
             }
 
             // Subscribe to errors
-            self.errorListenerToken = session.errorPublisher.listen { [weak self] error in
+            self.errorListenerToken = await session.errorPublisher.listen { [weak self] error in
                 Task { @MainActor [weak self] in
                     self?.sendEvent("onError", [
                         "code": "STREAM_ERROR",
@@ -287,7 +287,7 @@ public class GlassesModule: Module {
                 return nil
             }
 
-            session.capturePhoto(format: .jpeg)
+            await MainActor.run { session.capturePhoto(format: .jpeg) }
             print("[ExpoGlasses] Photo capture triggered")
 #endif
             return nil
