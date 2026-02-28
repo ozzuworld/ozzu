@@ -108,10 +108,23 @@ function withMetaDATiOS(config) {
 
     // Meta DAT SDK configuration
     plist.MWDAT = {
-      MetaAppID: "${EXPO_PUBLIC_META_APP_ID}",
+      MetaAppID: process.env.EXPO_PUBLIC_META_APP_ID || "",
+      ClientToken: process.env.EXPO_PUBLIC_META_CLIENT_TOKEN || "",
+      TeamID: "$(DEVELOPMENT_TEAM)",
       AppLinkURLScheme: "ozzu://",
       Analytics: { OptOut: true },
     };
+
+    // Background modes for Bluetooth glasses connection
+    const bgModes = plist.UIBackgroundModes || [];
+    if (!bgModes.includes("bluetooth-peripheral")) bgModes.push("bluetooth-peripheral");
+    if (!bgModes.includes("external-accessory")) bgModes.push("external-accessory");
+    plist.UIBackgroundModes = bgModes;
+
+    // External accessory protocol for Meta glasses
+    const eaProtocols = plist.UISupportedExternalAccessoryProtocols || [];
+    if (!eaProtocols.includes("com.meta.ar.wearable")) eaProtocols.push("com.meta.ar.wearable");
+    plist.UISupportedExternalAccessoryProtocols = eaProtocols;
 
     // Allow querying Meta AI app
     const querySchemes = plist.LSApplicationQueriesSchemes || [];
