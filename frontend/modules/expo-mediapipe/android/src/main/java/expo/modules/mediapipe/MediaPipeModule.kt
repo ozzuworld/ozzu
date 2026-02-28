@@ -6,7 +6,6 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
-import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.framework.image.BitmapImageBuilder
@@ -37,7 +36,7 @@ class MediaPipeModule : Module() {
                         .setModelAssetPath("hand_landmarker.task")
                         .build()
 
-                    val options = HandLandmarkerOptions.builder()
+                    val options = HandLandmarker.HandLandmarkerOptions.builder()
                         .setBaseOptions(baseOptions)
                         .setRunningMode(RunningMode.IMAGE)
                         .setNumHands(2)
