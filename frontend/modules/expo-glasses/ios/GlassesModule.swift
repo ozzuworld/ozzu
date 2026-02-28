@@ -18,7 +18,10 @@ public class GlassesModule: Module {
 #endif
 #if canImport(MWDATCamera)
     private var streamSession: StreamSession?
-    private var listenerTokens: [AnyListenerToken] = []
+    private var stateListenerToken: AnyListenerToken?
+    private var videoFrameListenerToken: AnyListenerToken?
+    private var photoDataListenerToken: AnyListenerToken?
+    private var errorListenerToken: AnyListenerToken?
 #endif
 
     private var connectionState = "disconnected"
@@ -59,7 +62,6 @@ public class GlassesModule: Module {
             do {
                 try Wearables.configure()
 
-                // Listen for registration state changes via AsyncStream
                 self.registrationTask?.cancel()
                 self.registrationTask = Task { @MainActor [weak self] in
                     guard let self = self else { return }
@@ -115,10 +117,10 @@ public class GlassesModule: Module {
                 return
             }
 
-            do {
-                self.connectionState = "connecting"
-                self.sendEvent("onConnectionChanged", ["state": self.connectionState])
+            self.connectionState = "connecting"
+            self.sendEvent("onConnectionChanged", ["state": self.connectionState])
 
+            do {
                 try await Wearables.shared.startRegistration()
             } catch {
                 print("[ExpoGlasses] Registration failed: \(error)")
@@ -193,9 +195,9 @@ public class GlassesModule: Module {
             )
             self.streamSession = session
 
-            // Listen for state changes
-            self.listenerTokens.append(
-                await session.statePublisher.listen { [weak self] state in
+            // Subscribe to state changes (same pattern as Meta's official sample)
+            self.stateListenerToken = session.statePublisher.listen { [weak self] state in
+                Task { @MainActor [weak self] in
                     guard let self = self else { return }
                     let stateStr: String
                     switch state {
@@ -218,11 +220,11 @@ public class GlassesModule: Module {
                     }
                     self.sendEvent("onStreamStateChanged", ["state": stateStr])
                 }
-            )
+            }
 
-            // Listen for video frames
-            self.listenerTokens.append(
-                await session.videoFramePublisher.listen { [weak self] frame in
+            // Subscribe to video frames
+            self.videoFrameListenerToken = session.videoFramePublisher.listen { [weak self] frame in
+                Task { @MainActor [weak self] in
                     guard let self = self else { return }
                     guard let image = frame.makeUIImage(),
                           let jpegData = image.jpegData(compressionQuality: GlassesModule.jpegQuality) else {
@@ -236,29 +238,29 @@ public class GlassesModule: Module {
                         "timestamp": Int(Date().timeIntervalSince1970 * 1000)
                     ])
                 }
-            )
+            }
 
-            // Listen for photo captures
-            self.listenerTokens.append(
-                await session.photoDataPublisher.listen { [weak self] photo in
+            // Subscribe to photo captures
+            self.photoDataListenerToken = session.photoDataPublisher.listen { [weak self] photoData in
+                Task { @MainActor [weak self] in
                     guard let self = self else { return }
-                    let base64 = photo.data.base64EncodedString()
+                    let base64 = photoData.data.base64EncodedString()
                     self.sendEvent("onPhotoCaptured", [
                         "data": base64,
                         "format": "jpeg"
                     ])
                 }
-            )
+            }
 
-            // Listen for errors
-            self.listenerTokens.append(
-                await session.errorPublisher.listen { [weak self] error in
+            // Subscribe to errors
+            self.errorListenerToken = session.errorPublisher.listen { [weak self] error in
+                Task { @MainActor [weak self] in
                     self?.sendEvent("onError", [
                         "code": "STREAM_ERROR",
                         "message": "\(error)"
                     ])
                 }
-            )
+            }
 
             // Start the stream
             await session.start()
@@ -285,7 +287,7 @@ public class GlassesModule: Module {
                 return nil
             }
 
-            await session.capturePhoto(format: .jpeg)
+            session.capturePhoto(format: .jpeg)
             print("[ExpoGlasses] Photo capture triggered")
 #endif
             return nil
@@ -300,7 +302,10 @@ public class GlassesModule: Module {
 
     private func stopStream() async {
 #if canImport(MWDATCamera)
-        listenerTokens.removeAll()
+        stateListenerToken = nil
+        videoFrameListenerToken = nil
+        photoDataListenerToken = nil
+        errorListenerToken = nil
         await streamSession?.stop()
         streamSession = nil
 #endif
@@ -322,7 +327,10 @@ public class GlassesModule: Module {
         registrationTask?.cancel()
 #endif
 #if canImport(MWDATCamera)
-        listenerTokens.removeAll()
+        stateListenerToken = nil
+        videoFrameListenerToken = nil
+        photoDataListenerToken = nil
+        errorListenerToken = nil
 #endif
         streaming = false
         initialized = false
