@@ -55,6 +55,19 @@ export async function dispose(): Promise<void> {
   return ExpoMediaPipe.dispose();
 }
 
+// ── Pose detection types ──
+
+export interface PoseLandmark {
+  x: number;
+  y: number;
+  z: number;
+  visibility: number; // 0-1, how visible the joint is
+}
+
+export interface PoseResult {
+  landmarks: PoseLandmark[]; // 33 body joints
+}
+
 // ── Face detection API ──
 
 export async function initializeFaces(): Promise<boolean> {
@@ -70,4 +83,21 @@ export async function detectFaces(base64Jpeg: string): Promise<FaceResult[]> {
 export async function disposeFaces(): Promise<void> {
   if (!ExpoMediaPipe) return;
   return ExpoMediaPipe.disposeFaces();
+}
+
+// ── Pose detection API ──
+
+export async function initializePose(): Promise<boolean> {
+  if (!ExpoMediaPipe) return false;
+  return ExpoMediaPipe.initializePose();
+}
+
+export async function detectPose(base64Jpeg: string): Promise<PoseResult[]> {
+  if (!ExpoMediaPipe) return [];
+  return ExpoMediaPipe.detectPose(base64Jpeg);
+}
+
+export async function disposePose(): Promise<void> {
+  if (!ExpoMediaPipe) return;
+  return ExpoMediaPipe.disposePose();
 }

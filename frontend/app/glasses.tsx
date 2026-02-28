@@ -21,7 +21,11 @@ import * as MediaPipe from "../modules/expo-mediapipe";
 import type { HandResult, FaceResult } from "../modules/expo-mediapipe";
 import HandOverlay from "../components/glasses/HandOverlay";
 import FaceOverlay from "../components/glasses/FaceOverlay";
+import PoseOverlay from "../components/glasses/PoseOverlay";
+import ExerciseHUD from "../components/glasses/ExerciseHUD";
 import { detectExpression, type ExpressionResult } from "../lib/expressions";
+import { ExerciseTracker, type ExerciseState } from "../lib/exercise-tracker";
+import type { PoseResult } from "../modules/expo-mediapipe";
 import { detectGesture, gestureEmoji, gestureLabel, resetSwipeTracking, type GestureResult } from "../lib/gestures";
 import { GestureCommandManager, type GestureCommand } from "../lib/gesture-commands";
 import { executeGestureCommand, type GestureAction } from "../lib/gesture-actions";
@@ -73,6 +77,14 @@ export default function GlassesScreen() {
   const faceReady = useRef(false);
   const processingFace = useRef(false);
   const frameCounter = useRef(0); // for alternating hand/face frames
+
+  // Pose detection state
+  const [poseMode, setPoseMode] = useState(false);
+  const [poses, setPoses] = useState<PoseResult[]>([]);
+  const [exerciseState, setExerciseState] = useState<ExerciseState | null>(null);
+  const poseReady = useRef(false);
+  const processingPose = useRef(false);
+  const exerciseTracker = useRef(new ExerciseTracker());
 
   // Gesture command system
   const [commandMode, setCommandMode] = useState(false);
@@ -254,6 +266,22 @@ export default function GlassesScreen() {
               processingFace.current = false;
             });
         }
+
+        // Pose detection (runs every 3rd frame to save CPU)
+        if (poseReady.current && !processingPose.current && frameCounter.current % 3 === 0) {
+          processingPose.current = true;
+          MediaPipe.detectPose(event.data)
+            .then((results) => {
+              setPoses(results);
+              if (results.length > 0 && results[0].landmarks) {
+                setExerciseState(exerciseTracker.current.update(results[0].landmarks));
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              processingPose.current = false;
+            });
+        }
       }),
       Glasses.onPhotoCaptured((event) => {
         setCapturedPhoto(event.data);
@@ -308,6 +336,30 @@ export default function GlassesScreen() {
     }
   }, [faceMode]);
 
+  const handleTogglePose = useCallback(async () => {
+    if (!poseMode) {
+      try {
+        const ok = await MediaPipe.initializePose();
+        if (ok) {
+          poseReady.current = true;
+          exerciseTracker.current.reset();
+          setPoseMode(true);
+        } else {
+          setError("Pose detection not available on this device");
+        }
+      } catch (e: any) {
+        setError(e.message || "Failed to initialize pose detection");
+      }
+    } else {
+      setPoseMode(false);
+      poseReady.current = false;
+      setPoses([]);
+      setExerciseState(null);
+      exerciseTracker.current.reset();
+      await MediaPipe.disposePose();
+    }
+  }, [poseMode]);
+
   const handleDisconnect = useCallback(async () => {
     setError(null);
     try {
@@ -329,6 +381,15 @@ export default function GlassesScreen() {
         setFaces([]);
         setExpressions([]);
         await MediaPipe.disposeFaces();
+      }
+      // Clean up pose mode
+      if (poseMode) {
+        setPoseMode(false);
+        poseReady.current = false;
+        setPoses([]);
+        setExerciseState(null);
+        exerciseTracker.current.reset();
+        await MediaPipe.disposePose();
       }
       if (streamState !== "stopped") {
         await Glasses.stopVideoStream();
@@ -375,13 +436,21 @@ export default function GlassesScreen() {
         setExpressions([]);
         await MediaPipe.disposeFaces();
       }
+      if (poseMode) {
+        setPoseMode(false);
+        poseReady.current = false;
+        setPoses([]);
+        setExerciseState(null);
+        exerciseTracker.current.reset();
+        await MediaPipe.disposePose();
+      }
       await Glasses.stopVideoStream();
       setFrameData(null);
       setFps(0);
     } catch (e: any) {
       setError(e.message || "Failed to stop stream");
     }
-  }, [arMode]);
+  }, [arMode, faceMode, poseMode]);
 
   const handleCapture = useCallback(async () => {
     setError(null);
@@ -785,6 +854,21 @@ export default function GlassesScreen() {
                 </View>
               )}
 
+              {/* Pose Overlay */}
+              {poseMode && poses.length > 0 && frameSize.width > 0 && (
+                <View style={StyleSheet.absoluteFill}>
+                  <PoseOverlay
+                    poses={poses}
+                    width={frameSize.width}
+                    height={frameSize.height}
+                    formQuality={exerciseState?.formQuality}
+                  />
+                </View>
+              )}
+
+              {/* Exercise HUD */}
+              {poseMode && exerciseState && <ExerciseHUD state={exerciseState} />}
+
               {/* Gesture label pill */}
               {arMode &&
                 currentGesture &&
@@ -931,6 +1015,18 @@ export default function GlassesScreen() {
                         }}
                       >
                         FACE
+                      </Text>
+                    )}
+                    {poseMode && (
+                      <Text
+                        style={{
+                          color: "#10B981",
+                          fontSize: 9,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        POSE
                       </Text>
                     )}
                     <Text
@@ -1210,6 +1306,36 @@ export default function GlassesScreen() {
                         }}
                       >
                         {faceMode ? "FACE: ON" : "FACE: OFF"}
+                      </Text>
+                    </TVPressable>
+                  )}
+                  {/* Pose Detection Toggle */}
+                  {MediaPipe.isAvailable() && (
+                    <TVPressable
+                      onPress={handleTogglePose}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 14,
+                        borderRadius: 8,
+                        backgroundColor: poseMode
+                          ? "rgba(16,185,129,0.15)"
+                          : "#1A1A1A",
+                        borderWidth: 1,
+                        borderColor: poseMode ? "#10B981" : "#333",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: poseMode ? "#10B981" : "#737373",
+                          fontSize: 11,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                          letterSpacing: 1,
+                        }}
+                      >
+                        {poseMode ? "POSE: ON" : "POSE: OFF"}
                       </Text>
                     </TVPressable>
                   )}
