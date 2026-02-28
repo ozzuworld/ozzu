@@ -73,6 +73,11 @@ export function isAvailable(): boolean {
   return ExpoGlasses.isAvailable();
 }
 
+export function getDiagnostics(): Record<string, any> {
+  if (!ExpoGlasses) return { sdkLinked: false, nativeModule: "not loaded" };
+  return ExpoGlasses.getDiagnostics();
+}
+
 export async function initialize(): Promise<boolean> {
   if (!ExpoGlasses) return false;
   return ExpoGlasses.initialize();

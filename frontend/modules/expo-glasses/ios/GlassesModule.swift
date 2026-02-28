@@ -53,14 +53,64 @@ public class GlassesModule: Module {
             return self.sdkAvailable
         }
 
+        // ── Diagnostics ──
+
+        Function("getDiagnostics") { () -> [String: Any] in
+            var info: [String: Any] = [
+                "sdkLinked": self.sdkAvailable,
+                "initialized": self.initialized,
+                "connectionState": self.connectionState,
+                "streaming": self.streaming
+            ]
+
+            // Read MWDAT plist config
+            if let mwdat = Bundle.main.object(forInfoDictionaryKey: "MWDAT") as? [String: Any] {
+                info["mwdatConfig"] = mwdat
+            } else {
+                info["mwdatConfig"] = "MISSING — no MWDAT key in Info.plist"
+            }
+
+            // Check if Meta AI app is installed
+            if let metaUrl = URL(string: "fb-viewapp://") {
+                info["metaAIAppInstalled"] = UIApplication.shared.canOpenURL(metaUrl)
+            }
+
+            // Check URL scheme registration
+            if let urlTypes = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] {
+                let schemes = urlTypes.compactMap { ($0["CFBundleURLSchemes"] as? [String])?.first }
+                info["registeredURLSchemes"] = schemes
+            }
+
+            info["bundleId"] = Bundle.main.bundleIdentifier ?? "unknown"
+
+#if canImport(MWDATCore)
+            info["registrationState"] = "\(Wearables.shared.registrationState)"
+#endif
+
+            return info
+        }
+
         // ── Registration ──
 
         AsyncFunction("initialize") { () -> Bool in
 #if canImport(MWDATCore)
             if self.initialized { return true }
 
+            // Log MWDAT plist config for diagnostics
+            if let mwdat = Bundle.main.object(forInfoDictionaryKey: "MWDAT") as? [String: Any] {
+                print("[ExpoGlasses] MWDAT plist config: \(mwdat)")
+            } else {
+                print("[ExpoGlasses] WARNING: No MWDAT key found in Info.plist!")
+            }
+            print("[ExpoGlasses] Bundle ID: \(Bundle.main.bundleIdentifier ?? "nil")")
+
             do {
                 try Wearables.configure()
+                print("[ExpoGlasses] Wearables.configure() succeeded")
+
+                // Log initial registration state
+                let regState = Wearables.shared.registrationState
+                print("[ExpoGlasses] Initial registration state: \(regState)")
 
                 self.registrationTask?.cancel()
                 self.registrationTask = Task { @MainActor [weak self] in
@@ -79,6 +129,7 @@ public class GlassesModule: Module {
                         @unknown default:
                             stateStr = "unavailable"
                         }
+                        print("[ExpoGlasses] Registration state changed: \(state) -> \(stateStr)")
                         self.connectionState = stateStr
                         self.sendEvent("onConnectionChanged", ["state": stateStr])
                     }
@@ -91,9 +142,10 @@ public class GlassesModule: Module {
                 return true
             } catch {
                 print("[ExpoGlasses] Initialize failed: \(error)")
+                print("[ExpoGlasses] Initialize error type: \(type(of: error))")
                 self.sendEvent("onError", [
                     "code": "INIT_FAILED",
-                    "message": error.localizedDescription
+                    "message": "\(error)"
                 ])
                 return false
             }
@@ -117,17 +169,65 @@ public class GlassesModule: Module {
                 return
             }
 
+            // Pre-flight check: is Meta AI app installed?
+            let metaAppInstalled: Bool
+            if let metaUrl = URL(string: "fb-viewapp://") {
+                metaAppInstalled = await MainActor.run {
+                    UIApplication.shared.canOpenURL(metaUrl)
+                }
+            } else {
+                metaAppInstalled = false
+            }
+            print("[ExpoGlasses] Meta AI app installed: \(metaAppInstalled)")
+
+            if !metaAppInstalled {
+                self.sendEvent("onError", [
+                    "code": "META_APP_MISSING",
+                    "message": "Meta AI app is not installed. Install it from the App Store to connect glasses."
+                ])
+                self.sendEvent("onConnectionChanged", [
+                    "state": "disconnected",
+                    "error": "Meta AI app is not installed"
+                ])
+                return
+            }
+
+            // Log current state before attempting registration
+            let regState = Wearables.shared.registrationState
+            print("[ExpoGlasses] Current registration state before connect: \(regState)")
+
             self.connectionState = "connecting"
             self.sendEvent("onConnectionChanged", ["state": self.connectionState])
 
             do {
                 try await Wearables.shared.startRegistration()
-            } catch {
-                print("[ExpoGlasses] Registration failed: \(error)")
+                print("[ExpoGlasses] startRegistration() succeeded")
+            } catch let regError as RegistrationError {
+                // Catch RegistrationError specifically — .description has the real error message
+                let desc = regError.description
+                print("[ExpoGlasses] RegistrationError: \(desc) (raw: \(regError))")
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", [
                     "state": self.connectionState,
-                    "error": error.localizedDescription
+                    "error": desc
+                ])
+                self.sendEvent("onError", [
+                    "code": "REGISTRATION_FAILED",
+                    "message": desc
+                ])
+            } catch {
+                // Fallback for unexpected error types
+                let msg = "\(error)"
+                print("[ExpoGlasses] Registration failed (unexpected): \(msg)")
+                print("[ExpoGlasses] Error type: \(type(of: error))")
+                self.connectionState = "disconnected"
+                self.sendEvent("onConnectionChanged", [
+                    "state": self.connectionState,
+                    "error": msg
+                ])
+                self.sendEvent("onError", [
+                    "code": "REGISTRATION_FAILED",
+                    "message": msg
                 ])
             }
 #endif
@@ -142,11 +242,18 @@ public class GlassesModule: Module {
                 try await Wearables.shared.startUnregistration()
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
+            } catch let unregError as UnregistrationError {
+                let desc = unregError.description
+                print("[ExpoGlasses] UnregistrationError: \(desc)")
+                self.sendEvent("onError", [
+                    "code": "UNREGISTER_FAILED",
+                    "message": desc
+                ])
             } catch {
                 print("[ExpoGlasses] Unregistration failed: \(error)")
                 self.sendEvent("onError", [
                     "code": "UNREGISTER_FAILED",
-                    "message": error.localizedDescription
+                    "message": "\(error)"
                 ])
             }
 #endif

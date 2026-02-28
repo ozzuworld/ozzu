@@ -46,6 +46,7 @@ export default function GlassesScreen() {
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<Record<string, any> | null>(null);
 
   // AR mode state
   const [arMode, setArMode] = useState(false);
@@ -174,6 +175,11 @@ export default function GlassesScreen() {
 
   const handleConnect = useCallback(async () => {
     setError(null);
+    // Log diagnostics before connect attempt
+    try {
+      const diag = Glasses.getDiagnostics();
+      console.log("[Glasses] Pre-connect diagnostics:", JSON.stringify(diag));
+    } catch {}
     try {
       await Glasses.registerDevice();
     } catch (e: any) {
@@ -401,10 +407,41 @@ export default function GlassesScreen() {
 
         {/* Error */}
         {error && (
-          <View style={{ backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "#7F1D1D", borderRadius: 8, padding: 10 }}>
+          <View style={{ backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "#7F1D1D", borderRadius: 8, padding: 10, gap: 6 }}>
             <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace" }}>
               {error}
             </Text>
+            {!diagnostics && (
+              <TVPressable
+                onPress={() => {
+                  try { setDiagnostics(Glasses.getDiagnostics()); } catch {}
+                }}
+                style={{ paddingVertical: 4, paddingHorizontal: 8, borderRadius: 4, borderWidth: 1, borderColor: "#7F1D1D", alignSelf: "flex-start" }}
+              >
+                <Text style={{ color: "#EF4444", fontSize: 9, fontFamily: "monospace", letterSpacing: 1 }}>
+                  SHOW DIAGNOSTICS
+                </Text>
+              </TVPressable>
+            )}
+          </View>
+        )}
+
+        {/* Diagnostics panel */}
+        {diagnostics && (
+          <View style={{ backgroundColor: "rgba(6,182,212,0.05)", borderWidth: 1, borderColor: "#164E63", borderRadius: 8, padding: 10, gap: 4 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={{ color: "#06B6D4", fontSize: 10, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
+                DIAGNOSTICS
+              </Text>
+              <TVPressable onPress={() => setDiagnostics(null)} style={{ padding: 4 }}>
+                <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>CLOSE</Text>
+              </TVPressable>
+            </View>
+            {Object.entries(diagnostics).map(([key, val]) => (
+              <Text key={key} style={{ color: "#737373", fontSize: 9, fontFamily: "monospace" }}>
+                {key}: {typeof val === "object" ? JSON.stringify(val) : String(val)}
+              </Text>
+            ))}
           </View>
         )}
 
