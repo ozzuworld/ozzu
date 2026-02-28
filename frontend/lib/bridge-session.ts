@@ -349,6 +349,13 @@ export class BridgeSession {
     }).catch(() => {}); // fire-and-forget
   }
 
+  sendGestureCommand(data: { gesture: string; action: string; fingerCount?: number; timestamp: number }): void {
+    const msg = JSON.stringify({ type: "gestureCommand", ...data });
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(msg);
+    }
+  }
+
   sendGlassesFrame(data: string, width: number, height: number): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "glassesFrame", data, width, height }));

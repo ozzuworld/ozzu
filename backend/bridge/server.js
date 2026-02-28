@@ -11012,6 +11012,39 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      // ── Gesture command from AR hand tracking ──
+      if (msg.type === "gestureCommand") {
+        const info = devices.get(ws);
+        const gesture = msg.gesture || "unknown";
+        const action = msg.action || "";
+        const fingerCount = msg.fingerCount;
+        log.bridge.info(`Gesture command: ${gesture} → ${action}${fingerCount ? ` (${fingerCount} fingers)` : ""} from ${info?.deviceId}`);
+
+        // Forward to Gemini as context so June can react
+        if (geminiReady && geminiWs && geminiWs.readyState === 1) {
+          const contextParts = [`[Gesture detected: ${gesture}. Action: ${action}.`];
+          if (fingerCount) contextParts[0] += ` Finger count: ${fingerCount}.`;
+          contextParts[0] += " React briefly and naturally — this is a hand gesture from the glasses camera.]";
+          geminiWs.send(JSON.stringify({
+            clientContent: {
+              turns: [{ role: "user", parts: [{ text: contextParts[0] }] }],
+              turnComplete: true,
+            },
+          }));
+        }
+
+        // Broadcast gesture event to all devices (for UI feedback on tablets/TV)
+        broadcastToAll({
+          type: "gestureEvent",
+          gesture,
+          action,
+          fingerCount,
+          from: info?.deviceId,
+          timestamp: msg.timestamp || Date.now(),
+        });
+        return;
+      }
+
       if (msg.type === "pinResponse") {
         const pending = pendingPinRequests.get(msg.approvalId);
         if (!pending) {

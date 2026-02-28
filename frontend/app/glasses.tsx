@@ -20,7 +20,9 @@ import * as Glasses from "../modules/expo-glasses";
 import * as MediaPipe from "../modules/expo-mediapipe";
 import type { HandResult } from "../modules/expo-mediapipe";
 import HandOverlay from "../components/glasses/HandOverlay";
-import { detectGesture, gestureEmoji, type GestureResult } from "../lib/gestures";
+import { detectGesture, gestureEmoji, gestureLabel, resetSwipeTracking, type GestureResult } from "../lib/gestures";
+import { GestureCommandManager, type GestureCommand } from "../lib/gesture-commands";
+import { executeGestureCommand, type GestureAction } from "../lib/gesture-actions";
 
 const TOP_BAR_HEIGHT = 48;
 
@@ -61,6 +63,12 @@ export default function GlassesScreen() {
   const mediapipeReady = useRef(false);
   const processingFrame = useRef(false);
 
+  // Gesture command system
+  const [commandMode, setCommandMode] = useState(false);
+  const [lastAction, setLastAction] = useState<GestureAction | null>(null);
+  const lastActionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gestureManager = useRef(new GestureCommandManager());
+
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
   const connectedRef = useRef(false);
   const frameCountRef = useRef(0);
@@ -92,6 +100,27 @@ export default function GlassesScreen() {
     bridgeRef.current.connect(callbacks);
     return () => bridgeRef.current.close();
   }, []);
+
+  // Gesture command handler
+  useEffect(() => {
+    gestureManager.current.setCallback((command: GestureCommand) => {
+      const action = executeGestureCommand(bridgeRef.current, command);
+      if (action) {
+        setLastAction(action);
+        // Clear action feedback after 1.5s
+        if (lastActionTimer.current) clearTimeout(lastActionTimer.current);
+        lastActionTimer.current = setTimeout(() => setLastAction(null), 1500);
+      }
+    });
+    return () => {
+      if (lastActionTimer.current) clearTimeout(lastActionTimer.current);
+    };
+  }, []);
+
+  // Sync command mode to gesture manager
+  useEffect(() => {
+    gestureManager.current.setEnabled(commandMode && arMode);
+  }, [commandMode, arMode]);
 
   // Listen for ALL incoming URLs (catches Meta AI callback if it arrives via RN Linking)
   useEffect(() => {
@@ -165,9 +194,13 @@ export default function GlassesScreen() {
             .then((results) => {
               setHands(results);
               if (results.length > 0) {
-                setCurrentGesture(detectGesture(results[0].landmarks));
+                const gesture = detectGesture(results[0].landmarks);
+                setCurrentGesture(gesture);
+                // Feed to gesture command system for debounced action triggering
+                gestureManager.current.update(gesture);
               } else {
                 setCurrentGesture(null);
+                gestureManager.current.update({ gesture: "none", confidence: 0, activeFingers: [] });
               }
             })
             .catch(() => {})
@@ -216,6 +249,9 @@ export default function GlassesScreen() {
         mediapipeReady.current = false;
         setHands([]);
         setCurrentGesture(null);
+        setCommandMode(false);
+        gestureManager.current.reset();
+        resetSwipeTracking();
         await MediaPipe.dispose();
       }
       if (streamState !== "stopped") {
@@ -251,6 +287,9 @@ export default function GlassesScreen() {
         mediapipeReady.current = false;
         setHands([]);
         setCurrentGesture(null);
+        setCommandMode(false);
+        gestureManager.current.reset();
+        resetSwipeTracking();
         await MediaPipe.dispose();
       }
       await Glasses.stopVideoStream();
@@ -290,6 +329,9 @@ export default function GlassesScreen() {
       mediapipeReady.current = false;
       setHands([]);
       setCurrentGesture(null);
+      setCommandMode(false);
+      gestureManager.current.reset();
+      resetSwipeTracking();
       await MediaPipe.dispose();
     }
   }, [arMode]);
@@ -641,12 +683,12 @@ export default function GlassesScreen() {
                       paddingVertical: 4,
                       borderRadius: 12,
                       borderWidth: 1,
-                      borderColor: "#00FF88",
+                      borderColor: commandMode ? "#F59E0B" : "#00FF88",
                     }}
                   >
                     <Text
                       style={{
-                        color: "#00FF88",
+                        color: commandMode ? "#F59E0B" : "#00FF88",
                         fontSize: 11,
                         fontFamily: "monospace",
                         fontWeight: "bold",
@@ -654,10 +696,37 @@ export default function GlassesScreen() {
                       }}
                     >
                       {gestureEmoji(currentGesture.gesture)}{" "}
-                      {currentGesture.gesture.toUpperCase()}
+                      {gestureLabel(currentGesture)}
                     </Text>
                   </View>
                 )}
+
+              {/* Action feedback pill — shows when a gesture command fires */}
+              {arMode && commandMode && lastAction && (
+                <View
+                  style={{
+                    position: "absolute",
+                    bottom: 12,
+                    alignSelf: "center",
+                    backgroundColor: "rgba(245,158,11,0.9)",
+                    paddingHorizontal: 16,
+                    paddingVertical: 6,
+                    borderRadius: 16,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#000",
+                      fontSize: 13,
+                      fontFamily: "monospace",
+                      fontWeight: "bold",
+                      letterSpacing: 2,
+                    }}
+                  >
+                    {lastAction.icon} {lastAction.label}
+                  </Text>
+                </View>
+              )}
 
               {/* HUD overlay */}
               {isStreaming && (
@@ -713,6 +782,18 @@ export default function GlassesScreen() {
                         }}
                       >
                         AR
+                      </Text>
+                    )}
+                    {commandMode && (
+                      <Text
+                        style={{
+                          color: "#F59E0B",
+                          fontSize: 9,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        CMD
                       </Text>
                     )}
                     <Text
@@ -862,6 +943,36 @@ export default function GlassesScreen() {
                         }}
                       >
                         {arMode ? "AR: ON" : "AR: OFF"}
+                      </Text>
+                    </TVPressable>
+                  )}
+                  {/* Command Mode Toggle (only visible when AR is on) */}
+                  {arMode && (
+                    <TVPressable
+                      onPress={() => setCommandMode((v) => !v)}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 14,
+                        borderRadius: 8,
+                        backgroundColor: commandMode
+                          ? "rgba(245,158,11,0.15)"
+                          : "#1A1A1A",
+                        borderWidth: 1,
+                        borderColor: commandMode ? "#F59E0B" : "#333",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: commandMode ? "#F59E0B" : "#737373",
+                          fontSize: 11,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                          letterSpacing: 1,
+                        }}
+                      >
+                        {commandMode ? "CMD: ON" : "CMD: OFF"}
                       </Text>
                     </TVPressable>
                   )}
