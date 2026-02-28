@@ -1,0 +1,39 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+group = 'expo.modules.mediapipe'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.mediapipe"
+  compileSdkVersion safeExtGet("compileSdkVersion", 35)
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 29)
+    targetSdkVersion safeExtGet("targetSdkVersion", 34)
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+
+  // Include .task model files from assets
+  aaptOptions {
+    noCompress "task"
+  }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+  implementation 'com.google.mediapipe:tasks-vision:0.10.21'
+  implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+}
+
+int safeExtGet(String prop, Integer fallback) {
+  rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}
