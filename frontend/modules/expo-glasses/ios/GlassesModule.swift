@@ -18,7 +18,6 @@ public class GlassesModule: Module {
 #endif
 #if canImport(MWDATCamera)
     private var streamSession: StreamSession?
-    private var streamTasks: [Task<Void, Never>] = []
     private var listenerTokens: [AnyListenerToken] = []
 #endif
 
@@ -194,10 +193,10 @@ public class GlassesModule: Module {
             )
             self.streamSession = session
 
-            // Listen for state changes via AsyncStream
-            self.streamTasks.append(Task { @MainActor [weak self] in
-                guard let self = self else { return }
-                for await state in session.statePublisher {
+            // Listen for state changes via Announcer
+            self.listenerTokens.append(
+                session.statePublisher.listen { [weak self] state in
+                    guard let self = self else { return }
                     let stateStr: String
                     switch state {
                     case .stopped:
@@ -219,15 +218,15 @@ public class GlassesModule: Module {
                     }
                     self.sendEvent("onStreamStateChanged", ["state": stateStr])
                 }
-            })
+            )
 
-            // Listen for video frames via AsyncStream
-            self.streamTasks.append(Task { @MainActor [weak self] in
-                guard let self = self else { return }
-                for await frame in session.videoFramePublisher {
+            // Listen for video frames via Announcer
+            self.listenerTokens.append(
+                session.videoFramePublisher.listen { [weak self] frame in
+                    guard let self = self else { return }
                     guard let image = frame.makeUIImage(),
                           let jpegData = image.jpegData(compressionQuality: GlassesModule.jpegQuality) else {
-                        continue
+                        return
                     }
                     let base64 = jpegData.base64EncodedString()
                     self.sendEvent("onVideoFrame", [
@@ -237,21 +236,21 @@ public class GlassesModule: Module {
                         "timestamp": Int(Date().timeIntervalSince1970 * 1000)
                     ])
                 }
-            })
+            )
 
-            // Listen for photo captures via AsyncStream
-            self.streamTasks.append(Task { @MainActor [weak self] in
-                guard let self = self else { return }
-                for await photo in session.photoDataPublisher {
+            // Listen for photo captures via Announcer
+            self.listenerTokens.append(
+                session.photoDataPublisher.listen { [weak self] photo in
+                    guard let self = self else { return }
                     let base64 = photo.data.base64EncodedString()
                     self.sendEvent("onPhotoCaptured", [
                         "data": base64,
                         "format": "jpeg"
                     ])
                 }
-            })
+            )
 
-            // Listen for errors via listener
+            // Listen for errors via Announcer
             self.listenerTokens.append(
                 session.errorPublisher.listen { [weak self] error in
                     self?.sendEvent("onError", [
@@ -301,8 +300,6 @@ public class GlassesModule: Module {
 
     private func stopStream() async {
 #if canImport(MWDATCamera)
-        streamTasks.forEach { $0.cancel() }
-        streamTasks.removeAll()
         listenerTokens.removeAll()
         await streamSession?.stop()
         streamSession = nil
@@ -325,8 +322,6 @@ public class GlassesModule: Module {
         registrationTask?.cancel()
 #endif
 #if canImport(MWDATCamera)
-        streamTasks.forEach { $0.cancel() }
-        streamTasks.removeAll()
         listenerTokens.removeAll()
 #endif
         streaming = false
