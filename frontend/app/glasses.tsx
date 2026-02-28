@@ -47,6 +47,7 @@ export default function GlassesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(false);
   const [diagnostics, setDiagnostics] = useState<Record<string, any> | null>(null);
+  const [logs, setLogs] = useState<Array<{ ts: string; msg: string }> | null>(null);
 
   // AR mode state
   const [arMode, setArMode] = useState(false);
@@ -407,24 +408,36 @@ export default function GlassesScreen() {
 
         {/* Error */}
         {error && (
-          <View style={{ backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "#7F1D1D", borderRadius: 8, padding: 10, gap: 6 }}>
+          <View style={{ backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "#7F1D1D", borderRadius: 8, padding: 10 }}>
             <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace" }}>
               {error}
             </Text>
-            {!diagnostics && (
-              <TVPressable
-                onPress={() => {
-                  try { setDiagnostics(Glasses.getDiagnostics()); } catch {}
-                }}
-                style={{ paddingVertical: 4, paddingHorizontal: 8, borderRadius: 4, borderWidth: 1, borderColor: "#7F1D1D", alignSelf: "flex-start" }}
-              >
-                <Text style={{ color: "#EF4444", fontSize: 9, fontFamily: "monospace", letterSpacing: 1 }}>
-                  SHOW DIAGNOSTICS
-                </Text>
-              </TVPressable>
-            )}
           </View>
         )}
+
+        {/* Debug buttons — always visible */}
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <TVPressable
+            onPress={() => {
+              try { setDiagnostics(Glasses.getDiagnostics()); } catch {}
+            }}
+            style={{ paddingVertical: 4, paddingHorizontal: 8, borderRadius: 4, borderWidth: 1, borderColor: "#164E63" }}
+          >
+            <Text style={{ color: "#06B6D4", fontSize: 9, fontFamily: "monospace", letterSpacing: 1 }}>
+              DIAGNOSTICS
+            </Text>
+          </TVPressable>
+          <TVPressable
+            onPress={() => {
+              try { setLogs(Glasses.getLogs()); } catch {}
+            }}
+            style={{ paddingVertical: 4, paddingHorizontal: 8, borderRadius: 4, borderWidth: 1, borderColor: "#164E63" }}
+          >
+            <Text style={{ color: "#06B6D4", fontSize: 9, fontFamily: "monospace", letterSpacing: 1 }}>
+              SHOW LOGS
+            </Text>
+          </TVPressable>
+        </View>
 
         {/* Diagnostics panel */}
         {diagnostics && (
@@ -437,11 +450,42 @@ export default function GlassesScreen() {
                 <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>CLOSE</Text>
               </TVPressable>
             </View>
-            {Object.entries(diagnostics).map(([key, val]) => (
+            {Object.entries(diagnostics).filter(([k]) => k !== "recentLogs").map(([key, val]) => (
               <Text key={key} style={{ color: "#737373", fontSize: 9, fontFamily: "monospace" }}>
                 {key}: {typeof val === "object" ? JSON.stringify(val) : String(val)}
               </Text>
             ))}
+          </View>
+        )}
+
+        {/* Logs panel */}
+        {logs && (
+          <View style={{ backgroundColor: "rgba(6,182,212,0.05)", borderWidth: 1, borderColor: "#164E63", borderRadius: 8, padding: 10, gap: 2, maxHeight: 300 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <Text style={{ color: "#06B6D4", fontSize: 10, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
+                SDK LOGS ({logs.length})
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TVPressable onPress={() => { try { setLogs(Glasses.getLogs()); } catch {} }} style={{ padding: 4 }}>
+                  <Text style={{ color: "#06B6D4", fontSize: 9, fontFamily: "monospace" }}>REFRESH</Text>
+                </TVPressable>
+                <TVPressable onPress={() => setLogs(null)} style={{ padding: 4 }}>
+                  <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>CLOSE</Text>
+                </TVPressable>
+              </View>
+            </View>
+            <ScrollView style={{ maxHeight: 250 }} nestedScrollEnabled>
+              {logs.map((entry, i) => (
+                <Text key={i} style={{ color: "#737373", fontSize: 8, fontFamily: "monospace", lineHeight: 12 }}>
+                  {entry.ts?.slice(11, 19) || "?"} {entry.msg}
+                </Text>
+              ))}
+              {logs.length === 0 && (
+                <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
+                  No logs yet — initialize and connect to generate logs
+                </Text>
+              )}
+            </ScrollView>
           </View>
         )}
 

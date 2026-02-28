@@ -78,6 +78,11 @@ export function getDiagnostics(): Record<string, any> {
   return ExpoGlasses.getDiagnostics();
 }
 
+export function getLogs(): Array<{ ts: string; msg: string }> {
+  if (!ExpoGlasses) return [];
+  return ExpoGlasses.getLogs();
+}
+
 export async function initialize(): Promise<boolean> {
   if (!ExpoGlasses) return false;
   return ExpoGlasses.initialize();

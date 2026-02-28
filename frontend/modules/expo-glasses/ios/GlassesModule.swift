@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import UIKit
+import os.log
 
 #if canImport(MWDATCore)
 import MWDATCore
@@ -12,6 +13,21 @@ import MWDATCamera
 public class GlassesModule: Module {
     private static let jpegQuality: CGFloat = 0.6
     private static let defaultFrameRate: UInt = 15
+    private static let maxLogEntries = 100
+    private static let osLog = OSLog(subsystem: "com.ozzu.glasses", category: "SDK")
+
+    /// In-app ring buffer for debug logs (NSLog doesn't appear in idevicesyslog on iOS 17+)
+    private static var logBuffer: [(timestamp: String, message: String)] = []
+
+    private static func log(_ message: String) {
+        let ts = ISO8601DateFormatter().string(from: Date())
+        logBuffer.append((timestamp: ts, message: message))
+        if logBuffer.count > maxLogEntries {
+            logBuffer.removeFirst(logBuffer.count - maxLogEntries)
+        }
+        NSLog("[ExpoGlasses] %@", message)
+        os_log("[ExpoGlasses] %{public}@", log: osLog, type: .error, message)
+    }
 
 #if canImport(MWDATCore)
     private var registrationTask: Task<Void, Never>?
@@ -87,7 +103,15 @@ public class GlassesModule: Module {
             info["registrationState"] = "\(Wearables.shared.registrationState)"
 #endif
 
+            // Include recent log entries
+            info["logCount"] = GlassesModule.logBuffer.count
+            info["recentLogs"] = GlassesModule.logBuffer.suffix(20).map { "\($0.timestamp) \($0.message)" }
+
             return info
+        }
+
+        Function("getLogs") { () -> [[String: String]] in
+            return GlassesModule.logBuffer.map { ["ts": $0.timestamp, "msg": $0.message] }
         }
 
         // ── Registration ──
@@ -98,19 +122,19 @@ public class GlassesModule: Module {
 
             // Log MWDAT plist config for diagnostics
             if let mwdat = Bundle.main.object(forInfoDictionaryKey: "MWDAT") as? [String: Any] {
-                NSLog("[ExpoGlasses] MWDAT plist config: %@", "\(mwdat)")
+                GlassesModule.log("MWDAT plist config: \(mwdat)")
             } else {
-                NSLog("[ExpoGlasses] WARNING: No MWDAT key found in Info.plist!")
+                GlassesModule.log("WARNING: No MWDAT key found in Info.plist!")
             }
-            NSLog("[ExpoGlasses] Bundle ID: \(Bundle.main.bundleIdentifier ?? "nil")")
+            GlassesModule.log("Bundle ID: \(Bundle.main.bundleIdentifier ?? "nil")")
 
             do {
                 try Wearables.configure()
-                NSLog("[ExpoGlasses] Wearables.configure() succeeded")
+                GlassesModule.log("Wearables.configure() succeeded")
 
                 // Log initial registration state
                 let regState = Wearables.shared.registrationState
-                NSLog("[ExpoGlasses] Initial registration state: \(regState)")
+                GlassesModule.log("Initial registration state: \(regState)")
 
                 self.registrationTask?.cancel()
                 self.registrationTask = Task { @MainActor [weak self] in
@@ -129,7 +153,7 @@ public class GlassesModule: Module {
                         @unknown default:
                             stateStr = "unavailable"
                         }
-                        NSLog("[ExpoGlasses] Registration state changed: \(state) -> \(stateStr)")
+                        GlassesModule.log("Registration state changed: \(state) -> \(stateStr)")
                         self.connectionState = stateStr
                         self.sendEvent("onConnectionChanged", ["state": stateStr])
                     }
@@ -138,11 +162,11 @@ public class GlassesModule: Module {
                 self.initialized = true
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
-                NSLog("[ExpoGlasses] Initialized with Meta DAT SDK v0.4.0")
+                GlassesModule.log("Initialized with Meta DAT SDK v0.4.0")
                 return true
             } catch {
-                NSLog("[ExpoGlasses] Initialize failed: \(error)")
-                NSLog("[ExpoGlasses] Initialize error type: \(type(of: error))")
+                GlassesModule.log("Initialize failed: \(error)")
+                GlassesModule.log("Initialize error type: \(type(of: error))")
                 self.sendEvent("onError", [
                     "code": "INIT_FAILED",
                     "message": "\(error)"
@@ -150,7 +174,7 @@ public class GlassesModule: Module {
                 return false
             }
 #else
-            NSLog("[ExpoGlasses] SDK not available — MWDATCore not linked")
+            GlassesModule.log("SDK not available — MWDATCore not linked")
             self.sendEvent("onError", [
                 "code": "SDK_NOT_LINKED",
                 "message": "Meta DAT SDK is not linked in this build"
@@ -178,7 +202,7 @@ public class GlassesModule: Module {
             } else {
                 metaAppInstalled = false
             }
-            NSLog("[ExpoGlasses] Meta AI app installed: \(metaAppInstalled)")
+            GlassesModule.log("Meta AI app installed: \(metaAppInstalled)")
 
             if !metaAppInstalled {
                 self.sendEvent("onError", [
@@ -194,18 +218,18 @@ public class GlassesModule: Module {
 
             // Log current state before attempting registration
             let regState = Wearables.shared.registrationState
-            NSLog("[ExpoGlasses] Current registration state before connect: \(regState)")
+            GlassesModule.log("Current registration state before connect: \(regState)")
 
             self.connectionState = "connecting"
             self.sendEvent("onConnectionChanged", ["state": self.connectionState])
 
             do {
                 try await Wearables.shared.startRegistration()
-                NSLog("[ExpoGlasses] startRegistration() succeeded")
+                GlassesModule.log("startRegistration() succeeded")
             } catch let regError as RegistrationError {
                 // Catch RegistrationError specifically — .description has the real error message
                 let desc = regError.description
-                NSLog("[ExpoGlasses] RegistrationError: \(desc) (raw: \(regError))")
+                GlassesModule.log("RegistrationError: \(desc) (raw: \(regError))")
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", [
                     "state": self.connectionState,
@@ -218,8 +242,8 @@ public class GlassesModule: Module {
             } catch {
                 // Fallback for unexpected error types
                 let msg = "\(error)"
-                NSLog("[ExpoGlasses] Registration failed (unexpected): \(msg)")
-                NSLog("[ExpoGlasses] Error type: \(type(of: error))")
+                GlassesModule.log("Registration failed (unexpected): \(msg)")
+                GlassesModule.log("Error type: \(type(of: error))")
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", [
                     "state": self.connectionState,
@@ -244,13 +268,13 @@ public class GlassesModule: Module {
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
             } catch let unregError as UnregistrationError {
                 let desc = unregError.description
-                NSLog("[ExpoGlasses] UnregistrationError: \(desc)")
+                GlassesModule.log("UnregistrationError: \(desc)")
                 self.sendEvent("onError", [
                     "code": "UNREGISTER_FAILED",
                     "message": desc
                 ])
             } catch {
-                NSLog("[ExpoGlasses] Unregistration failed: \(error)")
+                GlassesModule.log("Unregistration failed: \(error)")
                 self.sendEvent("onError", [
                     "code": "UNREGISTER_FAILED",
                     "message": "\(error)"
@@ -275,7 +299,7 @@ public class GlassesModule: Module {
                 return
             }
             guard !self.streaming else {
-                NSLog("[ExpoGlasses] Stream already active")
+                GlassesModule.log("Stream already active")
                 return
             }
 
@@ -371,7 +395,7 @@ public class GlassesModule: Module {
 
             // Start the stream
             await session.start()
-            NSLog("[ExpoGlasses] Stream started: quality=\(qualityStr), frameRate=\(frameRate)")
+            GlassesModule.log("Stream started: quality=\(qualityStr), frameRate=\(frameRate)")
 #else
             self.sendEvent("onError", [
                 "code": "SDK_NOT_LINKED",
@@ -395,7 +419,7 @@ public class GlassesModule: Module {
             }
 
             _ = await MainActor.run { session.capturePhoto(format: .jpeg) }
-            NSLog("[ExpoGlasses] Photo capture triggered")
+            GlassesModule.log("Photo capture triggered")
 #endif
             return nil
         }
@@ -408,7 +432,7 @@ public class GlassesModule: Module {
 #if canImport(MWDATCore)
             if self.initialized {
                 let currentState = Wearables.shared.registrationState
-                NSLog("[ExpoGlasses] App foregrounded — current registration state: \(currentState)")
+                GlassesModule.log("App foregrounded — current registration state: \(currentState)")
                 let stateStr: String
                 switch currentState {
                 case .registered:
@@ -423,7 +447,7 @@ public class GlassesModule: Module {
                     stateStr = "unavailable"
                 }
                 if stateStr != self.connectionState {
-                    NSLog("[ExpoGlasses] State changed while backgrounded: \(self.connectionState) -> \(stateStr)")
+                    GlassesModule.log("State changed while backgrounded: \(self.connectionState) -> \(stateStr)")
                     self.connectionState = stateStr
                     self.sendEvent("onConnectionChanged", ["state": stateStr])
                 }
@@ -447,7 +471,7 @@ public class GlassesModule: Module {
 #endif
         streaming = false
         sendEvent("onStreamStateChanged", ["state": "stopped"])
-        NSLog("[ExpoGlasses] Stream stopped")
+        GlassesModule.log("Stream stopped")
     }
 
     private func handleBackground() {
