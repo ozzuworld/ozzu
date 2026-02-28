@@ -255,7 +255,7 @@ public class GlassesModule: Module {
                 session.errorPublisher.listen { [weak self] error in
                     self?.sendEvent("onError", [
                         "code": "STREAM_ERROR",
-                        "message": error.description
+                        "message": "\(error)"
                     ])
                 }
             )
