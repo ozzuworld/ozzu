@@ -9465,6 +9465,8 @@ const ENGAGE_EXTEND_MS = 120000; // extend by 2 min on each conversation turn
 
 let inputTranscriptBuffer = ""; // accumulates fragments to detect wake word
 let pendingAudioBuffer = []; // buffers Gemini audio output while idle
+let pendingVisionRequest = null; // { ws, mode, buffer } — tracks active vision analysis request
+let visionTranscriptBuffer = ""; // accumulates Gemini text for vision result
 
 function isEngaged() { return true; } // Wake word disabled — always engaged until on-device detection is implemented
 
@@ -9954,6 +9956,10 @@ function handleGeminiMessage(msg) {
     if (isEngaged()) {
       broadcastToAll({ type: "transcript", text: sc.outputTranscription.text });
     }
+    // Accumulate for pending vision request
+    if (pendingVisionRequest) {
+      visionTranscriptBuffer += sc.outputTranscription.text;
+    }
   }
 
   // Turn complete
@@ -9966,6 +9972,24 @@ function handleGeminiMessage(msg) {
     if (isEngaged()) {
       extendEngagement();
       broadcastToAll({ type: "turnComplete" });
+    }
+    // Send accumulated vision result back to requesting device
+    if (pendingVisionRequest && visionTranscriptBuffer) {
+      try {
+        const vr = pendingVisionRequest;
+        if (vr.ws && vr.ws.readyState === 1) {
+          vr.ws.send(JSON.stringify({
+            type: "visionResult",
+            mode: vr.mode,
+            text: visionTranscriptBuffer.trim(),
+          }));
+          log.bridge.info(`Vision result sent (mode=${vr.mode}, ${visionTranscriptBuffer.length} chars)`);
+        }
+      } catch (e) {
+        log.bridge.warn(`Vision result send failed: ${e.message}`);
+      }
+      pendingVisionRequest = null;
+      visionTranscriptBuffer = "";
     }
   }
 }
@@ -10972,6 +10996,49 @@ wss.on("connection", (ws) => {
             },
           }));
           log.bridge.debug(`Glasses frame forwarded to Gemini (${msg.width}x${msg.height}) from ${info?.deviceId}`);
+        }
+        return;
+      }
+
+      // ── Vision mode request from glasses ──
+      if (msg.type === "glassesVisionRequest") {
+        const info = devices.get(ws);
+        const mode = msg.mode || "describe";
+        log.bridge.info(`Vision request: mode=${mode} from ${info?.deviceId}`);
+
+        const visionPrompts = {
+          describe: "Look at this image from smart glasses. Describe what you see in 1-2 concise sentences. Focus on the most notable things.",
+          ocr: "Extract ALL visible text from this image. Return only the text you can read, preserving layout where possible. If no text is visible, say 'No text detected'.",
+          identify: "List every distinct object you can identify in this image. Format: one per line, with approximate position (left/center/right, top/middle/bottom). Be specific (e.g. 'red coffee mug' not just 'object').",
+          translate: "Read any visible text in this image. If it's not in English, translate it to English. Format: 'Original: [text]' then 'English: [translation]'. If already English or no text, just read it out.",
+        };
+
+        const prompt = visionPrompts[mode] || visionPrompts.describe;
+
+        if (geminiReady && geminiWs && geminiWs.readyState === 1 && msg.data) {
+          // Track pending vision request so we can route the response back
+          pendingVisionRequest = { ws, mode };
+          visionTranscriptBuffer = "";
+
+          geminiWs.send(JSON.stringify({
+            clientContent: {
+              turns: [{
+                role: "user",
+                parts: [
+                  { text: `[Vision analysis — ${mode} mode. Respond with ONLY the analysis, no preamble.] ${prompt}` },
+                  { inlineData: { mimeType: "image/jpeg", data: msg.data } },
+                ],
+              }],
+              turnComplete: true,
+            },
+          }));
+          log.bridge.debug(`Vision request forwarded to Gemini (mode=${mode})`);
+        } else {
+          ws.send(JSON.stringify({
+            type: "visionResult",
+            mode,
+            text: "Vision not available — Gemini session inactive",
+          }));
         }
         return;
       }

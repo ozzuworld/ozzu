@@ -23,6 +23,7 @@ import HandOverlay from "../components/glasses/HandOverlay";
 import { detectGesture, gestureEmoji, gestureLabel, resetSwipeTracking, type GestureResult } from "../lib/gestures";
 import { GestureCommandManager, type GestureCommand } from "../lib/gesture-commands";
 import { executeGestureCommand, type GestureAction } from "../lib/gesture-actions";
+import VisionOverlay, { type VisionMode, type VisionResult } from "../components/glasses/VisionOverlay";
 
 const TOP_BAR_HEIGHT = 48;
 
@@ -69,6 +70,12 @@ export default function GlassesScreen() {
   const lastActionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestureManager = useRef(new GestureCommandManager());
 
+  // Vision mode state
+  const [visionMode, setVisionMode] = useState<VisionMode>("describe");
+  const [visionResult, setVisionResult] = useState<VisionResult | null>(null);
+  const [visionLoading, setVisionLoading] = useState(false);
+  const latestFrameRef = useRef<{ data: string; width: number; height: number } | null>(null);
+
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
   const connectedRef = useRef(false);
   const frameCountRef = useRef(0);
@@ -95,6 +102,14 @@ export default function GlassesScreen() {
       onHideContent: noop,
       onConnected: noop,
       onListeningReady: noop,
+      onVisionResult: (mode: string, text: string) => {
+        setVisionLoading(false);
+        setVisionResult({
+          mode: mode as VisionMode,
+          text,
+          timestamp: Date.now(),
+        });
+      },
       onError: (msg) => setError(msg),
     };
     bridgeRef.current.connect(callbacks);
@@ -164,6 +179,7 @@ export default function GlassesScreen() {
       }),
       Glasses.onVideoFrame((event) => {
         setFrameData(event.data);
+        latestFrameRef.current = { data: event.data, width: event.width, height: event.height };
         frameCountRef.current++;
         setFrameCount(frameCountRef.current);
 
@@ -335,6 +351,27 @@ export default function GlassesScreen() {
       await MediaPipe.dispose();
     }
   }, [arMode]);
+
+  // Vision: send current frame for analysis in selected mode
+  const handleVisionAnalyze = useCallback((mode?: VisionMode) => {
+    const m = mode ?? visionMode;
+    if (!latestFrameRef.current || !connectedRef.current) return;
+    if (mode) setVisionMode(m);
+    setVisionLoading(true);
+    setVisionResult(null);
+    const { data, width, height } = latestFrameRef.current;
+    bridgeRef.current.sendVisionRequest(m, data, width, height);
+  }, [visionMode]);
+
+  // Auto-dismiss vision result after 15s
+  const visionDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (visionDismissTimer.current) clearTimeout(visionDismissTimer.current);
+    if (visionResult) {
+      visionDismissTimer.current = setTimeout(() => setVisionResult(null), 15000);
+    }
+    return () => { if (visionDismissTimer.current) clearTimeout(visionDismissTimer.current); };
+  }, [visionResult]);
 
   const onPreviewLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -728,6 +765,15 @@ export default function GlassesScreen() {
                 </View>
               )}
 
+              {/* Vision analysis overlay */}
+              {isStreaming && (
+                <VisionOverlay
+                  result={visionResult}
+                  mode={visionMode}
+                  loading={visionLoading}
+                />
+              )}
+
               {/* HUD overlay */}
               {isStreaming && (
                 <>
@@ -888,6 +934,76 @@ export default function GlassesScreen() {
                 </TVPressable>
               ))}
             </View>
+
+            {/* Vision Mode Selector — visible when streaming */}
+            {isStreaming && (
+              <View style={{ gap: 8 }}>
+                <View style={{ flexDirection: "row", gap: 6, justifyContent: "center" }}>
+                  {(["describe", "ocr", "identify", "translate"] as VisionMode[]).map((m) => {
+                    const colors: Record<VisionMode, string> = {
+                      describe: "#06B6D4",
+                      ocr: "#A855F7",
+                      identify: "#10B981",
+                      translate: "#F59E0B",
+                    };
+                    const c = colors[m];
+                    const active = visionMode === m;
+                    return (
+                      <TVPressable
+                        key={m}
+                        onPress={() => {
+                          setVisionMode(m);
+                          setVisionResult(null);
+                        }}
+                        style={{
+                          paddingHorizontal: 10,
+                          paddingVertical: 5,
+                          borderRadius: 6,
+                          backgroundColor: active ? c : "#1A1A1A",
+                          borderWidth: 1,
+                          borderColor: active ? c : "#333",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: active ? "#000" : "#737373",
+                            fontSize: 10,
+                            fontFamily: "monospace",
+                            fontWeight: "bold",
+                            letterSpacing: 1,
+                          }}
+                        >
+                          {m.toUpperCase()}
+                        </Text>
+                      </TVPressable>
+                    );
+                  })}
+                </View>
+                <TVPressable
+                  onPress={handleVisionRequest}
+                  style={{
+                    paddingVertical: 8,
+                    borderRadius: 6,
+                    backgroundColor: "rgba(6,182,212,0.1)",
+                    borderWidth: 1,
+                    borderColor: "#164E63",
+                    alignItems: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#06B6D4",
+                      fontSize: 11,
+                      fontFamily: "monospace",
+                      fontWeight: "bold",
+                      letterSpacing: 2,
+                    }}
+                  >
+                    {visionLoading ? "ANALYZING..." : `ANALYZE (${visionMode.toUpperCase()})`}
+                  </Text>
+                </TVPressable>
+              </View>
+            )}
 
             {/* Stream Controls */}
             <View style={{ flexDirection: "row", gap: 10 }}>

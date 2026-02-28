@@ -32,6 +32,7 @@ export interface BridgeCallbacks {
   onCipherResponse?: (text: string) => void; // Phone-mode: Claude response text for on-device TTS
   onAudioRoutingUpdate?: (data: any) => void; // Audio routing state changed
   onDirectiveUpdate?: (data: any) => void; // Directive status/build changed (from bridge broadcast)
+  onVisionResult?: (mode: string, text: string) => void; // Glasses vision analysis result
   onError: (message: string) => void;
 }
 
@@ -248,6 +249,9 @@ export class BridgeSession {
         case "directiveUpdate":
           this.callbacks?.onDirectiveUpdate?.(msg);
           break;
+        case "visionResult":
+          this.callbacks?.onVisionResult?.(msg.mode, msg.text);
+          break;
         case "error":
           this.callbacks?.onError(msg.message);
           break;
@@ -347,6 +351,12 @@ export class BridgeSession {
       headers: { "Content-Type": "application/json" },
       body,
     }).catch(() => {}); // fire-and-forget
+  }
+
+  sendVisionRequest(mode: string, frameData: string, width: number, height: number): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "glassesVisionRequest", mode, data: frameData, width, height }));
+    }
   }
 
   sendGestureCommand(data: { gesture: string; action: string; fingerCount?: number; timestamp: number }): void {
