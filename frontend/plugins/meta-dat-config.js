@@ -38,17 +38,14 @@ function withMetaDATAndroid(config) {
       const metaData = mainApp["meta-data"] || [];
       const existingMeta = new Set(metaData.map((m) => m.$?.["android:name"]));
 
-      // Only add Meta DAT manifest entries if SDK is actually configured
-      const metaAppId = process.env.EXPO_PUBLIC_META_APP_ID;
-      if (metaAppId && metaAppId !== "NOT_CONFIGURED" && metaAppId !== "") {
-        if (!existingMeta.has("com.meta.wearable.mwdat.APPLICATION_ID")) {
-          metaData.push({
-            $: {
-              "android:name": "com.meta.wearable.mwdat.APPLICATION_ID",
-              "android:value": metaAppId,
-            },
-          });
-        }
+      // Developer Mode: MetaAppID=0 bypasses portal validation
+      if (!existingMeta.has("com.meta.wearable.mwdat.APPLICATION_ID")) {
+        metaData.push({
+          $: {
+            "android:name": "com.meta.wearable.mwdat.APPLICATION_ID",
+            "android:value": "0",
+          },
+        });
       }
       if (!existingMeta.has("com.meta.wearable.mwdat.ANALYTICS_OPT_OUT")) {
         metaData.push({
@@ -106,12 +103,12 @@ function withMetaDATiOS(config) {
   return withInfoPlist(config, (config) => {
     const plist = config.modResults;
 
-    // Meta DAT SDK configuration
+    // Meta DAT SDK configuration — Developer Mode (MetaAppID=0 bypasses portal validation)
+    // Official MWDAT plist keys: MetaAppID, AppLinkURLScheme, Analytics
+    // ClientToken and TeamID are NOT recognized MWDAT keys — removed
     plist.MWDAT = {
-      MetaAppID: process.env.EXPO_PUBLIC_META_APP_ID || "",
-      ClientToken: process.env.EXPO_PUBLIC_META_CLIENT_TOKEN || "",
-      TeamID: process.env.EXPO_PUBLIC_META_TEAM_ID || "G7PCS9PALV",
-      AppLinkURLScheme: "ozzu://",
+      MetaAppID: "0",
+      AppLinkURLScheme: "ozzu",
       Analytics: { OptOut: true },
     };
 
