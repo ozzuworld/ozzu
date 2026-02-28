@@ -122,7 +122,7 @@ public class MediaPipeModule: Module {
                 var blendshapes: [String: Float] = [:]
                 if let faceBlendshapes = result.faceBlendshapes,
                    idx < faceBlendshapes.count {
-                    for category in faceBlendshapes[idx] {
+                    for category in faceBlendshapes[idx].categories {
                         if let name = category.categoryName {
                             blendshapes[name] = category.score
                         }
