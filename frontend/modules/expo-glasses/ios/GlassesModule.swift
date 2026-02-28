@@ -1,25 +1,40 @@
 import ExpoModulesCore
 import UIKit
+
+#if canImport(MWDATCore)
 import MWDATCore
+#endif
+#if canImport(MWDATCamera)
 import MWDATCamera
+#endif
 
 /// GlassesModule — Expo native module wrapping Meta's Wearables DAT SDK (iOS).
 public class GlassesModule: Module {
     private static let jpegQuality: CGFloat = 0.6
     private static let defaultFrameRate = 15
 
+#if canImport(MWDATCamera)
     private var streamSession: StreamSession?
     private var deviceSelector: AutoDeviceSelector?
+#endif
 
-    private var registrationToken: AnyListenerToken?
-    private var devicesToken: AnyListenerToken?
-    private var stateToken: AnyListenerToken?
-    private var frameToken: AnyListenerToken?
-    private var photoToken: AnyListenerToken?
+    private var registrationToken: AnyObject?
+    private var devicesToken: AnyObject?
+    private var stateToken: AnyObject?
+    private var frameToken: AnyObject?
+    private var photoToken: AnyObject?
 
     private var connectionState = "disconnected"
     private var streaming = false
     private var initialized = false
+
+    private var sdkAvailable: Bool {
+#if canImport(MWDATCore)
+        return true
+#else
+        return false
+#endif
+    }
 
     public func definition() -> ModuleDefinition {
         Name("ExpoGlasses")
@@ -35,12 +50,13 @@ public class GlassesModule: Module {
         // ── Availability check ──
 
         Function("isAvailable") { () -> Bool in
-            return true
+            return self.sdkAvailable
         }
 
         // ── Registration ──
 
         AsyncFunction("initialize") { () -> Bool in
+#if canImport(MWDATCore)
             if self.initialized { return true }
 
             do {
@@ -79,9 +95,18 @@ public class GlassesModule: Module {
                 ])
                 return false
             }
+#else
+            print("[ExpoGlasses] SDK not available — MWDATCore not linked")
+            self.sendEvent("onError", [
+                "code": "SDK_NOT_LINKED",
+                "message": "Meta DAT SDK is not linked in this build"
+            ])
+            return false
+#endif
         }
 
         AsyncFunction("registerDevice") {
+#if canImport(MWDATCore)
             guard self.initialized else {
                 self.sendEvent("onError", [
                     "code": "NOT_INITIALIZED",
@@ -103,9 +128,11 @@ public class GlassesModule: Module {
                     "error": error.localizedDescription
                 ])
             }
+#endif
         }
 
         AsyncFunction("unregisterDevice") {
+#if canImport(MWDATCore)
             do {
                 if self.streaming {
                     await self.stopStream()
@@ -120,6 +147,7 @@ public class GlassesModule: Module {
                     "message": error.localizedDescription
                 ])
             }
+#endif
         }
 
         Function("getConnectionState") { () -> String in
@@ -129,6 +157,7 @@ public class GlassesModule: Module {
         // ── Video Streaming ──
 
         AsyncFunction("startVideoStream") { (options: [String: Any]) in
+#if canImport(MWDATCamera)
             guard self.initialized else {
                 self.sendEvent("onError", [
                     "code": "NOT_INITIALIZED",
@@ -187,7 +216,7 @@ public class GlassesModule: Module {
                     stateStr = "unknown"
                 }
                 self.sendEvent("onStreamStateChanged", ["state": stateStr])
-            }
+            } as AnyObject
 
             // Listen for video frames
             self.frameToken = session.videoFramePublisher.listen { [weak self] frame in
@@ -203,7 +232,7 @@ public class GlassesModule: Module {
                     "height": Int(image.size.height),
                     "timestamp": Int(Date().timeIntervalSince1970 * 1000)
                 ])
-            }
+            } as AnyObject
 
             // Listen for photo captures
             self.photoToken = session.photoDataPublisher.listen { [weak self] photoData in
@@ -213,11 +242,17 @@ public class GlassesModule: Module {
                     "data": base64,
                     "format": "jpeg"
                 ])
-            }
+            } as AnyObject
 
             // Start the stream
             await session.start()
             print("[ExpoGlasses] Stream started: quality=\(qualityStr), frameRate=\(frameRate)")
+#else
+            self.sendEvent("onError", [
+                "code": "SDK_NOT_LINKED",
+                "message": "MWDATCamera not linked in this build"
+            ])
+#endif
         }
 
         AsyncFunction("stopVideoStream") {
@@ -225,6 +260,7 @@ public class GlassesModule: Module {
         }
 
         AsyncFunction("capturePhoto") { () -> String? in
+#if canImport(MWDATCamera)
             guard let session = self.streamSession, self.streaming else {
                 self.sendEvent("onError", [
                     "code": "NO_STREAM",
@@ -235,6 +271,7 @@ public class GlassesModule: Module {
 
             session.capturePhoto(format: .jpeg)
             print("[ExpoGlasses] Photo capture triggered")
+#endif
             return nil
         }
 
@@ -249,9 +286,11 @@ public class GlassesModule: Module {
         stateToken = nil
         frameToken = nil
         photoToken = nil
+#if canImport(MWDATCamera)
         await streamSession?.stop()
         streamSession = nil
         deviceSelector = nil
+#endif
         streaming = false
         sendEvent("onStreamStateChanged", ["state": "stopped"])
         print("[ExpoGlasses] Stream stopped")

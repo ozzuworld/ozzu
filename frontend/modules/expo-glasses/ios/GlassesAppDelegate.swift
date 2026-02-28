@@ -1,6 +1,9 @@
 import ExpoModulesCore
 import UIKit
+
+#if canImport(MWDATCore)
 import MWDATCore
+#endif
 
 /// Handles URL callbacks from the Meta AI app during device registration.
 /// The Meta DAT SDK uses a URL scheme callback to complete OAuth registration.
@@ -10,6 +13,7 @@ public class GlassesAppDelegate: ExpoAppDelegateSubscriber {
         open url: URL,
         options: [UIApplication.OpenURLOptionsKey: Any] = [:]
     ) -> Bool {
+#if canImport(MWDATCore)
         // Check if this URL is a Meta Wearables callback
         if url.absoluteString.contains("metaWearablesAction") ||
            url.scheme == "ozzu" {
@@ -18,6 +22,7 @@ public class GlassesAppDelegate: ExpoAppDelegateSubscriber {
             }
             return true
         }
+#endif
         return false
     }
 }
