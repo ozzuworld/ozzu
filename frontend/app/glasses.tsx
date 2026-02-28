@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   StyleSheet,
   LayoutChangeEvent,
+  Linking,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
@@ -48,6 +49,7 @@ export default function GlassesScreen() {
   const [initializing, setInitializing] = useState(false);
   const [diagnostics, setDiagnostics] = useState<Record<string, any> | null>(null);
   const [logs, setLogs] = useState<Array<{ ts: string; msg: string }> | null>(null);
+  const [urlEvents, setUrlEvents] = useState<string[]>([]);
 
   // AR mode state
   const [arMode, setArMode] = useState(false);
@@ -89,6 +91,23 @@ export default function GlassesScreen() {
     };
     bridgeRef.current.connect(callbacks);
     return () => bridgeRef.current.close();
+  }, []);
+
+  // Listen for ALL incoming URLs (catches Meta AI callback if it arrives via RN Linking)
+  useEffect(() => {
+    const handler = (event: { url: string }) => {
+      console.log("[Glasses] RN Linking URL:", event.url);
+      setUrlEvents((prev) => [...prev, `${new Date().toISOString().slice(11,19)} ${event.url}`]);
+    };
+    const sub = Linking.addEventListener("url", handler);
+    // Also check if app was opened with a URL
+    Linking.getInitialURL().then((url) => {
+      if (url) {
+        console.log("[Glasses] Initial URL:", url);
+        setUrlEvents((prev) => [...prev, `INITIAL: ${url}`]);
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   // Check availability and initialize
@@ -437,6 +456,11 @@ export default function GlassesScreen() {
               SHOW LOGS
             </Text>
           </TVPressable>
+          {urlEvents.length > 0 && (
+            <Text style={{ color: "#F59E0B", fontSize: 9, fontFamily: "monospace", alignSelf: "center" }}>
+              {urlEvents.length} URL(s)
+            </Text>
+          )}
         </View>
 
         {/* Diagnostics panel */}
@@ -484,6 +508,18 @@ export default function GlassesScreen() {
                 <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
                   No logs yet — initialize and connect to generate logs
                 </Text>
+              )}
+              {urlEvents.length > 0 && (
+                <>
+                  <Text style={{ color: "#F59E0B", fontSize: 9, fontFamily: "monospace", fontWeight: "bold", marginTop: 6 }}>
+                    URL EVENTS ({urlEvents.length}):
+                  </Text>
+                  {urlEvents.map((u, i) => (
+                    <Text key={`url-${i}`} style={{ color: "#F59E0B", fontSize: 8, fontFamily: "monospace", lineHeight: 12 }}>
+                      {u}
+                    </Text>
+                  ))}
+                </>
               )}
             </ScrollView>
           </View>

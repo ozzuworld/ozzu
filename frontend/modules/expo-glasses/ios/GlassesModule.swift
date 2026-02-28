@@ -19,7 +19,7 @@ public class GlassesModule: Module {
     /// In-app ring buffer for debug logs (NSLog doesn't appear in idevicesyslog on iOS 17+)
     private static var logBuffer: [(timestamp: String, message: String)] = []
 
-    private static func log(_ message: String) {
+    static func log(_ message: String) {
         let ts = ISO8601DateFormatter().string(from: Date())
         logBuffer.append((timestamp: ts, message: message))
         if logBuffer.count > maxLogEntries {
