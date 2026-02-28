@@ -12,6 +12,7 @@
     "@expo/metro-runtime": "~6.1.2",
     "@google/genai": "^1.40.0",
     "cipher-voice": "file:./modules/cipher-voice",
+    "expo-glasses": "file:./modules/expo-glasses",
     "expo": "~54.0.33",
     "expo-av": "^16.0.8",
     "expo-constants": "~18.0.13",
