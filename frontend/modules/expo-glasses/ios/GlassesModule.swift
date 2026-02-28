@@ -303,6 +303,35 @@ public class GlassesModule: Module {
                 return
             }
 
+            // Request camera permission from the Meta DAT SDK before streaming.
+            // This is separate from iOS camera permissions — it's the SDK's own
+            // permission system that requires user approval in Meta AI.
+            do {
+                let currentStatus = try await Wearables.shared.checkPermissionStatus(.camera)
+                GlassesModule.log("Camera permission status: \(currentStatus)")
+                if currentStatus != .granted {
+                    GlassesModule.log("Requesting camera permission...")
+                    let requestedStatus = try await Wearables.shared.requestPermission(.camera)
+                    GlassesModule.log("Camera permission after request: \(requestedStatus)")
+                    if requestedStatus != .granted {
+                        GlassesModule.log("Camera permission denied")
+                        self.sendEvent("onError", [
+                            "code": "PERMISSION_DENIED",
+                            "message": "Camera permission denied. Grant permission in Meta AI settings."
+                        ])
+                        return
+                    }
+                }
+                GlassesModule.log("Camera permission granted — starting stream")
+            } catch {
+                GlassesModule.log("Permission check/request failed: \(error)")
+                self.sendEvent("onError", [
+                    "code": "PERMISSION_ERROR",
+                    "message": "Failed to check/request camera permission: \(error)"
+                ])
+                return
+            }
+
             let qualityStr = options["quality"] as? String ?? "medium"
             let frameRate = options["frameRate"] as? UInt ?? GlassesModule.defaultFrameRate
 
