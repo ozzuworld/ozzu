@@ -1,5 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, Image, ScrollView, ActivityIndicator } from "react-native";
+import {
+  View,
+  Text,
+  Image,
+  ScrollView,
+  ActivityIndicator,
+  StyleSheet,
+  LayoutChangeEvent,
+} from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
@@ -8,6 +16,10 @@ import { TVPressable } from "../components/TVPressable";
 import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import * as Glasses from "../modules/expo-glasses";
+import * as MediaPipe from "../modules/expo-mediapipe";
+import type { HandResult } from "../modules/expo-mediapipe";
+import HandOverlay from "../components/glasses/HandOverlay";
+import { detectGesture, gestureEmoji, type GestureResult } from "../lib/gestures";
 
 const TOP_BAR_HEIGHT = 48;
 
@@ -34,6 +46,16 @@ export default function GlassesScreen() {
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(false);
+
+  // AR mode state
+  const [arMode, setArMode] = useState(false);
+  const [hands, setHands] = useState<HandResult[]>([]);
+  const [currentGesture, setCurrentGesture] = useState<GestureResult | null>(
+    null
+  );
+  const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
+  const mediapipeReady = useRef(false);
+  const processingFrame = useRef(false);
 
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
   const connectedRef = useRef(false);
@@ -105,7 +127,32 @@ export default function GlassesScreen() {
 
         // Forward frame to bridge for Gemini vision (throttled to ~2fps)
         if (connectedRef.current && frameCountRef.current % 8 === 0) {
-          bridgeRef.current.sendGlassesFrame(event.data, event.width, event.height);
+          bridgeRef.current.sendGlassesFrame(
+            event.data,
+            event.width,
+            event.height
+          );
+        }
+
+        // AR hand detection (skip if already processing to prevent pile-up)
+        if (
+          mediapipeReady.current &&
+          !processingFrame.current
+        ) {
+          processingFrame.current = true;
+          MediaPipe.detectHands(event.data)
+            .then((results) => {
+              setHands(results);
+              if (results.length > 0) {
+                setCurrentGesture(detectGesture(results[0].landmarks));
+              } else {
+                setCurrentGesture(null);
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              processingFrame.current = false;
+            });
         }
       }),
       Glasses.onPhotoCaptured((event) => {
@@ -137,6 +184,14 @@ export default function GlassesScreen() {
   const handleDisconnect = useCallback(async () => {
     setError(null);
     try {
+      // Clean up AR mode
+      if (arMode) {
+        setArMode(false);
+        mediapipeReady.current = false;
+        setHands([]);
+        setCurrentGesture(null);
+        await MediaPipe.dispose();
+      }
       if (streamState !== "stopped") {
         await Glasses.stopVideoStream();
       }
@@ -147,7 +202,7 @@ export default function GlassesScreen() {
     } catch (e: any) {
       setError(e.message || "Failed to disconnect");
     }
-  }, [streamState]);
+  }, [streamState, arMode]);
 
   const handleStartStream = useCallback(async () => {
     setError(null);
@@ -164,13 +219,21 @@ export default function GlassesScreen() {
   const handleStopStream = useCallback(async () => {
     setError(null);
     try {
+      // Clean up AR mode when stopping stream
+      if (arMode) {
+        setArMode(false);
+        mediapipeReady.current = false;
+        setHands([]);
+        setCurrentGesture(null);
+        await MediaPipe.dispose();
+      }
       await Glasses.stopVideoStream();
       setFrameData(null);
       setFps(0);
     } catch (e: any) {
       setError(e.message || "Failed to stop stream");
     }
-  }, []);
+  }, [arMode]);
 
   const handleCapture = useCallback(async () => {
     setError(null);
@@ -179,6 +242,35 @@ export default function GlassesScreen() {
     } catch (e: any) {
       setError(e.message || "Failed to capture photo");
     }
+  }, []);
+
+  const handleToggleAR = useCallback(async () => {
+    if (!arMode) {
+      // Turn ON
+      try {
+        const ok = await MediaPipe.initialize();
+        if (ok) {
+          mediapipeReady.current = true;
+          setArMode(true);
+        } else {
+          setError("MediaPipe not available on this device");
+        }
+      } catch (e: any) {
+        setError(e.message || "Failed to initialize MediaPipe");
+      }
+    } else {
+      // Turn OFF
+      setArMode(false);
+      mediapipeReady.current = false;
+      setHands([]);
+      setCurrentGesture(null);
+      await MediaPipe.dispose();
+    }
+  }, [arMode]);
+
+  const onPreviewLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setFrameSize({ width, height });
   }, []);
 
   const isConnected = connectionState === "connected";
@@ -371,13 +463,18 @@ export default function GlassesScreen() {
           <View style={{ gap: 16 }}>
             {/* Video Preview Area */}
             <View
+              onLayout={onPreviewLayout}
               style={{
                 aspectRatio: 16 / 9,
                 maxHeight: isPhone ? 200 : 320,
                 backgroundColor: "#0A0A0A",
                 borderRadius: 12,
                 borderWidth: 1,
-                borderColor: isStreaming ? "#06B6D4" : "#222",
+                borderColor: arMode
+                  ? "#00FF88"
+                  : isStreaming
+                  ? "#06B6D4"
+                  : "#222",
                 overflow: "hidden",
                 justifyContent: "center",
                 alignItems: "center",
@@ -390,32 +487,176 @@ export default function GlassesScreen() {
                   resizeMode="contain"
                 />
               ) : (
-                <Text style={{ color: "#333", fontSize: 13, fontFamily: "monospace" }}>
+                <Text
+                  style={{
+                    color: "#333",
+                    fontSize: 13,
+                    fontFamily: "monospace",
+                  }}
+                >
                   {isStreaming ? "Waiting for frames..." : "Camera off"}
                 </Text>
               )}
+
+              {/* AR Hand Overlay */}
+              {arMode && hands.length > 0 && frameSize.width > 0 && (
+                <View style={StyleSheet.absoluteFill}>
+                  <HandOverlay
+                    hands={hands}
+                    width={frameSize.width}
+                    height={frameSize.height}
+                    activeFingers={currentGesture?.activeFingers}
+                  />
+                </View>
+              )}
+
+              {/* Gesture label pill */}
+              {arMode &&
+                currentGesture &&
+                currentGesture.gesture !== "none" && (
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      alignSelf: "center",
+                      backgroundColor: "rgba(0,0,0,0.7)",
+                      paddingHorizontal: 12,
+                      paddingVertical: 4,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: "#00FF88",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#00FF88",
+                        fontSize: 11,
+                        fontFamily: "monospace",
+                        fontWeight: "bold",
+                        letterSpacing: 2,
+                      }}
+                    >
+                      {gestureEmoji(currentGesture.gesture)}{" "}
+                      {currentGesture.gesture.toUpperCase()}
+                    </Text>
+                  </View>
+                )}
 
               {/* HUD overlay */}
               {isStreaming && (
                 <>
                   {/* Top-left: stream indicator */}
-                  <View style={{ position: "absolute", top: 8, left: 10, flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#EF4444" }} />
-                    <Text style={{ color: "#EF4444", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      left: 10,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: 3,
+                        backgroundColor: "#EF4444",
+                      }}
+                    />
+                    <Text
+                      style={{
+                        color: "#EF4444",
+                        fontSize: 9,
+                        fontFamily: "monospace",
+                        fontWeight: "bold",
+                      }}
+                    >
                       LIVE
                     </Text>
                   </View>
-                  {/* Top-right: FPS counter */}
-                  <View style={{ position: "absolute", top: 8, right: 10 }}>
-                    <Text style={{ color: "#06B6D4", fontSize: 9, fontFamily: "monospace" }}>
+                  {/* Top-right: FPS counter + AR badge */}
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 10,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {arMode && (
+                      <Text
+                        style={{
+                          color: "#00FF88",
+                          fontSize: 9,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        AR
+                      </Text>
+                    )}
+                    <Text
+                      style={{
+                        color: "#06B6D4",
+                        fontSize: 9,
+                        fontFamily: "monospace",
+                      }}
+                    >
                       {fps} FPS
                     </Text>
                   </View>
                   {/* Corner brackets */}
-                  <View style={{ position: "absolute", top: 4, left: 4, width: 16, height: 16, borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#06B6D4" }} />
-                  <View style={{ position: "absolute", top: 4, right: 4, width: 16, height: 16, borderTopWidth: 1, borderRightWidth: 1, borderColor: "#06B6D4" }} />
-                  <View style={{ position: "absolute", bottom: 4, left: 4, width: 16, height: 16, borderBottomWidth: 1, borderLeftWidth: 1, borderColor: "#06B6D4" }} />
-                  <View style={{ position: "absolute", bottom: 4, right: 4, width: 16, height: 16, borderBottomWidth: 1, borderRightWidth: 1, borderColor: "#06B6D4" }} />
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 4,
+                      left: 4,
+                      width: 16,
+                      height: 16,
+                      borderTopWidth: 1,
+                      borderLeftWidth: 1,
+                      borderColor: arMode ? "#00FF88" : "#06B6D4",
+                    }}
+                  />
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 4,
+                      right: 4,
+                      width: 16,
+                      height: 16,
+                      borderTopWidth: 1,
+                      borderRightWidth: 1,
+                      borderColor: arMode ? "#00FF88" : "#06B6D4",
+                    }}
+                  />
+                  <View
+                    style={{
+                      position: "absolute",
+                      bottom: 4,
+                      left: 4,
+                      width: 16,
+                      height: 16,
+                      borderBottomWidth: 1,
+                      borderLeftWidth: 1,
+                      borderColor: arMode ? "#00FF88" : "#06B6D4",
+                    }}
+                  />
+                  <View
+                    style={{
+                      position: "absolute",
+                      bottom: 4,
+                      right: 4,
+                      width: 16,
+                      height: 16,
+                      borderBottomWidth: 1,
+                      borderRightWidth: 1,
+                      borderColor: arMode ? "#00FF88" : "#06B6D4",
+                    }}
+                  />
                 </>
               )}
             </View>
@@ -463,12 +704,50 @@ export default function GlassesScreen() {
                     alignItems: "center",
                   }}
                 >
-                  <Text style={{ color: "#FFF", fontSize: 12, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                  <Text
+                    style={{
+                      color: "#FFF",
+                      fontSize: 12,
+                      fontFamily: "monospace",
+                      fontWeight: "bold",
+                      letterSpacing: 2,
+                    }}
+                  >
                     START CAMERA
                   </Text>
                 </TVPressable>
               ) : (
                 <>
+                  {/* AR Toggle */}
+                  {MediaPipe.isAvailable() && (
+                    <TVPressable
+                      onPress={handleToggleAR}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 14,
+                        borderRadius: 8,
+                        backgroundColor: arMode
+                          ? "rgba(0,255,136,0.15)"
+                          : "#1A1A1A",
+                        borderWidth: 1,
+                        borderColor: arMode ? "#00FF88" : "#333",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: arMode ? "#00FF88" : "#737373",
+                          fontSize: 11,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                          letterSpacing: 1,
+                        }}
+                      >
+                        {arMode ? "AR: ON" : "AR: OFF"}
+                      </Text>
+                    </TVPressable>
+                  )}
                   <TVPressable
                     onPress={handleCapture}
                     rarity="epic"
@@ -479,7 +758,15 @@ export default function GlassesScreen() {
                       alignItems: "center",
                     }}
                   >
-                    <Text style={{ color: "#FFF", fontSize: 12, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                    <Text
+                      style={{
+                        color: "#FFF",
+                        fontSize: 12,
+                        fontFamily: "monospace",
+                        fontWeight: "bold",
+                        letterSpacing: 2,
+                      }}
+                    >
                       CAPTURE
                     </Text>
                   </TVPressable>
@@ -495,7 +782,15 @@ export default function GlassesScreen() {
                       alignItems: "center",
                     }}
                   >
-                    <Text style={{ color: "#A3A3A3", fontSize: 12, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                    <Text
+                      style={{
+                        color: "#A3A3A3",
+                        fontSize: 12,
+                        fontFamily: "monospace",
+                        fontWeight: "bold",
+                        letterSpacing: 2,
+                      }}
+                    >
                       STOP CAMERA
                     </Text>
                   </TVPressable>

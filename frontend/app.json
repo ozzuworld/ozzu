@@ -60,7 +60,8 @@
       "./plugins/force-bundle-js",
       "./plugins/enable-updates",
       "./plugins/disable-dev-support",
-      "./plugins/meta-dat-config"
+      "./plugins/meta-dat-config",
+      "./plugins/mediapipe-config"
     ]
   }
 }
