@@ -14,30 +14,30 @@ public class GlassesAppDelegate: ExpoAppDelegateSubscriber {
         options: [UIApplication.OpenURLOptionsKey: Any] = [:]
     ) -> Bool {
         // Log ALL incoming URLs for debugging
-        print("[ExpoGlasses] URL received: \(url.absoluteString)")
-        print("[ExpoGlasses] URL scheme: \(url.scheme ?? "nil"), host: \(url.host ?? "nil")")
-        print("[ExpoGlasses] URL query: \(url.query ?? "nil")")
+        NSLog("[ExpoGlasses] URL received: \(url.absoluteString)")
+        NSLog("[ExpoGlasses] URL scheme: \(url.scheme ?? "nil"), host: \(url.host ?? "nil")")
+        NSLog("[ExpoGlasses] URL query: \(url.query ?? "nil")")
 
 #if canImport(MWDATCore)
         // Forward ALL URLs with our scheme to the SDK — let it decide what's relevant.
         // The SDK's handleUrl returns true if it recognized the URL.
         if url.scheme == "ozzu" || url.absoluteString.contains("metaWearablesAction") {
-            print("[ExpoGlasses] Forwarding URL to Wearables.shared.handleUrl()")
+            NSLog("[ExpoGlasses] Forwarding URL to Wearables.shared.handleUrl()")
             Task { @MainActor in
                 do {
                     let handled = try await Wearables.shared.handleUrl(url)
-                    print("[ExpoGlasses] handleUrl returned: \(handled)")
+                    NSLog("[ExpoGlasses] handleUrl returned: \(handled)")
                 } catch {
-                    print("[ExpoGlasses] handleUrl FAILED: \(error)")
-                    print("[ExpoGlasses] handleUrl error type: \(type(of: error))")
+                    NSLog("[ExpoGlasses] handleUrl FAILED: \(error)")
+                    NSLog("[ExpoGlasses] handleUrl error type: \(type(of: error))")
                 }
             }
             return true
         } else {
-            print("[ExpoGlasses] URL not for glasses — scheme is '\(url.scheme ?? "nil")', skipping")
+            NSLog("[ExpoGlasses] URL not for glasses — scheme is '\(url.scheme ?? "nil")', skipping")
         }
 #else
-        print("[ExpoGlasses] MWDATCore not linked — cannot handle URL")
+        NSLog("[ExpoGlasses] MWDATCore not linked — cannot handle URL")
 #endif
         return false
     }

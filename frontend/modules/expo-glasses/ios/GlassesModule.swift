@@ -98,19 +98,19 @@ public class GlassesModule: Module {
 
             // Log MWDAT plist config for diagnostics
             if let mwdat = Bundle.main.object(forInfoDictionaryKey: "MWDAT") as? [String: Any] {
-                print("[ExpoGlasses] MWDAT plist config: \(mwdat)")
+                NSLog("[ExpoGlasses] MWDAT plist config: %@", "\(mwdat)")
             } else {
-                print("[ExpoGlasses] WARNING: No MWDAT key found in Info.plist!")
+                NSLog("[ExpoGlasses] WARNING: No MWDAT key found in Info.plist!")
             }
-            print("[ExpoGlasses] Bundle ID: \(Bundle.main.bundleIdentifier ?? "nil")")
+            NSLog("[ExpoGlasses] Bundle ID: \(Bundle.main.bundleIdentifier ?? "nil")")
 
             do {
                 try Wearables.configure()
-                print("[ExpoGlasses] Wearables.configure() succeeded")
+                NSLog("[ExpoGlasses] Wearables.configure() succeeded")
 
                 // Log initial registration state
                 let regState = Wearables.shared.registrationState
-                print("[ExpoGlasses] Initial registration state: \(regState)")
+                NSLog("[ExpoGlasses] Initial registration state: \(regState)")
 
                 self.registrationTask?.cancel()
                 self.registrationTask = Task { @MainActor [weak self] in
@@ -129,7 +129,7 @@ public class GlassesModule: Module {
                         @unknown default:
                             stateStr = "unavailable"
                         }
-                        print("[ExpoGlasses] Registration state changed: \(state) -> \(stateStr)")
+                        NSLog("[ExpoGlasses] Registration state changed: \(state) -> \(stateStr)")
                         self.connectionState = stateStr
                         self.sendEvent("onConnectionChanged", ["state": stateStr])
                     }
@@ -138,11 +138,11 @@ public class GlassesModule: Module {
                 self.initialized = true
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
-                print("[ExpoGlasses] Initialized with Meta DAT SDK v0.4.0")
+                NSLog("[ExpoGlasses] Initialized with Meta DAT SDK v0.4.0")
                 return true
             } catch {
-                print("[ExpoGlasses] Initialize failed: \(error)")
-                print("[ExpoGlasses] Initialize error type: \(type(of: error))")
+                NSLog("[ExpoGlasses] Initialize failed: \(error)")
+                NSLog("[ExpoGlasses] Initialize error type: \(type(of: error))")
                 self.sendEvent("onError", [
                     "code": "INIT_FAILED",
                     "message": "\(error)"
@@ -150,7 +150,7 @@ public class GlassesModule: Module {
                 return false
             }
 #else
-            print("[ExpoGlasses] SDK not available — MWDATCore not linked")
+            NSLog("[ExpoGlasses] SDK not available — MWDATCore not linked")
             self.sendEvent("onError", [
                 "code": "SDK_NOT_LINKED",
                 "message": "Meta DAT SDK is not linked in this build"
@@ -178,7 +178,7 @@ public class GlassesModule: Module {
             } else {
                 metaAppInstalled = false
             }
-            print("[ExpoGlasses] Meta AI app installed: \(metaAppInstalled)")
+            NSLog("[ExpoGlasses] Meta AI app installed: \(metaAppInstalled)")
 
             if !metaAppInstalled {
                 self.sendEvent("onError", [
@@ -194,18 +194,18 @@ public class GlassesModule: Module {
 
             // Log current state before attempting registration
             let regState = Wearables.shared.registrationState
-            print("[ExpoGlasses] Current registration state before connect: \(regState)")
+            NSLog("[ExpoGlasses] Current registration state before connect: \(regState)")
 
             self.connectionState = "connecting"
             self.sendEvent("onConnectionChanged", ["state": self.connectionState])
 
             do {
                 try await Wearables.shared.startRegistration()
-                print("[ExpoGlasses] startRegistration() succeeded")
+                NSLog("[ExpoGlasses] startRegistration() succeeded")
             } catch let regError as RegistrationError {
                 // Catch RegistrationError specifically — .description has the real error message
                 let desc = regError.description
-                print("[ExpoGlasses] RegistrationError: \(desc) (raw: \(regError))")
+                NSLog("[ExpoGlasses] RegistrationError: \(desc) (raw: \(regError))")
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", [
                     "state": self.connectionState,
@@ -218,8 +218,8 @@ public class GlassesModule: Module {
             } catch {
                 // Fallback for unexpected error types
                 let msg = "\(error)"
-                print("[ExpoGlasses] Registration failed (unexpected): \(msg)")
-                print("[ExpoGlasses] Error type: \(type(of: error))")
+                NSLog("[ExpoGlasses] Registration failed (unexpected): \(msg)")
+                NSLog("[ExpoGlasses] Error type: \(type(of: error))")
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", [
                     "state": self.connectionState,
@@ -244,13 +244,13 @@ public class GlassesModule: Module {
                 self.sendEvent("onConnectionChanged", ["state": self.connectionState])
             } catch let unregError as UnregistrationError {
                 let desc = unregError.description
-                print("[ExpoGlasses] UnregistrationError: \(desc)")
+                NSLog("[ExpoGlasses] UnregistrationError: \(desc)")
                 self.sendEvent("onError", [
                     "code": "UNREGISTER_FAILED",
                     "message": desc
                 ])
             } catch {
-                print("[ExpoGlasses] Unregistration failed: \(error)")
+                NSLog("[ExpoGlasses] Unregistration failed: \(error)")
                 self.sendEvent("onError", [
                     "code": "UNREGISTER_FAILED",
                     "message": "\(error)"
@@ -275,7 +275,7 @@ public class GlassesModule: Module {
                 return
             }
             guard !self.streaming else {
-                print("[ExpoGlasses] Stream already active")
+                NSLog("[ExpoGlasses] Stream already active")
                 return
             }
 
@@ -371,7 +371,7 @@ public class GlassesModule: Module {
 
             // Start the stream
             await session.start()
-            print("[ExpoGlasses] Stream started: quality=\(qualityStr), frameRate=\(frameRate)")
+            NSLog("[ExpoGlasses] Stream started: quality=\(qualityStr), frameRate=\(frameRate)")
 #else
             self.sendEvent("onError", [
                 "code": "SDK_NOT_LINKED",
@@ -395,12 +395,41 @@ public class GlassesModule: Module {
             }
 
             _ = await MainActor.run { session.capturePhoto(format: .jpeg) }
-            print("[ExpoGlasses] Photo capture triggered")
+            NSLog("[ExpoGlasses] Photo capture triggered")
 #endif
             return nil
         }
 
         // ── Lifecycle ──
+
+        OnAppEntersForeground {
+            // Re-check registration state when returning from Meta AI app
+            // The URL callback might have been processed while we were in background
+#if canImport(MWDATCore)
+            if self.initialized {
+                let currentState = Wearables.shared.registrationState
+                NSLog("[ExpoGlasses] App foregrounded — current registration state: \(currentState)")
+                let stateStr: String
+                switch currentState {
+                case .registered:
+                    stateStr = "connected"
+                case .registering:
+                    stateStr = "connecting"
+                case .available:
+                    stateStr = "disconnected"
+                case .unavailable:
+                    stateStr = "unavailable"
+                @unknown default:
+                    stateStr = "unavailable"
+                }
+                if stateStr != self.connectionState {
+                    NSLog("[ExpoGlasses] State changed while backgrounded: \(self.connectionState) -> \(stateStr)")
+                    self.connectionState = stateStr
+                    self.sendEvent("onConnectionChanged", ["state": stateStr])
+                }
+            }
+#endif
+        }
 
         OnAppEntersBackground {
             self.handleBackground()
@@ -418,7 +447,7 @@ public class GlassesModule: Module {
 #endif
         streaming = false
         sendEvent("onStreamStateChanged", ["state": "stopped"])
-        print("[ExpoGlasses] Stream stopped")
+        NSLog("[ExpoGlasses] Stream stopped")
     }
 
     private func handleBackground() {
