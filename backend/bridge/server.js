@@ -11112,6 +11112,126 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      // ── Targeted gesture command — controls a specific HA device ──
+      if (msg.type === "targetedGestureCommand") {
+        const info = devices.get(ws);
+        const { gesture, service, entityId, domain, deviceName, continuous, continuousValue, attribute, min, max } = msg;
+
+        // Entity allowlist — only control known domains
+        const ALLOWED_DOMAINS = ["media_player", "climate", "switch", "vacuum", "siren", "number", "select"];
+        const entityDomain = entityId?.split(".")[0];
+        if (!entityId || !ALLOWED_DOMAINS.includes(entityDomain)) {
+          log.bridge.warn(`Targeted gesture blocked: ${entityId} — domain not allowed`);
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: "gestureControlFeedback", entityId, deviceName, action: service, error: "Domain not allowed" }));
+          }
+          return;
+        }
+
+        // Rate limiting: 100ms for continuous, 1s for discrete (per entity)
+        const now = Date.now();
+        const rlKey = `gesture:${entityId}`;
+        if (!global._gestureRateLimits) global._gestureRateLimits = new Map();
+        const lastCall = global._gestureRateLimits.get(rlKey) || 0;
+        const minInterval = continuous ? 100 : 1000;
+        if (now - lastCall < minInterval) {
+          return; // silently drop — rate limited
+        }
+        global._gestureRateLimits.set(rlKey, now);
+
+        // Clean rate limit map every 60s
+        if (!global._gestureRlCleanup) {
+          global._gestureRlCleanup = setInterval(() => {
+            if (!global._gestureRateLimits) return;
+            const cutoff = Date.now() - 60000;
+            for (const [k, v] of global._gestureRateLimits) {
+              if (v < cutoff) global._gestureRateLimits.delete(k);
+            }
+          }, 60000);
+        }
+
+        log.bridge.info(`Targeted gesture: ${gesture} → ${domain}.${service} on ${entityId} (${deviceName})${continuous ? ` val=${continuousValue}` : ""} from ${info?.deviceId}`);
+
+        (async () => {
+          try {
+            // Build HA service call
+            const serviceData = { entity_id: entityId };
+
+            if (continuous && continuousValue !== undefined && attribute) {
+              serviceData[attribute] = continuousValue;
+            }
+
+            // Execute HA service call
+            await haFetch(`/api/services/${entityDomain}/${service}`, {
+              method: "POST",
+              body: JSON.stringify(serviceData),
+            });
+
+            // Read back current state
+            let stateStr = "";
+            try {
+              const stateRes = await haFetch(`/api/states/${entityId}`);
+              if (stateRes && stateRes.state) {
+                stateStr = stateRes.state;
+                // Add relevant attribute for richer feedback
+                if (stateRes.attributes) {
+                  if (attribute === "volume_level" && stateRes.attributes.volume_level !== undefined) {
+                    stateStr = `VOL ${Math.round(stateRes.attributes.volume_level * 100)}%`;
+                  } else if (attribute === "temperature" && stateRes.attributes.temperature !== undefined) {
+                    stateStr = `${stateRes.attributes.temperature}\u00B0C`;
+                  }
+                }
+              }
+            } catch {}
+
+            // Send feedback to requesting device
+            if (ws.readyState === 1) {
+              ws.send(JSON.stringify({
+                type: "gestureControlFeedback",
+                entityId,
+                deviceName,
+                action: service,
+                state: stateStr,
+              }));
+            }
+
+            // Forward context to Gemini (non-intrusive)
+            if (geminiReady && geminiWs && geminiWs.readyState === 1) {
+              geminiWs.send(JSON.stringify({
+                clientContent: {
+                  turns: [{ role: "user", parts: [{ text: `[Gesture control: ${gesture} on ${deviceName} (${entityId}) \u2192 ${service}${stateStr ? `. State: ${stateStr}` : ""}. Don't narrate unless asked.]` }] }],
+                  turnComplete: true,
+                },
+              }));
+            }
+
+            // Broadcast event to all devices for UI awareness
+            broadcastToAll({
+              type: "gestureControlEvent",
+              gesture,
+              service,
+              entityId,
+              deviceName,
+              state: stateStr,
+              from: info?.deviceId,
+              timestamp: now,
+            });
+          } catch (err) {
+            log.bridge.error(`Targeted gesture HA call failed: ${err.message}`);
+            if (ws.readyState === 1) {
+              ws.send(JSON.stringify({
+                type: "gestureControlFeedback",
+                entityId,
+                deviceName,
+                action: service,
+                error: err.message || "HA call failed",
+              }));
+            }
+          }
+        })();
+        return;
+      }
+
       if (msg.type === "sceneChange") {
         const info = devices.get(ws);
         const objects = msg.objects || [];

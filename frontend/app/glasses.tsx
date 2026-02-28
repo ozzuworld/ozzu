@@ -29,8 +29,10 @@ import type { PoseResult, ObjectDetection } from "../modules/expo-mediapipe";
 import ObjectOverlay from "../components/glasses/ObjectOverlay";
 import { detectGesture, gestureEmoji, gestureLabel, resetSwipeTracking, type GestureResult } from "../lib/gestures";
 import { GestureCommandManager, type GestureCommand } from "../lib/gesture-commands";
-import { executeGestureCommand, type GestureAction } from "../lib/gesture-actions";
+import { executeGestureCommand, sendTargetedGestureCommand, type GestureAction } from "../lib/gesture-actions";
 import VisionOverlay, { type VisionMode, type VisionResult } from "../components/glasses/VisionOverlay";
+import { GestureTargetEngine, type TargetLock } from "../lib/gesture-target";
+import { loadCalibration } from "../lib/device-map";
 
 const TOP_BAR_HEIGHT = 48;
 
@@ -100,6 +102,15 @@ export default function GlassesScreen() {
   const lastActionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestureManager = useRef(new GestureCommandManager());
 
+  // Target mode — point at device + gesture to control
+  const [targetMode, setTargetMode] = useState(false);
+  const [lockedTarget, setLockedTarget] = useState<TargetLock | null>(null);
+  const [candidateLabel, setCandidateLabel] = useState<string | null>(null);
+  const [controlFeedback, setControlFeedback] = useState<string | null>(null);
+  const controlFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const targetEngine = useRef(new GestureTargetEngine());
+  const lastContinuousSend = useRef(0);
+
   // Vision mode state
   const [visionMode, setVisionMode] = useState<VisionMode>("describe");
   const [visionResult, setVisionResult] = useState<VisionResult | null>(null);
@@ -140,19 +151,44 @@ export default function GlassesScreen() {
           timestamp: Date.now(),
         });
       },
+      onGestureControlFeedback: (data) => {
+        const fb = data.error
+          ? `${data.deviceName}: ERROR`
+          : `${data.deviceName}: ${data.action}${data.state ? ` ${data.state}` : ""}`;
+        setControlFeedback(fb);
+        if (controlFeedbackTimer.current) clearTimeout(controlFeedbackTimer.current);
+        controlFeedbackTimer.current = setTimeout(() => setControlFeedback(null), 2000);
+      },
       onError: (msg) => setError(msg),
     };
     bridgeRef.current.connect(callbacks);
+    loadCalibration(); // load device map overrides from AsyncStorage
     return () => bridgeRef.current.close();
   }, []);
 
   // Gesture command handler
   useEffect(() => {
     gestureManager.current.setCallback((command: GestureCommand) => {
+      // Targeted mode: send to specific HA entity
+      const lock = targetEngine.current.getLockedTarget();
+      if (targetMode && lock) {
+        const gesture = command.compound || command.gesture;
+        const action = sendTargetedGestureCommand(
+          bridgeRef.current,
+          gesture,
+          lock.target
+        );
+        if (action) {
+          setLastAction(action);
+          if (lastActionTimer.current) clearTimeout(lastActionTimer.current);
+          lastActionTimer.current = setTimeout(() => setLastAction(null), 1500);
+        }
+        return;
+      }
+      // Untargeted mode: generic gesture command
       const action = executeGestureCommand(bridgeRef.current, command);
       if (action) {
         setLastAction(action);
-        // Clear action feedback after 1.5s
         if (lastActionTimer.current) clearTimeout(lastActionTimer.current);
         lastActionTimer.current = setTimeout(() => setLastAction(null), 1500);
       }
@@ -160,12 +196,36 @@ export default function GlassesScreen() {
     return () => {
       if (lastActionTimer.current) clearTimeout(lastActionTimer.current);
     };
-  }, []);
+  }, [targetMode]);
 
-  // Sync command mode to gesture manager
+  // Sync command mode to gesture manager (target mode also enables gesture commands)
   useEffect(() => {
-    gestureManager.current.setEnabled(commandMode && arMode);
-  }, [commandMode, arMode]);
+    gestureManager.current.setEnabled((commandMode || targetMode) && arMode);
+  }, [commandMode, targetMode, arMode]);
+
+  // Target mode auto-enables object detection
+  useEffect(() => {
+    if (targetMode && !objectMode && objectReady.current === false) {
+      (async () => {
+        try {
+          const ok = await MediaPipe.initializeObjects();
+          if (ok) {
+            objectReady.current = true;
+            setObjectMode(true);
+          }
+        } catch {}
+      })();
+    }
+  }, [targetMode, objectMode]);
+
+  // Reset target engine when target mode turns off
+  useEffect(() => {
+    if (!targetMode) {
+      targetEngine.current.reset();
+      setLockedTarget(null);
+      setCandidateLabel(null);
+    }
+  }, [targetMode]);
 
   // Listen for ALL incoming URLs (catches Meta AI callback if it arrives via RN Linking)
   useEffect(() => {
@@ -247,9 +307,48 @@ export default function GlassesScreen() {
                 const gesture = detectGesture(results[0].landmarks);
                 setCurrentGesture(gesture);
                 gestureManager.current.update(gesture);
+
+                // Targeting engine: update with landmarks + latest detected objects
+                if (targetMode) {
+                  const lock = targetEngine.current.update(results[0].landmarks, detectedObjects);
+                  setLockedTarget(lock);
+                  const cand = targetEngine.current.getCandidate();
+                  setCandidateLabel(cand ? cand.object.label : null);
+
+                  // Continuous control: when grab gesture + locked target with continuous support
+                  if (lock && lock.target.continuous && gesture.gesture === "grab") {
+                    const now = Date.now();
+                    if (now - lastContinuousSend.current >= 100) {
+                      lastContinuousSend.current = now;
+                      // Compute pinch distance (thumb tip to index tip) → map to device range
+                      const thumbTip = results[0].landmarks[4];
+                      const indexTip = results[0].landmarks[8];
+                      const dx = thumbTip.x - indexTip.x;
+                      const dy = thumbTip.y - indexTip.y;
+                      const pinchDist = Math.sqrt(dx * dx + dy * dy);
+                      // Map 0.02-0.2 distance to device min-max range
+                      const normalized = Math.max(0, Math.min(1, (pinchDist - 0.02) / 0.18));
+                      const min = lock.target.min ?? 0;
+                      const max = lock.target.max ?? 1;
+                      const value = min + normalized * (max - min);
+                      sendTargetedGestureCommand(
+                        bridgeRef.current,
+                        "grab",
+                        lock.target,
+                        Math.round(value * 100) / 100
+                      );
+                    }
+                  }
+                }
               } else {
                 setCurrentGesture(null);
                 gestureManager.current.update({ gesture: "none", confidence: 0, activeFingers: [] });
+                // Update targeting with no hand
+                if (targetMode) {
+                  const lock = targetEngine.current.update(null, detectedObjects);
+                  setLockedTarget(lock);
+                  setCandidateLabel(null);
+                }
               }
             })
             .catch(() => {})
@@ -432,6 +531,10 @@ export default function GlassesScreen() {
         setHands([]);
         setCurrentGesture(null);
         setCommandMode(false);
+        setTargetMode(false);
+        targetEngine.current.reset();
+        setLockedTarget(null);
+        setCandidateLabel(null);
         gestureManager.current.reset();
         resetSwipeTracking();
         await MediaPipe.dispose();
@@ -494,6 +597,10 @@ export default function GlassesScreen() {
         setHands([]);
         setCurrentGesture(null);
         setCommandMode(false);
+        setTargetMode(false);
+        targetEngine.current.reset();
+        setLockedTarget(null);
+        setCandidateLabel(null);
         gestureManager.current.reset();
         resetSwipeTracking();
         await MediaPipe.dispose();
@@ -951,6 +1058,9 @@ export default function GlassesScreen() {
                     objects={detectedObjects}
                     width={frameSize.width}
                     height={frameSize.height}
+                    lockedLabel={lockedTarget?.object.label}
+                    lockedDeviceName={lockedTarget?.target.name}
+                    candidateLabel={candidateLabel ?? undefined}
                   />
                 </View>
               )}
@@ -1012,13 +1122,13 @@ export default function GlassesScreen() {
                 )}
 
               {/* Action feedback pill — shows when a gesture command fires */}
-              {arMode && commandMode && lastAction && (
+              {arMode && (commandMode || targetMode) && lastAction && (
                 <View
                   style={{
                     position: "absolute",
                     bottom: 12,
                     alignSelf: "center",
-                    backgroundColor: "rgba(245,158,11,0.9)",
+                    backgroundColor: targetMode ? "rgba(255,102,0,0.9)" : "rgba(245,158,11,0.9)",
                     paddingHorizontal: 16,
                     paddingVertical: 6,
                     borderRadius: 16,
@@ -1034,6 +1144,62 @@ export default function GlassesScreen() {
                     }}
                   >
                     {lastAction.icon} {lastAction.label}
+                  </Text>
+                </View>
+              )}
+
+              {/* Target lock info pill */}
+              {arMode && targetMode && lockedTarget && (
+                <View
+                  style={{
+                    position: "absolute",
+                    bottom: 40,
+                    alignSelf: "center",
+                    backgroundColor: "rgba(0,255,136,0.9)",
+                    paddingHorizontal: 14,
+                    paddingVertical: 4,
+                    borderRadius: 12,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#000",
+                      fontSize: 11,
+                      fontFamily: "monospace",
+                      fontWeight: "bold",
+                      letterSpacing: 1,
+                    }}
+                  >
+                    TARGET: {lockedTarget.target.name.toUpperCase()}
+                  </Text>
+                </View>
+              )}
+
+              {/* Control feedback HUD — shows HA state after action */}
+              {controlFeedback && (
+                <View
+                  style={{
+                    position: "absolute",
+                    bottom: 68,
+                    alignSelf: "center",
+                    backgroundColor: "rgba(0,0,0,0.85)",
+                    paddingHorizontal: 14,
+                    paddingVertical: 4,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: "#FF6600",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#FF6600",
+                      fontSize: 11,
+                      fontFamily: "monospace",
+                      fontWeight: "bold",
+                      letterSpacing: 1,
+                    }}
+                  >
+                    {controlFeedback}
                   </Text>
                 </View>
               )}
@@ -1113,6 +1279,18 @@ export default function GlassesScreen() {
                         }}
                       >
                         CMD
+                      </Text>
+                    )}
+                    {targetMode && (
+                      <Text
+                        style={{
+                          color: "#FF6600",
+                          fontSize: 9,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        TARGET
                       </Text>
                     )}
                     {faceMode && (
@@ -1398,6 +1576,36 @@ export default function GlassesScreen() {
                         }}
                       >
                         {commandMode ? "CMD: ON" : "CMD: OFF"}
+                      </Text>
+                    </TVPressable>
+                  )}
+                  {/* Target Mode Toggle — point at device + gesture to control */}
+                  {arMode && (
+                    <TVPressable
+                      onPress={() => setTargetMode((v) => !v)}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 14,
+                        borderRadius: 8,
+                        backgroundColor: targetMode
+                          ? "rgba(255,102,0,0.15)"
+                          : "#1A1A1A",
+                        borderWidth: 1,
+                        borderColor: targetMode ? "#FF6600" : "#333",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: targetMode ? "#FF6600" : "#737373",
+                          fontSize: 11,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                          letterSpacing: 1,
+                        }}
+                      >
+                        {targetMode ? "TGT: ON" : "TGT: OFF"}
                       </Text>
                     </TVPressable>
                   )}

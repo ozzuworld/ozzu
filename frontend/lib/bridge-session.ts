@@ -33,6 +33,7 @@ export interface BridgeCallbacks {
   onAudioRoutingUpdate?: (data: any) => void; // Audio routing state changed
   onDirectiveUpdate?: (data: any) => void; // Directive status/build changed (from bridge broadcast)
   onVisionResult?: (mode: string, text: string) => void; // Glasses vision analysis result
+  onGestureControlFeedback?: (data: { entityId: string; deviceName: string; action: string; state?: any; error?: string }) => void;
   onError: (message: string) => void;
 }
 
@@ -252,6 +253,9 @@ export class BridgeSession {
         case "visionResult":
           this.callbacks?.onVisionResult?.(msg.mode, msg.text);
           break;
+        case "gestureControlFeedback":
+          this.callbacks?.onGestureControlFeedback?.(msg);
+          break;
         case "error":
           this.callbacks?.onError(msg.message);
           break;
@@ -361,6 +365,25 @@ export class BridgeSession {
 
   sendGestureCommand(data: { gesture: string; action: string; fingerCount?: number; timestamp: number }): void {
     const msg = JSON.stringify({ type: "gestureCommand", ...data });
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(msg);
+    }
+  }
+
+  sendTargetedGestureCommand(data: {
+    gesture: string;
+    service: string;
+    entityId: string;
+    domain: string;
+    deviceName: string;
+    continuous: boolean;
+    continuousValue?: number;
+    attribute?: string;
+    min?: number;
+    max?: number;
+    timestamp: number;
+  }): void {
+    const msg = JSON.stringify({ type: "targetedGestureCommand", ...data });
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(msg);
     }

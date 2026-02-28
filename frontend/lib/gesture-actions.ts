@@ -3,13 +3,14 @@
 
 import type { GestureCommand } from "./gesture-commands";
 import type { BridgeSession } from "./bridge-session";
+import type { DeviceTarget, DeviceDomain } from "./device-map";
 
 export interface GestureAction {
   label: string; // Human-readable action name shown in HUD
   icon: string; // Emoji for HUD feedback
 }
 
-// Default gesture → action mapping
+// Default gesture → action mapping (untargeted mode)
 // These are the actions sent to the bridge; the bridge decides what to do
 const GESTURE_ACTIONS: Record<string, GestureAction> = {
   pinch: { label: "TOGGLE", icon: "\u{1F4A1}" },
@@ -34,6 +35,41 @@ const FINGER_COUNT_ACTIONS: Record<number, GestureAction> = {
   5: { label: "ALL OFF", icon: "5\u{FE0F}\u{20E3}" },
 };
 
+// Domain-aware gesture → HA action mappings (targeted mode)
+interface TargetedAction {
+  service: string; // HA service: "media_play_pause", "toggle", etc.
+  label: string;
+  icon: string;
+  continuous?: boolean; // if true, sends continuous values
+}
+
+const DOMAIN_ACTIONS: Record<DeviceDomain, Record<string, TargetedAction>> = {
+  media_player: {
+    pinch: { service: "media_play_pause", label: "PLAY/PAUSE", icon: "\u{23EF}" },
+    swipe_left: { service: "media_previous_track", label: "PREV TRACK", icon: "\u{23EE}" },
+    swipe_right: { service: "media_next_track", label: "NEXT TRACK", icon: "\u{23ED}" },
+    grab: { service: "volume_set", label: "VOLUME", icon: "\u{1F50A}", continuous: true },
+    open_palm: { service: "media_stop", label: "STOP", icon: "\u{23F9}" },
+    thumbs_up: { service: "turn_on", label: "ON", icon: "\u{2705}" },
+  },
+  climate: {
+    pinch: { service: "toggle", label: "TOGGLE", icon: "\u{2744}" },
+    grab: { service: "set_temperature", label: "TEMP", icon: "\u{1F321}", continuous: true },
+    thumbs_up: { service: "set_temperature", label: "TEMP UP", icon: "\u{1F525}" },
+    peace: { service: "set_temperature", label: "TEMP DOWN", icon: "\u{2744}" },
+  },
+  switch: {
+    pinch: { service: "toggle", label: "TOGGLE", icon: "\u{1F4A1}" },
+    thumbs_up: { service: "turn_on", label: "ON", icon: "\u{2705}" },
+    grab: { service: "turn_off", label: "OFF", icon: "\u{26D4}" },
+  },
+  vacuum: {
+    pinch: { service: "toggle", label: "TOGGLE", icon: "\u{1F916}" },
+    thumbs_up: { service: "start", label: "START", icon: "\u{25B6}" },
+    grab: { service: "return_to_base", label: "DOCK", icon: "\u{1F3E0}" },
+  },
+};
+
 export function getActionForCommand(command: GestureCommand): GestureAction | null {
   // Compound gesture takes priority
   if (command.compound && GESTURE_ACTIONS[command.compound]) {
@@ -48,7 +84,17 @@ export function getActionForCommand(command: GestureCommand): GestureAction | nu
   return GESTURE_ACTIONS[command.gesture] || null;
 }
 
-/** Send triggered gesture command to bridge for processing */
+/** Get the HA action for a gesture when targeting a specific device */
+export function getTargetedAction(
+  gesture: string,
+  target: DeviceTarget
+): TargetedAction | null {
+  const domainActions = DOMAIN_ACTIONS[target.domain];
+  if (!domainActions) return null;
+  return domainActions[gesture] || null;
+}
+
+/** Send triggered gesture command to bridge for processing (untargeted) */
 export function executeGestureCommand(
   bridge: BridgeSession,
   command: GestureCommand
@@ -64,4 +110,31 @@ export function executeGestureCommand(
   });
 
   return action;
+}
+
+/** Send targeted gesture command to bridge for HA device control */
+export function sendTargetedGestureCommand(
+  bridge: BridgeSession,
+  gesture: string,
+  target: DeviceTarget,
+  continuousValue?: number
+): GestureAction | null {
+  const action = getTargetedAction(gesture, target);
+  if (!action) return null;
+
+  bridge.sendTargetedGestureCommand({
+    gesture,
+    service: action.service,
+    entityId: target.entityId,
+    domain: target.domain,
+    deviceName: target.name,
+    continuous: action.continuous || false,
+    continuousValue,
+    attribute: target.attribute,
+    min: target.min,
+    max: target.max,
+    timestamp: Date.now(),
+  });
+
+  return { label: action.label, icon: action.icon };
 }
