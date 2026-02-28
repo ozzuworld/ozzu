@@ -120,8 +120,8 @@ public class MediaPipeModule: Module {
 
                 // Extract blendshapes if available
                 var blendshapes: [String: Float] = [:]
-                if let faceBlendshapes = result.faceBlendshapes,
-                   idx < faceBlendshapes.count {
+                let faceBlendshapes = result.faceBlendshapes
+                if idx < faceBlendshapes.count {
                     for category in faceBlendshapes[idx].categories {
                         if let name = category.categoryName {
                             blendshapes[name] = category.score
@@ -136,7 +136,7 @@ public class MediaPipeModule: Module {
                     ],
                     "landmarkCount": landmarks.count,
                     "blendshapes": blendshapes,
-                    "confidence": idx < (result.faceBlendshapes?.count ?? 0) ? 0.9 : 0.7
+                    "confidence": idx < faceBlendshapes.count ? 0.9 : 0.7
                 ] as [String: Any]
             }
         }
