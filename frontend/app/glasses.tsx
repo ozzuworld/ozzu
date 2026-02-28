@@ -25,7 +25,8 @@ import PoseOverlay from "../components/glasses/PoseOverlay";
 import ExerciseHUD from "../components/glasses/ExerciseHUD";
 import { detectExpression, type ExpressionResult } from "../lib/expressions";
 import { ExerciseTracker, type ExerciseState } from "../lib/exercise-tracker";
-import type { PoseResult } from "../modules/expo-mediapipe";
+import type { PoseResult, ObjectDetection } from "../modules/expo-mediapipe";
+import ObjectOverlay from "../components/glasses/ObjectOverlay";
 import { detectGesture, gestureEmoji, gestureLabel, resetSwipeTracking, type GestureResult } from "../lib/gestures";
 import { GestureCommandManager, type GestureCommand } from "../lib/gesture-commands";
 import { executeGestureCommand, type GestureAction } from "../lib/gesture-actions";
@@ -85,6 +86,13 @@ export default function GlassesScreen() {
   const poseReady = useRef(false);
   const processingPose = useRef(false);
   const exerciseTracker = useRef(new ExerciseTracker());
+
+  // Object detection state
+  const [objectMode, setObjectMode] = useState(false);
+  const [detectedObjects, setDetectedObjects] = useState<ObjectDetection[]>([]);
+  const objectReady = useRef(false);
+  const processingObjects = useRef(false);
+  const prevObjectLabels = useRef<string>("");
 
   // Gesture command system
   const [commandMode, setCommandMode] = useState(false);
@@ -282,6 +290,29 @@ export default function GlassesScreen() {
               processingPose.current = false;
             });
         }
+
+        // Object detection (runs every 4th frame to save CPU)
+        if (objectReady.current && !processingObjects.current && frameCounter.current % 4 === 1) {
+          processingObjects.current = true;
+          MediaPipe.detectObjects(event.data)
+            .then((results) => {
+              setDetectedObjects(results);
+              // Send scene change events to bridge
+              if (connectedRef.current && results.length > 0) {
+                const labels = results.map((o) => o.label).sort().join(",");
+                if (labels !== prevObjectLabels.current) {
+                  prevObjectLabels.current = labels;
+                  bridgeRef.current.sendSceneChange(
+                    results.map((o) => ({ label: o.label, score: Math.round(o.score * 100) })),
+                  );
+                }
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              processingObjects.current = false;
+            });
+        }
       }),
       Glasses.onPhotoCaptured((event) => {
         setCapturedPhoto(event.data);
@@ -360,6 +391,27 @@ export default function GlassesScreen() {
     }
   }, [poseMode]);
 
+  const handleToggleObjects = useCallback(async () => {
+    if (!objectMode) {
+      try {
+        const ok = await MediaPipe.initializeObjects();
+        if (ok) {
+          objectReady.current = true;
+          setObjectMode(true);
+        } else {
+          setError("Object detection not available on this device");
+        }
+      } catch (e: any) {
+        setError(e.message || "Failed to initialize object detection");
+      }
+    } else {
+      setObjectMode(false);
+      objectReady.current = false;
+      setDetectedObjects([]);
+      await MediaPipe.disposeObjects();
+    }
+  }, [objectMode]);
+
   const handleDisconnect = useCallback(async () => {
     setError(null);
     try {
@@ -391,6 +443,13 @@ export default function GlassesScreen() {
         exerciseTracker.current.reset();
         await MediaPipe.disposePose();
       }
+      // Clean up object mode
+      if (objectMode) {
+        setObjectMode(false);
+        objectReady.current = false;
+        setDetectedObjects([]);
+        await MediaPipe.disposeObjects();
+      }
       if (streamState !== "stopped") {
         await Glasses.stopVideoStream();
       }
@@ -401,7 +460,7 @@ export default function GlassesScreen() {
     } catch (e: any) {
       setError(e.message || "Failed to disconnect");
     }
-  }, [streamState, arMode, faceMode]);
+  }, [streamState, arMode, faceMode, poseMode, objectMode]);
 
   const handleStartStream = useCallback(async () => {
     setError(null);
@@ -444,13 +503,19 @@ export default function GlassesScreen() {
         exerciseTracker.current.reset();
         await MediaPipe.disposePose();
       }
+      if (objectMode) {
+        setObjectMode(false);
+        objectReady.current = false;
+        setDetectedObjects([]);
+        await MediaPipe.disposeObjects();
+      }
       await Glasses.stopVideoStream();
       setFrameData(null);
       setFps(0);
     } catch (e: any) {
       setError(e.message || "Failed to stop stream");
     }
-  }, [arMode, faceMode, poseMode]);
+  }, [arMode, faceMode, poseMode, objectMode]);
 
   const handleCapture = useCallback(async () => {
     setError(null);
@@ -869,6 +934,41 @@ export default function GlassesScreen() {
               {/* Exercise HUD */}
               {poseMode && exerciseState && <ExerciseHUD state={exerciseState} />}
 
+              {/* Object Overlay */}
+              {objectMode && detectedObjects.length > 0 && frameSize.width > 0 && (
+                <View style={StyleSheet.absoluteFill}>
+                  <ObjectOverlay
+                    objects={detectedObjects}
+                    width={frameSize.width}
+                    height={frameSize.height}
+                  />
+                </View>
+              )}
+
+              {/* Object count HUD */}
+              {objectMode && detectedObjects.length > 0 && (
+                <View
+                  style={{
+                    position: "absolute",
+                    right: 8,
+                    top: 30,
+                    backgroundColor: "rgba(0,0,0,0.8)",
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 4,
+                    borderWidth: 1,
+                    borderColor: "#3B82F6",
+                  }}
+                >
+                  <Text style={{ color: "#FFF", fontSize: 14, fontFamily: "monospace", fontWeight: "bold" }}>
+                    {detectedObjects.length}
+                  </Text>
+                  <Text style={{ color: "#737373", fontSize: 8, fontFamily: "monospace", letterSpacing: 1 }}>
+                    OBJECTS
+                  </Text>
+                </View>
+              )}
+
               {/* Gesture label pill */}
               {arMode &&
                 currentGesture &&
@@ -1027,6 +1127,18 @@ export default function GlassesScreen() {
                         }}
                       >
                         POSE
+                      </Text>
+                    )}
+                    {objectMode && (
+                      <Text
+                        style={{
+                          color: "#3B82F6",
+                          fontSize: 9,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        OBJ
                       </Text>
                     )}
                     <Text
@@ -1336,6 +1448,36 @@ export default function GlassesScreen() {
                         }}
                       >
                         {poseMode ? "POSE: ON" : "POSE: OFF"}
+                      </Text>
+                    </TVPressable>
+                  )}
+                  {/* Object Detection Toggle */}
+                  {MediaPipe.isAvailable() && (
+                    <TVPressable
+                      onPress={handleToggleObjects}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 14,
+                        borderRadius: 8,
+                        backgroundColor: objectMode
+                          ? "rgba(59,130,246,0.15)"
+                          : "#1A1A1A",
+                        borderWidth: 1,
+                        borderColor: objectMode ? "#3B82F6" : "#333",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: objectMode ? "#3B82F6" : "#737373",
+                          fontSize: 11,
+                          fontFamily: "monospace",
+                          fontWeight: "bold",
+                          letterSpacing: 1,
+                        }}
+                      >
+                        {objectMode ? "OBJ: ON" : "OBJ: OFF"}
                       </Text>
                     </TVPressable>
                   )}

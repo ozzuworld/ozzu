@@ -9,6 +9,8 @@ public class MediaPipeModule: Module {
     private var faceModelLoaded = false
     private var poseLandmarker: PoseLandmarker?
     private var poseModelLoaded = false
+    private var objectDetector: ObjectDetector?
+    private var objectModelLoaded = false
 
     public func definition() -> ModuleDefinition {
         Name("ExpoMediaPipe")
@@ -191,6 +193,62 @@ public class MediaPipeModule: Module {
         AsyncFunction("disposePose") { () -> Void in
             self.poseLandmarker = nil
             self.poseModelLoaded = false
+        }
+
+        // ── Object detection ──
+
+        AsyncFunction("initializeObjects") { () -> Bool in
+            guard !self.objectModelLoaded else { return true }
+
+            let bundle = Bundle(for: MediaPipeModule.self)
+            guard let modelPath = bundle.path(
+                forResource: "efficientdet_lite0",
+                ofType: "tflite",
+                inDirectory: "MediaPipeModels.bundle"
+            ) else {
+                throw NSError(domain: "MediaPipe", code: 4,
+                    userInfo: [NSLocalizedDescriptionKey: "Object detector model not found in bundle"])
+            }
+
+            let options = ObjectDetectorOptions()
+            options.baseOptions.modelAssetPath = modelPath
+            options.runningMode = .image
+            options.maxResults = 10
+            options.scoreThreshold = 0.4
+
+            self.objectDetector = try ObjectDetector(options: options)
+            self.objectModelLoaded = true
+            return true
+        }
+
+        AsyncFunction("detectObjects") { (base64: String) -> [[String: Any]] in
+            guard let detector = self.objectDetector else { return [] }
+            guard let data = Data(base64Encoded: base64),
+                  let uiImage = UIImage(data: data) else { return [] }
+
+            let imgW = Float(uiImage.size.width)
+            let imgH = Float(uiImage.size.height)
+            let mpImage = try MPImage(uiImage: uiImage)
+            let result = try detector.detect(image: mpImage)
+
+            return result.detections.compactMap { detection in
+                guard let category = detection.categories.first,
+                      let label = category.categoryName else { return nil }
+                let box = detection.boundingBox
+                return [
+                    "label": label,
+                    "score": category.score,
+                    "x": Float(box.origin.x) / imgW,
+                    "y": Float(box.origin.y) / imgH,
+                    "width": Float(box.size.width) / imgW,
+                    "height": Float(box.size.height) / imgH,
+                ] as [String: Any]
+            }
+        }
+
+        AsyncFunction("disposeObjects") { () -> Void in
+            self.objectDetector = nil
+            self.objectModelLoaded = false
         }
     }
 }

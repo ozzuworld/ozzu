@@ -366,6 +366,12 @@ export class BridgeSession {
     }
   }
 
+  sendSceneChange(objects: { label: string; score: number }[]): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "sceneChange", objects }));
+    }
+  }
+
   sendGlassesFrame(data: string, width: number, height: number): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "glassesFrame", data, width, height }));

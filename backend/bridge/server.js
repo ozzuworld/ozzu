@@ -11112,6 +11112,32 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      if (msg.type === "sceneChange") {
+        const info = devices.get(ws);
+        const objects = msg.objects || [];
+        const summary = objects.map(o => `${o.label} (${o.score}%)`).join(", ");
+        log.bridge.info(`Scene change from ${info?.deviceId}: ${summary}`);
+
+        // Forward to Gemini so June is aware of surroundings
+        if (geminiReady && geminiWs && geminiWs.readyState === 1) {
+          geminiWs.send(JSON.stringify({
+            clientContent: {
+              turns: [{ role: "user", parts: [{ text: `[Scene update from glasses camera — objects detected: ${summary}. This is background context, don't narrate every change unless asked.]` }] }],
+              turnComplete: true,
+            },
+          }));
+        }
+
+        // Broadcast to all devices
+        broadcastToAll({
+          type: "sceneUpdate",
+          objects,
+          from: info?.deviceId,
+          timestamp: Date.now(),
+        });
+        return;
+      }
+
       if (msg.type === "pinResponse") {
         const pending = pendingPinRequests.get(msg.approvalId);
         if (!pending) {

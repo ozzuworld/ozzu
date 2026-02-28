@@ -8,6 +8,7 @@ import expo.modules.kotlin.Promise
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
+import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.framework.image.BitmapImageBuilder
@@ -20,6 +21,8 @@ class MediaPipeModule : Module() {
     private var faceModelLoaded = false
     private var poseLandmarker: PoseLandmarker? = null
     private var poseModelLoaded = false
+    private var objectDetector: ObjectDetector? = null
+    private var objectModelLoaded = false
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     override fun definition() = ModuleDefinition {
@@ -301,6 +304,91 @@ class MediaPipeModule : Module() {
             promise.resolve(null)
         }
 
+        // ── Object detection ──
+
+        AsyncFunction("initializeObjects") { promise: Promise ->
+            if (objectModelLoaded) {
+                promise.resolve(true)
+                return@AsyncFunction
+            }
+
+            scope.launch {
+                try {
+                    val context = appContext.reactContext ?: run {
+                        promise.reject("ERR_NO_CONTEXT", "React context not available", null)
+                        return@launch
+                    }
+
+                    val baseOptions = BaseOptions.builder()
+                        .setModelAssetPath("efficientdet_lite0.tflite")
+                        .build()
+
+                    val options = ObjectDetector.ObjectDetectorOptions.builder()
+                        .setBaseOptions(baseOptions)
+                        .setRunningMode(RunningMode.IMAGE)
+                        .setMaxResults(10)
+                        .setScoreThreshold(0.4f)
+                        .build()
+
+                    objectDetector = ObjectDetector.createFromOptions(context, options)
+                    objectModelLoaded = true
+                    promise.resolve(true)
+                } catch (e: Exception) {
+                    promise.reject("ERR_INIT_OBJ", "Failed to initialize object detection: ${e.message}", e)
+                }
+            }
+        }
+
+        AsyncFunction("detectObjects") { base64: String, promise: Promise ->
+            val detector = objectDetector
+            if (detector == null) {
+                promise.resolve(emptyList<Map<String, Any>>())
+                return@AsyncFunction
+            }
+
+            scope.launch {
+                try {
+                    val bytes = Base64.decode(base64, Base64.DEFAULT)
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap == null) {
+                        promise.resolve(emptyList<Map<String, Any>>())
+                        return@launch
+                    }
+
+                    val imgW = bitmap.width.toFloat()
+                    val imgH = bitmap.height.toFloat()
+                    val mpImage = BitmapImageBuilder(bitmap).build()
+                    val result = detector.detect(mpImage)
+
+                    val objects = result.detections().mapNotNull { detection ->
+                        val category = detection.categories().firstOrNull() ?: return@mapNotNull null
+                        val label = category.categoryName() ?: return@mapNotNull null
+                        val box = detection.boundingBox()
+                        mapOf(
+                            "label" to label,
+                            "score" to category.score(),
+                            "x" to (box.left / imgW),
+                            "y" to (box.top / imgH),
+                            "width" to ((box.right - box.left) / imgW),
+                            "height" to ((box.bottom - box.top) / imgH)
+                        )
+                    }
+
+                    bitmap.recycle()
+                    promise.resolve(objects)
+                } catch (e: Exception) {
+                    promise.resolve(emptyList<Map<String, Any>>())
+                }
+            }
+        }
+
+        AsyncFunction("disposeObjects") { promise: Promise ->
+            objectDetector?.close()
+            objectDetector = null
+            objectModelLoaded = false
+            promise.resolve(null)
+        }
+
         OnDestroy {
             handLandmarker?.close()
             handLandmarker = null
@@ -311,6 +399,9 @@ class MediaPipeModule : Module() {
             poseLandmarker?.close()
             poseLandmarker = null
             poseModelLoaded = false
+            objectDetector?.close()
+            objectDetector = null
+            objectModelLoaded = false
             scope.cancel()
         }
     }

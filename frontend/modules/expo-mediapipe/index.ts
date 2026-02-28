@@ -85,6 +85,17 @@ export async function disposeFaces(): Promise<void> {
   return ExpoMediaPipe.disposeFaces();
 }
 
+// ── Object detection types ──
+
+export interface ObjectDetection {
+  label: string; // COCO class name (person, car, cup, etc.)
+  score: number; // confidence 0-1
+  x: number; // normalized bounding box 0-1
+  y: number;
+  width: number;
+  height: number;
+}
+
 // ── Pose detection API ──
 
 export async function initializePose(): Promise<boolean> {
@@ -100,4 +111,21 @@ export async function detectPose(base64Jpeg: string): Promise<PoseResult[]> {
 export async function disposePose(): Promise<void> {
   if (!ExpoMediaPipe) return;
   return ExpoMediaPipe.disposePose();
+}
+
+// ── Object detection API ──
+
+export async function initializeObjects(): Promise<boolean> {
+  if (!ExpoMediaPipe) return false;
+  return ExpoMediaPipe.initializeObjects();
+}
+
+export async function detectObjects(base64Jpeg: string): Promise<ObjectDetection[]> {
+  if (!ExpoMediaPipe) return [];
+  return ExpoMediaPipe.detectObjects(base64Jpeg);
+}
+
+export async function disposeObjects(): Promise<void> {
+  if (!ExpoMediaPipe) return;
+  return ExpoMediaPipe.disposeObjects();
 }
