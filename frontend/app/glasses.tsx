@@ -3,7 +3,6 @@ import {
   View,
   Text,
   Image,
-  ScrollView,
   ActivityIndicator,
   StyleSheet,
   LayoutChangeEvent,
@@ -12,7 +11,6 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
-import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
 import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
@@ -33,8 +31,8 @@ import { executeGestureCommand, sendTargetedGestureCommand, type GestureAction }
 import VisionOverlay, { type VisionMode, type VisionResult } from "../components/glasses/VisionOverlay";
 import { GestureTargetEngine, type TargetLock } from "../lib/gesture-target";
 import { loadCalibration } from "../lib/device-map";
-
-const TOP_BAR_HEIGHT = 48;
+import ToolbarPill, { type ToolbarItem } from "../components/glasses/ToolbarPill";
+import SettingsSheet from "../components/glasses/SettingsSheet";
 
 type Quality = "low" | "medium" | "high";
 
@@ -116,6 +114,10 @@ export default function GlassesScreen() {
   const [visionResult, setVisionResult] = useState<VisionResult | null>(null);
   const [visionLoading, setVisionLoading] = useState(false);
   const latestFrameRef = useRef<{ data: string; width: number; height: number } | null>(null);
+
+  // Settings sheet + vision picker
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [visionPickerOpen, setVisionPickerOpen] = useState(false);
 
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
   const connectedRef = useRef(false);
@@ -723,213 +725,43 @@ export default function GlassesScreen() {
     );
   }
 
+  // Build toolbar items for the bottom pill
+  const toolbarItems: ToolbarItem[] = [];
+  if (isStreaming && MediaPipe.isAvailable()) {
+    toolbarItems.push(
+      { id: "ar", icon: "\u270B", color: "#00FF88", active: arMode, onPress: handleToggleAR },
+      { id: "tgt", icon: "\uD83C\uDFAF", color: "#FF6600", active: targetMode, onPress: () => setTargetMode((v) => !v) },
+      { id: "obj", icon: "\uD83D\uDCE6", color: "#3B82F6", active: objectMode, onPress: handleToggleObjects },
+      { id: "face", icon: "\uD83D\uDE00", color: "#FF6B9D", active: faceMode, onPress: handleToggleFace },
+      { id: "pose", icon: "\uD83C\uDFC3", color: "#10B981", active: poseMode, onPress: handleTogglePose },
+      { id: "cmd", icon: "\u26A1", color: "#F59E0B", active: commandMode, onPress: () => setCommandMode((v) => !v) },
+      { id: "vision", icon: "\uD83D\uDC41\uFE0F", color: "#06B6D4", active: visionPickerOpen, onPress: () => setVisionPickerOpen((v) => !v) },
+    );
+  }
+  if (isStreaming) {
+    toolbarItems.push(
+      { id: "settings", icon: "\u2699\uFE0F", color: "#737373", active: settingsOpen, onPress: () => setSettingsOpen(true) },
+      { id: "stop", icon: "\u23F9\uFE0F", color: "#EF4444", active: false, onPress: handleDisconnect },
+    );
+  }
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#111111" }}>
-      {/* Top Bar */}
+    <View style={{ flex: 1, backgroundColor: "#000" }}>
+      <StatusBar style="light" hidden={isStreaming} />
+
+      {/* FULL-SCREEN CAMERA / PRE-STREAM STATES */}
       <View
-        style={{
-          paddingTop: insets.top,
-          height: TOP_BAR_HEIGHT + insets.top,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingHorizontal: Math.max(16, insets.left, insets.right),
-        }}
+        onLayout={onPreviewLayout}
+        style={{ flex: 1, backgroundColor: "#0A0A0A", justifyContent: "center", alignItems: "center" }}
       >
-        <Text style={{ color: "#F59E0B", fontSize: 24, fontWeight: "bold" }}>
-          ozzu
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-          <TVPressable
-            onPress={() => router.back()}
-            style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6 }}
-          >
-            <Text style={{ color: "#A3A3A3", fontSize: 12, fontWeight: "bold", letterSpacing: 1 }}>
-              {"◀ BACK"}
-            </Text>
-          </TVPressable>
-          <StatusBadge />
-        </View>
-      </View>
-
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{
-          padding: Math.max(24, insets.left, insets.right),
-          paddingBottom: Math.max(24, insets.bottom),
-          gap: 16,
-        }}
-      >
-        {/* Title + Connection Status */}
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Text
-            style={{
-              color: "#06B6D4",
-              fontSize: 16,
-              fontFamily: "monospace",
-              fontWeight: "bold",
-              letterSpacing: 4,
-            }}
-          >
-            GLASSES
-          </Text>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 6,
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: isConnected ? "#059669" : isConnecting ? "#D97706" : "#333",
-              backgroundColor: isConnected
-                ? "rgba(5,150,105,0.15)"
-                : isConnecting
-                ? "rgba(217,119,6,0.15)"
-                : "rgba(51,51,51,0.15)",
-            }}
-          >
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: isConnected ? "#10B981" : isConnecting ? "#F59E0B" : "#525252",
-              }}
-            />
-            <Text
-              style={{
-                color: isConnected ? "#10B981" : isConnecting ? "#F59E0B" : "#525252",
-                fontSize: 10,
-                fontFamily: "monospace",
-                fontWeight: "bold",
-                letterSpacing: 1,
-                textTransform: "uppercase",
-              }}
-            >
-              {connectionState}
-            </Text>
-          </View>
-        </View>
-
-        {initializing && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <ActivityIndicator size="small" color="#06B6D4" />
-            <Text style={{ color: "#737373", fontSize: 12, fontFamily: "monospace" }}>
-              Initializing...
-            </Text>
-          </View>
-        )}
-
-        {/* Error */}
-        {error && (
-          <View style={{ backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "#7F1D1D", borderRadius: 8, padding: 10 }}>
-            <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace" }}>
-              {error}
-            </Text>
-          </View>
-        )}
-
-        {/* Debug buttons — always visible */}
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <TVPressable
-            onPress={() => {
-              try { setDiagnostics(Glasses.getDiagnostics()); } catch {}
-            }}
-            style={{ paddingVertical: 4, paddingHorizontal: 8, borderRadius: 4, borderWidth: 1, borderColor: "#164E63" }}
-          >
-            <Text style={{ color: "#06B6D4", fontSize: 9, fontFamily: "monospace", letterSpacing: 1 }}>
-              DIAGNOSTICS
-            </Text>
-          </TVPressable>
-          <TVPressable
-            onPress={() => {
-              try { setLogs(Glasses.getLogs()); } catch {}
-            }}
-            style={{ paddingVertical: 4, paddingHorizontal: 8, borderRadius: 4, borderWidth: 1, borderColor: "#164E63" }}
-          >
-            <Text style={{ color: "#06B6D4", fontSize: 9, fontFamily: "monospace", letterSpacing: 1 }}>
-              SHOW LOGS
-            </Text>
-          </TVPressable>
-          {urlEvents.length > 0 && (
-            <Text style={{ color: "#F59E0B", fontSize: 9, fontFamily: "monospace", alignSelf: "center" }}>
-              {urlEvents.length} URL(s)
-            </Text>
-          )}
-        </View>
-
-        {/* Diagnostics panel */}
-        {diagnostics && (
-          <View style={{ backgroundColor: "rgba(6,182,212,0.05)", borderWidth: 1, borderColor: "#164E63", borderRadius: 8, padding: 10, gap: 4 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={{ color: "#06B6D4", fontSize: 10, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
-                DIAGNOSTICS
-              </Text>
-              <TVPressable onPress={() => setDiagnostics(null)} style={{ padding: 4 }}>
-                <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>CLOSE</Text>
-              </TVPressable>
-            </View>
-            {Object.entries(diagnostics).filter(([k]) => k !== "recentLogs").map(([key, val]) => (
-              <Text key={key} style={{ color: "#737373", fontSize: 9, fontFamily: "monospace" }}>
-                {key}: {typeof val === "object" ? JSON.stringify(val) : String(val)}
-              </Text>
-            ))}
-          </View>
-        )}
-
-        {/* Logs panel */}
-        {logs && (
-          <View style={{ backgroundColor: "rgba(6,182,212,0.05)", borderWidth: 1, borderColor: "#164E63", borderRadius: 8, padding: 10, gap: 2, maxHeight: 300 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <Text style={{ color: "#06B6D4", fontSize: 10, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
-                SDK LOGS ({logs.length})
-              </Text>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <TVPressable onPress={() => { try { setLogs(Glasses.getLogs()); } catch {} }} style={{ padding: 4 }}>
-                  <Text style={{ color: "#06B6D4", fontSize: 9, fontFamily: "monospace" }}>REFRESH</Text>
-                </TVPressable>
-                <TVPressable onPress={() => setLogs(null)} style={{ padding: 4 }}>
-                  <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>CLOSE</Text>
-                </TVPressable>
-              </View>
-            </View>
-            <ScrollView style={{ maxHeight: 250 }} nestedScrollEnabled>
-              {logs.map((entry, i) => (
-                <Text key={i} style={{ color: "#737373", fontSize: 8, fontFamily: "monospace", lineHeight: 12 }}>
-                  {entry.ts?.slice(11, 19) || "?"} {entry.msg}
-                </Text>
-              ))}
-              {logs.length === 0 && (
-                <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
-                  No logs yet — initialize and connect to generate logs
-                </Text>
-              )}
-              {urlEvents.length > 0 && (
-                <>
-                  <Text style={{ color: "#F59E0B", fontSize: 9, fontFamily: "monospace", fontWeight: "bold", marginTop: 6 }}>
-                    URL EVENTS ({urlEvents.length}):
-                  </Text>
-                  {urlEvents.map((u, i) => (
-                    <Text key={`url-${i}`} style={{ color: "#F59E0B", fontSize: 8, fontFamily: "monospace", lineHeight: 12 }}>
-                      {u}
-                    </Text>
-                  ))}
-                </>
-              )}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Disconnected state */}
+        {/* === Disconnected state === */}
         {!isConnected && !isConnecting && !initializing && (
-          <View style={{ gap: 12, alignItems: "center", paddingVertical: 20 }}>
+          <View style={{ gap: 16, alignItems: "center" }}>
             <View
               style={{
-                width: 80,
-                height: 80,
-                borderRadius: 40,
+                width: 100,
+                height: 100,
+                borderRadius: 50,
                 borderWidth: 2,
                 borderColor: "#333",
                 justifyContent: "center",
@@ -937,33 +769,36 @@ export default function GlassesScreen() {
                 backgroundColor: "#1A1A1A",
               }}
             >
-              <Text style={{ fontSize: 36 }}>{"👓"}</Text>
+              <Text style={{ fontSize: 44 }}>{"\uD83D\uDC53"}</Text>
             </View>
-            <Text style={{ color: "#525252", fontSize: 12, fontFamily: "monospace", textAlign: "center" }}>
+            <Text style={{ color: "#525252", fontSize: 13, fontFamily: "monospace", textAlign: "center" }}>
               {"Connect your Meta Ray-Ban glasses\nvia the Meta AI companion app"}
             </Text>
             <TVPressable
               onPress={handleConnect}
               rarity="rare"
-              style={{
-                paddingHorizontal: 32,
-                paddingVertical: 14,
-                borderRadius: 8,
-                alignItems: "center",
-              }}
+              style={{ paddingHorizontal: 40, paddingVertical: 16, borderRadius: 12, alignItems: "center" }}
             >
-              <Text style={{ color: "#FFF", fontSize: 13, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
-                CONNECT GLASSES
+              <Text style={{ color: "#FFF", fontSize: 14, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                CONNECT
               </Text>
             </TVPressable>
           </View>
         )}
 
-        {/* Connecting state */}
+        {/* === Initializing === */}
+        {initializing && (
+          <View style={{ gap: 8, alignItems: "center" }}>
+            <ActivityIndicator size="large" color="#06B6D4" />
+            <Text style={{ color: "#737373", fontSize: 12, fontFamily: "monospace" }}>Initializing...</Text>
+          </View>
+        )}
+
+        {/* === Connecting === */}
         {isConnecting && (
-          <View style={{ alignItems: "center", paddingVertical: 20, gap: 12 }}>
+          <View style={{ alignItems: "center", gap: 12 }}>
             <ActivityIndicator size="large" color="#F59E0B" />
-            <Text style={{ color: "#F59E0B", fontSize: 12, fontFamily: "monospace", letterSpacing: 2 }}>
+            <Text style={{ color: "#F59E0B", fontSize: 13, fontFamily: "monospace", letterSpacing: 2 }}>
               CONNECTING...
             </Text>
             <Text style={{ color: "#525252", fontSize: 11, fontFamily: "monospace", textAlign: "center" }}>
@@ -972,893 +807,339 @@ export default function GlassesScreen() {
           </View>
         )}
 
-        {/* Connected state */}
-        {isConnected && (
-          <View style={{ gap: 16 }}>
-            {/* Video Preview Area */}
-            <View
-              onLayout={onPreviewLayout}
-              style={{
-                aspectRatio: 16 / 9,
-                maxHeight: isPhone ? 200 : 320,
-                backgroundColor: "#0A0A0A",
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: arMode
-                  ? "#00FF88"
-                  : isStreaming
-                  ? "#06B6D4"
-                  : "#222",
-                overflow: "hidden",
-                justifyContent: "center",
-                alignItems: "center",
-              }}
+        {/* === Connected but not streaming === */}
+        {isConnected && !isStreaming && (
+          <View style={{ gap: 16, alignItems: "center" }}>
+            <TVPressable
+              onPress={handleStartStream}
+              rarity="rare"
+              style={{ paddingHorizontal: 40, paddingVertical: 16, borderRadius: 12, alignItems: "center" }}
             >
-              {isStreaming && frameData ? (
-                <Image
-                  source={{ uri: `data:image/jpeg;base64,${frameData}` }}
-                  style={{ width: "100%", height: "100%" }}
-                  resizeMode="contain"
-                />
-              ) : (
-                <Text
-                  style={{
-                    color: "#333",
-                    fontSize: 13,
-                    fontFamily: "monospace",
-                  }}
-                >
-                  {isStreaming ? "Waiting for frames..." : "Camera off"}
-                </Text>
-              )}
-
-              {/* AR Hand Overlay */}
-              {arMode && hands.length > 0 && frameSize.width > 0 && (
-                <View style={StyleSheet.absoluteFill}>
-                  <HandOverlay
-                    hands={hands}
-                    width={frameSize.width}
-                    height={frameSize.height}
-                    activeFingers={currentGesture?.activeFingers}
-                  />
-                </View>
-              )}
-
-              {/* Face Overlay */}
-              {faceMode && faces.length > 0 && frameSize.width > 0 && (
-                <View style={StyleSheet.absoluteFill}>
-                  <FaceOverlay
-                    faces={faces}
-                    expressions={expressions}
-                    width={frameSize.width}
-                    height={frameSize.height}
-                  />
-                </View>
-              )}
-
-              {/* Pose Overlay */}
-              {poseMode && poses.length > 0 && frameSize.width > 0 && (
-                <View style={StyleSheet.absoluteFill}>
-                  <PoseOverlay
-                    poses={poses}
-                    width={frameSize.width}
-                    height={frameSize.height}
-                    formQuality={exerciseState?.formQuality}
-                  />
-                </View>
-              )}
-
-              {/* Exercise HUD */}
-              {poseMode && exerciseState && <ExerciseHUD state={exerciseState} />}
-
-              {/* Object Overlay */}
-              {objectMode && detectedObjects.length > 0 && frameSize.width > 0 && (
-                <View style={StyleSheet.absoluteFill}>
-                  <ObjectOverlay
-                    objects={detectedObjects}
-                    width={frameSize.width}
-                    height={frameSize.height}
-                    lockedLabel={lockedTarget?.object.label}
-                    lockedDeviceName={lockedTarget?.target.name}
-                    candidateLabel={candidateLabel ?? undefined}
-                  />
-                </View>
-              )}
-
-              {/* Object count HUD */}
-              {objectMode && detectedObjects.length > 0 && (
-                <View
-                  style={{
-                    position: "absolute",
-                    right: 8,
-                    top: 30,
-                    backgroundColor: "rgba(0,0,0,0.8)",
-                    paddingHorizontal: 8,
-                    paddingVertical: 3,
-                    borderRadius: 4,
-                    borderWidth: 1,
-                    borderColor: "#3B82F6",
-                  }}
-                >
-                  <Text style={{ color: "#FFF", fontSize: 14, fontFamily: "monospace", fontWeight: "bold" }}>
-                    {detectedObjects.length}
-                  </Text>
-                  <Text style={{ color: "#737373", fontSize: 8, fontFamily: "monospace", letterSpacing: 1 }}>
-                    OBJECTS
-                  </Text>
-                </View>
-              )}
-
-              {/* Gesture label pill */}
-              {arMode &&
-                currentGesture &&
-                currentGesture.gesture !== "none" && (
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 8,
-                      alignSelf: "center",
-                      backgroundColor: "rgba(0,0,0,0.7)",
-                      paddingHorizontal: 12,
-                      paddingVertical: 4,
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      borderColor: commandMode ? "#F59E0B" : "#00FF88",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: commandMode ? "#F59E0B" : "#00FF88",
-                        fontSize: 11,
-                        fontFamily: "monospace",
-                        fontWeight: "bold",
-                        letterSpacing: 2,
-                      }}
-                    >
-                      {gestureEmoji(currentGesture.gesture)}{" "}
-                      {gestureLabel(currentGesture)}
-                    </Text>
-                  </View>
-                )}
-
-              {/* Action feedback pill — shows when a gesture command fires */}
-              {arMode && (commandMode || targetMode) && lastAction && (
-                <View
-                  style={{
-                    position: "absolute",
-                    bottom: 12,
-                    alignSelf: "center",
-                    backgroundColor: targetMode ? "rgba(255,102,0,0.9)" : "rgba(245,158,11,0.9)",
-                    paddingHorizontal: 16,
-                    paddingVertical: 6,
-                    borderRadius: 16,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#000",
-                      fontSize: 13,
-                      fontFamily: "monospace",
-                      fontWeight: "bold",
-                      letterSpacing: 2,
-                    }}
-                  >
-                    {lastAction.icon} {lastAction.label}
-                  </Text>
-                </View>
-              )}
-
-              {/* Target lock info pill */}
-              {arMode && targetMode && lockedTarget && (
-                <View
-                  style={{
-                    position: "absolute",
-                    bottom: 40,
-                    alignSelf: "center",
-                    backgroundColor: "rgba(0,255,136,0.9)",
-                    paddingHorizontal: 14,
-                    paddingVertical: 4,
-                    borderRadius: 12,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#000",
-                      fontSize: 11,
-                      fontFamily: "monospace",
-                      fontWeight: "bold",
-                      letterSpacing: 1,
-                    }}
-                  >
-                    TARGET: {lockedTarget.target.name.toUpperCase()}
-                  </Text>
-                </View>
-              )}
-
-              {/* Control feedback HUD — shows HA state after action */}
-              {controlFeedback && (
-                <View
-                  style={{
-                    position: "absolute",
-                    bottom: 68,
-                    alignSelf: "center",
-                    backgroundColor: "rgba(0,0,0,0.85)",
-                    paddingHorizontal: 14,
-                    paddingVertical: 4,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: "#FF6600",
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#FF6600",
-                      fontSize: 11,
-                      fontFamily: "monospace",
-                      fontWeight: "bold",
-                      letterSpacing: 1,
-                    }}
-                  >
-                    {controlFeedback}
-                  </Text>
-                </View>
-              )}
-
-              {/* Vision analysis overlay */}
-              {isStreaming && (
-                <VisionOverlay
-                  result={visionResult}
-                  mode={visionMode}
-                  loading={visionLoading}
-                />
-              )}
-
-              {/* HUD overlay */}
-              {isStreaming && (
-                <>
-                  {/* Top-left: stream indicator */}
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 8,
-                      left: 10,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
-                    <View
-                      style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: 3,
-                        backgroundColor: "#EF4444",
-                      }}
-                    />
-                    <Text
-                      style={{
-                        color: "#EF4444",
-                        fontSize: 9,
-                        fontFamily: "monospace",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      LIVE
-                    </Text>
-                  </View>
-                  {/* Top-right: FPS counter + AR badge */}
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 8,
-                      right: 10,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    {arMode && (
-                      <Text
-                        style={{
-                          color: "#00FF88",
-                          fontSize: 9,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        AR
-                      </Text>
-                    )}
-                    {commandMode && (
-                      <Text
-                        style={{
-                          color: "#F59E0B",
-                          fontSize: 9,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        CMD
-                      </Text>
-                    )}
-                    {targetMode && (
-                      <Text
-                        style={{
-                          color: "#FF6600",
-                          fontSize: 9,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        TARGET
-                      </Text>
-                    )}
-                    {faceMode && (
-                      <Text
-                        style={{
-                          color: "#FF6B9D",
-                          fontSize: 9,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        FACE
-                      </Text>
-                    )}
-                    {poseMode && (
-                      <Text
-                        style={{
-                          color: "#10B981",
-                          fontSize: 9,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        POSE
-                      </Text>
-                    )}
-                    {objectMode && (
-                      <Text
-                        style={{
-                          color: "#3B82F6",
-                          fontSize: 9,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        OBJ
-                      </Text>
-                    )}
-                    <Text
-                      style={{
-                        color: "#06B6D4",
-                        fontSize: 9,
-                        fontFamily: "monospace",
-                      }}
-                    >
-                      {fps} FPS
-                    </Text>
-                  </View>
-                  {/* Corner brackets */}
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 4,
-                      left: 4,
-                      width: 16,
-                      height: 16,
-                      borderTopWidth: 1,
-                      borderLeftWidth: 1,
-                      borderColor: arMode ? "#00FF88" : "#06B6D4",
-                    }}
-                  />
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 4,
-                      right: 4,
-                      width: 16,
-                      height: 16,
-                      borderTopWidth: 1,
-                      borderRightWidth: 1,
-                      borderColor: arMode ? "#00FF88" : "#06B6D4",
-                    }}
-                  />
-                  <View
-                    style={{
-                      position: "absolute",
-                      bottom: 4,
-                      left: 4,
-                      width: 16,
-                      height: 16,
-                      borderBottomWidth: 1,
-                      borderLeftWidth: 1,
-                      borderColor: arMode ? "#00FF88" : "#06B6D4",
-                    }}
-                  />
-                  <View
-                    style={{
-                      position: "absolute",
-                      bottom: 4,
-                      right: 4,
-                      width: 16,
-                      height: 16,
-                      borderBottomWidth: 1,
-                      borderRightWidth: 1,
-                      borderColor: arMode ? "#00FF88" : "#06B6D4",
-                    }}
-                  />
-                </>
-              )}
-            </View>
-
-            {/* Quality Selector */}
-            <View style={{ flexDirection: "row", gap: 8, justifyContent: "center" }}>
-              {(["low", "medium", "high"] as Quality[]).map((q) => (
-                <TVPressable
-                  key={q}
-                  onPress={() => setQuality(q)}
-                  style={{
-                    paddingHorizontal: 16,
-                    paddingVertical: 6,
-                    borderRadius: 6,
-                    backgroundColor: quality === q ? "#06B6D4" : "#1A1A1A",
-                    borderWidth: 1,
-                    borderColor: quality === q ? "#06B6D4" : "#333",
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: quality === q ? "#000" : "#737373",
-                      fontSize: 11,
-                      fontFamily: "monospace",
-                      fontWeight: "bold",
-                      letterSpacing: 1,
-                    }}
-                  >
-                    {QUALITY_LABELS[q]}
-                  </Text>
-                </TVPressable>
-              ))}
-            </View>
-
-            {/* Vision Mode Selector — visible when streaming */}
-            {isStreaming && (
-              <View style={{ gap: 8 }}>
-                <View style={{ flexDirection: "row", gap: 6, justifyContent: "center" }}>
-                  {(["describe", "ocr", "identify", "translate"] as VisionMode[]).map((m) => {
-                    const colors: Record<VisionMode, string> = {
-                      describe: "#06B6D4",
-                      ocr: "#A855F7",
-                      identify: "#10B981",
-                      translate: "#F59E0B",
-                    };
-                    const c = colors[m];
-                    const active = visionMode === m;
-                    return (
-                      <TVPressable
-                        key={m}
-                        onPress={() => {
-                          setVisionMode(m);
-                          setVisionResult(null);
-                        }}
-                        style={{
-                          paddingHorizontal: 10,
-                          paddingVertical: 5,
-                          borderRadius: 6,
-                          backgroundColor: active ? c : "#1A1A1A",
-                          borderWidth: 1,
-                          borderColor: active ? c : "#333",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            color: active ? "#000" : "#737373",
-                            fontSize: 10,
-                            fontFamily: "monospace",
-                            fontWeight: "bold",
-                            letterSpacing: 1,
-                          }}
-                        >
-                          {m.toUpperCase()}
-                        </Text>
-                      </TVPressable>
-                    );
-                  })}
-                </View>
-                <TVPressable
-                  onPress={() => handleVisionAnalyze()}
-                  style={{
-                    paddingVertical: 8,
-                    borderRadius: 6,
-                    backgroundColor: "rgba(6,182,212,0.1)",
-                    borderWidth: 1,
-                    borderColor: "#164E63",
-                    alignItems: "center",
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#06B6D4",
-                      fontSize: 11,
-                      fontFamily: "monospace",
-                      fontWeight: "bold",
-                      letterSpacing: 2,
-                    }}
-                  >
-                    {visionLoading ? "ANALYZING..." : `ANALYZE (${visionMode.toUpperCase()})`}
-                  </Text>
-                </TVPressable>
-              </View>
-            )}
-
-            {/* Stream Controls */}
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              {!isStreaming ? (
-                <TVPressable
-                  onPress={handleStartStream}
-                  rarity="rare"
-                  style={{
-                    flex: 1,
-                    paddingVertical: 14,
-                    borderRadius: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#FFF",
-                      fontSize: 12,
-                      fontFamily: "monospace",
-                      fontWeight: "bold",
-                      letterSpacing: 2,
-                    }}
-                  >
-                    START CAMERA
-                  </Text>
-                </TVPressable>
-              ) : (
-                <>
-                  {/* AR Toggle */}
-                  {MediaPipe.isAvailable() && (
-                    <TVPressable
-                      onPress={handleToggleAR}
-                      style={{
-                        paddingHorizontal: 14,
-                        paddingVertical: 14,
-                        borderRadius: 8,
-                        backgroundColor: arMode
-                          ? "rgba(0,255,136,0.15)"
-                          : "#1A1A1A",
-                        borderWidth: 1,
-                        borderColor: arMode ? "#00FF88" : "#333",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: arMode ? "#00FF88" : "#737373",
-                          fontSize: 11,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                          letterSpacing: 1,
-                        }}
-                      >
-                        {arMode ? "AR: ON" : "AR: OFF"}
-                      </Text>
-                    </TVPressable>
-                  )}
-                  {/* Command Mode Toggle (only visible when AR is on) */}
-                  {arMode && (
-                    <TVPressable
-                      onPress={() => setCommandMode((v) => !v)}
-                      style={{
-                        paddingHorizontal: 14,
-                        paddingVertical: 14,
-                        borderRadius: 8,
-                        backgroundColor: commandMode
-                          ? "rgba(245,158,11,0.15)"
-                          : "#1A1A1A",
-                        borderWidth: 1,
-                        borderColor: commandMode ? "#F59E0B" : "#333",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: commandMode ? "#F59E0B" : "#737373",
-                          fontSize: 11,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                          letterSpacing: 1,
-                        }}
-                      >
-                        {commandMode ? "CMD: ON" : "CMD: OFF"}
-                      </Text>
-                    </TVPressable>
-                  )}
-                  {/* Target Mode Toggle — point at device + gesture to control */}
-                  {arMode && (
-                    <TVPressable
-                      onPress={() => setTargetMode((v) => !v)}
-                      style={{
-                        paddingHorizontal: 14,
-                        paddingVertical: 14,
-                        borderRadius: 8,
-                        backgroundColor: targetMode
-                          ? "rgba(255,102,0,0.15)"
-                          : "#1A1A1A",
-                        borderWidth: 1,
-                        borderColor: targetMode ? "#FF6600" : "#333",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: targetMode ? "#FF6600" : "#737373",
-                          fontSize: 11,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                          letterSpacing: 1,
-                        }}
-                      >
-                        {targetMode ? "TGT: ON" : "TGT: OFF"}
-                      </Text>
-                    </TVPressable>
-                  )}
-                  {/* Face Detection Toggle */}
-                  {MediaPipe.isAvailable() && (
-                    <TVPressable
-                      onPress={handleToggleFace}
-                      style={{
-                        paddingHorizontal: 14,
-                        paddingVertical: 14,
-                        borderRadius: 8,
-                        backgroundColor: faceMode
-                          ? "rgba(255,107,157,0.15)"
-                          : "#1A1A1A",
-                        borderWidth: 1,
-                        borderColor: faceMode ? "#FF6B9D" : "#333",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: faceMode ? "#FF6B9D" : "#737373",
-                          fontSize: 11,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                          letterSpacing: 1,
-                        }}
-                      >
-                        {faceMode ? "FACE: ON" : "FACE: OFF"}
-                      </Text>
-                    </TVPressable>
-                  )}
-                  {/* Pose Detection Toggle */}
-                  {MediaPipe.isAvailable() && (
-                    <TVPressable
-                      onPress={handleTogglePose}
-                      style={{
-                        paddingHorizontal: 14,
-                        paddingVertical: 14,
-                        borderRadius: 8,
-                        backgroundColor: poseMode
-                          ? "rgba(16,185,129,0.15)"
-                          : "#1A1A1A",
-                        borderWidth: 1,
-                        borderColor: poseMode ? "#10B981" : "#333",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: poseMode ? "#10B981" : "#737373",
-                          fontSize: 11,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                          letterSpacing: 1,
-                        }}
-                      >
-                        {poseMode ? "POSE: ON" : "POSE: OFF"}
-                      </Text>
-                    </TVPressable>
-                  )}
-                  {/* Object Detection Toggle */}
-                  {MediaPipe.isAvailable() && (
-                    <TVPressable
-                      onPress={handleToggleObjects}
-                      style={{
-                        paddingHorizontal: 14,
-                        paddingVertical: 14,
-                        borderRadius: 8,
-                        backgroundColor: objectMode
-                          ? "rgba(59,130,246,0.15)"
-                          : "#1A1A1A",
-                        borderWidth: 1,
-                        borderColor: objectMode ? "#3B82F6" : "#333",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: objectMode ? "#3B82F6" : "#737373",
-                          fontSize: 11,
-                          fontFamily: "monospace",
-                          fontWeight: "bold",
-                          letterSpacing: 1,
-                        }}
-                      >
-                        {objectMode ? "OBJ: ON" : "OBJ: OFF"}
-                      </Text>
-                    </TVPressable>
-                  )}
-                  <TVPressable
-                    onPress={handleCapture}
-                    rarity="epic"
-                    style={{
-                      flex: 1,
-                      paddingVertical: 14,
-                      borderRadius: 8,
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: "#FFF",
-                        fontSize: 12,
-                        fontFamily: "monospace",
-                        fontWeight: "bold",
-                        letterSpacing: 2,
-                      }}
-                    >
-                      CAPTURE
-                    </Text>
-                  </TVPressable>
-                  <TVPressable
-                    onPress={handleStopStream}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 14,
-                      borderRadius: 8,
-                      backgroundColor: "#1A1A1A",
-                      borderWidth: 1,
-                      borderColor: "#333",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: "#A3A3A3",
-                        fontSize: 12,
-                        fontFamily: "monospace",
-                        fontWeight: "bold",
-                        letterSpacing: 2,
-                      }}
-                    >
-                      STOP CAMERA
-                    </Text>
-                  </TVPressable>
-                </>
-              )}
-            </View>
-
-            {/* Vision Mode Picker — visible when streaming */}
-            {isStreaming && (
-              <View style={{ gap: 8 }}>
-                <Text style={{ color: "#737373", fontSize: 10, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
-                  VISION
-                </Text>
-                <View style={{ flexDirection: "row", gap: 6 }}>
-                  {(["describe", "ocr", "identify", "translate"] as VisionMode[]).map((m) => {
-                    const colors: Record<VisionMode, string> = {
-                      describe: "#06B6D4",
-                      ocr: "#A855F7",
-                      identify: "#10B981",
-                      translate: "#F59E0B",
-                    };
-                    const c = colors[m];
-                    const active = visionMode === m;
-                    return (
-                      <TVPressable
-                        key={m}
-                        onPress={() => handleVisionAnalyze(m)}
-                        style={{
-                          flex: 1,
-                          paddingVertical: 10,
-                          borderRadius: 8,
-                          backgroundColor: active ? `${c}22` : "#1A1A1A",
-                          borderWidth: 1,
-                          borderColor: active ? c : "#333",
-                          alignItems: "center",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            color: active ? c : "#737373",
-                            fontSize: 9,
-                            fontFamily: "monospace",
-                            fontWeight: "bold",
-                            letterSpacing: 1,
-                          }}
-                        >
-                          {m.toUpperCase()}
-                        </Text>
-                      </TVPressable>
-                    );
-                  })}
-                </View>
-                {/* Dismiss vision result */}
-                {(visionResult || visionLoading) && (
-                  <TVPressable
-                    onPress={() => { setVisionResult(null); setVisionLoading(false); }}
-                    style={{ alignSelf: "center", paddingHorizontal: 12, paddingVertical: 4 }}
-                  >
-                    <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace" }}>
-                      DISMISS RESULT
-                    </Text>
-                  </TVPressable>
-                )}
-              </View>
-            )}
-
-            {/* Captured Photo Preview */}
-            {capturedPhoto && (
-              <View style={{ gap: 8 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                  <Text style={{ color: "#737373", fontSize: 11, fontFamily: "monospace", letterSpacing: 1 }}>
-                    LAST CAPTURE
-                  </Text>
-                  <TVPressable onPress={() => setCapturedPhoto(null)} style={{ padding: 4 }}>
-                    <Text style={{ color: "#525252", fontSize: 11, fontFamily: "monospace" }}>
-                      DISMISS
-                    </Text>
-                  </TVPressable>
-                </View>
-                <View
-                  style={{
-                    borderRadius: 8,
-                    borderWidth: 1,
-                    borderColor: "#A855F7",
-                    overflow: "hidden",
-                  }}
-                >
-                  <Image
-                    source={{ uri: `data:image/jpeg;base64,${capturedPhoto}` }}
-                    style={{ width: "100%", height: isPhone ? 140 : 200 }}
-                    resizeMode="contain"
-                  />
-                </View>
-              </View>
-            )}
-
-            {/* Disconnect Button */}
+              <Text style={{ color: "#FFF", fontSize: 14, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                START CAMERA
+              </Text>
+            </TVPressable>
             <TVPressable
               onPress={handleDisconnect}
-              style={{
-                paddingVertical: 10,
-                borderRadius: 8,
-                backgroundColor: "rgba(239,68,68,0.1)",
-                borderWidth: 1,
-                borderColor: "#7F1D1D",
-                alignItems: "center",
-              }}
+              style={{ paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8 }}
             >
-              <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+              <Text style={{ color: "#525252", fontSize: 11, fontFamily: "monospace", letterSpacing: 1 }}>
                 DISCONNECT
               </Text>
             </TVPressable>
           </View>
         )}
-      </ScrollView>
 
-      <StatusBar style="light" />
+        {/* === Streaming: full-screen camera feed === */}
+        {isStreaming && frameData && (
+          <Image
+            source={{ uri: `data:image/jpeg;base64,${frameData}` }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+        )}
+        {isStreaming && !frameData && (
+          <Text style={{ color: "#333", fontSize: 13, fontFamily: "monospace" }}>
+            Waiting for frames...
+          </Text>
+        )}
+
+        {/* === Overlays (absolute, on top of feed) === */}
+        {arMode && hands.length > 0 && frameSize.width > 0 && (
+          <View style={StyleSheet.absoluteFill}>
+            <HandOverlay hands={hands} width={frameSize.width} height={frameSize.height} activeFingers={currentGesture?.activeFingers} />
+          </View>
+        )}
+        {faceMode && faces.length > 0 && frameSize.width > 0 && (
+          <View style={StyleSheet.absoluteFill}>
+            <FaceOverlay faces={faces} expressions={expressions} width={frameSize.width} height={frameSize.height} />
+          </View>
+        )}
+        {poseMode && poses.length > 0 && frameSize.width > 0 && (
+          <View style={StyleSheet.absoluteFill}>
+            <PoseOverlay poses={poses} width={frameSize.width} height={frameSize.height} formQuality={exerciseState?.formQuality} />
+          </View>
+        )}
+        {poseMode && exerciseState && <ExerciseHUD state={exerciseState} />}
+        {objectMode && detectedObjects.length > 0 && frameSize.width > 0 && (
+          <View style={StyleSheet.absoluteFill}>
+            <ObjectOverlay
+              objects={detectedObjects}
+              width={frameSize.width}
+              height={frameSize.height}
+              lockedLabel={lockedTarget?.object.label}
+              lockedDeviceName={lockedTarget?.target.name}
+              candidateLabel={candidateLabel ?? undefined}
+            />
+          </View>
+        )}
+
+        {/* Vision analysis overlay */}
+        {isStreaming && (
+          <VisionOverlay result={visionResult} mode={visionMode} loading={visionLoading} />
+        )}
+
+        {/* === Floating HUD elements === */}
+        {isStreaming && (
+          <>
+            {/* Top status bar */}
+            <View
+              style={{
+                position: "absolute",
+                top: insets.top + 4,
+                left: 10,
+                right: 10,
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              {/* Left: LIVE indicator */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#EF4444" }} />
+                <Text style={{ color: "#EF4444", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>LIVE</Text>
+              </View>
+              {/* Right: mode badges + FPS */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                {arMode && <Text style={{ color: "#00FF88", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>AR</Text>}
+                {commandMode && <Text style={{ color: "#F59E0B", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>CMD</Text>}
+                {targetMode && <Text style={{ color: "#FF6600", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>TARGET</Text>}
+                {faceMode && <Text style={{ color: "#FF6B9D", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>FACE</Text>}
+                {poseMode && <Text style={{ color: "#10B981", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>POSE</Text>}
+                {objectMode && <Text style={{ color: "#3B82F6", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>OBJ</Text>}
+                <Text style={{ color: "#06B6D4", fontSize: 9, fontFamily: "monospace" }}>{fps} FPS</Text>
+              </View>
+            </View>
+
+            {/* Corner brackets */}
+            <View style={{ position: "absolute", top: insets.top, left: 4, width: 16, height: 16, borderTopWidth: 1, borderLeftWidth: 1, borderColor: arMode ? "#00FF88" : "#06B6D4" }} />
+            <View style={{ position: "absolute", top: insets.top, right: 4, width: 16, height: 16, borderTopWidth: 1, borderRightWidth: 1, borderColor: arMode ? "#00FF88" : "#06B6D4" }} />
+            <View style={{ position: "absolute", bottom: insets.bottom + 70, left: 4, width: 16, height: 16, borderBottomWidth: 1, borderLeftWidth: 1, borderColor: arMode ? "#00FF88" : "#06B6D4" }} />
+            <View style={{ position: "absolute", bottom: insets.bottom + 70, right: 4, width: 16, height: 16, borderBottomWidth: 1, borderRightWidth: 1, borderColor: arMode ? "#00FF88" : "#06B6D4" }} />
+
+            {/* Gesture label pill */}
+            {arMode && currentGesture && currentGesture.gesture !== "none" && (
+              <View
+                style={{
+                  position: "absolute",
+                  top: insets.top + 28,
+                  alignSelf: "center",
+                  backgroundColor: "rgba(0,0,0,0.7)",
+                  paddingHorizontal: 12,
+                  paddingVertical: 4,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: commandMode ? "#F59E0B" : "#00FF88",
+                }}
+              >
+                <Text style={{ color: commandMode ? "#F59E0B" : "#00FF88", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                  {gestureEmoji(currentGesture.gesture)} {gestureLabel(currentGesture)}
+                </Text>
+              </View>
+            )}
+
+            {/* Object count HUD */}
+            {objectMode && detectedObjects.length > 0 && (
+              <View
+                style={{
+                  position: "absolute",
+                  right: 10,
+                  top: insets.top + 28,
+                  backgroundColor: "rgba(0,0,0,0.8)",
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 4,
+                  borderWidth: 1,
+                  borderColor: "#3B82F6",
+                }}
+              >
+                <Text style={{ color: "#FFF", fontSize: 14, fontFamily: "monospace", fontWeight: "bold" }}>{detectedObjects.length}</Text>
+                <Text style={{ color: "#737373", fontSize: 8, fontFamily: "monospace", letterSpacing: 1 }}>OBJECTS</Text>
+              </View>
+            )}
+
+            {/* Control feedback HUD */}
+            {controlFeedback && (
+              <View
+                style={{
+                  position: "absolute",
+                  bottom: insets.bottom + 130,
+                  alignSelf: "center",
+                  backgroundColor: "rgba(0,0,0,0.85)",
+                  paddingHorizontal: 14,
+                  paddingVertical: 4,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: "#FF6600",
+                }}
+              >
+                <Text style={{ color: "#FF6600", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
+                  {controlFeedback}
+                </Text>
+              </View>
+            )}
+
+            {/* Target lock pill */}
+            {arMode && targetMode && lockedTarget && (
+              <View
+                style={{
+                  position: "absolute",
+                  bottom: insets.bottom + 110,
+                  alignSelf: "center",
+                  backgroundColor: "rgba(0,255,136,0.9)",
+                  paddingHorizontal: 14,
+                  paddingVertical: 4,
+                  borderRadius: 12,
+                }}
+              >
+                <Text style={{ color: "#000", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
+                  TARGET: {lockedTarget.target.name.toUpperCase()}
+                </Text>
+              </View>
+            )}
+
+            {/* Action feedback pill */}
+            {arMode && (commandMode || targetMode) && lastAction && (
+              <View
+                style={{
+                  position: "absolute",
+                  bottom: insets.bottom + 90,
+                  alignSelf: "center",
+                  backgroundColor: targetMode ? "rgba(255,102,0,0.9)" : "rgba(245,158,11,0.9)",
+                  paddingHorizontal: 16,
+                  paddingVertical: 6,
+                  borderRadius: 16,
+                }}
+              >
+                <Text style={{ color: "#000", fontSize: 13, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                  {lastAction.icon} {lastAction.label}
+                </Text>
+              </View>
+            )}
+
+            {/* Vision mode floating picker */}
+            {visionPickerOpen && (
+              <View
+                style={{
+                  position: "absolute",
+                  bottom: insets.bottom + 76,
+                  alignSelf: "center",
+                  backgroundColor: "rgba(0,0,0,0.85)",
+                  borderRadius: 16,
+                  paddingHorizontal: 10,
+                  paddingVertical: 8,
+                  flexDirection: "row",
+                  gap: 6,
+                }}
+              >
+                {(["describe", "ocr", "identify", "translate"] as VisionMode[]).map((m) => {
+                  const colors: Record<VisionMode, string> = { describe: "#06B6D4", ocr: "#A855F7", identify: "#10B981", translate: "#F59E0B" };
+                  const c = colors[m];
+                  const active = visionMode === m;
+                  return (
+                    <TVPressable
+                      key={m}
+                      onPress={() => {
+                        handleVisionAnalyze(m);
+                        setVisionPickerOpen(false);
+                      }}
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        backgroundColor: active ? `${c}33` : "transparent",
+                        borderWidth: 1,
+                        borderColor: active ? c : "#444",
+                      }}
+                    >
+                      <Text style={{ color: active ? c : "#737373", fontSize: 9, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
+                        {m.toUpperCase()}
+                      </Text>
+                    </TVPressable>
+                  );
+                })}
+              </View>
+            )}
+          </>
+        )}
+
+        {/* Back button (always visible, top-left when not streaming) */}
+        {!isStreaming && (
+          <TVPressable
+            onPress={() => router.back()}
+            style={{ position: "absolute", top: insets.top + 8, left: 12, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
+          >
+            <Text style={{ color: "#A3A3A3", fontSize: 12, fontWeight: "bold", letterSpacing: 1 }}>{"\u25C0 BACK"}</Text>
+          </TVPressable>
+        )}
+
+        {/* Error banner */}
+        {error && (
+          <View
+            style={{
+              position: "absolute",
+              top: isStreaming ? insets.top + 48 : insets.top + 44,
+              left: 16,
+              right: 16,
+              backgroundColor: "rgba(239,68,68,0.15)",
+              borderWidth: 1,
+              borderColor: "#7F1D1D",
+              borderRadius: 8,
+              padding: 10,
+            }}
+          >
+            <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace" }}>{error}</Text>
+          </View>
+        )}
+
+        {/* Captured photo toast */}
+        {capturedPhoto && (
+          <TVPressable
+            onPress={() => setCapturedPhoto(null)}
+            style={{
+              position: "absolute",
+              top: insets.top + 48,
+              right: 12,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: "#A855F7",
+              overflow: "hidden",
+            }}
+          >
+            <Image
+              source={{ uri: `data:image/jpeg;base64,${capturedPhoto}` }}
+              style={{ width: 80, height: 60 }}
+              resizeMode="cover"
+            />
+          </TVPressable>
+        )}
+      </View>
+
+      {/* Bottom toolbar pill */}
+      {isStreaming && toolbarItems.length > 0 && (
+        <ToolbarPill items={toolbarItems} bottomInset={insets.bottom} />
+      )}
+
+      {/* Settings bottom sheet */}
+      <SettingsSheet
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        quality={quality}
+        onQualityChange={setQuality}
+        visionMode={visionMode}
+        onVisionModeChange={(m) => { setVisionMode(m); setVisionResult(null); }}
+        onAnalyze={() => handleVisionAnalyze()}
+        visionLoading={visionLoading}
+        onDiagnostics={() => { try { setDiagnostics(Glasses.getDiagnostics()); } catch {} }}
+        onLogs={() => { try { setLogs(Glasses.getLogs()); } catch {} }}
+        diagnostics={diagnostics}
+        logs={logs}
+        onClearDiagnostics={() => setDiagnostics(null)}
+        onClearLogs={() => setLogs(null)}
+        onRefreshLogs={() => { try { setLogs(Glasses.getLogs()); } catch {} }}
+        urlEvents={urlEvents}
+        isStreaming={isStreaming}
+      />
     </View>
   );
 }
