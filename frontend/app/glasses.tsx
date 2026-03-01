@@ -9,13 +9,14 @@ import {
   Linking,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
 import { TVPressable } from "../components/TVPressable";
 import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import * as Glasses from "../modules/expo-glasses";
 import * as MediaPipe from "../modules/expo-mediapipe";
+import { immersiveState, type ImmersiveState } from "../lib/immersive-state";
 import type { HandResult, FaceResult } from "../modules/expo-mediapipe";
 import HandOverlay from "../components/glasses/HandOverlay";
 import FaceOverlay from "../components/glasses/FaceOverlay";
@@ -44,7 +45,9 @@ const QUALITY_LABELS: Record<Quality, string> = {
 export default function GlassesScreen() {
   useKeepAwake();
   const router = useRouter();
+  const { immersive: immersiveParam } = useLocalSearchParams<{ immersive?: string }>();
   const { insets, isPhone } = usePhoneLayout();
+  const immersiveRequested = immersiveParam === "true";
 
   const [available, setAvailable] = useState<boolean | null>(null);
   const [connectionState, setConnectionState] =
@@ -158,6 +161,25 @@ export default function GlassesScreen() {
         setControlFeedback(fb);
         if (controlFeedbackTimer.current) clearTimeout(controlFeedbackTimer.current);
         controlFeedbackTimer.current = setTimeout(() => setControlFeedback(null), 2000);
+        // Speak concise feedback through glasses Bluetooth speakers
+        const spokenText = data.error
+          ? `${data.deviceName} error`
+          : `${data.deviceName} ${data.action}`;
+        Glasses.speakFeedback(spokenText);
+      },
+      onGlassesImmersiveRequest: (data) => {
+        if (!data.enable) {
+          // Voice-triggered exit: teardown and navigate back
+          immersiveState.transition("deactivating");
+          Glasses.setImmersiveMode(false);
+          handleDisconnect().then(() => {
+            immersiveState.transition("idle");
+            if (connectedRef.current) {
+              bridgeRef.current.sendGlassesImmersiveState("idle");
+            }
+            router.back();
+          });
+        }
       },
       onError: (msg) => setError(msg),
     };
@@ -255,6 +277,99 @@ export default function GlassesScreen() {
         .catch(() => setInitializing(false));
     }
   }, []);
+
+  // ── Immersive mode: auto-connect when launched with ?immersive=true ──
+  const immersiveAutoConnected = useRef(false);
+  useEffect(() => {
+    if (!immersiveRequested || immersiveAutoConnected.current) return;
+    if (available !== true || initializing) return;
+    if (connectionState !== "disconnected") return;
+
+    immersiveAutoConnected.current = true;
+    immersiveState.transition("activating");
+    Glasses.setImmersiveMode(true);
+    if (connectedRef.current) {
+      bridgeRef.current.sendGlassesImmersiveState("activating");
+    }
+    handleConnect();
+  }, [immersiveRequested, available, initializing, connectionState]);
+
+  // ── Immersive mode: auto-start stream once connected ──
+  useEffect(() => {
+    if (!immersiveRequested) return;
+    if (connectionState !== "connected") return;
+    if (streamState !== "stopped") return;
+    if (immersiveState.state !== "activating") return;
+
+    handleStartStream();
+  }, [immersiveRequested, connectionState, streamState]);
+
+  // ── Immersive mode: report fully active once streaming ──
+  useEffect(() => {
+    if (!immersiveRequested) return;
+    if (streamState !== "started") return;
+    if (immersiveState.state !== "activating") return;
+
+    immersiveState.transition("immersive");
+    if (connectedRef.current) {
+      bridgeRef.current.sendGlassesImmersiveState("immersive");
+    }
+  }, [immersiveRequested, streamState]);
+
+  // ── Immersive mode: state machine listener + idle timeout ──
+  useEffect(() => {
+    immersiveState.setIdleTimeoutCallback(() => {
+      // Notify bridge — June will ask if still using it
+      if (connectedRef.current) {
+        bridgeRef.current.sendGlassesImmersiveState("idle_timeout");
+      }
+    });
+    return () => {
+      immersiveState.setIdleTimeoutCallback(null);
+    };
+  }, []);
+
+  // ── Immersive mode: record gesture activity for idle timeout ──
+  const prevGesture = useRef<string | null>(null);
+  useEffect(() => {
+    if (currentGesture && currentGesture.gesture !== "none" && currentGesture.gesture !== prevGesture.current) {
+      immersiveState.recordGesture();
+    }
+    prevGesture.current = currentGesture?.gesture ?? null;
+  }, [currentGesture]);
+
+  // ── Immersive mode: error recovery — auto-retry on connection drop ──
+  const immersiveRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!immersiveRequested) return;
+    if (immersiveState.state !== "immersive" && immersiveState.state !== "activating") return;
+    if (connectionState !== "disconnected") return;
+
+    // Connection dropped during immersive — retry after 3s
+    console.log("[Glasses] Connection lost during immersive mode — retrying in 3s");
+    immersiveRetryTimer.current = setTimeout(() => {
+      if (immersiveState.state === "immersive" || immersiveState.state === "activating") {
+        handleConnect();
+      }
+    }, 3000);
+
+    return () => {
+      if (immersiveRetryTimer.current) {
+        clearTimeout(immersiveRetryTimer.current);
+        immersiveRetryTimer.current = null;
+      }
+    };
+  }, [immersiveRequested, connectionState]);
+
+  // ── Immersive mode: cleanup on unmount ──
+  useEffect(() => {
+    return () => {
+      if (immersiveRequested) {
+        Glasses.setImmersiveMode(false);
+        immersiveState.reset();
+      }
+    };
+  }, [immersiveRequested]);
 
   // Native event listeners
   useEffect(() => {

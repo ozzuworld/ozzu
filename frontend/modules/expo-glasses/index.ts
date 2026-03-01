@@ -120,6 +120,30 @@ export async function capturePhoto(): Promise<string | null> {
   return ExpoGlasses.capturePhoto();
 }
 
+// ── Audio Feedback (TTS via Bluetooth glasses speakers) ──
+
+export async function speakFeedback(text: string): Promise<void> {
+  if (!ExpoGlasses) return;
+  return ExpoGlasses.speakFeedback(text);
+}
+
+export function stopFeedback(): void {
+  if (!ExpoGlasses) return;
+  ExpoGlasses.stopFeedback();
+}
+
+// ── Immersive Mode ──
+
+export function setImmersiveMode(enabled: boolean): void {
+  if (!ExpoGlasses) return;
+  ExpoGlasses.setImmersiveMode(enabled);
+}
+
+export function getImmersiveMode(): boolean {
+  if (!ExpoGlasses) return false;
+  return ExpoGlasses.getImmersiveMode();
+}
+
 // ── Event subscriptions (no-op if native module missing) ──
 
 const noopSubscription: EventSubscription = { remove: () => {} };
@@ -157,4 +181,11 @@ export function onError(
 ): EventSubscription {
   if (!emitter) return noopSubscription;
   return emitter.addListener("onError", callback);
+}
+
+export function onFeedbackDone(
+  callback: () => void
+): EventSubscription {
+  if (!emitter) return noopSubscription;
+  return emitter.addListener("onFeedbackDone", callback as any);
 }

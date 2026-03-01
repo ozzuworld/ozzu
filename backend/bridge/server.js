@@ -8269,6 +8269,28 @@ const GEMINI_BRIDGE_TOOLS = [
       required: ["table"],
     },
   },
+  {
+    name: "enable_glasses_immersive",
+    description:
+      "Enable immersive mode on King Kazuma's glasses. " +
+      "The iPhone will auto-navigate to the glasses screen, connect, and start the camera + AR/gesture pipeline. " +
+      "Use when King Kazuma says 'immersive mode', 'enable glasses', 'start glasses', or similar.",
+    parameters: {
+      type: "OBJECT",
+      properties: {},
+    },
+  },
+  {
+    name: "disable_glasses_immersive",
+    description:
+      "Disable immersive mode on King Kazuma's glasses. " +
+      "Tears down the camera stream, gesture pipeline, and returns the iPhone to its previous screen. " +
+      "Use when King Kazuma says 'exit immersive', 'stop glasses', 'disable glasses', or similar.",
+    parameters: {
+      type: "OBJECT",
+      properties: {},
+    },
+  },
 ];
 
 const SWITCH_TO_CIPHER_TOOL = {
@@ -8671,6 +8693,18 @@ async function handleToolCall(name, args) {
     } catch (err) {
       return { success: false, message: `Memory save failed: ${err.message}` };
     }
+  }
+
+  // ── Glasses immersive mode ──
+  if (name === "enable_glasses_immersive") {
+    broadcastToDeviceType("phone", { type: "glassesImmersiveRequest", enable: true });
+    log.bridge.info("Glasses immersive mode: enabling via phone");
+    return { success: true, message: "Immersive mode activation sent to iPhone. The glasses camera and AR pipeline will start automatically." };
+  }
+  if (name === "disable_glasses_immersive") {
+    broadcastToDeviceType("phone", { type: "glassesImmersiveRequest", enable: false });
+    log.bridge.info("Glasses immersive mode: disabling via phone");
+    return { success: true, message: "Immersive mode deactivation sent to iPhone. Glasses stream will stop." };
   }
 
   // ── Bridge tools (resolved locally) ──
@@ -11076,6 +11110,34 @@ wss.on("connection", (ws) => {
         log.bridge.info(`Glasses status: ${msg.state} from ${info?.deviceId}`);
         // Broadcast to all other devices
         broadcastToAll({ type: "glassesStatus", state: msg.state, from: info?.deviceId });
+        return;
+      }
+
+      // ── Glasses immersive mode state updates ──
+      if (msg.type === "glassesImmersiveState") {
+        const info = devices.get(ws);
+        const state = msg.state || "unknown";
+        const error = msg.error || null;
+        log.bridge.info(`Glasses immersive state: ${state}${error ? ` (error: ${error})` : ""} from ${info?.deviceId}`);
+        // Broadcast to all devices
+        broadcastToAll({ type: "glassesImmersiveState", state, error, from: info?.deviceId });
+        // Send context to Gemini so June can acknowledge
+        if (geminiReady && geminiWs && geminiWs.readyState === 1) {
+          const contextMap = {
+            activating: "[System: Glasses immersive mode is activating — camera and AR pipeline starting. Acknowledge briefly.]",
+            immersive: "[System: Glasses immersive mode is now fully active — gesture control ready. Acknowledge briefly.]",
+            deactivating: "[System: Glasses immersive mode is shutting down. Acknowledge briefly.]",
+            idle: "[System: Glasses immersive mode has been deactivated.]",
+            error: `[System: Glasses immersive mode error: ${error}. Let King Kazuma know.]`,
+          };
+          const contextText = contextMap[state] || `[System: Glasses immersive state changed to ${state}]`;
+          geminiWs.send(JSON.stringify({
+            clientContent: {
+              turns: [{ role: "user", parts: [{ text: contextText }] }],
+              turnComplete: true,
+            },
+          }));
+        }
         return;
       }
 

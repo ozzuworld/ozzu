@@ -116,10 +116,11 @@ function withMetaDATiOS(config) {
       Analytics: { OptOut: true },
     };
 
-    // Background modes for Bluetooth glasses connection
+    // Background modes for Bluetooth glasses connection + audio for immersive TTS
     const bgModes = plist.UIBackgroundModes || [];
     if (!bgModes.includes("bluetooth-peripheral")) bgModes.push("bluetooth-peripheral");
     if (!bgModes.includes("external-accessory")) bgModes.push("external-accessory");
+    if (!bgModes.includes("audio")) bgModes.push("audio");
     plist.UIBackgroundModes = bgModes;
 
     // External accessory protocol for Meta glasses

@@ -34,6 +34,7 @@ export interface BridgeCallbacks {
   onDirectiveUpdate?: (data: any) => void; // Directive status/build changed (from bridge broadcast)
   onVisionResult?: (mode: string, text: string) => void; // Glasses vision analysis result
   onGestureControlFeedback?: (data: { entityId: string; deviceName: string; action: string; state?: any; error?: string }) => void;
+  onGlassesImmersiveRequest?: (data: { enable: boolean }) => void;
   onError: (message: string) => void;
 }
 
@@ -256,6 +257,9 @@ export class BridgeSession {
         case "gestureControlFeedback":
           this.callbacks?.onGestureControlFeedback?.(msg);
           break;
+        case "glassesImmersiveRequest":
+          this.callbacks?.onGlassesImmersiveRequest?.(msg);
+          break;
         case "error":
           this.callbacks?.onError(msg.message);
           break;
@@ -410,6 +414,14 @@ export class BridgeSession {
   sendGlassesStatus(state: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "glassesStatus", state }));
+    }
+  }
+
+  sendGlassesImmersiveState(state: string, error?: string): void {
+    const msg: Record<string, any> = { type: "glassesImmersiveState", state };
+    if (error) msg.error = error;
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg));
     }
   }
 

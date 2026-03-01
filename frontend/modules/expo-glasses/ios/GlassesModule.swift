@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import UIKit
+import AVFoundation
 import os.log
 
 #if canImport(MWDATCore)
@@ -43,6 +44,11 @@ public class GlassesModule: Module {
     private var connectionState = "disconnected"
     private var streaming = false
     private var initialized = false
+    private var immersiveMode = false
+
+    // TTS feedback via glasses Bluetooth speakers
+    private var feedbackSynth: AVSpeechSynthesizer?
+    private var feedbackDelegate: FeedbackTTSDelegate?
 
     private var sdkAvailable: Bool {
 #if canImport(MWDATCore)
@@ -60,7 +66,8 @@ public class GlassesModule: Module {
             "onVideoFrame",
             "onPhotoCaptured",
             "onStreamStateChanged",
-            "onError"
+            "onError",
+            "onFeedbackDone"
         )
 
         // ── Availability check ──
@@ -453,6 +460,63 @@ public class GlassesModule: Module {
             return nil
         }
 
+        // ── Audio Feedback (TTS via Bluetooth glasses speakers) ──
+
+        AsyncFunction("speakFeedback") { (text: String) in
+            // Only speak if Bluetooth audio output is available (glasses connected).
+            // This prevents the phone speaker from blasting in the user's pocket.
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(.playback, options: [.allowBluetoothA2DP])
+                try session.setActive(true)
+            } catch {
+                GlassesModule.log("Audio session setup failed: \(error)")
+                return
+            }
+
+            let hasBluetooth = session.currentRoute.outputs.contains { port in
+                port.portType == .bluetoothA2DP || port.portType == .bluetoothHFP || port.portType == .bluetoothLE
+            }
+            guard hasBluetooth else {
+                GlassesModule.log("No Bluetooth audio output — skipping TTS to avoid phone speaker")
+                return
+            }
+
+            // Cancel any in-progress speech
+            self.feedbackSynth?.stopSpeaking(at: .immediate)
+
+            let synth = AVSpeechSynthesizer()
+            let delegate = FeedbackTTSDelegate { [weak self] in
+                self?.sendEvent("onFeedbackDone", [:])
+            }
+            synth.delegate = delegate
+            self.feedbackSynth = synth
+            self.feedbackDelegate = delegate
+
+            let utterance = AVSpeechUtterance(string: text)
+            utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 1.2
+            utterance.volume = 0.8
+            synth.speak(utterance)
+            GlassesModule.log("TTS: \(text)")
+        }
+
+        Function("stopFeedback") {
+            self.feedbackSynth?.stopSpeaking(at: .immediate)
+            self.feedbackSynth = nil
+            self.feedbackDelegate = nil
+        }
+
+        // ── Immersive Mode ──
+
+        Function("setImmersiveMode") { (enabled: Bool) in
+            self.immersiveMode = enabled
+            GlassesModule.log("Immersive mode: \(enabled)")
+        }
+
+        Function("getImmersiveMode") { () -> Bool in
+            return self.immersiveMode
+        }
+
         // ── Lifecycle ──
 
         OnAppEntersForeground {
@@ -480,6 +544,9 @@ public class GlassesModule: Module {
                     self.connectionState = stateStr
                     self.sendEvent("onConnectionChanged", ["state": stateStr])
                 }
+                if self.immersiveMode {
+                    GlassesModule.log("Foregrounded in immersive mode — stream should auto-resume")
+                }
             }
 #endif
         }
@@ -505,8 +572,14 @@ public class GlassesModule: Module {
 
     private func handleBackground() {
         if streaming {
-            Task {
-                await self.stopStream()
+            if immersiveMode {
+                // In immersive mode, let the SDK handle .paused state naturally.
+                // The Bluetooth connection stays alive and auto-resumes on foreground.
+                GlassesModule.log("Background with immersive mode — keeping stream alive")
+            } else {
+                Task {
+                    await self.stopStream()
+                }
             }
         }
     }
@@ -521,7 +594,24 @@ public class GlassesModule: Module {
         photoDataListenerToken = nil
         errorListenerToken = nil
 #endif
+        feedbackSynth?.stopSpeaking(at: .immediate)
+        feedbackSynth = nil
+        feedbackDelegate = nil
         streaming = false
         initialized = false
+        immersiveMode = false
+    }
+}
+
+/// Delegate that fires a completion callback when TTS finishes
+private class FeedbackTTSDelegate: NSObject, AVSpeechSynthesizerDelegate {
+    private let onDone: () -> Void
+
+    init(onDone: @escaping () -> Void) {
+        self.onDone = onDone
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        onDone()
     }
 }

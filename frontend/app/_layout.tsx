@@ -1,9 +1,10 @@
 import "../global.css";
-import React from "react";
-import { LogBox, View, Text, Platform } from "react-native";
-import { Stack } from "expo-router";
+import React, { useEffect } from "react";
+import { LogBox, View, Text, Platform, Dimensions } from "react-native";
+import { Stack, useRouter } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { HAProvider } from "../lib/ha-context";
+import { setImmersiveCallback } from "../lib/immersive-events";
 
 if (!__DEV__) {
   LogBox.ignoreAllLogs();
@@ -93,11 +94,35 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+/** Phone-only, iOS-only: listens for immersive mode activation from bridge and navigates to glasses screen */
+function ImmersiveListener() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Only on iPhone (iOS + screen width < 500)
+    if (Platform.OS !== "ios") return;
+    const { width } = Dimensions.get("screen");
+    if (width >= 500) return;
+
+    setImmersiveCallback((enable) => {
+      if (enable) {
+        router.push("/glasses?immersive=true");
+      }
+      // Disable is handled inside glasses.tsx itself
+    });
+
+    return () => setImmersiveCallback(null);
+  }, [router]);
+
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
         <HAProvider>
+          <ImmersiveListener />
           <Stack
             screenOptions={{
               headerShown: false,
