@@ -31,7 +31,6 @@ import { executeGestureCommand, sendTargetedGestureCommand, type GestureAction }
 import VisionOverlay, { type VisionMode, type VisionResult } from "../components/glasses/VisionOverlay";
 import { GestureTargetEngine, type TargetLock } from "../lib/gesture-target";
 import { loadCalibration } from "../lib/device-map";
-import ToolbarPill, { type ToolbarItem } from "../components/glasses/ToolbarPill";
 import SettingsSheet from "../components/glasses/SettingsSheet";
 
 type Quality = "low" | "medium" | "high";
@@ -115,9 +114,8 @@ export default function GlassesScreen() {
   const [visionLoading, setVisionLoading] = useState(false);
   const latestFrameRef = useRef<{ data: string; width: number; height: number } | null>(null);
 
-  // Settings sheet + vision picker
+  // Settings sheet
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [visionPickerOpen, setVisionPickerOpen] = useState(false);
 
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
   const connectedRef = useRef(false);
@@ -584,6 +582,25 @@ export default function GlassesScreen() {
     lastFrameTimeRef.current = Date.now();
     try {
       await Glasses.startVideoStream({ quality, frameRate: 15 });
+      // Auto-enable gesture control pipeline: AR + Objects + Target + Command
+      if (MediaPipe.isAvailable()) {
+        try {
+          const handOk = await MediaPipe.initialize();
+          if (handOk) {
+            mediapipeReady.current = true;
+            setArMode(true);
+          }
+        } catch {}
+        try {
+          const objOk = await MediaPipe.initializeObjects();
+          if (objOk) {
+            objectReady.current = true;
+            setObjectMode(true);
+          }
+        } catch {}
+        setTargetMode(true);
+        setCommandMode(true);
+      }
     } catch (e: any) {
       setError(e.message || "Failed to start stream");
     }
@@ -725,26 +742,6 @@ export default function GlassesScreen() {
     );
   }
 
-  // Build toolbar items for the bottom pill
-  const toolbarItems: ToolbarItem[] = [];
-  if (isStreaming && MediaPipe.isAvailable()) {
-    toolbarItems.push(
-      { id: "ar", icon: "\u270B", color: "#00FF88", active: arMode, onPress: handleToggleAR },
-      { id: "tgt", icon: "\uD83C\uDFAF", color: "#FF6600", active: targetMode, onPress: () => setTargetMode((v) => !v) },
-      { id: "obj", icon: "\uD83D\uDCE6", color: "#3B82F6", active: objectMode, onPress: handleToggleObjects },
-      { id: "face", icon: "\uD83D\uDE00", color: "#FF6B9D", active: faceMode, onPress: handleToggleFace },
-      { id: "pose", icon: "\uD83C\uDFC3", color: "#10B981", active: poseMode, onPress: handleTogglePose },
-      { id: "cmd", icon: "\u26A1", color: "#F59E0B", active: commandMode, onPress: () => setCommandMode((v) => !v) },
-      { id: "vision", icon: "\uD83D\uDC41\uFE0F", color: "#06B6D4", active: visionPickerOpen, onPress: () => setVisionPickerOpen((v) => !v) },
-    );
-  }
-  if (isStreaming) {
-    toolbarItems.push(
-      { id: "settings", icon: "\u2699\uFE0F", color: "#737373", active: settingsOpen, onPress: () => setSettingsOpen(true) },
-      { id: "stop", icon: "\u23F9\uFE0F", color: "#EF4444", active: false, onPress: handleDisconnect },
-    );
-  }
-
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       <StatusBar style="light" hidden={isStreaming} />
@@ -754,7 +751,7 @@ export default function GlassesScreen() {
         onLayout={onPreviewLayout}
         style={{ flex: 1, backgroundColor: "#0A0A0A", justifyContent: "center", alignItems: "center" }}
       >
-        {/* === Disconnected state === */}
+        {/* === Disconnected === */}
         {!isConnected && !isConnecting && !initializing && (
           <View style={{ gap: 16, alignItems: "center" }}>
             <View
@@ -786,7 +783,6 @@ export default function GlassesScreen() {
           </View>
         )}
 
-        {/* === Initializing === */}
         {initializing && (
           <View style={{ gap: 8, alignItems: "center" }}>
             <ActivityIndicator size="large" color="#06B6D4" />
@@ -794,7 +790,6 @@ export default function GlassesScreen() {
           </View>
         )}
 
-        {/* === Connecting === */}
         {isConnecting && (
           <View style={{ alignItems: "center", gap: 12 }}>
             <ActivityIndicator size="large" color="#F59E0B" />
@@ -807,30 +802,31 @@ export default function GlassesScreen() {
           </View>
         )}
 
-        {/* === Connected but not streaming === */}
+        {/* === Connected, not streaming — big shutter button === */}
         {isConnected && !isStreaming && (
           <View style={{ gap: 16, alignItems: "center" }}>
             <TVPressable
               onPress={handleStartStream}
-              rarity="rare"
-              style={{ paddingHorizontal: 40, paddingVertical: 16, borderRadius: 12, alignItems: "center" }}
+              style={{
+                width: 80,
+                height: 80,
+                borderRadius: 40,
+                borderWidth: 4,
+                borderColor: "#FFF",
+                backgroundColor: "transparent",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
             >
-              <Text style={{ color: "#FFF", fontSize: 14, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
-                START CAMERA
-              </Text>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: "#FFF" }} />
             </TVPressable>
-            <TVPressable
-              onPress={handleDisconnect}
-              style={{ paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8 }}
-            >
-              <Text style={{ color: "#525252", fontSize: 11, fontFamily: "monospace", letterSpacing: 1 }}>
-                DISCONNECT
-              </Text>
+            <TVPressable onPress={handleDisconnect} style={{ paddingHorizontal: 20, paddingVertical: 8 }}>
+              <Text style={{ color: "#525252", fontSize: 11, fontFamily: "monospace" }}>DISCONNECT</Text>
             </TVPressable>
           </View>
         )}
 
-        {/* === Streaming: full-screen camera feed === */}
+        {/* === Full-screen feed === */}
         {isStreaming && frameData && (
           <Image
             source={{ uri: `data:image/jpeg;base64,${frameData}` }}
@@ -839,12 +835,10 @@ export default function GlassesScreen() {
           />
         )}
         {isStreaming && !frameData && (
-          <Text style={{ color: "#333", fontSize: 13, fontFamily: "monospace" }}>
-            Waiting for frames...
-          </Text>
+          <Text style={{ color: "#333", fontSize: 13, fontFamily: "monospace" }}>Waiting for frames...</Text>
         )}
 
-        {/* === Overlays (absolute, on top of feed) === */}
+        {/* === Detection overlays === */}
         {arMode && hands.length > 0 && frameSize.width > 0 && (
           <View style={StyleSheet.absoluteFill}>
             <HandOverlay hands={hands} width={frameSize.width} height={frameSize.height} activeFingers={currentGesture?.activeFingers} />
@@ -874,98 +868,83 @@ export default function GlassesScreen() {
           </View>
         )}
 
-        {/* Vision analysis overlay */}
-        {isStreaming && (
-          <VisionOverlay result={visionResult} mode={visionMode} loading={visionLoading} />
-        )}
+        {/* Vision overlay */}
+        {isStreaming && <VisionOverlay result={visionResult} mode={visionMode} loading={visionLoading} />}
 
-        {/* === Floating HUD elements === */}
+        {/* === Minimal floating HUD — only contextual feedback === */}
         {isStreaming && (
           <>
-            {/* Top status bar */}
-            <View
-              style={{
-                position: "absolute",
-                top: insets.top + 4,
-                left: 10,
-                right: 10,
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              {/* Left: LIVE indicator */}
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#EF4444" }} />
-                <Text style={{ color: "#EF4444", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>LIVE</Text>
-              </View>
-              {/* Right: mode badges + FPS */}
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                {arMode && <Text style={{ color: "#00FF88", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>AR</Text>}
-                {commandMode && <Text style={{ color: "#F59E0B", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>CMD</Text>}
-                {targetMode && <Text style={{ color: "#FF6600", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>TARGET</Text>}
-                {faceMode && <Text style={{ color: "#FF6B9D", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>FACE</Text>}
-                {poseMode && <Text style={{ color: "#10B981", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>POSE</Text>}
-                {objectMode && <Text style={{ color: "#3B82F6", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>OBJ</Text>}
-                <Text style={{ color: "#06B6D4", fontSize: 9, fontFamily: "monospace" }}>{fps} FPS</Text>
-              </View>
+            {/* Tiny LIVE dot — top left */}
+            <View style={{ position: "absolute", top: insets.top + 8, left: 12, flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#EF4444" }} />
+              <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 8, fontFamily: "monospace" }}>LIVE</Text>
             </View>
 
-            {/* Corner brackets */}
-            <View style={{ position: "absolute", top: insets.top, left: 4, width: 16, height: 16, borderTopWidth: 1, borderLeftWidth: 1, borderColor: arMode ? "#00FF88" : "#06B6D4" }} />
-            <View style={{ position: "absolute", top: insets.top, right: 4, width: 16, height: 16, borderTopWidth: 1, borderRightWidth: 1, borderColor: arMode ? "#00FF88" : "#06B6D4" }} />
-            <View style={{ position: "absolute", bottom: insets.bottom + 70, left: 4, width: 16, height: 16, borderBottomWidth: 1, borderLeftWidth: 1, borderColor: arMode ? "#00FF88" : "#06B6D4" }} />
-            <View style={{ position: "absolute", bottom: insets.bottom + 70, right: 4, width: 16, height: 16, borderBottomWidth: 1, borderRightWidth: 1, borderColor: arMode ? "#00FF88" : "#06B6D4" }} />
-
-            {/* Gesture label pill */}
+            {/* Gesture feedback — only shows when a gesture is detected */}
             {arMode && currentGesture && currentGesture.gesture !== "none" && (
               <View
                 style={{
                   position: "absolute",
-                  top: insets.top + 28,
+                  top: insets.top + 8,
                   alignSelf: "center",
-                  backgroundColor: "rgba(0,0,0,0.7)",
+                  backgroundColor: "rgba(0,0,0,0.6)",
                   paddingHorizontal: 12,
                   paddingVertical: 4,
                   borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: commandMode ? "#F59E0B" : "#00FF88",
                 }}
               >
-                <Text style={{ color: commandMode ? "#F59E0B" : "#00FF88", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                <Text style={{ color: "#00FF88", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
                   {gestureEmoji(currentGesture.gesture)} {gestureLabel(currentGesture)}
                 </Text>
               </View>
             )}
 
-            {/* Object count HUD */}
-            {objectMode && detectedObjects.length > 0 && (
+            {/* Target lock — shows when pointing at a controllable device */}
+            {lockedTarget && (
               <View
                 style={{
                   position: "absolute",
-                  right: 10,
-                  top: insets.top + 28,
-                  backgroundColor: "rgba(0,0,0,0.8)",
-                  paddingHorizontal: 8,
-                  paddingVertical: 3,
-                  borderRadius: 4,
-                  borderWidth: 1,
-                  borderColor: "#3B82F6",
+                  bottom: insets.bottom + 80,
+                  alignSelf: "center",
+                  backgroundColor: "rgba(0,255,136,0.9)",
+                  paddingHorizontal: 16,
+                  paddingVertical: 6,
+                  borderRadius: 16,
                 }}
               >
-                <Text style={{ color: "#FFF", fontSize: 14, fontFamily: "monospace", fontWeight: "bold" }}>{detectedObjects.length}</Text>
-                <Text style={{ color: "#737373", fontSize: 8, fontFamily: "monospace", letterSpacing: 1 }}>OBJECTS</Text>
+                <Text style={{ color: "#000", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}>
+                  {lockedTarget.target.name.toUpperCase()}
+                </Text>
               </View>
             )}
 
-            {/* Control feedback HUD */}
+            {/* Action result — shows briefly after a gesture command fires */}
+            {lastAction && (
+              <View
+                style={{
+                  position: "absolute",
+                  bottom: insets.bottom + 110,
+                  alignSelf: "center",
+                  backgroundColor: "rgba(245,158,11,0.9)",
+                  paddingHorizontal: 16,
+                  paddingVertical: 6,
+                  borderRadius: 16,
+                }}
+              >
+                <Text style={{ color: "#000", fontSize: 13, fontFamily: "monospace", fontWeight: "bold" }}>
+                  {lastAction.icon} {lastAction.label}
+                </Text>
+              </View>
+            )}
+
+            {/* HA control feedback — shows device state after action */}
             {controlFeedback && (
               <View
                 style={{
                   position: "absolute",
-                  bottom: insets.bottom + 130,
+                  bottom: insets.bottom + 140,
                   alignSelf: "center",
-                  backgroundColor: "rgba(0,0,0,0.85)",
+                  backgroundColor: "rgba(0,0,0,0.8)",
                   paddingHorizontal: 14,
                   paddingVertical: 4,
                   borderRadius: 12,
@@ -973,123 +952,40 @@ export default function GlassesScreen() {
                   borderColor: "#FF6600",
                 }}
               >
-                <Text style={{ color: "#FF6600", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
+                <Text style={{ color: "#FF6600", fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>
                   {controlFeedback}
                 </Text>
-              </View>
-            )}
-
-            {/* Target lock pill */}
-            {arMode && targetMode && lockedTarget && (
-              <View
-                style={{
-                  position: "absolute",
-                  bottom: insets.bottom + 110,
-                  alignSelf: "center",
-                  backgroundColor: "rgba(0,255,136,0.9)",
-                  paddingHorizontal: 14,
-                  paddingVertical: 4,
-                  borderRadius: 12,
-                }}
-              >
-                <Text style={{ color: "#000", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
-                  TARGET: {lockedTarget.target.name.toUpperCase()}
-                </Text>
-              </View>
-            )}
-
-            {/* Action feedback pill */}
-            {arMode && (commandMode || targetMode) && lastAction && (
-              <View
-                style={{
-                  position: "absolute",
-                  bottom: insets.bottom + 90,
-                  alignSelf: "center",
-                  backgroundColor: targetMode ? "rgba(255,102,0,0.9)" : "rgba(245,158,11,0.9)",
-                  paddingHorizontal: 16,
-                  paddingVertical: 6,
-                  borderRadius: 16,
-                }}
-              >
-                <Text style={{ color: "#000", fontSize: 13, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
-                  {lastAction.icon} {lastAction.label}
-                </Text>
-              </View>
-            )}
-
-            {/* Vision mode floating picker */}
-            {visionPickerOpen && (
-              <View
-                style={{
-                  position: "absolute",
-                  bottom: insets.bottom + 76,
-                  alignSelf: "center",
-                  backgroundColor: "rgba(0,0,0,0.85)",
-                  borderRadius: 16,
-                  paddingHorizontal: 10,
-                  paddingVertical: 8,
-                  flexDirection: "row",
-                  gap: 6,
-                }}
-              >
-                {(["describe", "ocr", "identify", "translate"] as VisionMode[]).map((m) => {
-                  const colors: Record<VisionMode, string> = { describe: "#06B6D4", ocr: "#A855F7", identify: "#10B981", translate: "#F59E0B" };
-                  const c = colors[m];
-                  const active = visionMode === m;
-                  return (
-                    <TVPressable
-                      key={m}
-                      onPress={() => {
-                        handleVisionAnalyze(m);
-                        setVisionPickerOpen(false);
-                      }}
-                      style={{
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        borderRadius: 8,
-                        backgroundColor: active ? `${c}33` : "transparent",
-                        borderWidth: 1,
-                        borderColor: active ? c : "#444",
-                      }}
-                    >
-                      <Text style={{ color: active ? c : "#737373", fontSize: 9, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
-                        {m.toUpperCase()}
-                      </Text>
-                    </TVPressable>
-                  );
-                })}
               </View>
             )}
           </>
         )}
 
-        {/* Back button (always visible, top-left when not streaming) */}
+        {/* Back button — pre-stream only */}
         {!isStreaming && (
           <TVPressable
             onPress={() => router.back()}
-            style={{ position: "absolute", top: insets.top + 8, left: 12, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
+            style={{ position: "absolute", top: insets.top + 8, left: 12, paddingHorizontal: 12, paddingVertical: 6 }}
           >
-            <Text style={{ color: "#A3A3A3", fontSize: 12, fontWeight: "bold", letterSpacing: 1 }}>{"\u25C0 BACK"}</Text>
+            <Text style={{ color: "#A3A3A3", fontSize: 12, fontWeight: "bold" }}>{"\u25C0 BACK"}</Text>
           </TVPressable>
         )}
 
-        {/* Error banner */}
+        {/* Error — auto-dismissing banner */}
         {error && (
-          <View
+          <TVPressable
+            onPress={() => setError(null)}
             style={{
               position: "absolute",
-              top: isStreaming ? insets.top + 48 : insets.top + 44,
+              top: insets.top + 28,
               left: 16,
               right: 16,
               backgroundColor: "rgba(239,68,68,0.15)",
-              borderWidth: 1,
-              borderColor: "#7F1D1D",
               borderRadius: 8,
               padding: 10,
             }}
           >
             <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace" }}>{error}</Text>
-          </View>
+          </TVPressable>
         )}
 
         {/* Captured photo toast */}
@@ -1098,7 +994,7 @@ export default function GlassesScreen() {
             onPress={() => setCapturedPhoto(null)}
             style={{
               position: "absolute",
-              top: insets.top + 48,
+              top: insets.top + 28,
               right: 12,
               borderRadius: 8,
               borderWidth: 1,
@@ -1115,12 +1011,35 @@ export default function GlassesScreen() {
         )}
       </View>
 
-      {/* Bottom toolbar pill */}
-      {isStreaming && toolbarItems.length > 0 && (
-        <ToolbarPill items={toolbarItems} bottomInset={insets.bottom} />
+      {/* === Bottom: stop button only (like iOS camera shutter) === */}
+      {isStreaming && (
+        <View
+          style={{
+            position: "absolute",
+            bottom: Math.max(24, insets.bottom + 12),
+            alignSelf: "center",
+            alignItems: "center",
+          }}
+        >
+          <TVPressable
+            onPress={handleDisconnect}
+            style={{
+              width: 60,
+              height: 60,
+              borderRadius: 30,
+              borderWidth: 3,
+              borderColor: "rgba(255,255,255,0.3)",
+              backgroundColor: "rgba(239,68,68,0.8)",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <View style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: "#FFF" }} />
+          </TVPressable>
+        </View>
       )}
 
-      {/* Settings bottom sheet */}
+      {/* Settings sheet — accessible via long-press on stop button or from outside */}
       <SettingsSheet
         visible={settingsOpen}
         onClose={() => setSettingsOpen(false)}
