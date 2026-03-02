@@ -1316,6 +1316,19 @@ export interface BusinessTask {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  phase: string;
+  notes: string;
+  attachment_count: number;
+}
+
+export interface BusinessAttachment {
+  id: number;
+  task_id: number;
+  file_name: string;
+  file_type: string;
+  mime_type: string;
+  file_size: number;
+  created_at: string;
 }
 
 export interface BusinessProject {
@@ -1372,7 +1385,7 @@ export async function archiveBusinessProject(id: number): Promise<{ ok: boolean 
   return res.json();
 }
 
-export async function createBusinessTask(projectId: number, data: { title: string; description?: string; priority?: string; due_date?: string }): Promise<{ ok: boolean; task: BusinessTask }> {
+export async function createBusinessTask(projectId: number, data: { title: string; description?: string; priority?: string; due_date?: string; phase?: string }): Promise<{ ok: boolean; task: BusinessTask }> {
   const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects/${projectId}/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1406,4 +1419,30 @@ export async function toggleBusinessTaskStatus(id: number): Promise<{ ok: boolea
   });
   if (!res.ok) throw new Error(`Toggle task error: ${res.status}`);
   return res.json();
+}
+
+export async function fetchTaskAttachments(taskId: number): Promise<BusinessAttachment[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/tasks/${taskId}/attachments`);
+  if (!res.ok) throw new Error(`Fetch attachments error: ${res.status}`);
+  return res.json();
+}
+
+export async function uploadTaskAttachment(taskId: number, base64: string, fileName: string, fileType?: string): Promise<{ ok: boolean; attachment: BusinessAttachment }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/tasks/${taskId}/attachments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ base64, fileName, fileType }),
+  });
+  if (!res.ok) throw new Error(`Upload attachment error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteTaskAttachment(id: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/attachments/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete attachment error: ${res.status}`);
+  return res.json();
+}
+
+export function getAttachmentUrl(id: number, thumb?: boolean): string {
+  return `${BRIDGE_URL}/business/attachments/${id}/file${thumb ? "?thumb=1" : ""}`;
 }

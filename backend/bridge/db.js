@@ -380,6 +380,24 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_business_tasks_project ON business_tasks(project_id)`);
 
+    // Migration: add phase + notes columns to business_tasks
+    await pool.query(`ALTER TABLE business_tasks ADD COLUMN IF NOT EXISTS phase TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE business_tasks ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''`);
+
+    // Migration: business_attachments table
+    await pool.query(`CREATE TABLE IF NOT EXISTS business_attachments (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER REFERENCES business_tasks(id) ON DELETE CASCADE,
+      file_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      thumbnail_path TEXT,
+      file_type VARCHAR(20) DEFAULT 'image',
+      mime_type VARCHAR(50) DEFAULT 'image/jpeg',
+      file_size INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_business_attachments_task ON business_attachments(task_id)`);
+
     console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
@@ -1890,7 +1908,10 @@ async function getBusinessProject(id) {
   const pRes = await query(`SELECT * FROM business_projects WHERE id = $1`, [id]);
   if (pRes.rows.length === 0) return null;
   const tRes = await query(
-    `SELECT * FROM business_tasks WHERE project_id = $1 ORDER BY position, created_at`,
+    `SELECT t.*, COALESCE(a.cnt, 0)::int AS attachment_count
+     FROM business_tasks t
+     LEFT JOIN (SELECT task_id, COUNT(*)::int AS cnt FROM business_attachments GROUP BY task_id) a ON a.task_id = t.id
+     WHERE t.project_id = $1 ORDER BY t.position, t.created_at`,
     [id]
   );
   return { ...pRes.rows[0], tasks: tRes.rows };
@@ -1938,7 +1959,7 @@ async function archiveBusinessProject(id) {
   return res.rowCount > 0;
 }
 
-async function createBusinessTask({ project_id, title, description, priority, due_date }) {
+async function createBusinessTask({ project_id, title, description, priority, due_date, phase, notes }) {
   if (!_pgConnected) return null;
   const posRes = await query(
     `SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM business_tasks WHERE project_id = $1`,
@@ -1946,9 +1967,9 @@ async function createBusinessTask({ project_id, title, description, priority, du
   );
   const pos = posRes.rows[0].next_pos;
   const res = await query(
-    `INSERT INTO business_tasks (project_id, title, description, priority, due_date, position)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [project_id, title, description || '', priority || 'medium', due_date || null, pos]
+    `INSERT INTO business_tasks (project_id, title, description, priority, due_date, position, phase, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [project_id, title, description || '', priority || 'medium', due_date || null, pos, phase || '', notes || '']
   );
   return res.rows[0];
 }
@@ -1958,7 +1979,7 @@ async function updateBusinessTask(id, updates) {
   const fields = [];
   const vals = [];
   let idx = 1;
-  for (const key of ['title', 'description', 'status', 'priority', 'position', 'due_date']) {
+  for (const key of ['title', 'description', 'status', 'priority', 'position', 'due_date', 'phase', 'notes']) {
     if (updates[key] !== undefined) {
       fields.push(`${key} = $${idx}`);
       vals.push(updates[key]);
@@ -1993,6 +2014,39 @@ async function toggleBusinessTaskStatus(id) {
   const cycle = { pending: 'in_progress', in_progress: 'done', done: 'pending' };
   const next = cycle[cur.rows[0].status] || 'pending';
   return updateBusinessTask(id, { status: next });
+}
+
+// ── Business Attachments ──
+
+async function createBusinessAttachment({ task_id, file_name, file_path, thumbnail_path, file_type, mime_type, file_size }) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO business_attachments (task_id, file_name, file_path, thumbnail_path, file_type, mime_type, file_size)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [task_id, file_name, file_path, thumbnail_path || null, file_type || 'image', mime_type || 'image/jpeg', file_size || 0]
+  );
+  return res.rows[0];
+}
+
+async function getBusinessAttachments(task_id) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT id, task_id, file_name, file_type, mime_type, file_size, created_at FROM business_attachments WHERE task_id = $1 ORDER BY created_at DESC`,
+    [task_id]
+  );
+  return res.rows;
+}
+
+async function getBusinessAttachment(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM business_attachments WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function deleteBusinessAttachment(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`DELETE FROM business_attachments WHERE id = $1 RETURNING *`, [id]);
+  return res.rows[0] || null;
 }
 
 module.exports = {
@@ -2136,6 +2190,11 @@ module.exports = {
   updateBusinessTask,
   deleteBusinessTask,
   toggleBusinessTaskStatus,
+  // Business Attachments
+  createBusinessAttachment,
+  getBusinessAttachments,
+  getBusinessAttachment,
+  deleteBusinessAttachment,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

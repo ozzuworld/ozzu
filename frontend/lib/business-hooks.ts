@@ -9,6 +9,8 @@ import {
   updateBusinessTask,
   deleteBusinessTask,
   toggleBusinessTaskStatus,
+  uploadTaskAttachment,
+  deleteTaskAttachment,
   type BusinessProject,
   type BusinessTask,
 } from "./bridge-api";
@@ -86,8 +88,25 @@ export function useBusinessProject(id: number | null) {
     reload();
   }, [reload]);
 
+  const uploadAttachment = useCallback(
+    async (taskId: number, base64: string, fileName: string, fileType?: string) => {
+      const res = await uploadTaskAttachment(taskId, base64, fileName, fileType);
+      await reload();
+      return res.attachment;
+    },
+    [reload]
+  );
+
+  const removeAttachment = useCallback(
+    async (attachmentId: number) => {
+      await deleteTaskAttachment(attachmentId);
+      await reload();
+    },
+    [reload]
+  );
+
   const addTask = useCallback(
-    async (data: { title: string; description?: string; priority?: string; due_date?: string }) => {
+    async (data: { title: string; description?: string; priority?: string; due_date?: string; phase?: string }) => {
       if (!id) return null;
       const res = await createBusinessTask(id, data);
       await reload();
@@ -129,5 +148,5 @@ export function useBusinessProject(id: number | null) {
     []
   );
 
-  return { project, loading, error, reload, addTask, editTask, removeTask, toggleTask };
+  return { project, loading, error, reload, addTask, editTask, removeTask, toggleTask, uploadAttachment, removeAttachment };
 }
