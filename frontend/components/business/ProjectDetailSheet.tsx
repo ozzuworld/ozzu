@@ -4,7 +4,9 @@ import { ProgressBar } from "./ProgressBar";
 import { TaskCard } from "./TaskCard";
 import { TaskDetailSheet } from "./TaskDetailSheet";
 import { AddTaskModal } from "./AddTaskModal";
-import { useBusinessProject } from "../../lib/business-hooks";
+import { FinancialSummaryCard } from "./FinancialSummaryCard";
+import { CostField } from "./CostField";
+import { useBusinessProject, useProjectFinancials } from "../../lib/business-hooks";
 import {
   toggleBusinessTaskStatus,
   deleteBusinessTask,
@@ -29,18 +31,22 @@ interface ProjectDetailSheetProps {
 }
 
 export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList }: ProjectDetailSheetProps) {
-  const { project, loading, reload: refresh, editTask, uploadAttachment, removeAttachment } = useBusinessProject(projectId);
+  const { project, loading, reload: refresh, editTask, uploadAttachment, removeAttachment, addExpense, editExpense, removeExpense } = useBusinessProject(projectId);
+  const { financials, loading: financialsLoading, reload: reloadFinancials } = useProjectFinancials(projectId);
   const [addTaskVisible, setAddTaskVisible] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("phases");
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
   const [detailTask, setDetailTask] = useState<BusinessTask | null>(null);
+  const [editingBudget, setEditingBudget] = useState(false);
+  const [budgetVal, setBudgetVal] = useState<number | null>(null);
 
   const handleToggleTask = useCallback(async (taskId: number) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     await toggleBusinessTaskStatus(taskId);
     refresh();
+    reloadFinancials();
     onRefreshList();
-  }, [refresh, onRefreshList]);
+  }, [refresh, reloadFinancials, onRefreshList]);
 
   const handleDeleteTask = useCallback(async (task: BusinessTask) => {
     Alert.alert("Delete Task", `Delete "${task.title}"?`, [
@@ -50,11 +56,12 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
           await deleteBusinessTask(task.id);
           setDetailTask(null);
           refresh();
+          reloadFinancials();
           onRefreshList();
         },
       },
     ]);
-  }, [refresh, onRefreshList]);
+  }, [refresh, reloadFinancials, onRefreshList]);
 
   const handleStatusChange = useCallback(async (status: string) => {
     if (!projectId) return;
@@ -79,17 +86,28 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
 
   const handleEditTask = useCallback(async (taskId: number, data: Partial<BusinessTask>) => {
     await editTask(taskId, data);
-    // Update the detail task inline so changes are reflected immediately
     setDetailTask((prev) => prev && prev.id === taskId ? { ...prev, ...data } : prev);
-  }, [editTask]);
+    reloadFinancials();
+  }, [editTask, reloadFinancials]);
 
   const handleUploadAttachment = useCallback(async (taskId: number, base64: string, fileName: string, fileType?: string) => {
-    return uploadAttachment(taskId, base64, fileName, fileType);
-  }, [uploadAttachment]);
+    const result = await uploadAttachment(taskId, base64, fileName, fileType);
+    reloadFinancials();
+    return result;
+  }, [uploadAttachment, reloadFinancials]);
 
   const handleRemoveAttachment = useCallback(async (id: number) => {
     await removeAttachment(id);
   }, [removeAttachment]);
+
+  const handleBudgetSave = useCallback(async () => {
+    if (!projectId) return;
+    await updateBusinessProject(projectId, { budget: budgetVal } as any);
+    setEditingBudget(false);
+    refresh();
+    reloadFinancials();
+    onRefreshList();
+  }, [projectId, budgetVal, refresh, reloadFinancials, onRefreshList]);
 
   const togglePhaseCollapse = (phase: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -244,6 +262,30 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
                 </View>
               </View>
 
+              {/* Financial summary card */}
+              <FinancialSummaryCard financials={financials} loading={financialsLoading} />
+
+              {/* Budget field */}
+              {editingBudget ? (
+                <View style={{ marginBottom: 16 }}>
+                  <CostField value={budgetVal} onChange={setBudgetVal} label="PROJECT BUDGET (COP)" />
+                  <View style={{ flexDirection: "row", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+                    <Pressable onPress={() => setEditingBudget(false)} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
+                      <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 10 }}>CANCEL</Text>
+                    </Pressable>
+                    <Pressable onPress={handleBudgetSave} style={{ backgroundColor: "#06B6D4", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}>
+                      <Text style={{ color: "#111", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>SAVE</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <Pressable onPress={() => { setBudgetVal(project.budget || null); setEditingBudget(true); }} style={{ marginBottom: 16 }}>
+                  <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>
+                    {project.budget ? "EDIT BUDGET" : "+ SET BUDGET"}
+                  </Text>
+                </Pressable>
+              )}
+
               {/* Status toggles */}
               <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>STATUS</Text>
               <View style={{ flexDirection: "row", gap: 6, marginBottom: 16 }}>
@@ -330,7 +372,7 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
             projectId={projectId || 0}
             existingPhases={existingPhases}
             onClose={() => setAddTaskVisible(false)}
-            onCreated={() => { refresh(); onRefreshList(); }}
+            onCreated={() => { refresh(); reloadFinancials(); onRefreshList(); }}
           />
 
           <TaskDetailSheet
@@ -342,6 +384,9 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
             onDelete={handleDeleteTask}
             onUpload={handleUploadAttachment}
             onRemoveAttachment={handleRemoveAttachment}
+            onAddExpense={addExpense}
+            onEditExpense={editExpense}
+            onRemoveExpense={removeExpense}
           />
         </View>
       </View>

@@ -1,5 +1,6 @@
 import { View, Text, Pressable } from "react-native";
 import { ProgressBar } from "./ProgressBar";
+import { formatCOPCompact } from "./CostField";
 import type { BusinessProject } from "../../lib/bridge-api";
 
 const STATUS_BADGE: Record<string, { label: string; color: string }> = {
@@ -50,6 +51,16 @@ export function ProjectCard({ project, onPress, onLongPress }: ProjectCardProps)
           <Text style={{ color: "#737373", fontSize: 12, marginBottom: 8 }} numberOfLines={2}>
             {project.description}
           </Text>
+        ) : null}
+
+        {/* Budget utilization bar */}
+        {project.budget && project.budget > 0 ? (
+          <View style={{ marginBottom: 6 }}>
+            <ProgressBar done={project.total_actual || 0} total={project.budget} color={((project.total_actual || 0) / project.budget) > 1 ? "#EF4444" : ((project.total_actual || 0) / project.budget) > 0.8 ? "#EAB308" : "#22C55E"} height={3} />
+            <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>
+              {formatCOPCompact(project.total_actual || 0)} / {formatCOPCompact(project.budget)}
+            </Text>
+          </View>
         ) : null}
 
         {/* Progress */}

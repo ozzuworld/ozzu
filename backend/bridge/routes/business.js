@@ -92,6 +92,80 @@ Respond ONLY with valid JSON in this exact format:
   });
 }
 
+// ── Gemini Receipt/Invoice Extraction ──
+
+async function extractReceiptWithGemini(apiKey, fileBuffer, mimeType) {
+  const base64Data = fileBuffer.toString("base64");
+  const prompt = `You are a receipt/invoice data extraction assistant for Colombian businesses.
+
+Analyze this document and determine if it is a receipt, invoice, factura, or similar financial document.
+
+If it IS a receipt/invoice/factura:
+- Extract all financial data
+- All amounts should be in COP (Colombian Pesos) if visible, or the currency shown
+- IVA in Colombia is 19%
+
+Respond ONLY with valid JSON:
+{
+  "isReceipt": true,
+  "amount": 0,
+  "subtotal": 0,
+  "iva": 0,
+  "vendor": "string",
+  "date": "YYYY-MM-DD",
+  "lineItems": [{ "description": "string", "quantity": 1, "unitPrice": 0, "total": 0 }],
+  "paymentMethod": "cash|card|transfer|other",
+  "documentNumber": "string or null",
+  "rawText": "brief summary of document content"
+}
+
+If it is NOT a receipt/invoice, respond with:
+{ "isReceipt": false }`;
+
+  const payload = JSON.stringify({
+    contents: [{
+      parts: [
+        { inlineData: { mimeType, data: base64Data } },
+        { text: prompt },
+      ],
+    }],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+  });
+
+  return new Promise((resolve, reject) => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const parsed = new URL(url);
+    const reqOpts = {
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+      timeout: 30000,
+    };
+
+    const httpReq = https.request(reqOpts, (httpRes) => {
+      let data = "";
+      httpRes.on("data", (chunk) => { data += chunk; });
+      httpRes.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          const text = json.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, text];
+          const parsed = JSON.parse(jsonMatch[1].trim());
+          resolve(parsed.isReceipt ? parsed : null);
+        } catch (e) {
+          reject(new Error(`Gemini receipt parse error: ${e.message}`));
+        }
+      });
+    });
+
+    httpReq.on("error", (e) => reject(new Error(`Gemini receipt request error: ${e.message}`)));
+    httpReq.on("timeout", () => { httpReq.destroy(); reject(new Error("Gemini receipt request timeout (30s)")); });
+    httpReq.write(payload);
+    httpReq.end();
+  });
+}
+
 module.exports = function businessRoutes(ctx) {
   const { sendJSON, parseBody, db, CORS_HEADERS } = ctx;
   const GEMINI_API_KEY = ctx.GEMINI_API_KEY || "";
@@ -310,6 +384,8 @@ module.exports = function businessRoutes(ctx) {
 
         // Auto-verify with Gemini if API key available
         let verification = null;
+        let receiptData = null;
+        let autoExpense = null;
         if (GEMINI_API_KEY) {
           try {
             const taskRow = await db.query(`SELECT * FROM business_tasks WHERE id = $1`, [taskId]);
@@ -349,11 +425,34 @@ module.exports = function businessRoutes(ctx) {
             }
           } catch (verifyErr) {
             console.error("[business] Gemini verification error:", verifyErr.message);
-            // Non-fatal — attachment still saved
+          }
+
+          // Receipt detection — run in parallel with verification
+          try {
+            receiptData = await extractReceiptWithGemini(GEMINI_API_KEY, buf, mimeType);
+            if (receiptData) {
+              await db.updateBusinessAttachmentReceiptData(attachment.id, receiptData);
+              // Auto-create expense from receipt
+              autoExpense = await db.createBusinessExpense({
+                task_id: taskId,
+                attachment_id: attachment.id,
+                amount: receiptData.amount || 0,
+                iva_amount: receiptData.iva || 0,
+                category: 'other',
+                vendor: receiptData.vendor || '',
+                description: `Auto-extracted from ${body.fileName}`,
+                payment_status: 'paid',
+                payment_method: receiptData.paymentMethod || null,
+                expense_date: receiptData.date || new Date().toISOString().split('T')[0],
+                receipt_data: receiptData,
+              });
+            }
+          } catch (receiptErr) {
+            console.error("[business] Receipt extraction error:", receiptErr.message);
           }
         }
 
-        sendJSON(res, 201, { ok: true, attachment: { ...attachment, verification } });
+        sendJSON(res, 201, { ok: true, attachment: { ...attachment, verification, receipt_data: receiptData }, autoExpense });
       } catch (err) {
         sendJSON(res, 500, { error: err.message });
       }
@@ -436,6 +535,118 @@ module.exports = function businessRoutes(ctx) {
         const contentType = thumb ? "image/jpeg" : (attachment.mime_type || "application/octet-stream");
         res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "public, max-age=3600" });
         fs.createReadStream(servePath).pipe(res);
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // ── Expenses CRUD ──
+
+    // POST /business/tasks/:id/expenses — create expense
+    const expenseCreateMatch = pathname.match(/^\/business\/tasks\/(\d+)\/expenses$/);
+    if (req.method === "POST" && expenseCreateMatch) {
+      try {
+        const taskId = parseInt(expenseCreateMatch[1]);
+        const body = await parseBody(req);
+        if (!body.amount || !body.category) {
+          sendJSON(res, 400, { error: "amount and category are required" });
+          return true;
+        }
+        const expense = await db.createBusinessExpense({
+          task_id: taskId,
+          attachment_id: body.attachment_id,
+          amount: body.amount,
+          iva_amount: body.iva_amount,
+          category: body.category,
+          vendor: body.vendor,
+          description: body.description,
+          payment_status: body.payment_status,
+          payment_method: body.payment_method,
+          expense_date: body.expense_date,
+          receipt_data: body.receipt_data,
+        });
+        sendJSON(res, 201, { ok: true, expense });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /business/tasks/:id/expenses — list expenses for task
+    if (req.method === "GET" && expenseCreateMatch) {
+      try {
+        const taskId = parseInt(expenseCreateMatch[1]);
+        const expenses = await db.getBusinessExpenses(taskId);
+        sendJSON(res, 200, expenses);
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // PATCH /business/expenses/:id — update expense
+    const expenseMatch = pathname.match(/^\/business\/expenses\/(\d+)$/);
+    if (req.method === "PATCH" && expenseMatch) {
+      try {
+        const body = await parseBody(req);
+        const expense = await db.updateBusinessExpense(parseInt(expenseMatch[1]), body);
+        if (!expense) {
+          sendJSON(res, 404, { error: "expense not found" });
+          return true;
+        }
+        sendJSON(res, 200, { ok: true, expense });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // DELETE /business/expenses/:id — delete expense
+    if (req.method === "DELETE" && expenseMatch) {
+      try {
+        const ok = await db.deleteBusinessExpense(parseInt(expenseMatch[1]));
+        sendJSON(res, ok ? 200 : 404, { ok });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /business/projects/:id/financials — financial summary
+    const financialsMatch = pathname.match(/^\/business\/projects\/(\d+)\/financials$/);
+    if (req.method === "GET" && financialsMatch) {
+      try {
+        const financials = await db.getProjectFinancials(parseInt(financialsMatch[1]));
+        if (!financials) {
+          sendJSON(res, 404, { error: "project not found" });
+          return true;
+        }
+        sendJSON(res, 200, financials);
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /business/attachments/:id/extract-receipt — manual receipt extraction
+    const extractReceiptMatch = pathname.match(/^\/business\/attachments\/(\d+)\/extract-receipt$/);
+    if (req.method === "POST" && extractReceiptMatch) {
+      try {
+        if (!GEMINI_API_KEY) { sendJSON(res, 500, { error: "GEMINI_API_KEY not configured" }); return true; }
+        const attId = parseInt(extractReceiptMatch[1]);
+        const attachment = await db.getBusinessAttachment(attId);
+        if (!attachment) { sendJSON(res, 404, { error: "Attachment not found" }); return true; }
+        if (!fs.existsSync(attachment.file_path)) { sendJSON(res, 404, { error: "File not found on disk" }); return true; }
+
+        const buf = fs.readFileSync(attachment.file_path);
+        const receiptData = await extractReceiptWithGemini(GEMINI_API_KEY, buf, attachment.mime_type);
+        if (!receiptData) {
+          sendJSON(res, 200, { ok: false, message: "No receipt data detected" });
+          return true;
+        }
+        await db.updateBusinessAttachmentReceiptData(attId, receiptData);
+        sendJSON(res, 200, { ok: true, receiptData });
       } catch (err) {
         sendJSON(res, 500, { error: err.message });
       }

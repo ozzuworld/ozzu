@@ -1346,7 +1346,11 @@ export interface BusinessTask {
   phase: string;
   notes: string;
   attachment_count: number;
+  expense_count: number;
   requirements: TaskRequirement[];
+  estimated_cost: number | null;
+  actual_cost: number | null;
+  cost_category: string | null;
 }
 
 export interface BusinessAttachment {
@@ -1357,6 +1361,7 @@ export interface BusinessAttachment {
   mime_type: string;
   file_size: number;
   verification: AttachmentVerification | null;
+  receipt_data: ReceiptData | null;
   created_at: string;
 }
 
@@ -1371,6 +1376,10 @@ export interface BusinessProject {
   task_count: number;
   done_count: number;
   in_progress_count: number;
+  budget: number | null;
+  currency: string;
+  total_estimated: number;
+  total_actual: number;
   created_at: string;
   updated_at: string;
   tasks?: BusinessTask[];
@@ -1493,5 +1502,116 @@ export async function reverifyAttachment(attachmentId: number): Promise<{ ok: bo
     body: JSON.stringify({}),
   });
   if (!res.ok) throw new Error(`Reverify error: ${res.status}`);
+  return res.json();
+}
+
+// ── COP Formatting ──
+
+export function formatCOP(amount: number | null | undefined): string {
+  if (amount == null || isNaN(amount)) return "$0";
+  const rounded = Math.round(amount);
+  return "$" + rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+export function formatCOPCompact(amount: number | null | undefined): string {
+  if (amount == null || isNaN(amount)) return "$0";
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (abs >= 1_000_000_000) return sign + "$" + (abs / 1_000_000_000).toFixed(1) + "B";
+  if (abs >= 1_000_000) return sign + "$" + (abs / 1_000_000).toFixed(1) + "M";
+  if (abs >= 1_000) return sign + "$" + (abs / 1_000).toFixed(0) + "K";
+  return sign + "$" + Math.round(abs);
+}
+
+// ── Business Expenses & Financial Tracking ──
+
+export interface ReceiptData {
+  isReceipt?: boolean;
+  amount: number;
+  subtotal?: number;
+  iva?: number;
+  vendor?: string;
+  date?: string;
+  lineItems?: { description: string; quantity?: number; unitPrice?: number; total: number }[];
+  paymentMethod?: string;
+  documentNumber?: string;
+  rawText?: string;
+}
+
+export interface BusinessExpense {
+  id: number;
+  task_id: number;
+  attachment_id: number | null;
+  amount: number;
+  iva_amount: number;
+  subtotal: number | null;
+  category: string;
+  vendor: string;
+  description: string;
+  payment_status: "pending" | "paid" | "partial" | "overdue";
+  payment_method: string | null;
+  expense_date: string;
+  receipt_data: ReceiptData | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectFinancials {
+  budget: number | null;
+  currency: string;
+  totalEstimated: number;
+  totalActual: number;
+  totalIVA: number;
+  byCategory: Record<string, number>;
+  byPhase: Record<string, { estimated: number; actual: number; taskCount: number }>;
+  byPaymentStatus: Record<string, { count: number; total: number }>;
+  budgetUtilization: number | null;
+}
+
+export async function getTaskExpenses(taskId: number): Promise<BusinessExpense[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/tasks/${taskId}/expenses`);
+  if (!res.ok) throw new Error(`Fetch expenses error: ${res.status}`);
+  return res.json();
+}
+
+export async function createExpense(taskId: number, data: Partial<BusinessExpense>): Promise<{ ok: boolean; expense: BusinessExpense }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/tasks/${taskId}/expenses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Create expense error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateExpense(expenseId: number, data: Partial<BusinessExpense>): Promise<{ ok: boolean; expense: BusinessExpense }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/expenses/${expenseId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Update expense error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteExpense(expenseId: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/expenses/${expenseId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete expense error: ${res.status}`);
+  return res.json();
+}
+
+export async function getProjectFinancials(projectId: number): Promise<ProjectFinancials> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects/${projectId}/financials`);
+  if (!res.ok) throw new Error(`Fetch financials error: ${res.status}`);
+  return res.json();
+}
+
+export async function extractReceipt(attachmentId: number): Promise<{ ok: boolean; receiptData?: ReceiptData }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/attachments/${attachmentId}/extract-receipt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`Extract receipt error: ${res.status}`);
   return res.json();
 }

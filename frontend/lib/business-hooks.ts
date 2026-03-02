@@ -11,8 +11,15 @@ import {
   toggleBusinessTaskStatus,
   uploadTaskAttachment,
   deleteTaskAttachment,
+  getTaskExpenses,
+  createExpense,
+  updateExpense,
+  deleteExpense,
+  getProjectFinancials,
   type BusinessProject,
   type BusinessTask,
+  type BusinessExpense,
+  type ProjectFinancials,
 } from "./bridge-api";
 
 export function useBusiness() {
@@ -148,5 +155,55 @@ export function useBusinessProject(id: number | null) {
     []
   );
 
-  return { project, loading, error, reload, addTask, editTask, removeTask, toggleTask, uploadAttachment, removeAttachment };
+  const addExpense = useCallback(
+    async (taskId: number, data: Partial<BusinessExpense>) => {
+      const res = await createExpense(taskId, data);
+      await reload();
+      return res.expense;
+    },
+    [reload]
+  );
+
+  const editExpense = useCallback(
+    async (expenseId: number, data: Partial<BusinessExpense>) => {
+      const res = await updateExpense(expenseId, data);
+      await reload();
+      return res.expense;
+    },
+    [reload]
+  );
+
+  const removeExpense = useCallback(
+    async (expenseId: number) => {
+      await deleteExpense(expenseId);
+      await reload();
+    },
+    [reload]
+  );
+
+  return { project, loading, error, reload, addTask, editTask, removeTask, toggleTask, uploadAttachment, removeAttachment, addExpense, editExpense, removeExpense };
+}
+
+export function useProjectFinancials(projectId: number | null) {
+  const [financials, setFinancials] = useState<ProjectFinancials | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    if (!projectId) { setLoading(false); return; }
+    try {
+      const data = await getProjectFinancials(projectId);
+      setFinancials(data);
+    } catch {
+      setFinancials(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    setLoading(true);
+    reload();
+  }, [reload]);
+
+  return { financials, loading, reload };
 }

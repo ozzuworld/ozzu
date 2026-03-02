@@ -402,6 +402,38 @@ async function init() {
     await pool.query(`ALTER TABLE business_tasks ADD COLUMN IF NOT EXISTS requirements JSONB DEFAULT '[]'`);
     await pool.query(`ALTER TABLE business_attachments ADD COLUMN IF NOT EXISTS verification JSONB DEFAULT NULL`);
 
+    // Migration: financial tracking columns on business_projects
+    await pool.query(`ALTER TABLE business_projects ADD COLUMN IF NOT EXISTS budget DECIMAL(15,2) DEFAULT NULL`);
+    await pool.query(`ALTER TABLE business_projects ADD COLUMN IF NOT EXISTS currency VARCHAR(5) DEFAULT 'COP'`);
+
+    // Migration: financial tracking columns on business_tasks
+    await pool.query(`ALTER TABLE business_tasks ADD COLUMN IF NOT EXISTS estimated_cost DECIMAL(15,2) DEFAULT NULL`);
+    await pool.query(`ALTER TABLE business_tasks ADD COLUMN IF NOT EXISTS actual_cost DECIMAL(15,2) DEFAULT NULL`);
+    await pool.query(`ALTER TABLE business_tasks ADD COLUMN IF NOT EXISTS cost_category VARCHAR(30) DEFAULT NULL`);
+
+    // Migration: business_expenses table
+    await pool.query(`CREATE TABLE IF NOT EXISTS business_expenses (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER REFERENCES business_tasks(id) ON DELETE CASCADE,
+      attachment_id INTEGER REFERENCES business_attachments(id) ON DELETE SET NULL,
+      amount DECIMAL(15,2) NOT NULL,
+      iva_amount DECIMAL(15,2) DEFAULT 0,
+      subtotal DECIMAL(15,2) DEFAULT NULL,
+      category VARCHAR(30) NOT NULL,
+      vendor TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending','paid','partial','overdue')),
+      payment_method VARCHAR(20) DEFAULT NULL,
+      expense_date DATE DEFAULT CURRENT_DATE,
+      receipt_data JSONB DEFAULT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_business_expenses_task ON business_expenses(task_id)`);
+
+    // Migration: receipt_data on business_attachments
+    await pool.query(`ALTER TABLE business_attachments ADD COLUMN IF NOT EXISTS receipt_data JSONB DEFAULT NULL`);
+
     console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
@@ -1897,7 +1929,9 @@ async function getBusinessProjects() {
     SELECT p.*,
       COUNT(t.id)::int AS task_count,
       COUNT(t.id) FILTER (WHERE t.status = 'done')::int AS done_count,
-      COUNT(t.id) FILTER (WHERE t.status = 'in_progress')::int AS in_progress_count
+      COUNT(t.id) FILTER (WHERE t.status = 'in_progress')::int AS in_progress_count,
+      COALESCE(SUM(t.estimated_cost), 0)::numeric AS total_estimated,
+      COALESCE((SELECT SUM(e.amount) FROM business_expenses e JOIN business_tasks bt ON bt.id = e.task_id WHERE bt.project_id = p.id), 0)::numeric AS total_actual
     FROM business_projects p
     LEFT JOIN business_tasks t ON t.project_id = p.id
     WHERE p.status != 'archived'
@@ -1912,9 +1946,10 @@ async function getBusinessProject(id) {
   const pRes = await query(`SELECT * FROM business_projects WHERE id = $1`, [id]);
   if (pRes.rows.length === 0) return null;
   const tRes = await query(
-    `SELECT t.*, COALESCE(a.cnt, 0)::int AS attachment_count
+    `SELECT t.*, COALESCE(a.cnt, 0)::int AS attachment_count, COALESCE(e.cnt, 0)::int AS expense_count
      FROM business_tasks t
      LEFT JOIN (SELECT task_id, COUNT(*)::int AS cnt FROM business_attachments GROUP BY task_id) a ON a.task_id = t.id
+     LEFT JOIN (SELECT task_id, COUNT(*)::int AS cnt FROM business_expenses GROUP BY task_id) e ON e.task_id = t.id
      WHERE t.project_id = $1 ORDER BY t.position, t.created_at`,
     [id]
   );
@@ -1937,7 +1972,7 @@ async function updateBusinessProject(id, updates) {
   const fields = [];
   const vals = [];
   let idx = 1;
-  for (const key of ['name', 'description', 'emoji', 'color', 'status', 'position']) {
+  for (const key of ['name', 'description', 'emoji', 'color', 'status', 'position', 'budget', 'currency']) {
     if (updates[key] !== undefined) {
       fields.push(`${key} = $${idx}`);
       vals.push(updates[key]);
@@ -1963,7 +1998,7 @@ async function archiveBusinessProject(id) {
   return res.rowCount > 0;
 }
 
-async function createBusinessTask({ project_id, title, description, priority, due_date, phase, notes }) {
+async function createBusinessTask({ project_id, title, description, priority, due_date, phase, notes, estimated_cost, cost_category }) {
   if (!_pgConnected) return null;
   const posRes = await query(
     `SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM business_tasks WHERE project_id = $1`,
@@ -1971,9 +2006,9 @@ async function createBusinessTask({ project_id, title, description, priority, du
   );
   const pos = posRes.rows[0].next_pos;
   const res = await query(
-    `INSERT INTO business_tasks (project_id, title, description, priority, due_date, position, phase, notes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [project_id, title, description || '', priority || 'medium', due_date || null, pos, phase || '', notes || '']
+    `INSERT INTO business_tasks (project_id, title, description, priority, due_date, position, phase, notes, estimated_cost, cost_category)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    [project_id, title, description || '', priority || 'medium', due_date || null, pos, phase || '', notes || '', estimated_cost || null, cost_category || null]
   );
   return res.rows[0];
 }
@@ -1983,7 +2018,7 @@ async function updateBusinessTask(id, updates) {
   const fields = [];
   const vals = [];
   let idx = 1;
-  for (const key of ['title', 'description', 'status', 'priority', 'position', 'due_date', 'phase', 'notes', 'requirements']) {
+  for (const key of ['title', 'description', 'status', 'priority', 'position', 'due_date', 'phase', 'notes', 'requirements', 'estimated_cost', 'actual_cost', 'cost_category']) {
     if (updates[key] !== undefined) {
       fields.push(`${key} = $${idx}`);
       vals.push(updates[key]);
@@ -2058,6 +2093,139 @@ async function updateBusinessAttachmentVerification(id, verification) {
   const res = await query(
     `UPDATE business_attachments SET verification = $1 WHERE id = $2 RETURNING *`,
     [JSON.stringify(verification), id]
+  );
+  return res.rows[0] || null;
+}
+
+// ── Business Expenses ──
+
+async function createBusinessExpense({ task_id, attachment_id, amount, iva_amount, category, vendor, description, payment_status, payment_method, expense_date, receipt_data }) {
+  if (!_pgConnected) return null;
+  const subtotal = amount - (iva_amount || 0);
+  const res = await query(
+    `INSERT INTO business_expenses (task_id, attachment_id, amount, iva_amount, subtotal, category, vendor, description, payment_status, payment_method, expense_date, receipt_data)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+    [task_id, attachment_id || null, amount, iva_amount || 0, subtotal, category, vendor || '', description || '', payment_status || 'pending', payment_method || null, expense_date || new Date().toISOString().split('T')[0], receipt_data ? JSON.stringify(receipt_data) : null]
+  );
+  return res.rows[0];
+}
+
+async function getBusinessExpenses(task_id) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT * FROM business_expenses WHERE task_id = $1 ORDER BY expense_date DESC, created_at DESC`,
+    [task_id]
+  );
+  return res.rows;
+}
+
+async function updateBusinessExpense(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const vals = [];
+  let idx = 1;
+  for (const key of ['amount', 'iva_amount', 'category', 'vendor', 'description', 'payment_status', 'payment_method', 'expense_date', 'attachment_id', 'receipt_data']) {
+    if (updates[key] !== undefined) {
+      fields.push(`${key} = $${idx}`);
+      vals.push(key === 'receipt_data' ? JSON.stringify(updates[key]) : updates[key]);
+      idx++;
+    }
+  }
+  if (fields.length === 0) return null;
+  // Recompute subtotal if amount or iva changed
+  if (updates.amount !== undefined || updates.iva_amount !== undefined) {
+    const cur = await query(`SELECT amount, iva_amount FROM business_expenses WHERE id = $1`, [id]);
+    if (cur.rows.length > 0) {
+      const amt = updates.amount !== undefined ? updates.amount : cur.rows[0].amount;
+      const iva = updates.iva_amount !== undefined ? updates.iva_amount : cur.rows[0].iva_amount;
+      fields.push(`subtotal = $${idx}`);
+      vals.push(amt - iva);
+      idx++;
+    }
+  }
+  fields.push(`updated_at = NOW()`);
+  vals.push(id);
+  const res = await query(
+    `UPDATE business_expenses SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+    vals
+  );
+  return res.rows[0] || null;
+}
+
+async function deleteBusinessExpense(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM business_expenses WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+async function getProjectFinancials(projectId) {
+  if (!_pgConnected) return null;
+  const pRes = await query(`SELECT budget, currency FROM business_projects WHERE id = $1`, [projectId]);
+  if (pRes.rows.length === 0) return null;
+  const { budget, currency } = pRes.rows[0];
+
+  // Task-level aggregates
+  const taskRes = await query(
+    `SELECT COALESCE(SUM(estimated_cost), 0)::numeric AS total_estimated FROM business_tasks WHERE project_id = $1`,
+    [projectId]
+  );
+  const totalEstimated = parseFloat(taskRes.rows[0].total_estimated);
+
+  // Expense aggregates
+  const expRes = await query(
+    `SELECT COALESCE(SUM(e.amount), 0)::numeric AS total_actual, COALESCE(SUM(e.iva_amount), 0)::numeric AS total_iva
+     FROM business_expenses e JOIN business_tasks t ON t.id = e.task_id WHERE t.project_id = $1`,
+    [projectId]
+  );
+  const totalActual = parseFloat(expRes.rows[0].total_actual);
+  const totalIVA = parseFloat(expRes.rows[0].total_iva);
+
+  // By category
+  const catRes = await query(
+    `SELECT e.category, SUM(e.amount)::numeric AS total
+     FROM business_expenses e JOIN business_tasks t ON t.id = e.task_id WHERE t.project_id = $1
+     GROUP BY e.category ORDER BY total DESC`,
+    [projectId]
+  );
+  const byCategory = {};
+  for (const r of catRes.rows) byCategory[r.category] = parseFloat(r.total);
+
+  // By phase
+  const phaseRes = await query(
+    `SELECT COALESCE(NULLIF(t.phase, ''), 'Uncategorized') AS phase,
+       COALESCE(SUM(t.estimated_cost), 0)::numeric AS estimated,
+       COALESCE(SUM(e_agg.actual), 0)::numeric AS actual,
+       COUNT(t.id)::int AS task_count
+     FROM business_tasks t
+     LEFT JOIN (SELECT task_id, SUM(amount)::numeric AS actual FROM business_expenses GROUP BY task_id) e_agg ON e_agg.task_id = t.id
+     WHERE t.project_id = $1
+     GROUP BY phase ORDER BY phase`,
+    [projectId]
+  );
+  const byPhase = {};
+  for (const r of phaseRes.rows) byPhase[r.phase] = { estimated: parseFloat(r.estimated), actual: parseFloat(r.actual), taskCount: r.task_count };
+
+  // By payment status
+  const payRes = await query(
+    `SELECT e.payment_status, COUNT(*)::int AS count, SUM(e.amount)::numeric AS total
+     FROM business_expenses e JOIN business_tasks t ON t.id = e.task_id WHERE t.project_id = $1
+     GROUP BY e.payment_status`,
+    [projectId]
+  );
+  const byPaymentStatus = {};
+  for (const r of payRes.rows) byPaymentStatus[r.payment_status] = { count: r.count, total: parseFloat(r.total) };
+
+  const budgetVal = budget ? parseFloat(budget) : null;
+  const budgetUtilization = budgetVal ? Math.round((totalActual / budgetVal) * 10000) / 100 : null;
+
+  return { budget: budgetVal, currency, totalEstimated, totalActual, totalIVA, byCategory, byPhase, byPaymentStatus, budgetUtilization };
+}
+
+async function updateBusinessAttachmentReceiptData(id, receiptData) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `UPDATE business_attachments SET receipt_data = $1 WHERE id = $2 RETURNING *`,
+    [JSON.stringify(receiptData), id]
   );
   return res.rows[0] || null;
 }
@@ -2209,6 +2377,13 @@ module.exports = {
   getBusinessAttachment,
   deleteBusinessAttachment,
   updateBusinessAttachmentVerification,
+  updateBusinessAttachmentReceiptData,
+  // Business Expenses
+  createBusinessExpense,
+  getBusinessExpenses,
+  updateBusinessExpense,
+  deleteBusinessExpense,
+  getProjectFinancials,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

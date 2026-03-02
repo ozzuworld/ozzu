@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text, Pressable, LayoutAnimation, ScrollView, Image } from "react-native";
 import { type BusinessTask, type TaskRequirement, getAttachmentUrl } from "../../lib/bridge-api";
+import { formatCOPCompact } from "./CostField";
 
 const STATUS_ICON: Record<string, string> = {
   pending: "○",
@@ -93,6 +94,12 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
               const color = fulfilled === 0 ? "#525252" : fulfilled >= reqs.length ? "#22C55E" : "#EAB308";
               return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />;
             })()}
+            {task.estimated_cost ? (
+              <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 9 }}>{formatCOPCompact(task.estimated_cost)}</Text>
+            ) : null}
+            {(task.expense_count || 0) > 0 ? (
+              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 9 }}>$ {task.expense_count}</Text>
+            ) : null}
             {attachCount > 0 ? (
               <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 9 }}>📎 {attachCount}</Text>
             ) : null}

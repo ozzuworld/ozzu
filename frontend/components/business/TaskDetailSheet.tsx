@@ -16,14 +16,20 @@ import * as FileSystem from "expo-file-system";
 import {
   type BusinessTask,
   type BusinessAttachment,
+  type BusinessExpense,
   type TaskRequirement,
   type AttachmentVerification,
   fetchTaskAttachments,
   fetchTaskRequirements,
+  getTaskExpenses,
   reverifyAttachment,
   getAttachmentUrl,
   updateBusinessTask,
 } from "../../lib/bridge-api";
+import { formatCOPDisplay, formatCOPCompact } from "./CostField";
+import { ExpenseRow } from "./ExpenseRow";
+import { AddExpenseModal } from "./AddExpenseModal";
+import { ExpenseDetailSheet } from "./ExpenseDetailSheet";
 
 const STATUS_CYCLE: Record<string, string> = {
   pending: "in_progress",
@@ -56,6 +62,9 @@ interface TaskDetailSheetProps {
   onDelete: (task: BusinessTask) => void;
   onUpload: (taskId: number, base64: string, fileName: string, fileType?: string) => Promise<any>;
   onRemoveAttachment: (id: number) => void;
+  onAddExpense?: (taskId: number, data: Partial<BusinessExpense>) => Promise<any>;
+  onEditExpense?: (expenseId: number, data: Partial<BusinessExpense>) => void;
+  onRemoveExpense?: (expenseId: number) => void;
 }
 
 export function TaskDetailSheet({
@@ -67,6 +76,9 @@ export function TaskDetailSheet({
   onDelete,
   onUpload,
   onRemoveAttachment,
+  onAddExpense,
+  onEditExpense,
+  onRemoveExpense,
 }: TaskDetailSheetProps) {
   const [notes, setNotes] = useState("");
   const [attachments, setAttachments] = useState<BusinessAttachment[]>([]);
@@ -76,16 +88,21 @@ export function TaskDetailSheet({
   const [requirements, setRequirements] = useState<TaskRequirement[]>([]);
   const [reqFulfilled, setReqFulfilled] = useState(0);
   const [verificationDetail, setVerificationDetail] = useState<AttachmentVerification | null>(null);
+  const [expenses, setExpenses] = useState<BusinessExpense[]>([]);
+  const [addExpenseVisible, setAddExpenseVisible] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<BusinessExpense | null>(null);
 
   useEffect(() => {
     if (task) {
       setNotes(task.notes || "");
       loadAttachments(task.id);
       loadRequirements(task.id);
+      loadExpenses(task.id);
     } else {
       setAttachments([]);
       setRequirements([]);
       setReqFulfilled(0);
+      setExpenses([]);
     }
   }, [task?.id, task?.attachment_count]);
 
@@ -109,6 +126,15 @@ export function TaskDetailSheet({
     } catch {
       setRequirements([]);
       setReqFulfilled(0);
+    }
+  };
+
+  const loadExpenses = async (taskId: number) => {
+    try {
+      const data = await getTaskExpenses(taskId);
+      setExpenses(data);
+    } catch {
+      setExpenses([]);
     }
   };
 
@@ -438,6 +464,62 @@ export function TaskDetailSheet({
                 </Text>
               )}
 
+              {/* Cost summary */}
+              {(task.estimated_cost || task.actual_cost || expenses.length > 0) ? (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>COSTS</Text>
+                  <View style={{ flexDirection: "row", gap: 16 }}>
+                    {task.estimated_cost ? (
+                      <View>
+                        <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>ESTIMATED</Text>
+                        <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 12 }}>{formatCOPCompact(task.estimated_cost)}</Text>
+                      </View>
+                    ) : null}
+                    <View>
+                      <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>ACTUAL</Text>
+                      <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
+                        {formatCOPCompact(task.actual_cost || 0)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ) : null}
+
+              {/* Expenses */}
+              {onAddExpense ? (
+                <View style={{ marginBottom: 16 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10 }}>
+                      EXPENSES ({expenses.length})
+                    </Text>
+                    <Pressable onPress={() => setAddExpenseVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Text style={{ color: "#06B6D4", fontSize: 16 }}>+</Text>
+                      <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>ADD</Text>
+                    </Pressable>
+                  </View>
+                  {expenses.length > 0 ? (
+                    expenses.map((exp) => (
+                      <ExpenseRow
+                        key={exp.id}
+                        expense={exp}
+                        onPress={() => setEditingExpense(exp)}
+                        onDelete={() => {
+                          Alert.alert("Delete Expense", `Delete ${formatCOPDisplay(exp.amount)} expense?`, [
+                            { text: "Cancel", style: "cancel" },
+                            { text: "Delete", style: "destructive", onPress: () => {
+                              onRemoveExpense?.(exp.id);
+                              setExpenses((prev) => prev.filter((e) => e.id !== exp.id));
+                            }},
+                          ]);
+                        }}
+                      />
+                    ))
+                  ) : (
+                    <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11 }}>No expenses yet</Text>
+                  )}
+                </View>
+              ) : null}
+
               {/* Timestamps */}
               <View style={{ marginBottom: 16 }}>
                 <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>
@@ -564,6 +646,34 @@ export function TaskDetailSheet({
           </View>
         </View>
       </Modal>
+
+      {/* Add expense modal */}
+      {onAddExpense && task ? (
+        <AddExpenseModal
+          visible={addExpenseVisible}
+          taskId={task.id}
+          onClose={() => setAddExpenseVisible(false)}
+          onCreated={() => loadExpenses(task.id)}
+          onAddExpense={onAddExpense}
+        />
+      ) : null}
+
+      {/* Edit expense sheet */}
+      {onEditExpense ? (
+        <ExpenseDetailSheet
+          expense={editingExpense}
+          visible={editingExpense !== null}
+          onClose={() => setEditingExpense(null)}
+          onSave={(expenseId, data) => {
+            onEditExpense(expenseId, data);
+            setExpenses((prev) => prev.map((e) => e.id === expenseId ? { ...e, ...data } : e));
+          }}
+          onDelete={(exp) => {
+            onRemoveExpense?.(exp.id);
+            setExpenses((prev) => prev.filter((e) => e.id !== exp.id));
+          }}
+        />
+      ) : null}
     </>
   );
 }
