@@ -398,6 +398,10 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_business_attachments_task ON business_attachments(task_id)`);
 
+    // Migration: task verification engine — requirements + verification columns
+    await pool.query(`ALTER TABLE business_tasks ADD COLUMN IF NOT EXISTS requirements JSONB DEFAULT '[]'`);
+    await pool.query(`ALTER TABLE business_attachments ADD COLUMN IF NOT EXISTS verification JSONB DEFAULT NULL`);
+
     console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
@@ -1979,7 +1983,7 @@ async function updateBusinessTask(id, updates) {
   const fields = [];
   const vals = [];
   let idx = 1;
-  for (const key of ['title', 'description', 'status', 'priority', 'position', 'due_date', 'phase', 'notes']) {
+  for (const key of ['title', 'description', 'status', 'priority', 'position', 'due_date', 'phase', 'notes', 'requirements']) {
     if (updates[key] !== undefined) {
       fields.push(`${key} = $${idx}`);
       vals.push(updates[key]);
@@ -2031,7 +2035,7 @@ async function createBusinessAttachment({ task_id, file_name, file_path, thumbna
 async function getBusinessAttachments(task_id) {
   if (!_pgConnected) return [];
   const res = await query(
-    `SELECT id, task_id, file_name, file_type, mime_type, file_size, created_at FROM business_attachments WHERE task_id = $1 ORDER BY created_at DESC`,
+    `SELECT id, task_id, file_name, file_type, mime_type, file_size, verification, created_at FROM business_attachments WHERE task_id = $1 ORDER BY created_at DESC`,
     [task_id]
   );
   return res.rows;
@@ -2046,6 +2050,15 @@ async function getBusinessAttachment(id) {
 async function deleteBusinessAttachment(id) {
   if (!_pgConnected) return null;
   const res = await query(`DELETE FROM business_attachments WHERE id = $1 RETURNING *`, [id]);
+  return res.rows[0] || null;
+}
+
+async function updateBusinessAttachmentVerification(id, verification) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `UPDATE business_attachments SET verification = $1 WHERE id = $2 RETURNING *`,
+    [JSON.stringify(verification), id]
+  );
   return res.rows[0] || null;
 }
 
@@ -2195,6 +2208,7 @@ module.exports = {
   getBusinessAttachments,
   getBusinessAttachment,
   deleteBusinessAttachment,
+  updateBusinessAttachmentVerification,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

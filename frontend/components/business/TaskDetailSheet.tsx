@@ -16,7 +16,11 @@ import * as FileSystem from "expo-file-system";
 import {
   type BusinessTask,
   type BusinessAttachment,
+  type TaskRequirement,
+  type AttachmentVerification,
   fetchTaskAttachments,
+  fetchTaskRequirements,
+  reverifyAttachment,
   getAttachmentUrl,
   updateBusinessTask,
 } from "../../lib/bridge-api";
@@ -29,6 +33,13 @@ const STATUS_CYCLE: Record<string, string> = {
 const STATUS_ICON: Record<string, string> = { pending: "○", in_progress: "◐", done: "●" };
 const STATUS_COLOR: Record<string, string> = { pending: "#525252", in_progress: "#EAB308", done: "#22C55E" };
 const STATUS_LABEL: Record<string, string> = { pending: "PENDING", in_progress: "IN PROGRESS", done: "DONE" };
+
+const VERIFICATION_DOT_COLOR: Record<string, string> = {
+  verified: "#22C55E",
+  partial: "#EAB308",
+  rejected: "#EF4444",
+  unverified: "#525252",
+};
 
 const PRIORITIES = [
   { value: "low", label: "LOW", color: "#3B82F6" },
@@ -62,13 +73,19 @@ export function TaskDetailSheet({
   const [loadingAttachments, setLoadingAttachments] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [viewImage, setViewImage] = useState<number | null>(null);
+  const [requirements, setRequirements] = useState<TaskRequirement[]>([]);
+  const [reqFulfilled, setReqFulfilled] = useState(0);
+  const [verificationDetail, setVerificationDetail] = useState<AttachmentVerification | null>(null);
 
   useEffect(() => {
     if (task) {
       setNotes(task.notes || "");
       loadAttachments(task.id);
+      loadRequirements(task.id);
     } else {
       setAttachments([]);
+      setRequirements([]);
+      setReqFulfilled(0);
     }
   }, [task?.id, task?.attachment_count]);
 
@@ -81,6 +98,17 @@ export function TaskDetailSheet({
       setAttachments([]);
     } finally {
       setLoadingAttachments(false);
+    }
+  };
+
+  const loadRequirements = async (taskId: number) => {
+    try {
+      const data = await fetchTaskRequirements(taskId);
+      setRequirements(data.requirements || []);
+      setReqFulfilled(data.fulfilled || 0);
+    } catch {
+      setRequirements([]);
+      setReqFulfilled(0);
     }
   };
 
@@ -106,6 +134,7 @@ export function TaskDetailSheet({
     try {
       await onUpload(task.id, asset.base64, fileName, "image");
       await loadAttachments(task.id);
+      await loadRequirements(task.id);
     } finally {
       setUploading(false);
     }
@@ -122,6 +151,7 @@ export function TaskDetailSheet({
     try {
       await onUpload(task.id, base64, doc.name, fileType);
       await loadAttachments(task.id);
+      await loadRequirements(task.id);
     } finally {
       setUploading(false);
     }
@@ -156,6 +186,9 @@ export function TaskDetailSheet({
     const date = new Date(d);
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   };
+
+  const hasRequirements = requirements.length > 0;
+  const verificationStatus = reqFulfilled === 0 ? "unverified" : reqFulfilled >= requirements.length ? "verified" : "partial";
 
   return (
     <>
@@ -232,6 +265,55 @@ export function TaskDetailSheet({
                 </View>
               ) : null}
 
+              {/* Requirements checklist */}
+              {hasRequirements ? (
+                <View style={{ marginBottom: 16 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+                    <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, flex: 1 }}>
+                      REQUIREMENTS ({reqFulfilled}/{requirements.length})
+                    </Text>
+                    <View style={{
+                      backgroundColor: VERIFICATION_DOT_COLOR[verificationStatus] + "22",
+                      paddingHorizontal: 8,
+                      paddingVertical: 2,
+                      borderRadius: 4,
+                    }}>
+                      <Text style={{
+                        color: VERIFICATION_DOT_COLOR[verificationStatus],
+                        fontFamily: "monospace",
+                        fontSize: 9,
+                        fontWeight: "bold",
+                      }}>
+                        {verificationStatus === "verified" ? "VERIFIED" : verificationStatus === "partial" ? "PARTIAL" : "UNVERIFIED"}
+                      </Text>
+                    </View>
+                  </View>
+                  {requirements.map((req) => (
+                    <View key={req.id} style={{
+                      flexDirection: "row",
+                      alignItems: "flex-start",
+                      paddingVertical: 6,
+                      paddingLeft: 8,
+                      borderLeftWidth: 2,
+                      borderLeftColor: req.fulfilled ? "#22C55E" : "#333",
+                      marginBottom: 4,
+                    }}>
+                      <Text style={{ color: req.fulfilled ? "#22C55E" : "#525252", fontSize: 12, marginRight: 8, marginTop: 1 }}>
+                        {req.fulfilled ? "●" : "○"}
+                      </Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: req.fulfilled ? "#A3A3A3" : "#E5E5E5", fontSize: 12, fontWeight: "600" }}>
+                          {req.label}
+                        </Text>
+                        {req.description ? (
+                          <Text style={{ color: "#525252", fontSize: 10, marginTop: 2 }}>{req.description}</Text>
+                        ) : null}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
               {/* Notes */}
               <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>NOTES</Text>
               <TextInput
@@ -262,7 +344,10 @@ export function TaskDetailSheet({
                 </Text>
                 <Pressable onPress={handleUploadMenu} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                   {uploading ? (
-                    <ActivityIndicator size="small" color="#06B6D4" />
+                    <>
+                      <ActivityIndicator size="small" color="#06B6D4" />
+                      <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>VERIFYING...</Text>
+                    </>
                   ) : (
                     <>
                       <Text style={{ color: "#06B6D4", fontSize: 16 }}>+</Text>
@@ -276,34 +361,60 @@ export function TaskDetailSheet({
                 <ActivityIndicator size="small" color="#525252" style={{ marginVertical: 12 }} />
               ) : attachments.length > 0 ? (
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                  {attachments.map((att) => (
-                    <Pressable
-                      key={att.id}
-                      onPress={() => att.file_type === "image" ? setViewImage(att.id) : null}
-                      onLongPress={() => handleDeleteAttachment(att)}
-                    >
-                      {att.file_type === "image" ? (
-                        <Image
-                          source={{ uri: getAttachmentUrl(att.id, true) }}
-                          style={{ width: 80, height: 80, borderRadius: 8, backgroundColor: "#1A1A1A" }}
-                        />
-                      ) : (
-                        <View style={{
-                          width: 80,
-                          height: 80,
-                          borderRadius: 8,
-                          backgroundColor: "#1A1A1A",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}>
-                          <Text style={{ fontSize: 24 }}>📄</Text>
-                          <Text style={{ color: "#525252", fontSize: 8, fontFamily: "monospace", marginTop: 2 }} numberOfLines={1}>
-                            {att.file_name}
-                          </Text>
+                  {attachments.map((att) => {
+                    const vStatus = att.verification?.status;
+                    const dotColor = vStatus ? VERIFICATION_DOT_COLOR[vStatus] : undefined;
+                    return (
+                      <Pressable
+                        key={att.id}
+                        onPress={() => {
+                          if (att.verification) {
+                            setVerificationDetail(att.verification);
+                          } else if (att.file_type === "image") {
+                            setViewImage(att.id);
+                          }
+                        }}
+                        onLongPress={() => handleDeleteAttachment(att)}
+                      >
+                        <View>
+                          {att.file_type === "image" ? (
+                            <Image
+                              source={{ uri: getAttachmentUrl(att.id, true) }}
+                              style={{ width: 80, height: 80, borderRadius: 8, backgroundColor: "#1A1A1A" }}
+                            />
+                          ) : (
+                            <View style={{
+                              width: 80,
+                              height: 80,
+                              borderRadius: 8,
+                              backgroundColor: "#1A1A1A",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}>
+                              <Text style={{ fontSize: 24 }}>📄</Text>
+                              <Text style={{ color: "#525252", fontSize: 8, fontFamily: "monospace", marginTop: 2 }} numberOfLines={1}>
+                                {att.file_name}
+                              </Text>
+                            </View>
+                          )}
+                          {/* Verification dot overlay */}
+                          {dotColor ? (
+                            <View style={{
+                              position: "absolute",
+                              top: 4,
+                              right: 4,
+                              width: 10,
+                              height: 10,
+                              borderRadius: 5,
+                              backgroundColor: dotColor,
+                              borderWidth: 1.5,
+                              borderColor: "#111111",
+                            }} />
+                          ) : null}
                         </View>
-                      )}
-                    </Pressable>
-                  ))}
+                      </Pressable>
+                    );
+                  })}
                 </View>
               ) : (
                 <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11, marginBottom: 16 }}>
@@ -346,6 +457,96 @@ export function TaskDetailSheet({
             />
           )}
         </Pressable>
+      </Modal>
+
+      {/* Verification detail panel */}
+      <Modal visible={verificationDetail !== null} transparent animationType="slide" onRequestClose={() => setVerificationDetail(null)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <Pressable style={{ flex: 0.3 }} onPress={() => setVerificationDetail(null)} />
+          <View style={{ flex: 0.7, backgroundColor: "#111111", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 }}>
+            <View style={{ alignItems: "center", paddingBottom: 12 }}>
+              <View style={{ width: 40, height: 4, backgroundColor: "#333", borderRadius: 2 }} />
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {verificationDetail && (
+                <>
+                  {/* Status badge */}
+                  <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+                    <View style={{
+                      width: 10, height: 10, borderRadius: 5, marginRight: 8,
+                      backgroundColor: VERIFICATION_DOT_COLOR[verificationDetail.status],
+                    }} />
+                    <Text style={{
+                      color: VERIFICATION_DOT_COLOR[verificationDetail.status],
+                      fontFamily: "monospace", fontSize: 12, fontWeight: "bold",
+                    }}>
+                      {verificationDetail.status.toUpperCase()}
+                    </Text>
+                    <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginLeft: 8 }}>
+                      {verificationDetail.documentType}
+                    </Text>
+                  </View>
+
+                  {/* Summary */}
+                  <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>AI ANALYSIS</Text>
+                  <Text style={{ color: "#A3A3A3", fontSize: 13, lineHeight: 20, marginBottom: 16 }}>
+                    {verificationDetail.summary}
+                  </Text>
+
+                  {/* Matched requirements */}
+                  {verificationDetail.details.length > 0 ? (
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 8 }}>REQUIREMENTS CHECK</Text>
+                      {verificationDetail.details.map((d, i) => (
+                        <View key={i} style={{
+                          flexDirection: "row", alignItems: "flex-start",
+                          paddingVertical: 6, paddingLeft: 8,
+                          borderLeftWidth: 2, borderLeftColor: d.met ? "#22C55E" : "#EF4444",
+                          marginBottom: 4,
+                        }}>
+                          <Text style={{ color: d.met ? "#22C55E" : "#EF4444", fontSize: 12, marginRight: 8 }}>
+                            {d.met ? "✓" : "✗"}
+                          </Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: "#E5E5E5", fontSize: 11 }}>{d.requirementId}</Text>
+                            <Text style={{ color: "#737373", fontSize: 10, marginTop: 2 }}>{d.explanation}</Text>
+                            <Text style={{ color: "#525252", fontSize: 9, marginTop: 2 }}>
+                              Confidence: {Math.round(d.confidence * 100)}%
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  {/* Issues */}
+                  {verificationDetail.issues.length > 0 ? (
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={{ color: "#EF4444", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>ISSUES</Text>
+                      {verificationDetail.issues.map((issue, i) => (
+                        <Text key={i} style={{ color: "#A3A3A3", fontSize: 12, marginBottom: 2 }}>• {issue}</Text>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  {/* Suggestions */}
+                  {verificationDetail.suggestions.length > 0 ? (
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>SUGGESTIONS</Text>
+                      {verificationDetail.suggestions.map((s, i) => (
+                        <Text key={i} style={{ color: "#A3A3A3", fontSize: 12, marginBottom: 2 }}>• {s}</Text>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  <Pressable onPress={() => setVerificationDetail(null)} style={{ alignItems: "center", paddingVertical: 12 }}>
+                    <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11 }}>CLOSE</Text>
+                  </Pressable>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
     </>
   );

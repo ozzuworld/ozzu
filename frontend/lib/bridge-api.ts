@@ -1304,6 +1304,33 @@ export async function deleteCedulaFace(cedula: string): Promise<{ ok: boolean }>
 
 // ── Business Projects & Tasks ──
 
+export interface TaskRequirement {
+  id: string;
+  label: string;
+  description?: string;
+  accepts?: string[];
+  fulfilled: boolean;
+  fulfilledBy: number | null;
+}
+
+export interface VerificationDetail {
+  requirementId: string;
+  met: boolean;
+  confidence: number;
+  explanation: string;
+}
+
+export interface AttachmentVerification {
+  status: "verified" | "partial" | "rejected" | "unverified";
+  verifiedAt: string;
+  summary: string;
+  documentType: string;
+  matchedRequirements: string[];
+  details: VerificationDetail[];
+  issues: string[];
+  suggestions: string[];
+}
+
 export interface BusinessTask {
   id: number;
   project_id: number;
@@ -1319,6 +1346,7 @@ export interface BusinessTask {
   phase: string;
   notes: string;
   attachment_count: number;
+  requirements: TaskRequirement[];
 }
 
 export interface BusinessAttachment {
@@ -1328,6 +1356,7 @@ export interface BusinessAttachment {
   file_type: string;
   mime_type: string;
   file_size: number;
+  verification: AttachmentVerification | null;
   created_at: string;
 }
 
@@ -1445,4 +1474,20 @@ export async function deleteTaskAttachment(id: number): Promise<{ ok: boolean }>
 
 export function getAttachmentUrl(id: number, thumb?: boolean): string {
   return `${BRIDGE_URL}/business/attachments/${id}/file${thumb ? "?thumb=1" : ""}`;
+}
+
+export async function fetchTaskRequirements(taskId: number): Promise<{ requirements: TaskRequirement[]; fulfilled: number; total: number; status: string }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/tasks/${taskId}/requirements`);
+  if (!res.ok) throw new Error(`Fetch requirements error: ${res.status}`);
+  return res.json();
+}
+
+export async function reverifyAttachment(attachmentId: number): Promise<{ ok: boolean; verification: AttachmentVerification }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/attachments/${attachmentId}/reverify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`Reverify error: ${res.status}`);
+  return res.json();
 }

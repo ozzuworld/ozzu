@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { View, Text, Pressable, LayoutAnimation, ScrollView, Image } from "react-native";
-import { type BusinessTask, getAttachmentUrl } from "../../lib/bridge-api";
+import { type BusinessTask, type TaskRequirement, getAttachmentUrl } from "../../lib/bridge-api";
 
 const STATUS_ICON: Record<string, string> = {
   pending: "○",
@@ -85,6 +85,14 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
 
           {/* Badges */}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: 8 }}>
+            {/* Verification dot */}
+            {(() => {
+              const reqs: TaskRequirement[] = task.requirements || [];
+              if (reqs.length === 0) return null;
+              const fulfilled = reqs.filter((r) => r.fulfilled).length;
+              const color = fulfilled === 0 ? "#525252" : fulfilled >= reqs.length ? "#22C55E" : "#EAB308";
+              return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />;
+            })()}
             {attachCount > 0 ? (
               <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 9 }}>📎 {attachCount}</Text>
             ) : null}

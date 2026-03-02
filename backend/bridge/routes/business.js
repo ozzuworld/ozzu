@@ -3,11 +3,98 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const https = require("https");
 
 const ATTACHMENTS_DIR = "/tmp/ozzu-bridge/business-attachments";
 
+// ── Gemini Document Verification ──
+
+async function verifyDocumentWithGemini(apiKey, fileBuffer, mimeType, task, requirements) {
+  const base64Data = fileBuffer.toString("base64");
+  const reqList = requirements && requirements.length > 0
+    ? requirements.map((r) => `- [${r.id}] ${r.label}: ${r.description || ""}`).join("\n")
+    : "(No specific requirements defined for this task)";
+
+  const prompt = `You are a document verification assistant for a Colombian business project.
+
+Task: "${task.title}"
+${task.description ? `Description: ${task.description}` : ""}
+${task.phase ? `Phase: ${task.phase}` : ""}
+
+Requirements to verify against:
+${reqList}
+
+Analyze this uploaded document and determine:
+1. What type of document this is
+2. A brief summary of its contents
+3. Which requirements (if any) it fulfills — match by requirement ID
+4. Any issues or concerns with the document
+5. Suggestions for next steps
+
+${requirements && requirements.length > 0
+    ? "For each requirement, assess whether this document meets it (met: true/false), your confidence (0-1), and a brief explanation."
+    : "Since no specific requirements are defined, suggest what this document could fulfill and what requirements it might satisfy."}
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "documentType": "string",
+  "summary": "string",
+  "matchedRequirements": ["req_id1"],
+  "details": [
+    { "requirementId": "req_id", "met": true, "confidence": 0.95, "explanation": "string" }
+  ],
+  "issues": ["string"],
+  "suggestions": ["string"]
+}`;
+
+  const payload = JSON.stringify({
+    contents: [{
+      parts: [
+        { inlineData: { mimeType, data: base64Data } },
+        { text: prompt },
+      ],
+    }],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+  });
+
+  return new Promise((resolve, reject) => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const parsed = new URL(url);
+    const reqOpts = {
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+      timeout: 30000,
+    };
+
+    const httpReq = https.request(reqOpts, (httpRes) => {
+      let data = "";
+      httpRes.on("data", (chunk) => { data += chunk; });
+      httpRes.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          const text = json.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          // Extract JSON from possible markdown fences
+          const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, text];
+          const parsed = JSON.parse(jsonMatch[1].trim());
+          resolve(parsed);
+        } catch (e) {
+          reject(new Error(`Gemini parse error: ${e.message}`));
+        }
+      });
+    });
+
+    httpReq.on("error", (e) => reject(new Error(`Gemini request error: ${e.message}`)));
+    httpReq.on("timeout", () => { httpReq.destroy(); reject(new Error("Gemini request timeout (30s)")); });
+    httpReq.write(payload);
+    httpReq.end();
+  });
+}
+
 module.exports = function businessRoutes(ctx) {
   const { sendJSON, parseBody, db, CORS_HEADERS } = ctx;
+  const GEMINI_API_KEY = ctx.GEMINI_API_KEY || "";
 
   return async function (req, res, pathname, url) {
     // GET /business/projects — list all with task counts
@@ -142,7 +229,40 @@ module.exports = function businessRoutes(ctx) {
       return true;
     }
 
-    // POST /business/tasks/:id/attachments — upload file (base64 JSON body)
+    // ── Task Requirements ──
+
+    // GET /business/tasks/:id/requirements — requirements + verification status
+    const reqMatch = pathname.match(/^\/business\/tasks\/(\d+)\/requirements$/);
+    if (req.method === "GET" && reqMatch) {
+      try {
+        const taskId = parseInt(reqMatch[1]);
+        const task = await db.query(`SELECT requirements FROM business_tasks WHERE id = $1`, [taskId]);
+        if (task.rows.length === 0) { sendJSON(res, 404, { error: "task not found" }); return true; }
+        const requirements = task.rows[0].requirements || [];
+        const fulfilled = requirements.filter((r) => r.fulfilled).length;
+        sendJSON(res, 200, { requirements, fulfilled, total: requirements.length, status: fulfilled === 0 ? "unverified" : fulfilled >= requirements.length ? "verified" : "partial" });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // PUT /business/tasks/:id/requirements — set requirements array
+    if (req.method === "PUT" && reqMatch) {
+      try {
+        const taskId = parseInt(reqMatch[1]);
+        const body = await parseBody(req);
+        if (!Array.isArray(body.requirements)) { sendJSON(res, 400, { error: "requirements array is required" }); return true; }
+        const task = await db.updateBusinessTask(taskId, { requirements: JSON.stringify(body.requirements) });
+        if (!task) { sendJSON(res, 404, { error: "task not found" }); return true; }
+        sendJSON(res, 200, { ok: true, requirements: task.requirements });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /business/tasks/:id/attachments — upload file with auto-verification
     const attachUploadMatch = pathname.match(/^\/business\/tasks\/(\d+)\/attachments$/);
     if (req.method === "POST" && attachUploadMatch) {
       try {
@@ -187,7 +307,53 @@ module.exports = function businessRoutes(ctx) {
           mime_type: mimeType,
           file_size: buf.length,
         });
-        sendJSON(res, 201, { ok: true, attachment });
+
+        // Auto-verify with Gemini if API key available
+        let verification = null;
+        if (GEMINI_API_KEY) {
+          try {
+            const taskRow = await db.query(`SELECT * FROM business_tasks WHERE id = $1`, [taskId]);
+            const task = taskRow.rows[0];
+            const requirements = task?.requirements || [];
+            const geminiResult = await verifyDocumentWithGemini(GEMINI_API_KEY, buf, mimeType, task, requirements);
+
+            const matchedReqs = geminiResult.matchedRequirements || [];
+            const allMet = (geminiResult.details || []).every((d) => d.met);
+            const anyMet = (geminiResult.details || []).some((d) => d.met);
+
+            verification = {
+              status: matchedReqs.length === 0 ? "unverified" : allMet ? "verified" : anyMet ? "partial" : "rejected",
+              verifiedAt: new Date().toISOString(),
+              summary: geminiResult.summary || "",
+              documentType: geminiResult.documentType || "",
+              matchedRequirements: matchedReqs,
+              details: geminiResult.details || [],
+              issues: geminiResult.issues || [],
+              suggestions: geminiResult.suggestions || [],
+            };
+
+            await db.updateBusinessAttachmentVerification(attachment.id, verification);
+
+            // Update task requirements fulfilled status
+            if (requirements.length > 0 && matchedReqs.length > 0) {
+              const updated = requirements.map((r) => {
+                if (matchedReqs.includes(r.id)) {
+                  const detail = (geminiResult.details || []).find((d) => d.requirementId === r.id);
+                  if (detail && detail.met) {
+                    return { ...r, fulfilled: true, fulfilledBy: attachment.id };
+                  }
+                }
+                return r;
+              });
+              await db.updateBusinessTask(taskId, { requirements: JSON.stringify(updated) });
+            }
+          } catch (verifyErr) {
+            console.error("[business] Gemini verification error:", verifyErr.message);
+            // Non-fatal — attachment still saved
+          }
+        }
+
+        sendJSON(res, 201, { ok: true, attachment: { ...attachment, verification } });
       } catch (err) {
         sendJSON(res, 500, { error: err.message });
       }
@@ -200,6 +366,58 @@ module.exports = function businessRoutes(ctx) {
         const taskId = parseInt(attachUploadMatch[1]);
         const attachments = await db.getBusinessAttachments(taskId);
         sendJSON(res, 200, attachments);
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /business/attachments/:id/reverify — re-run Gemini verification
+    const reverifyMatch = pathname.match(/^\/business\/attachments\/(\d+)\/reverify$/);
+    if (req.method === "POST" && reverifyMatch) {
+      try {
+        if (!GEMINI_API_KEY) { sendJSON(res, 500, { error: "GEMINI_API_KEY not configured" }); return true; }
+        const attId = parseInt(reverifyMatch[1]);
+        const attachment = await db.getBusinessAttachment(attId);
+        if (!attachment) { sendJSON(res, 404, { error: "Attachment not found" }); return true; }
+        if (!fs.existsSync(attachment.file_path)) { sendJSON(res, 404, { error: "File not found on disk" }); return true; }
+
+        const buf = fs.readFileSync(attachment.file_path);
+        const taskRow = await db.query(`SELECT * FROM business_tasks WHERE id = $1`, [attachment.task_id]);
+        const task = taskRow.rows[0];
+        const requirements = task?.requirements || [];
+
+        const geminiResult = await verifyDocumentWithGemini(GEMINI_API_KEY, buf, attachment.mime_type, task, requirements);
+        const matchedReqs = geminiResult.matchedRequirements || [];
+        const allMet = (geminiResult.details || []).every((d) => d.met);
+        const anyMet = (geminiResult.details || []).some((d) => d.met);
+
+        const verification = {
+          status: matchedReqs.length === 0 ? "unverified" : allMet ? "verified" : anyMet ? "partial" : "rejected",
+          verifiedAt: new Date().toISOString(),
+          summary: geminiResult.summary || "",
+          documentType: geminiResult.documentType || "",
+          matchedRequirements: matchedReqs,
+          details: geminiResult.details || [],
+          issues: geminiResult.issues || [],
+          suggestions: geminiResult.suggestions || [],
+        };
+
+        await db.updateBusinessAttachmentVerification(attId, verification);
+
+        // Update task requirements
+        if (requirements.length > 0 && matchedReqs.length > 0) {
+          const updated = requirements.map((r) => {
+            if (matchedReqs.includes(r.id)) {
+              const detail = (geminiResult.details || []).find((d) => d.requirementId === r.id);
+              if (detail && detail.met) return { ...r, fulfilled: true, fulfilledBy: attId };
+            }
+            return r;
+          });
+          await db.updateBusinessTask(attachment.task_id, { requirements: JSON.stringify(updated) });
+        }
+
+        sendJSON(res, 200, { ok: true, verification });
       } catch (err) {
         sendJSON(res, 500, { error: err.message });
       }
