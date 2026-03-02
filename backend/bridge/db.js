@@ -1722,17 +1722,6 @@ async function bulkCreateRemediations(remediations) {
   return created;
 }
 
-async function bulkUpdateOsintFindings(findingIds, status) {
-  if (!_pgConnected || !findingIds || findingIds.length === 0) return [];
-  const res = await query(
-    `UPDATE osint_findings SET status = $1, updated_at = NOW()
-     WHERE id = ANY($2) AND status = 'new'
-     RETURNING id`,
-    [status, findingIds]
-  );
-  return res.rows.map((r) => r.id);
-}
-
 // ── OSINT Incidents (SOC Compliance) ──────────────────────────────
 
 async function createOsintIncident({ incidentId, title, description, severity, category, profileId, findingIds, remediationIds, classification, affectedAssets, attackVector, indicators, assignedTo }) {
@@ -1970,7 +1959,6 @@ module.exports = {
   updateOsintRemediation,
   getOsintRemediationStats,
   bulkCreateRemediations,
-  bulkUpdateOsintFindings,
   // OSINT Incidents (SOC)
   createOsintIncident,
   getOsintIncidents,

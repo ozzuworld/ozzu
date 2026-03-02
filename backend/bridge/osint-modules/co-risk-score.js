@@ -69,7 +69,7 @@ module.exports = {
       if (mod === "co-contraloria") {
         modulesChecked++;
         if (sev === "critical") { scores.legal_risk += 25; modulesWithData++; }
-        else if (sev !== "info" || !raw.reported === false) modulesWithData++;
+        else if (sev !== "info" || raw.reported !== false) modulesWithData++;
       }
       if (mod === "co-rama-judicial") {
         modulesChecked++;

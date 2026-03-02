@@ -143,8 +143,8 @@ async function getSpotifyToken() {
     const params = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: tokenData.refresh_token,
-      client_id: "62ee533a9f2444dfb854cb1293c32cd9",
-      client_secret: "60ca708c676846508251cf2549f26b14",
+      client_id: process.env.SPOTIFY_CLIENT_ID || "62ee533a9f2444dfb854cb1293c32cd9",
+      client_secret: process.env.SPOTIFY_CLIENT_SECRET || "",
     });
     const refreshRes = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
@@ -5608,100 +5608,6 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     return;
   }
 
-  // GET /api/spotify/playlists — fetch user's playlists
-  if (req.method === "GET" && pathname === "/api/spotify/playlists") {
-    if (_spotifyPlaylistsCache && Date.now() - _spotifyPlaylistsCache.ts < 300000) {
-      sendJSON(res, 200, { playlists: _spotifyPlaylistsCache.playlists });
-      return;
-    }
-    const token = await getSpotifyToken();
-    if (!token) {
-      sendJSON(res, 500, { error: "No Spotify token available" });
-      return;
-    }
-    try {
-      const spRes = await fetch("https://api.spotify.com/v1/me/playlists?limit=50", {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!spRes.ok) {
-        sendJSON(res, spRes.status, { error: `Spotify API error ${spRes.status}` });
-        return;
-      }
-      const data = await spRes.json();
-      const playlists = (data.items || []).map(p => ({
-        id: p.id,
-        name: p.name,
-        imageUrl: p.images?.[0]?.url || null,
-        trackCount: p.tracks?.total || 0,
-        owner: p.owner?.display_name || "",
-        uri: p.uri,
-      }));
-      _spotifyPlaylistsCache = { playlists, ts: Date.now() };
-      sendJSON(res, 200, { playlists });
-    } catch (err) {
-      log.bridge.error("Spotify playlists fetch failed:", err.message);
-      sendJSON(res, 500, { error: "Failed to fetch playlists" });
-    }
-    return;
-  }
-
-  // GET /api/spotify/playlists/:id/tracks — fetch tracks for a playlist
-  const playlistTracksMatch = pathname.match(/^\/api\/spotify\/playlists\/([^/]+)\/tracks$/);
-  if (req.method === "GET" && playlistTracksMatch) {
-    const playlistId = playlistTracksMatch[1];
-    const offset = parseInt(url.searchParams.get("offset") || "0", 10);
-    const cacheKey = `${playlistId}:${offset}`;
-    const cached = _spotifyTracksCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < 120000) {
-      sendJSON(res, 200, { tracks: cached.tracks, total: cached.total });
-      return;
-    }
-    const token = await getSpotifyToken();
-    if (!token) {
-      sendJSON(res, 500, { error: "No Spotify token available" });
-      return;
-    }
-    try {
-      const spRes = await fetch(
-        `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=100&offset=${offset}&fields=total,items(track(id,name,artists,album,duration_ms,uri))`,
-        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000) }
-      );
-      if (!spRes.ok) {
-        sendJSON(res, spRes.status, { error: `Spotify API error ${spRes.status}` });
-        return;
-      }
-      const data = await spRes.json();
-      const tracks = (data.items || [])
-        .filter(item => item.track)
-        .map(item => {
-          const t = item.track;
-          return {
-            id: t.id,
-            name: t.name,
-            artist: (t.artists || []).map(a => a.name).join(", "),
-            albumName: t.album?.name || "",
-            albumArt: t.album?.images?.[1]?.url || t.album?.images?.[0]?.url || null,
-            albumArtSmall: t.album?.images?.[2]?.url || t.album?.images?.[0]?.url || null,
-            durationMs: t.duration_ms || 0,
-            uri: t.uri,
-          };
-        });
-      const total = data.total || tracks.length;
-      _spotifyTracksCache.set(cacheKey, { tracks, total, ts: Date.now() });
-      // Evict old cache entries
-      if (_spotifyTracksCache.size > 50) {
-        const oldest = [..._spotifyTracksCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
-        if (oldest) _spotifyTracksCache.delete(oldest[0]);
-      }
-      sendJSON(res, 200, { tracks, total });
-    } catch (err) {
-      log.bridge.error("Spotify playlist tracks fetch failed:", err.message);
-      sendJSON(res, 500, { error: "Failed to fetch tracks" });
-    }
-    return;
-  }
-
   // GET /api/spotify/liked — fetch user's liked songs
   if (req.method === "GET" && pathname === "/api/spotify/liked") {
     const offset = parseInt(url.searchParams.get("offset") || "0", 10);
@@ -7029,56 +6935,6 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
       });
     } catch (err) {
       log.bridge.error("OSINT readiness error:", err.message);
-      sendJSON(res, 500, { error: err.message });
-    }
-    return;
-  }
-
-  // ── OSINT Alerts API (Epic 6) ──
-
-  // GET /osint/alerts — list alerts
-  if (req.method === "GET" && pathname === "/osint/alerts") {
-    try {
-      const unreadOnly = params.get("unreadOnly") === "true";
-      const profileId = params.get("profileId") ? parseInt(params.get("profileId")) : undefined;
-      const limit = params.get("limit") ? parseInt(params.get("limit")) : 50;
-      const alerts = await db.getOsintAlerts({ unreadOnly, profileId, limit });
-      sendJSON(res, 200, { ok: true, alerts });
-    } catch (err) {
-      sendJSON(res, 500, { error: err.message });
-    }
-    return;
-  }
-
-  // PATCH /osint/alerts/:id — mark alert as read
-  const alertPatchMatch = pathname.match(/^\/osint\/alerts\/(\d+)$/);
-  if (req.method === "PATCH" && alertPatchMatch) {
-    try {
-      await db.markOsintAlertRead(parseInt(alertPatchMatch[1]));
-      sendJSON(res, 200, { ok: true });
-    } catch (err) {
-      sendJSON(res, 500, { error: err.message });
-    }
-    return;
-  }
-
-  // POST /osint/alerts/read-all — mark all alerts as read
-  if (req.method === "POST" && pathname === "/osint/alerts/read-all") {
-    try {
-      await db.markAllOsintAlertsRead();
-      sendJSON(res, 200, { ok: true });
-    } catch (err) {
-      sendJSON(res, 500, { error: err.message });
-    }
-    return;
-  }
-
-  // GET /osint/alerts/unread-count — badge count
-  if (req.method === "GET" && pathname === "/osint/alerts/unread-count") {
-    try {
-      const count = await db.getOsintAlertCount();
-      sendJSON(res, 200, { ok: true, count });
-    } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
     return;
