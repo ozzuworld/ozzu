@@ -119,22 +119,24 @@ export function TaskDetailSheet({
 
   const handlePickImage = useCallback(async (source: "camera" | "library") => {
     if (!task) return;
-    const opts: ImagePicker.ImagePickerOptions = {
-      quality: 0.8,
-      base64: true,
-    };
-    const result = source === "camera"
-      ? await ImagePicker.launchCameraAsync(opts)
-      : await ImagePicker.launchImageLibraryAsync(opts);
-    if (result.canceled || !result.assets?.[0]?.base64) return;
-    const asset = result.assets[0];
-    const ext = asset.uri.split(".").pop() || "jpg";
-    const fileName = `photo_${Date.now()}.${ext}`;
-    setUploading(true);
     try {
+      const opts: ImagePicker.ImagePickerOptions = {
+        quality: 0.8,
+        base64: true,
+      };
+      const result = source === "camera"
+        ? await ImagePicker.launchCameraAsync(opts)
+        : await ImagePicker.launchImageLibraryAsync(opts);
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+      const asset = result.assets[0];
+      const ext = asset.uri.split(".").pop() || "jpg";
+      const fileName = `photo_${Date.now()}.${ext}`;
+      setUploading(true);
       await onUpload(task.id, asset.base64, fileName, "image");
       await loadAttachments(task.id);
       await loadRequirements(task.id);
+    } catch (err: any) {
+      Alert.alert("Upload Failed", err?.message || "Could not upload the image");
     } finally {
       setUploading(false);
     }
@@ -142,16 +144,18 @@ export function TaskDetailSheet({
 
   const handlePickDocument = useCallback(async () => {
     if (!task) return;
-    const result = await DocumentPicker.getDocumentAsync({ type: "*/*" });
-    if (result.canceled || !result.assets?.[0]) return;
-    const doc = result.assets[0];
-    const base64 = await FileSystem.readAsStringAsync(doc.uri, { encoding: FileSystem.EncodingType.Base64 });
-    const fileType = doc.mimeType?.includes("pdf") ? "document" : "image";
-    setUploading(true);
     try {
+      const result = await DocumentPicker.getDocumentAsync({ type: "*/*" });
+      if (result.canceled || !result.assets?.[0]) return;
+      const doc = result.assets[0];
+      setUploading(true);
+      const base64 = await FileSystem.readAsStringAsync(doc.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const fileType = doc.mimeType?.includes("pdf") ? "document" : "image";
       await onUpload(task.id, base64, doc.name, fileType);
       await loadAttachments(task.id);
       await loadRequirements(task.id);
+    } catch (err: any) {
+      Alert.alert("Upload Failed", err?.message || "Could not read or upload the file");
     } finally {
       setUploading(false);
     }
@@ -194,10 +198,17 @@ export function TaskDetailSheet({
     <>
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
-          <Pressable style={{ height: 60 }} onPress={onClose} />
+          <Pressable style={{ height: 100 }} onPress={onClose} />
           <View style={{ flex: 1, backgroundColor: "#111111", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
-            <View style={{ alignItems: "center", paddingTop: 12, paddingBottom: 8 }}>
-              <View style={{ width: 40, height: 4, backgroundColor: "#333", borderRadius: 2 }} />
+            <Pressable onPress={onClose} style={{ alignItems: "center", paddingTop: 12, paddingBottom: 8 }}>
+              <View style={{ width: 40, height: 4, backgroundColor: "#555", borderRadius: 2 }} />
+            </Pressable>
+
+            {/* Close button */}
+            <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16, marginBottom: 4 }}>
+              <Pressable onPress={onClose} hitSlop={16} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+                <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 11 }}>CLOSE</Text>
+              </Pressable>
             </View>
 
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>

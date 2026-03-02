@@ -191,11 +191,18 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
-        <Pressable style={{ height: 80 }} onPress={onClose} />
+        <Pressable style={{ height: 100 }} onPress={onClose} />
         <View style={{ flex: 1, backgroundColor: "#111111", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
-          {/* Handle */}
-          <View style={{ alignItems: "center", paddingTop: 12, paddingBottom: 8 }}>
-            <View style={{ width: 40, height: 4, backgroundColor: "#333", borderRadius: 2 }} />
+          {/* Handle — tappable to dismiss */}
+          <Pressable onPress={onClose} style={{ alignItems: "center", paddingTop: 12, paddingBottom: 8 }}>
+            <View style={{ width: 40, height: 4, backgroundColor: "#555", borderRadius: 2 }} />
+          </Pressable>
+
+          {/* Close button */}
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16, marginBottom: 4 }}>
+            <Pressable onPress={onClose} hitSlop={16} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 11 }}>CLOSE</Text>
+            </Pressable>
           </View>
 
           {loading || !project ? (

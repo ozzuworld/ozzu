@@ -267,7 +267,7 @@ module.exports = function businessRoutes(ctx) {
     if (req.method === "POST" && attachUploadMatch) {
       try {
         const taskId = parseInt(attachUploadMatch[1]);
-        const body = await parseBody(req);
+        const body = await parseBody(req, 20 * 1024 * 1024); // 20MB for file uploads
         if (!body.base64 || !body.fileName) {
           sendJSON(res, 400, { error: "base64 and fileName are required" });
           return true;

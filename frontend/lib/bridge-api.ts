@@ -1457,11 +1457,15 @@ export async function fetchTaskAttachments(taskId: number): Promise<BusinessAtta
 }
 
 export async function uploadTaskAttachment(taskId: number, base64: string, fileName: string, fileType?: string): Promise<{ ok: boolean; attachment: BusinessAttachment }> {
-  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/tasks/${taskId}/attachments`, {
+  // Longer timeout for uploads — server runs Gemini verification which can take 30s+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  const res = await fetch(`${BRIDGE_URL}/business/tasks/${taskId}/attachments`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ base64, fileName, fileType }),
-  });
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
   if (!res.ok) throw new Error(`Upload attachment error: ${res.status}`);
   return res.json();
 }
