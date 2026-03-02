@@ -242,7 +242,7 @@ async function init() {
     // Migration: add 'image' to existing profile_type constraint if needed
     try {
       await pool.query(`ALTER TABLE osint_profiles DROP CONSTRAINT IF EXISTS osint_profiles_profile_type_check`);
-      await pool.query(`ALTER TABLE osint_profiles ADD CONSTRAINT osint_profiles_profile_type_check CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain', 'ip', 'image'))`);
+      await pool.query(`ALTER TABLE osint_profiles ADD CONSTRAINT osint_profiles_profile_type_check CHECK (profile_type IN ('email', 'username', 'password', 'phone', 'domain', 'ip', 'image', 'cedula', 'nit'))`);
     } catch { /* constraint already exists or column has no constraint */ }
 
     // OSINT Schedules (Epic 6)

@@ -56,6 +56,22 @@ osintEngine.registerModule(require("./osint-modules/dnstwist-scan"));
 osintEngine.registerModule(require("./osint-modules/crtsh-monitor"));
 osintEngine.registerModule(require("./osint-modules/darkweb-search"));
 osintEngine.registerModule(require("./osint-modules/leak-search"));
+// Colombian OSINT modules (CO Epic)
+osintEngine.registerModule(require("./osint-modules/co-secop"));
+osintEngine.registerModule(require("./osint-modules/co-adres"));
+osintEngine.registerModule(require("./osint-modules/co-simit"));
+osintEngine.registerModule(require("./osint-modules/co-rues"));
+osintEngine.registerModule(require("./osint-modules/co-sigep"));
+osintEngine.registerModule(require("./osint-modules/co-dian"));
+osintEngine.registerModule(require("./osint-modules/co-registraduria"));
+osintEngine.registerModule(require("./osint-modules/co-redam"));
+osintEngine.registerModule(require("./osint-modules/co-procuraduria"));
+osintEngine.registerModule(require("./osint-modules/co-contraloria"));
+osintEngine.registerModule(require("./osint-modules/co-policia"));
+osintEngine.registerModule(require("./osint-modules/co-rama-judicial"));
+osintEngine.registerModule(require("./osint-modules/co-fiscalia"));
+osintEngine.registerModule(require("./osint-modules/co-libreta-militar"));
+osintEngine.registerModule(require("./osint-modules/co-risk-score"));
 // OSINT monitoring + CLI runner
 const osintMonitor = require("./osint-monitor");
 const cliRunner = require("./osint-cli-runner");

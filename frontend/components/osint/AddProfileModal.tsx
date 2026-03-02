@@ -56,9 +56,11 @@ const TEXT_PROFILE_TYPES = [
   { key: "phone" as const, label: "Phone", emoji: "📱" },
   { key: "domain" as const, label: "Domain", emoji: "🌐" },
   { key: "ip" as const, label: "IP", emoji: "📡" },
+  { key: "cedula" as const, label: "Cédula", emoji: "🪪" },
+  { key: "nit" as const, label: "NIT", emoji: "🏢" },
 ];
 
-type ProfileType = "email" | "username" | "password" | "phone" | "domain" | "ip" | "image";
+type ProfileType = "email" | "username" | "password" | "phone" | "domain" | "ip" | "image" | "cedula" | "nit";
 
 interface Props {
   visible: boolean;
@@ -230,7 +232,7 @@ export function AddProfileModal({ visible, onClose, onCreated }: Props) {
                   <TextInput
                     value={value}
                     onChangeText={setValue}
-                    placeholder={type === "email" ? "email@example.com" : type === "username" ? "username" : type === "phone" ? "+14155551234" : type === "domain" ? "example.com" : type === "ip" ? "192.168.1.1 or 2001:db8::1" : "password (hashed locally)"}
+                    placeholder={type === "email" ? "email@example.com" : type === "username" ? "username" : type === "phone" ? "+14155551234" : type === "domain" ? "example.com" : type === "ip" ? "192.168.1.1 or 2001:db8::1" : type === "cedula" ? "Número de cédula (e.g. 1234567890)" : type === "nit" ? "NIT (e.g. 899999068-1)" : "password (hashed locally)"}
                     placeholderTextColor="#525252"
                     secureTextEntry={type === "password"}
                     autoCapitalize="none"

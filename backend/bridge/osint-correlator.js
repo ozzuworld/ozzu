@@ -1023,6 +1023,191 @@ const EXTRACTION_RULES = [
       };
     },
   },
+
+  // ── Colombian OSINT (CO Epic) ──
+
+  // co-adres: Health affiliation → person + location entities
+  {
+    module: "co-adres",
+    match: (f) => f.severity !== "info" && f.raw_data && (f.raw_data.primerNombre || f.raw_data.nombre),
+    extract: (f, profile) => {
+      const d = f.raw_data;
+      const entities = [];
+      const relationships = [];
+      const fullName = [d.primerNombre, d.segundoNombre, d.primerApellido, d.segundoApellido]
+        .filter(Boolean).join(" ") || d.nombre;
+      if (fullName) {
+        entities.push({
+          entity_type: "person", value: fullName.toLowerCase(), label: fullName,
+          metadata: { source: "adres", eps: d.eps || d.entidad, regime: d.tipoAfiliado || d.regimen },
+          source_module: "co-adres",
+        });
+        relationships.push({
+          fromType: "cedula", fromValue: profile.value, toType: "person", toValue: fullName.toLowerCase(),
+          relationship: "registered_to", confidence: 90, evidence: "ADRES health affiliation: " + fullName,
+        });
+      }
+      const municipality = d.municipio || d.nombreMunicipio;
+      const department = d.departamento || d.nombreDepartamento;
+      if (municipality) {
+        const loc = (municipality + (department ? ", " + department : "")).toLowerCase();
+        entities.push({
+          entity_type: "location", value: loc, label: municipality + (department ? ", " + department : ""),
+          metadata: { source: "adres", type: "health_affiliation_municipality" }, source_module: "co-adres",
+        });
+        relationships.push({
+          fromType: "cedula", fromValue: profile.value, toType: "location", toValue: loc,
+          relationship: "associated_with", confidence: 80, evidence: "ADRES municipality: " + municipality,
+        });
+      }
+      if (d.eps || d.entidad) {
+        const eps = (d.eps || d.entidad || "").toLowerCase().replace(/\s+/g, "_");
+        entities.push({
+          entity_type: "organization", value: "eps:" + eps, label: d.eps || d.entidad,
+          metadata: { type: "health_insurance", regime: d.tipoAfiliado }, source_module: "co-adres",
+        });
+        relationships.push({
+          fromType: "cedula", fromValue: profile.value, toType: "organization", toValue: "eps:" + eps,
+          relationship: "member_of", confidence: 90, evidence: "ADRES: affiliated with " + (d.eps || d.entidad),
+        });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // co-sigep: Public servant → person + organization entities
+  {
+    module: "co-sigep",
+    match: (f) => f.severity !== "info" && f.raw_data && (f.raw_data.name || f.raw_data.entity),
+    extract: (f, profile) => {
+      const d = f.raw_data;
+      const entities = [];
+      const relationships = [];
+      if (d.name) {
+        entities.push({
+          entity_type: "person", value: d.name.toLowerCase(), label: d.name,
+          metadata: { source: "sigep", position: d.position, entity: d.entity }, source_module: "co-sigep",
+        });
+        relationships.push({
+          fromType: "cedula", fromValue: profile.value, toType: "person", toValue: d.name.toLowerCase(),
+          relationship: "registered_to", confidence: 90, evidence: "SIGEP: " + d.name,
+        });
+      }
+      if (d.entity) {
+        const org = d.entity.toLowerCase().replace(/\s+/g, "_");
+        entities.push({
+          entity_type: "organization", value: "gov:" + org, label: d.entity,
+          metadata: { type: "government_entity", position: d.position }, source_module: "co-sigep",
+        });
+        relationships.push({
+          fromType: "cedula", fromValue: profile.value, toType: "organization", toValue: "gov:" + org,
+          relationship: "member_of", confidence: 90, evidence: "SIGEP: employed at " + d.entity,
+        });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // co-rues: Business registry → organization entities
+  {
+    module: "co-rues",
+    match: (f) => f.severity !== "info" && f.raw_data && (f.raw_data.businesses || f.raw_data.razonSocial),
+    extract: (f, profile) => {
+      const businesses = f.raw_data.businesses || [f.raw_data];
+      const entities = [];
+      const relationships = [];
+      for (const biz of businesses.slice(0, 10)) {
+        const name = biz.razonSocial || biz.nombre || biz.name;
+        if (!name) continue;
+        const org = name.toLowerCase().replace(/\s+/g, "_");
+        entities.push({
+          entity_type: "organization", value: "rues:" + org, label: name,
+          metadata: { nit: biz.nit, ciiu: biz.ciiu, estado: biz.estado, source: "rues" }, source_module: "co-rues",
+        });
+        relationships.push({
+          fromType: profile.profile_type, fromValue: profile.value, toType: "organization", toValue: "rues:" + org,
+          relationship: "owns", confidence: 85, evidence: "RUES: registered business " + name,
+        });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // co-secop: Government contracts → organization entities
+  {
+    module: "co-secop",
+    match: (f) => f.severity !== "info" && f.raw_data && (f.raw_data.contracts || f.raw_data.totalContracts),
+    extract: (f, profile) => {
+      const contracts = f.raw_data.contracts || [];
+      const entities = [];
+      const relationships = [];
+      const seenEntities = new Set();
+      for (const c of contracts.slice(0, 10)) {
+        const entity = c.entidad || c.nombre_entidad;
+        if (!entity || seenEntities.has(entity.toLowerCase())) continue;
+        seenEntities.add(entity.toLowerCase());
+        const org = entity.toLowerCase().replace(/\s+/g, "_");
+        entities.push({
+          entity_type: "organization", value: "secop:" + org, label: entity,
+          metadata: { type: "government_entity", source: "secop" }, source_module: "co-secop",
+        });
+        relationships.push({
+          fromType: profile.profile_type, fromValue: profile.value, toType: "organization", toValue: "secop:" + org,
+          relationship: "associated_with", confidence: 80, evidence: "SECOP: government contract with " + entity,
+        });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // co-dian: Tax registry → person entity
+  {
+    module: "co-dian",
+    match: (f) => f.severity !== "info" && f.raw_data && (f.raw_data.name || f.raw_data.razonSocial),
+    extract: (f, profile) => {
+      const d = f.raw_data;
+      const name = d.name || d.razonSocial;
+      if (!name) return { entities: [], relationships: [] };
+      return {
+        entities: [{
+          entity_type: "person", value: name.toLowerCase(), label: name,
+          metadata: { source: "dian", status: d.status, nit: d.nit, type: d.tipoContribuyente },
+          source_module: "co-dian",
+        }],
+        relationships: [{
+          fromType: profile.profile_type, fromValue: profile.value, toType: "person", toValue: name.toLowerCase(),
+          relationship: "registered_to", confidence: 90, evidence: "DIAN RUT: " + name,
+        }],
+      };
+    },
+  },
+
+  // co-rama-judicial: Court cases → organization entities (courts)
+  {
+    module: "co-rama-judicial",
+    match: (f) => f.severity !== "info" && f.raw_data && f.raw_data.cases,
+    extract: (f, profile) => {
+      const cases = f.raw_data.cases || [];
+      const entities = [];
+      const relationships = [];
+      const seenCourts = new Set();
+      for (const c of cases.slice(0, 5)) {
+        const court = c.despacho || c.Despacho;
+        if (!court || seenCourts.has(court.toLowerCase())) continue;
+        seenCourts.add(court.toLowerCase());
+        const org = court.toLowerCase().replace(/\s+/g, "_").substring(0, 80);
+        entities.push({
+          entity_type: "organization", value: "court:" + org, label: court,
+          metadata: { type: "judicial_court", caseType: c.tipoProceso || c.TipoProceso }, source_module: "co-rama-judicial",
+        });
+        relationships.push({
+          fromType: "cedula", fromValue: profile.value, toType: "organization", toValue: "court:" + org,
+          relationship: "associated_with", confidence: 90, evidence: "Rama Judicial: case at " + court,
+        });
+      }
+      return { entities, relationships };
+    },
+  },
 ];
 
 // ── Core Correlation Functions ──
@@ -1033,7 +1218,7 @@ async function correlateScanResults(profileId, scanId) {
     if (!profile) return;
 
     // Skip profile types that aren't valid entity types (e.g. "password")
-    const VALID_ENTITY_TYPES = new Set(["person", "email", "username", "phone", "domain", "ip", "social_account", "organization", "location", "image", "device"]);
+    const VALID_ENTITY_TYPES = new Set(["person", "email", "username", "phone", "domain", "ip", "social_account", "organization", "location", "image", "device", "cedula", "nit"]);
     if (!VALID_ENTITY_TYPES.has(profile.profile_type)) return;
 
     // Get all findings for this profile (not just this scan — correlate everything)

@@ -62,6 +62,8 @@ export const PROFILE_TYPE_EMOJI: Record<string, string> = {
   domain: "🌐",
   ip: "📡",
   image: "🖼",
+  cedula: "🪪",
+  nit: "🏢",
 };
 
 export const CORRELATION_TYPE_EMOJI: Record<string, string> = {
