@@ -3,7 +3,7 @@
 // Note: DIAN added reCAPTCHA (verificarCaptcha) — direct submission is blocked.
 // This module extracts the JSESSIONID and ViewState but cannot bypass captcha.
 // Falls back to datos.gov.co RUT datasets when available.
-const { validateCedula, validateNIT, safeFetch, CO_HEADERS } = require("./co-utils");
+const { validateCedula, validateNIT, safeFetch, insecureFetch, CO_HEADERS } = require("./co-utils");
 
 // datos.gov.co has some RUT-related open datasets
 const DIAN_OPEN_DATA = "https://www.datos.gov.co/resource/f9g5-2wvi.json"; // Grandes Contribuyentes
@@ -62,9 +62,9 @@ module.exports = {
     let viewState = null;
     let sessionCookies = "";
     try {
-      const pageRes = await safeFetch(
+      const pageRes = await insecureFetch(
         "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
-        { method: "GET", redirect: "follow" }
+        { method: "GET" }
       );
       if (pageRes.ok && typeof pageRes.body === "string") {
         const vsMatch = pageRes.body.match(/javax\.faces\.ViewState[^>]*value="([^"]+)"/);
@@ -94,7 +94,7 @@ module.exports = {
           ? `https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces;${sessionCookies.replace("; ", ";")}`
           : "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces";
 
-        const res = await safeFetch(actionUrl, {
+        const res = await insecureFetch(actionUrl, {
           method: "POST",
           headers: {
             ...CO_HEADERS,

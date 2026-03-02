@@ -1,7 +1,7 @@
 // Colombian OSINT: Contraloría General de la República — Fiscal responsibility
 // Source: cfiscal.contraloria.gov.co — Boletín de Responsables Fiscales
 // Access: ASPX form with ViewState — NO reCAPTCHA. GET page → extract hidden fields → POST.
-const { validateCedula, safeFetch, CO_HEADERS, extractAspxFields } = require("./co-utils");
+const { validateCedula, insecureFetch, CO_HEADERS, extractAspxFields } = require("./co-utils");
 
 const FORM_URL = "https://cfiscal.contraloria.gov.co/certificados/certificadopersonanatural.aspx";
 
@@ -28,7 +28,7 @@ module.exports = {
     let aspxFields = null;
     let sessionCookies = "";
     try {
-      const pageRes = await safeFetch(FORM_URL, { method: "GET" });
+      const pageRes = await insecureFetch(FORM_URL, { method: "GET" });
       if (pageRes.ok && typeof pageRes.body === "string") {
         aspxFields = extractAspxFields(pageRes.body);
         sessionCookies = pageRes.cookies || "";
@@ -63,7 +63,7 @@ module.exports = {
       formData.append("ctl00$MainContent$txtNumeroDocumento", cedula);
       formData.append("ctl00$MainContent$btnBuscar", "Buscar");
 
-      const res = await safeFetch(FORM_URL, {
+      const res = await insecureFetch(FORM_URL, {
         method: "POST",
         headers: {
           ...CO_HEADERS,

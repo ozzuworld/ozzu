@@ -87,6 +87,28 @@ module.exports = {
         const html = res.body;
         const lower = html.toLowerCase();
 
+        // Detect error/validation modals (form rejected the input)
+        const isError = lower.includes("debe registrar") ||
+          lower.includes("error") && lower.includes("alert-danger");
+
+        if (isError) {
+          // The RNMC form requires both cédula AND issue date for cédula lookups
+          findings.push({
+            category: "exposure",
+            severity: "info",
+            title: "Policía RNMC: Issue date required",
+            description: [
+              `The Policía RNMC (Medidas Correctivas) form requires the cédula issue date to query.`,
+              `Automated lookup not possible for CC: ${cedula} without this information.`,
+              `Check police records manually at the link below.`,
+            ].join("\n"),
+            sourceUrl: FORM_URL,
+            rawData: { searched: cedula, reason: "requires_issue_date" },
+            remediation: "Visit https://srvcnpc.policia.gov.co/PSC/frm_cnp_consulta.aspx — enter cédula, issue date, then search.",
+          });
+          return findings;
+        }
+
         // Check for records found
         const hasRecords = lower.includes("registra anotaciones") ||
           lower.includes("medida de aseguramiento") ||

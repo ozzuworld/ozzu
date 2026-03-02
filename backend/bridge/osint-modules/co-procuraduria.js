@@ -53,7 +53,7 @@ module.exports = {
         formData.append("__VIEWSTATE", aspxFields.__VIEWSTATE);
         if (aspxFields.__VIEWSTATEGENERATOR) formData.append("__VIEWSTATEGENERATOR", aspxFields.__VIEWSTATEGENERATOR);
         if (aspxFields.__EVENTVALIDATION) formData.append("__EVENTVALIDATION", aspxFields.__EVENTVALIDATION);
-        formData.append("ddlTipoID", "CC");
+        formData.append("ddlTipoID", "1"); // 1=Cédula de ciudadanía
         formData.append("txtNumID", cedula);
         formData.append("rblTipoCert", "1"); // Ordinario
         formData.append("foo", "");
@@ -95,7 +95,7 @@ module.exports = {
                 answerForm.append("__VIEWSTATE", newFields.__VIEWSTATE || "");
                 if (newFields.__VIEWSTATEGENERATOR) answerForm.append("__VIEWSTATEGENERATOR", newFields.__VIEWSTATEGENERATOR);
                 if (newFields.__EVENTVALIDATION) answerForm.append("__EVENTVALIDATION", newFields.__EVENTVALIDATION);
-                answerForm.append("ddlTipoID", "CC");
+                answerForm.append("ddlTipoID", "1"); // 1=Cédula de ciudadanía
                 answerForm.append("txtNumID", cedula);
                 answerForm.append("rblTipoCert", "1");
                 answerForm.append("txtRespuestaPregunta", String(answer));

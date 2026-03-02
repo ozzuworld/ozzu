@@ -1,4 +1,6 @@
 // Colombian OSINT utilities — cédula/NIT validation, shared HTTP helpers
+const https = require("https");
+const http = require("http");
 
 /**
  * Validate Colombian cédula de ciudadanía
@@ -94,6 +96,80 @@ async function safeFetch(url, options = {}, timeoutMs = 15000) {
 }
 
 /**
+ * Insecure HTTPS fetch — uses https.request with rejectUnauthorized:false
+ * For Colombian gov sites with bad SSL certs (Contraloría, DIAN MUISCA)
+ * Returns same shape as safeFetch: { ok, status, body, headers, cookies }
+ */
+async function insecureFetch(url, options = {}, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    try {
+      const parsed = new URL(url);
+      const isHttps = parsed.protocol === "https:";
+      const mod = isHttps ? https : http;
+      const mergedHeaders = { ...CO_HEADERS, ...(options.headers || {}) };
+
+      const reqOptions = {
+        hostname: parsed.hostname,
+        port: parsed.port || (isHttps ? 443 : 80),
+        path: parsed.pathname + parsed.search,
+        method: options.method || "GET",
+        headers: mergedHeaders,
+        rejectUnauthorized: false,
+        timeout: timeoutMs,
+      };
+
+      const req = mod.request(reqOptions, (res) => {
+        // Follow redirects (up to 3)
+        if ([301, 302, 303, 307].includes(res.statusCode) && res.headers.location) {
+          const redirectUrl = new URL(res.headers.location, url).href;
+          res.resume();
+          return insecureFetch(redirectUrl, { ...options, method: "GET", body: undefined }, timeoutMs)
+            .then(resolve);
+        }
+
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          const contentType = res.headers["content-type"] || "";
+          let body;
+          if (contentType.includes("json")) {
+            try { body = JSON.parse(data); } catch { body = data; }
+          } else {
+            body = data;
+          }
+          const setCookie = (res.headers["set-cookie"] || [])
+            .map((c) => c.split(";")[0].trim())
+            .filter(Boolean)
+            .join("; ");
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 400,
+            status: res.statusCode,
+            body,
+            headers: res.headers,
+            cookies: setCookie,
+          });
+        });
+      });
+
+      req.on("error", (err) => {
+        resolve({ ok: false, status: 0, error: err.message, body: null, headers: null, cookies: "" });
+      });
+      req.on("timeout", () => {
+        req.destroy();
+        resolve({ ok: false, status: 0, error: "timeout", body: null, headers: null, cookies: "" });
+      });
+
+      if (options.body) {
+        req.write(options.body);
+      }
+      req.end();
+    } catch (err) {
+      resolve({ ok: false, status: 0, error: err.message, body: null, headers: null, cookies: "" });
+    }
+  });
+}
+
+/**
  * Extract ASPX ViewState fields from HTML
  */
 function extractAspxFields(html) {
@@ -117,5 +193,6 @@ module.exports = {
   formatCOP,
   CO_HEADERS,
   safeFetch,
+  insecureFetch,
   extractAspxFields,
 };
