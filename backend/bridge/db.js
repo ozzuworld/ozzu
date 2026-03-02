@@ -353,7 +353,34 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_cedula_faces_cedula ON cedula_faces(cedula)`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces)");
+    // Migration: business_projects + business_tasks tables
+    await pool.query(`CREATE TABLE IF NOT EXISTS business_projects (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      emoji VARCHAR(10) DEFAULT '📁',
+      color VARCHAR(10) DEFAULT '#06B6D4',
+      status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active','paused','completed','archived')),
+      position INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS business_tasks (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER REFERENCES business_projects(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending','in_progress','done')),
+      priority VARCHAR(10) DEFAULT 'medium' CHECK (priority IN ('low','medium','high')),
+      position INTEGER DEFAULT 0,
+      due_date DATE,
+      completed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_business_tasks_project ON business_tasks(project_id)`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -1840,6 +1867,134 @@ async function getAllCedulaEmbeddings() {
   return res.rows;
 }
 
+// ── Business Projects & Tasks ──
+
+async function getBusinessProjects() {
+  if (!_pgConnected) return [];
+  const res = await query(`
+    SELECT p.*,
+      COUNT(t.id)::int AS task_count,
+      COUNT(t.id) FILTER (WHERE t.status = 'done')::int AS done_count,
+      COUNT(t.id) FILTER (WHERE t.status = 'in_progress')::int AS in_progress_count
+    FROM business_projects p
+    LEFT JOIN business_tasks t ON t.project_id = p.id
+    WHERE p.status != 'archived'
+    GROUP BY p.id
+    ORDER BY p.position, p.created_at DESC
+  `);
+  return res.rows;
+}
+
+async function getBusinessProject(id) {
+  if (!_pgConnected) return null;
+  const pRes = await query(`SELECT * FROM business_projects WHERE id = $1`, [id]);
+  if (pRes.rows.length === 0) return null;
+  const tRes = await query(
+    `SELECT * FROM business_tasks WHERE project_id = $1 ORDER BY position, created_at`,
+    [id]
+  );
+  return { ...pRes.rows[0], tasks: tRes.rows };
+}
+
+async function createBusinessProject({ name, description, emoji, color }) {
+  if (!_pgConnected) return null;
+  const posRes = await query(`SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM business_projects`);
+  const pos = posRes.rows[0].next_pos;
+  const res = await query(
+    `INSERT INTO business_projects (name, description, emoji, color, position) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [name, description || '', emoji || '📁', color || '#06B6D4', pos]
+  );
+  return res.rows[0];
+}
+
+async function updateBusinessProject(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const vals = [];
+  let idx = 1;
+  for (const key of ['name', 'description', 'emoji', 'color', 'status', 'position']) {
+    if (updates[key] !== undefined) {
+      fields.push(`${key} = $${idx}`);
+      vals.push(updates[key]);
+      idx++;
+    }
+  }
+  if (fields.length === 0) return null;
+  fields.push(`updated_at = NOW()`);
+  vals.push(id);
+  const res = await query(
+    `UPDATE business_projects SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+    vals
+  );
+  return res.rows[0] || null;
+}
+
+async function archiveBusinessProject(id) {
+  if (!_pgConnected) return false;
+  const res = await query(
+    `UPDATE business_projects SET status = 'archived', updated_at = NOW() WHERE id = $1`,
+    [id]
+  );
+  return res.rowCount > 0;
+}
+
+async function createBusinessTask({ project_id, title, description, priority, due_date }) {
+  if (!_pgConnected) return null;
+  const posRes = await query(
+    `SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM business_tasks WHERE project_id = $1`,
+    [project_id]
+  );
+  const pos = posRes.rows[0].next_pos;
+  const res = await query(
+    `INSERT INTO business_tasks (project_id, title, description, priority, due_date, position)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [project_id, title, description || '', priority || 'medium', due_date || null, pos]
+  );
+  return res.rows[0];
+}
+
+async function updateBusinessTask(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const vals = [];
+  let idx = 1;
+  for (const key of ['title', 'description', 'status', 'priority', 'position', 'due_date']) {
+    if (updates[key] !== undefined) {
+      fields.push(`${key} = $${idx}`);
+      vals.push(updates[key]);
+      idx++;
+    }
+  }
+  if (updates.status === 'done') {
+    fields.push(`completed_at = NOW()`);
+  } else if (updates.status && updates.status !== 'done') {
+    fields.push(`completed_at = NULL`);
+  }
+  if (fields.length === 0) return null;
+  fields.push(`updated_at = NOW()`);
+  vals.push(id);
+  const res = await query(
+    `UPDATE business_tasks SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+    vals
+  );
+  return res.rows[0] || null;
+}
+
+async function deleteBusinessTask(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM business_tasks WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+async function toggleBusinessTaskStatus(id) {
+  if (!_pgConnected) return null;
+  const cur = await query(`SELECT status FROM business_tasks WHERE id = $1`, [id]);
+  if (cur.rows.length === 0) return null;
+  const cycle = { pending: 'in_progress', in_progress: 'done', done: 'pending' };
+  const next = cycle[cur.rows[0].status] || 'pending';
+  return updateBusinessTask(id, { status: next });
+}
+
 module.exports = {
   init,
   isConnected,
@@ -1971,6 +2126,16 @@ module.exports = {
   getCedulaFaces,
   deleteCedulaFace,
   getAllCedulaEmbeddings,
+  // Business Projects & Tasks
+  getBusinessProjects,
+  getBusinessProject,
+  createBusinessProject,
+  updateBusinessProject,
+  archiveBusinessProject,
+  createBusinessTask,
+  updateBusinessTask,
+  deleteBusinessTask,
+  toggleBusinessTaskStatus,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

@@ -85,6 +85,7 @@ const pipelineRoutes = require("./routes/pipeline");
 const epicRoutes = require("./routes/epics");
 const cedulaRoutes = require("./routes/cedula");
 const cipherRoutes = require("./routes/cipher");
+const businessRoutes = require("./routes/business");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -1409,6 +1410,7 @@ function getRouteHandlers() {
       epics: epicRoutes(routeCtx),
       cedula: cedulaRoutes(routeCtx),
       cipher: cipherRoutes(routeCtx),
+      business: businessRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1439,6 +1441,7 @@ async function handleRequest(req, res) {
   if (await r.epics(req, res, pathname, url)) return;
   if (await r.osint(req, res, pathname, url)) return;
   if (await r.cedula(req, res, pathname, url)) return;
+  if (await r.business(req, res, pathname, url)) return;
 
   // GET /tmp-file/:filename — serve temp files (for iOS pairing etc)
   if (req.method === "GET" && pathname.startsWith("/tmp-file/")) {

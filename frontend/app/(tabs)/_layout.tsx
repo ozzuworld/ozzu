@@ -49,6 +49,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="business"
+        options={{
+          title: "BIZ",
+          tabBarIcon: () => <TabIcon emoji="💼" />,
+        }}
+      />
+      <Tabs.Screen
         name="music"
         options={{
           title: "MUSIC",

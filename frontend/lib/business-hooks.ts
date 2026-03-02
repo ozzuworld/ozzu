@@ -1,0 +1,133 @@
+import { useState, useEffect, useCallback } from "react";
+import {
+  fetchBusinessProjects,
+  fetchBusinessProject,
+  createBusinessProject,
+  updateBusinessProject,
+  archiveBusinessProject,
+  createBusinessTask,
+  updateBusinessTask,
+  deleteBusinessTask,
+  toggleBusinessTaskStatus,
+  type BusinessProject,
+  type BusinessTask,
+} from "./bridge-api";
+
+export function useBusiness() {
+  const [projects, setProjects] = useState<BusinessProject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      setError(null);
+      const data = await fetchBusinessProjects();
+      setProjects(data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const addProject = useCallback(
+    async (data: { name: string; description?: string; emoji?: string; color?: string }) => {
+      const res = await createBusinessProject(data);
+      await reload();
+      return res.project;
+    },
+    [reload]
+  );
+
+  const editProject = useCallback(
+    async (id: number, data: Partial<BusinessProject>) => {
+      const res = await updateBusinessProject(id, data);
+      await reload();
+      return res.project;
+    },
+    [reload]
+  );
+
+  const removeProject = useCallback(
+    async (id: number) => {
+      await archiveBusinessProject(id);
+      await reload();
+    },
+    [reload]
+  );
+
+  return { projects, loading, error, reload, addProject, editProject, removeProject };
+}
+
+export function useBusinessProject(id: number | null) {
+  const [project, setProject] = useState<(BusinessProject & { tasks: BusinessTask[] }) | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!id) { setLoading(false); return; }
+    try {
+      setError(null);
+      const data = await fetchBusinessProject(id);
+      setProject(data as any);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    setLoading(true);
+    reload();
+  }, [reload]);
+
+  const addTask = useCallback(
+    async (data: { title: string; description?: string; priority?: string; due_date?: string }) => {
+      if (!id) return null;
+      const res = await createBusinessTask(id, data);
+      await reload();
+      return res.task;
+    },
+    [id, reload]
+  );
+
+  const editTask = useCallback(
+    async (taskId: number, data: Partial<BusinessTask>) => {
+      const res = await updateBusinessTask(taskId, data);
+      await reload();
+      return res.task;
+    },
+    [reload]
+  );
+
+  const removeTask = useCallback(
+    async (taskId: number) => {
+      await deleteBusinessTask(taskId);
+      await reload();
+    },
+    [reload]
+  );
+
+  const toggleTask = useCallback(
+    async (taskId: number) => {
+      const res = await toggleBusinessTaskStatus(taskId);
+      // Optimistic: update local state immediately
+      setProject((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          tasks: prev.tasks.map((t) => (t.id === taskId ? res.task : t)),
+        };
+      });
+      return res.task;
+    },
+    []
+  );
+
+  return { project, loading, error, reload, addTask, editTask, removeTask, toggleTask };
+}

@@ -1301,3 +1301,109 @@ export async function deleteCedulaFace(cedula: string): Promise<{ ok: boolean }>
   if (!res.ok) throw new Error(`Delete cedula face error: ${res.status}`);
   return res.json();
 }
+
+// ── Business Projects & Tasks ──
+
+export interface BusinessTask {
+  id: number;
+  project_id: number;
+  title: string;
+  description: string;
+  status: "pending" | "in_progress" | "done";
+  priority: "low" | "medium" | "high";
+  position: number;
+  due_date: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessProject {
+  id: number;
+  name: string;
+  description: string;
+  emoji: string;
+  color: string;
+  status: "active" | "paused" | "completed" | "archived";
+  position: number;
+  task_count: number;
+  done_count: number;
+  in_progress_count: number;
+  created_at: string;
+  updated_at: string;
+  tasks?: BusinessTask[];
+}
+
+export async function fetchBusinessProjects(): Promise<BusinessProject[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects`);
+  if (!res.ok) throw new Error(`Business projects error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchBusinessProject(id: number): Promise<BusinessProject> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects/${id}`);
+  if (!res.ok) throw new Error(`Business project error: ${res.status}`);
+  return res.json();
+}
+
+export async function createBusinessProject(data: { name: string; description?: string; emoji?: string; color?: string }): Promise<{ ok: boolean; project: BusinessProject }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Create project error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateBusinessProject(id: number, updates: Partial<BusinessProject>): Promise<{ ok: boolean; project: BusinessProject }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error(`Update project error: ${res.status}`);
+  return res.json();
+}
+
+export async function archiveBusinessProject(id: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Archive project error: ${res.status}`);
+  return res.json();
+}
+
+export async function createBusinessTask(projectId: number, data: { title: string; description?: string; priority?: string; due_date?: string }): Promise<{ ok: boolean; task: BusinessTask }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects/${projectId}/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Create task error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateBusinessTask(id: number, updates: Partial<BusinessTask>): Promise<{ ok: boolean; task: BusinessTask }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/tasks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error(`Update task error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteBusinessTask(id: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/tasks/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete task error: ${res.status}`);
+  return res.json();
+}
+
+export async function toggleBusinessTaskStatus(id: number): Promise<{ ok: boolean; task: BusinessTask }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/tasks/${id}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`Toggle task error: ${res.status}`);
+  return res.json();
+}
