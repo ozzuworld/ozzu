@@ -114,7 +114,7 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
             {
               text: "Download",
               onPress: () => {
-                const url = `${BRIDGE_URL}/api/artifacts/latest/ipa`;
+                const url = `${BRIDGE_URL}/api/artifacts/${artifact.artifactId}/download`;
                 downloadInApp(url, "ozzu-latest.ipa");
               },
             },
