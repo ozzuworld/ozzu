@@ -76,6 +76,16 @@ osintEngine.registerModule(require("./osint-modules/co-risk-score"));
 const osintMonitor = require("./osint-monitor");
 const cliRunner = require("./osint-cli-runner");
 
+// ── Extracted route modules ──
+const dashboardRoutes = require("./routes/dashboard");
+const directiveRoutes = require("./routes/directives");
+const spotifyRoutes = require("./routes/spotify");
+const osintRoutes = require("./routes/osint");
+const pipelineRoutes = require("./routes/pipeline");
+const epicRoutes = require("./routes/epics");
+const cedulaRoutes = require("./routes/cedula");
+const cipherRoutes = require("./routes/cipher");
+
 const log = {
   bridge: createLogger("bridge"),
   directive: createLogger("directive"),
@@ -1306,6 +1316,99 @@ function cosineSimilarity(a, b) {
   return denom === 0 ? 0 : dot / denom;
 }
 
+// ── Route context (shared deps for extracted route modules) ──
+const routeCtx = {
+  // Utilities
+  sendJSON, parseBody, requireAuth, escapeHtml, escapeJsString, cosineSimilarity,
+  // Database + external modules
+  db, redis, log, metrics, osintEngine, osintMonitor, cliRunner, buildVerifier, anthropicUsage,
+  // Agent spawner
+  getRunningAgents, killAgent, smartDeploy, mergeWorktreeToMain, cleanupWorktree, getConfig, setConfig,
+  routeDirective: orchestrator.routeDirective,
+  // State accessors
+  getDirectives, saveDirectives, findSimilarDirective,
+  getApprovals, saveApprovals, expireApprovals,
+  getEpics, saveEpics, deriveEpicStatus, getEpicProgress,
+  updateEpicProgress: (epicId) => { deriveEpicStatus(epicId); },
+  getNextEpicPhase: (epicId) => {
+    const epics = getEpics();
+    const epic = epics.find(e => e.id === epicId);
+    if (!epic || !epic.phaseIds || epic.phaseIds.length === 0) return null;
+    const directives = getDirectives();
+    for (const pid of epic.phaseIds) {
+      const d = directives.find(dd => dd.id === pid);
+      if (d && !["completed", "cancelled"].includes(d.status)) return d;
+    }
+    return null;
+  },
+  getStatusEntries, saveStatusEntries, getLogRing,
+  // Constants
+  CORS_HEADERS, DIRECTIVE_TEMPLATES, PORT, DATA_DIR, MAX_DIRECTIVES,
+  RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS,
+  HA_URL: process.env.HA_URL || "http://localhost:8123",
+  HA_TOKEN: process.env.HA_TOKEN || "",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
+  // Mutable state (accessed via routeCtx.xxx for mutations to propagate)
+  get _serverStartedAt() { return _serverStartedAt; },
+  get _restartCount() { return _restartCount; },
+  get _latencyStats() { return _latencyStats; },
+  get _redisConnected() { return _redisConnected; },
+  get _pipelineViolations() { return _pipelineViolations; },
+  set _pipelineViolations(v) { _pipelineViolations = v; },
+  get _pipelineViolationIdCounter() { return _pipelineViolationIdCounter; },
+  set _pipelineViolationIdCounter(v) { _pipelineViolationIdCounter = v; },
+  get _buildStatusCache() { return _buildStatusCache; },
+  set _buildStatusCache(v) { _buildStatusCache = v; },
+  get _buildStatusCacheTime() { return _buildStatusCacheTime; },
+  set _buildStatusCacheTime(v) { _buildStatusCacheTime = v; },
+  get _directiveCreationTimestamps() { return _directiveCreationTimestamps; },
+  get _rateLimitHits() { return _rateLimitHits; },
+  set _rateLimitHits(v) { _rateLimitHits = v; },
+  get _albumColorCache() { return _albumColorCache; },
+  get _spotifyQueueCache() { return _spotifyQueueCache; },
+  set _spotifyQueueCache(v) { _spotifyQueueCache = v; },
+  get _spotifyPlaylistsCache() { return _spotifyPlaylistsCache; },
+  set _spotifyPlaylistsCache(v) { _spotifyPlaylistsCache = v; },
+  get _spotifyTracksCache() { return _spotifyTracksCache; },
+  get _spotifyNowPlayingCache() { return _spotifyNowPlayingCache; },
+  set _spotifyNowPlayingCache(v) { _spotifyNowPlayingCache = v; },
+  get _spotifyLikedCache() { return _spotifyLikedCache; },
+  set _spotifyLikedCache(v) { _spotifyLikedCache = v; },
+  get _cachedSpotifyToken() { return _cachedSpotifyToken; },
+  spotifyFetch, getSpotifyToken,
+  BUILD_STATUS_CACHE_TTL: 120000,
+  // Voice/WS functions (populated after they're defined)
+  get engage() { return typeof engage === "function" ? engage : () => {}; },
+  get sendNotification() { return typeof sendNotification === "function" ? sendNotification : () => {}; },
+  get broadcastToAll() { return typeof broadcastToAll === "function" ? broadcastToAll : () => {}; },
+  get geminiReady() { return typeof geminiReady !== "undefined" ? geminiReady : false; },
+  get currentPersona() { return typeof currentPersona !== "undefined" ? currentPersona : "june"; },
+  get conversationTranscript() { return typeof conversationTranscript !== "undefined" ? conversationTranscript : []; },
+  get cipherPipeline() { return typeof cipherPipeline !== "undefined" ? cipherPipeline : null; },
+  get setLastRestartReason() { return typeof setLastRestartReason === "function" ? setLastRestartReason : () => {}; },
+  get buildSituationBriefing() { return typeof buildSituationBriefing === "function" ? buildSituationBriefing : async () => ""; },
+  // Node built-ins
+  fs, path, crypto,
+};
+
+// Route handlers initialized lazily on first request
+let _routeHandlers = null;
+function getRouteHandlers() {
+  if (!_routeHandlers) {
+    _routeHandlers = {
+      dashboard: dashboardRoutes(routeCtx),
+      directives: directiveRoutes(routeCtx),
+      spotify: spotifyRoutes(routeCtx),
+      osint: osintRoutes(routeCtx),
+      pipeline: pipelineRoutes(routeCtx),
+      epics: epicRoutes(routeCtx),
+      cedula: cedulaRoutes(routeCtx),
+      cipher: cipherRoutes(routeCtx),
+    };
+  }
+  return _routeHandlers;
+}
+
 // ── Route handlers ──
 
 async function handleRequest(req, res) {
@@ -1320,6 +1423,17 @@ async function handleRequest(req, res) {
     res.end();
     return;
   }
+
+  // ── Extracted route dispatch ──
+  const r = getRouteHandlers();
+  if (await r.directives(req, res, pathname, url)) return;
+  if (await r.dashboard(req, res, pathname, url)) return;
+  if (await r.cipher(req, res, pathname, url)) return;
+  if (await r.spotify(req, res, pathname, url)) return;
+  if (await r.pipeline(req, res, pathname, url)) return;
+  if (await r.epics(req, res, pathname, url)) return;
+  if (await r.osint(req, res, pathname, url)) return;
+  if (await r.cedula(req, res, pathname, url)) return;
 
   // GET /tmp-file/:filename — serve temp files (for iOS pairing etc)
   if (req.method === "GET" && pathname.startsWith("/tmp-file/")) {
