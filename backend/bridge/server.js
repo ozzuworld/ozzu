@@ -988,7 +988,7 @@ async function initStorage() {
               }
             }
           } catch (err) {
-            // Silently ignore per-run errors in background updater
+            log.directive.warn(`[build-updater] Failed to check run ${run.runId}: ${err.message}`);
           }
         }
       }
@@ -2342,7 +2342,9 @@ async function handleRequest(req, res) {
               name: a.name,
               sizeBytes: a.size_in_bytes,
             });
-          } catch (_) {}
+          } catch (_) {
+            log.bridge.warn(`[artifacts] Failed to parse artifact line: ${line}`);
+          }
         }
       } catch (err) {
         log.bridge.warn(`[artifacts] Failed to fetch artifacts for run ${run.runId}: ${err.message}`);
@@ -2542,7 +2544,9 @@ async function handleRequest(req, res) {
           sendJSON(res, 400, { error: `No branch specified. Detected current branch: ${currentBranch}. Pass {"branch":"${currentBranch}"} in request body.` });
           return;
         }
-      } catch {}
+      } catch (err) {
+        log.directive.warn(`[merge-and-deploy] Branch auto-detect failed: ${err.message}`);
+      }
       sendJSON(res, 400, { error: "No branch specified. Pass {\"branch\":\"cipher/dir_xxx\"} in request body or set mergeBranch on directive." });
       return;
     }
@@ -3181,7 +3185,9 @@ async function handleRequest(req, res) {
     // Load expoConfig if available
     const expoConfigPath = path.join(updateDir, "expoConfig.json");
     let expoClient = {};
-    try { expoClient = JSON.parse(await fs.promises.readFile(expoConfigPath, "utf8")); } catch {}
+    try { expoClient = JSON.parse(await fs.promises.readFile(expoConfigPath, "utf8")); } catch (err) {
+      if (err.code !== "ENOENT") log.bridge.warn(`[OTA] Failed to parse expoConfig.json: ${err.message}`);
+    }
 
     const stat = await fs.promises.stat(metadataPath);
     const createdAt = stat.mtime.toISOString();
@@ -5572,7 +5578,9 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
           });
           sendJSON(res, 200, { ok: true, fallback: "ha" });
           return;
-        } catch {}
+        } catch (haErr) {
+          log.bridge.warn("Spotify HA fallback also failed:", haErr.message);
+        }
       }
       sendJSON(res, 500, { error: err.message });
     }
@@ -5770,7 +5778,9 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         sendNotification(
           `[SYSTEM — Tell King Kazuma casually.]\nPipeline bypass detected: ${violation.violationType} by ${violation.author} on branch "${violation.branch}". Message: "${(violation.message || "").slice(0, 80)}"`
         );
-      } catch {}
+      } catch (err) {
+        log.directive.warn(`[pipeline-violation] Failed to send notification: ${err.message}`);
+      }
     }, 500);
 
     sendJSON(res, 200, { ok: true, violation });
@@ -6478,43 +6488,6 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
     try {
       const count = await db.getOsintAlertCount();
       sendJSON(res, 200, { ok: true, unreadCount: count });
-    } catch (err) {
-      sendJSON(res, 500, { error: err.message });
-    }
-    return;
-  }
-
-  // ── OSINT Schedules (Persistent) ──
-
-  // GET /osint/schedules — list active schedules
-  if (req.method === "GET" && pathname === "/osint/schedules") {
-    try {
-      const schedules = await db.getOsintSchedules();
-      sendJSON(res, 200, { ok: true, schedules });
-    } catch (err) {
-      sendJSON(res, 500, { error: err.message });
-    }
-    return;
-  }
-
-  // POST /osint/schedules — create schedule
-  if (req.method === "POST" && pathname === "/osint/schedules") {
-    try {
-      const body = await parseBody(req);
-      const schedule = await db.upsertOsintSchedule(body);
-      sendJSON(res, 201, { ok: true, schedule });
-    } catch (err) {
-      sendJSON(res, 500, { error: err.message });
-    }
-    return;
-  }
-
-  // DELETE /osint/schedules/:id
-  const schedDeleteMatch = pathname.match(/^\/osint\/schedules\/(\d+)$/);
-  if (req.method === "DELETE" && schedDeleteMatch) {
-    try {
-      await db.deleteOsintSchedule(parseInt(schedDeleteMatch[1], 10));
-      sendJSON(res, 200, { ok: true });
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
@@ -11336,7 +11309,9 @@ wss.on("connection", (ws) => {
                   }
                 }
               }
-            } catch {}
+            } catch (err) {
+              log.bridge.warn(`[gestureControl] State readback failed for ${entityId}: ${err.message}`);
+            }
 
             // Send feedback to requesting device
             if (ws.readyState === 1) {
@@ -11520,7 +11495,6 @@ wss.on("connection", (ws) => {
     metrics.startFlushTimer();
     // Initialize OSINT persistent scheduler + alert broadcast + monitoring
     osintEngine.setAlertBroadcast(broadcastToAll);
-    osintEngine.initScheduler().catch((e) => log.bridge.error("OSINT scheduler init error:", e.message));
     osintMonitor.loadSchedules(osintEngine.runScan).catch((e) => log.bridge.error("OSINT monitor init error:", e.message));
     cliRunner.healthCheck().then((status) => {
       log.bridge.info(`OSINT CLI tools: container=${status.containerRunning ? "running" : "not running"}, tools=${Object.entries(status.tools).filter(([,v]) => v.available).length} available`);

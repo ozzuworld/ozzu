@@ -54,6 +54,7 @@ import { AlertBanner } from "../../components/osint/AlertBanner";
 import { AlertList } from "../../components/osint/AlertList";
 import { GroupManager } from "../../components/osint/GroupManager";
 import { RemediationList } from "../../components/osint/RemediationList";
+import CedulaDbManager from "../../components/osint/CedulaDbManager";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -98,6 +99,7 @@ export default function OsintScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showReport, setShowReport] = useState(false);
+  const [showFaceDb, setShowFaceDb] = useState(false);
   const [reportData, setReportData] = useState<{ markdown: string } | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [correlations, setCorrelations] = useState<OsintCorrelation[]>([]);
@@ -600,6 +602,24 @@ export default function OsintScreen() {
               style={{ color: "#4ADE80", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}
             >
               {isScanning ? "Scanning..." : "Scan All"}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setShowFaceDb(true)}
+            style={({ pressed }) => ({
+              flex: 1,
+              backgroundColor: pressed ? "#2A1A2E" : "#1E1128",
+              borderWidth: 1,
+              borderColor: "#A855F740",
+              borderRadius: 10,
+              paddingVertical: 12,
+              alignItems: "center",
+            })}
+          >
+            <Text
+              style={{ color: "#C084FC", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}
+            >
+              Face DB
             </Text>
           </Pressable>
         </View>
@@ -1273,6 +1293,12 @@ export default function OsintScreen() {
         report={reportData}
         loading={reportLoading}
       />
+
+      {showFaceDb && (
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }}>
+          <CedulaDbManager onClose={() => setShowFaceDb(false)} />
+        </View>
+      )}
     </View>
   );
 }

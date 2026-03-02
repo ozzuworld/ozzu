@@ -72,7 +72,9 @@ services:
       - CIPHER_MODEL=${CIPHER_MODEL:-opus}
       - CIPHER_VOICE_ID=${CIPHER_VOICE_ID:-c99d36f3-5ffd-4253-803a-535c1bc9c306}
       - BRIDGE_API_KEY=${BRIDGE_API_KEY:-}
-    command: sh -c "[ -d node_modules/ws ] || npm install --omit=dev; [ -d node_modules/ioredis ] || npm install --omit=dev; [ -d node_modules/pg ] || npm install --omit=dev; node server.js"
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+    command: sh -c "npm install --omit=dev --prefer-offline 2>/dev/null; node server.js"
     depends_on:
       - redis
       - postgres

@@ -1208,23 +1208,6 @@ export async function fetchOsintToolStatus(): Promise<OsintToolStatus> {
   return res.json();
 }
 
-// ── OSINT Per-Profile Scheduling (Epic 6) ──
-
-export async function fetchOsintProfileSchedule(profileId: number): Promise<any> {
-  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/schedule/${profileId}`);
-  if (!res.ok) throw new Error(`Schedule error: ${res.status}`);
-  const data = await res.json();
-  return data.schedule;
-}
-
-export async function setOsintProfileSchedule(profileId: number, intervalHours: number): Promise<void> {
-  await fetchWithTimeout(`${BRIDGE_URL}/osint/schedule/${profileId}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ intervalHours }),
-  });
-}
-
 // ── Epics (integrated into directives — type="epic" with epicId/phaseOrder) ──
 
 export interface EpicProgress {
