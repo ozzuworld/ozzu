@@ -22,6 +22,8 @@ type Props = {
   onRefreshLogs: () => void;
   urlEvents: string[];
   isStreaming: boolean;
+  osintMode?: boolean;
+  onToggleOsint?: () => void;
 };
 
 const QUALITY_LABELS: Record<Quality, string> = {
@@ -55,6 +57,8 @@ export default function SettingsSheet({
   onRefreshLogs,
   urlEvents,
   isStreaming,
+  osintMode,
+  onToggleOsint,
 }: Props) {
   if (!visible) return null;
 
@@ -156,6 +160,35 @@ export default function SettingsSheet({
                     {visionLoading ? "ANALYZING..." : `ANALYZE (${visionMode.toUpperCase()})`}
                   </Text>
                 </TVPressable>
+              </View>
+            )}
+
+            {/* OSINT Scan Mode */}
+            {isStreaming && onToggleOsint && (
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ color: "#737373", fontSize: 10, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2, marginBottom: 8 }}>
+                  OSINT SCAN MODE
+                </Text>
+                <TVPressable
+                  onPress={onToggleOsint}
+                  style={{
+                    paddingVertical: 12,
+                    borderRadius: 8,
+                    backgroundColor: osintMode ? "rgba(6,182,212,0.15)" : "#111",
+                    borderWidth: 1,
+                    borderColor: osintMode ? "#06B6D4" : "#333",
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: osintMode ? "#06B6D4" : "#737373", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
+                    {osintMode ? "OSINT ACTIVE — TAP TO DISABLE" : "ENABLE FACE SCANNING"}
+                  </Text>
+                </TVPressable>
+                {osintMode && (
+                  <Text style={{ color: "#525252", fontSize: 9, fontFamily: "monospace", marginTop: 4 }}>
+                    Scanning faces against local DB every 5s
+                  </Text>
+                )}
               </View>
             )}
 

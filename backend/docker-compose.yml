@@ -114,6 +114,21 @@ services:
     restart: unless-stopped
     command: tail -f /dev/null
 
+  face-recognition:
+    build: ./face-recognition
+    container_name: face-recognition
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - face-models:/models
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+          cpus: '2.0'
+    environment:
+      - MODEL_DIR=/models
+
   # wyze-bridge now runs on dev-01 (172.168.0.59) for LAN camera access
   # See ~/wyze-bridge/docker-compose.yml on dev-01
 
@@ -131,3 +146,4 @@ volumes:
   letsencrypt:
   redis-data:
   postgres-data:
+  face-models:

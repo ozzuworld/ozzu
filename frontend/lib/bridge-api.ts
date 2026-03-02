@@ -1241,3 +1241,80 @@ export async function fetchEpicProgress(epicId: string): Promise<EpicProgress> {
   if (!res.ok) throw new Error(`Fetch epic progress error: ${res.status}`);
   return res.json();
 }
+
+// ── Cédula Face DB ──
+
+export interface CedulaFaceMatch {
+  cedula: string;
+  fullName: string | null;
+  similarity: number;
+  id?: number;
+}
+
+export interface CedulaSearchResult {
+  matches: CedulaFaceMatch[];
+  totalSearched: number;
+  facesDetected: number;
+}
+
+export interface CedulaScanMatchResult {
+  match: CedulaFaceMatch | null;
+  profileId?: number;
+  scanId?: number;
+  message: string;
+}
+
+export async function searchCedulaFace(photoBase64: string, threshold?: number): Promise<CedulaSearchResult> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/cedula-db/search-face`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photoBase64, threshold }),
+  });
+  if (!res.ok) throw new Error(`Face search error: ${res.status}`);
+  return res.json();
+}
+
+export async function scanMatchCedula(photoBase64: string, threshold?: number): Promise<CedulaScanMatchResult> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/cedula-db/scan-match`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photoBase64, threshold }),
+  });
+  if (!res.ok) throw new Error(`Scan-match error: ${res.status}`);
+  return res.json();
+}
+
+export async function importCedulaFaces(records: Array<{ cedula: string; fullName?: string; photoBase64?: string; metadata?: any }>): Promise<{ ok: boolean; imported: number; results: any[] }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/cedula-db/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ records }),
+  });
+  if (!res.ok) throw new Error(`Import error: ${res.status}`);
+  return res.json();
+}
+
+export interface CedulaFaceRecord {
+  id: number;
+  cedula: string;
+  full_name: string | null;
+  photo_path: string | null;
+  metadata: any;
+  created_at: string;
+}
+
+export async function fetchCedulaFaces(limit?: number, offset?: number): Promise<{ ok: boolean; count: number; records: CedulaFaceRecord[] }> {
+  const params = new URLSearchParams();
+  if (limit) params.set("limit", String(limit));
+  if (offset) params.set("offset", String(offset));
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/cedula-db/list${qs}`);
+  if (!res.ok) throw new Error(`Fetch cedula faces error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteCedulaFace(cedula: string): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/cedula-db/${cedula}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete cedula face error: ${res.status}`);
+  return res.json();
+}

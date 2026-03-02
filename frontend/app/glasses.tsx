@@ -33,6 +33,8 @@ import VisionOverlay, { type VisionMode, type VisionResult } from "../components
 import { GestureTargetEngine, type TargetLock } from "../lib/gesture-target";
 import { loadCalibration } from "../lib/device-map";
 import SettingsSheet from "../components/glasses/SettingsSheet";
+import FaceMatchOverlay, { type FaceMatch } from "../components/glasses/FaceMatchOverlay";
+import { searchCedulaFace, scanMatchCedula } from "../lib/bridge-api";
 
 type Quality = "low" | "medium" | "high";
 
@@ -119,6 +121,17 @@ export default function GlassesScreen() {
 
   // Settings sheet
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // OSINT scan mode — face capture + cédula DB match
+  const [osintMode, setOsintMode] = useState(false);
+  const osintModeRef = useRef(false);
+  const [faceMatch, setFaceMatch] = useState<FaceMatch | null>(null);
+  const [faceSearching, setFaceSearching] = useState(false);
+  const lastFaceSearch = useRef(0);
+  const searchingFace = useRef(false);
+
+  // Keep ref in sync with state for use inside event listeners
+  useEffect(() => { osintModeRef.current = osintMode; }, [osintMode]);
 
   const bridgeRef = useRef<BridgeSession>(new BridgeSession());
   const connectedRef = useRef(false);
@@ -478,10 +491,35 @@ export default function GlassesScreen() {
 
         if (shouldDetectFaces) {
           processingFace.current = true;
-          MediaPipe.detectFaces(event.data)
+          const capturedFrame = event.data; // capture for OSINT search closure
+          MediaPipe.detectFaces(capturedFrame)
             .then((results) => {
               setFaces(results);
               setExpressions(results.map((f) => detectExpression(f.blendshapes)));
+              // OSINT scan mode: when face detected, search cédula DB (debounced 5s)
+              if (osintModeRef.current && results.length > 0 && !searchingFace.current) {
+                const now = Date.now();
+                if (now - lastFaceSearch.current >= 5000) {
+                  lastFaceSearch.current = now;
+                  searchingFace.current = true;
+                  setFaceSearching(true);
+                  searchCedulaFace(capturedFrame)
+                    .then((res) => {
+                      if (res.matches && res.matches.length > 0) {
+                        setFaceMatch({
+                          cedula: res.matches[0].cedula,
+                          fullName: res.matches[0].fullName,
+                          similarity: res.matches[0].similarity,
+                        });
+                      }
+                    })
+                    .catch(() => {})
+                    .finally(() => {
+                      searchingFace.current = false;
+                      setFaceSearching(false);
+                    });
+                }
+              }
             })
             .catch(() => {})
             .finally(() => {
@@ -590,6 +628,49 @@ export default function GlassesScreen() {
       await MediaPipe.disposeFaces();
     }
   }, [faceMode]);
+
+  const handleToggleOsint = useCallback(async () => {
+    if (!osintMode) {
+      // Enable OSINT mode — also enable face detection if not already on
+      if (!faceMode) {
+        try {
+          const ok = await MediaPipe.initializeFaces();
+          if (ok) {
+            faceReady.current = true;
+            setFaceMode(true);
+          }
+        } catch {}
+      }
+      setOsintMode(true);
+      setFaceMatch(null);
+    } else {
+      setOsintMode(false);
+      setFaceMatch(null);
+      setFaceSearching(false);
+      searchingFace.current = false;
+    }
+  }, [osintMode, faceMode]);
+
+  const handleRunOsintScan = useCallback(async () => {
+    if (!faceMatch) return;
+    try {
+      setFaceSearching(true);
+      const result = await scanMatchCedula(latestFrameRef.current?.data || "");
+      if (result.scanId) {
+        setFaceMatch(null);
+        setOsintMode(false);
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to trigger scan");
+    } finally {
+      setFaceSearching(false);
+    }
+  }, [faceMatch]);
+
+  const handleDismissMatch = useCallback(() => {
+    setFaceMatch(null);
+    lastFaceSearch.current = Date.now(); // reset cooldown
+  }, []);
 
   const handleTogglePose = useCallback(async () => {
     if (!poseMode) {
@@ -983,6 +1064,16 @@ export default function GlassesScreen() {
           </View>
         )}
 
+        {/* OSINT Face Match overlay */}
+        {isStreaming && osintMode && (
+          <FaceMatchOverlay
+            match={faceMatch}
+            scanning={faceSearching}
+            onRunScan={handleRunOsintScan}
+            onDismiss={handleDismissMatch}
+          />
+        )}
+
         {/* Vision overlay */}
         {isStreaming && <VisionOverlay result={visionResult} mode={visionMode} loading={visionLoading} />}
 
@@ -993,6 +1084,11 @@ export default function GlassesScreen() {
             <View style={{ position: "absolute", top: insets.top + 8, left: 12, flexDirection: "row", alignItems: "center", gap: 4 }}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#EF4444" }} />
               <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 8, fontFamily: "monospace" }}>LIVE</Text>
+              {osintMode && (
+                <TVPressable onPress={handleToggleOsint} style={{ marginLeft: 8, backgroundColor: "rgba(6,182,212,0.8)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                  <Text style={{ color: "#000", fontSize: 7, fontFamily: "monospace", fontWeight: "bold" }}>OSINT</Text>
+                </TVPressable>
+              )}
             </View>
 
             {/* Gesture feedback — only shows when a gesture is detected */}
@@ -1173,6 +1269,8 @@ export default function GlassesScreen() {
         onRefreshLogs={() => { try { setLogs(Glasses.getLogs()); } catch {} }}
         urlEvents={urlEvents}
         isStreaming={isStreaming}
+        osintMode={osintMode}
+        onToggleOsint={handleToggleOsint}
       />
     </View>
   );

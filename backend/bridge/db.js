@@ -341,7 +341,19 @@ async function init() {
     // Auto-remediation triage stats on scans
     try { await pool.query(`ALTER TABLE osint_scans ADD COLUMN IF NOT EXISTS triage_stats JSONB DEFAULT NULL`); } catch {}
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents)");
+    // Face recognition: cédula face database
+    await pool.query(`CREATE TABLE IF NOT EXISTS cedula_faces (
+      id SERIAL PRIMARY KEY,
+      cedula VARCHAR(20) NOT NULL UNIQUE,
+      full_name TEXT,
+      photo_path TEXT,
+      embedding FLOAT8[],
+      metadata JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cedula_faces_cedula ON cedula_faces(cedula)`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -1794,6 +1806,51 @@ async function getOsintIncidentStats() {
   return stats;
 }
 
+// ── Cédula Face DB ──
+
+async function upsertCedulaFace(cedula, fullName, photoPath, embedding, metadata) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO cedula_faces (cedula, full_name, photo_path, embedding, metadata)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (cedula) DO UPDATE SET
+       full_name = COALESCE(EXCLUDED.full_name, cedula_faces.full_name),
+       photo_path = COALESCE(EXCLUDED.photo_path, cedula_faces.photo_path),
+       embedding = COALESCE(EXCLUDED.embedding, cedula_faces.embedding),
+       metadata = cedula_faces.metadata || EXCLUDED.metadata
+     RETURNING *`,
+    [cedula, fullName, photoPath, embedding, metadata || {}]
+  );
+  return res.rows[0] || null;
+}
+
+async function getCedulaFace(cedula) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM cedula_faces WHERE cedula = $1`, [cedula]);
+  return res.rows[0] || null;
+}
+
+async function getCedulaFaces(limit = 100, offset = 0) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT id, cedula, full_name, photo_path, metadata, created_at FROM cedula_faces ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
+  return res.rows;
+}
+
+async function deleteCedulaFace(cedula) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM cedula_faces WHERE cedula = $1`, [cedula]);
+  return res.rowCount > 0;
+}
+
+async function getAllCedulaEmbeddings() {
+  if (!_pgConnected) return [];
+  const res = await query(`SELECT id, cedula, full_name, embedding FROM cedula_faces WHERE embedding IS NOT NULL`);
+  return res.rows;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -1920,6 +1977,12 @@ module.exports = {
   updateOsintIncident,
   addIncidentTimelineEvent,
   getOsintIncidentStats,
+  // Cédula Face DB
+  upsertCedulaFace,
+  getCedulaFace,
+  getCedulaFaces,
+  deleteCedulaFace,
+  getAllCedulaEmbeddings,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,
