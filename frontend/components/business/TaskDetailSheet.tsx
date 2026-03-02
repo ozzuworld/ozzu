@@ -145,15 +145,20 @@ export function TaskDetailSheet({
   const handlePickDocument = useCallback(async () => {
     if (!task) return;
     try {
-      const result = await DocumentPicker.getDocumentAsync({ type: "*/*" });
+      const result = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
       if (result.canceled || !result.assets?.[0]) return;
       const doc = result.assets[0];
       setUploading(true);
-      const base64 = await FileSystem.readAsStringAsync(doc.uri, { encoding: FileSystem.EncodingType.Base64 });
+      // Copy to local cache first — iOS sandboxing blocks direct reads from picker URIs
+      const localUri = FileSystem.cacheDirectory + "upload_" + Date.now() + "_" + doc.name;
+      await FileSystem.copyAsync({ from: doc.uri, to: localUri });
+      const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 });
       const fileType = doc.mimeType?.includes("pdf") ? "document" : "image";
       await onUpload(task.id, base64, doc.name, fileType);
       await loadAttachments(task.id);
       await loadRequirements(task.id);
+      // Clean up temp file
+      FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
     } catch (err: any) {
       Alert.alert("Upload Failed", err?.message || "Could not read or upload the file");
     } finally {
