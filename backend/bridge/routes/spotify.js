@@ -52,7 +52,7 @@ module.exports = function createSpotifyRoutes(ctx) {
       log.bridge.error("Album color extraction failed:", err.message);
       sendJSON(res, 500, { error: "Color extraction failed" });
     }
-    return;
+    return true;
   }
 
   // GET /api/spotify/queue — fetch Spotify queue via Spotify Web API
@@ -74,7 +74,7 @@ module.exports = function createSpotifyRoutes(ctx) {
       log.bridge.error("Spotify queue fetch failed:", err.message);
       sendJSON(res, 200, { queue: [], reason: err.message });
     }
-    return;
+    return true;
   }
 
   // GET /api/spotify/playlists — fetch user playlists + synthetic Liked Songs
@@ -112,7 +112,7 @@ module.exports = function createSpotifyRoutes(ctx) {
       log.bridge.error("Spotify playlists fetch failed:", err.message);
       sendJSON(res, 500, { error: err.message });
     }
-    return;
+    return true;
   }
 
   // GET /api/spotify/playlists/:id/tracks — fetch tracks for a playlist or liked songs
@@ -159,7 +159,7 @@ module.exports = function createSpotifyRoutes(ctx) {
       log.bridge.error("Spotify tracks fetch failed:", err.message);
       sendJSON(res, 500, { error: err.message });
     }
-    return;
+    return true;
   }
 
   // GET /api/spotify/play — play a specific track or context
@@ -204,7 +204,7 @@ module.exports = function createSpotifyRoutes(ctx) {
       }
       sendJSON(res, 500, { error: err.message });
     }
-    return;
+    return true;
   }
 
   // GET /api/spotify/now-playing — richer now-playing context
@@ -233,7 +233,7 @@ module.exports = function createSpotifyRoutes(ctx) {
       log.bridge.error("Spotify now-playing fetch failed:", err.message);
       sendJSON(res, 200, { trackId: null, isPlaying: false, error: err.message });
     }
-    return;
+    return true;
   }
 
   // GET /api/spotify/liked — fetch user's liked songs
@@ -282,7 +282,7 @@ module.exports = function createSpotifyRoutes(ctx) {
       log.bridge.error("Spotify liked songs fetch failed:", err.message);
       sendJSON(res, 500, { error: "Failed to fetch liked songs" });
     }
-    return;
+    return true;
   }
 
   // POST /api/spotify/play — start playback on active device
@@ -317,8 +317,9 @@ module.exports = function createSpotifyRoutes(ctx) {
       log.bridge.error("Spotify play failed:", err.message);
       sendJSON(res, 500, { error: "Failed to start playback" });
     }
-    return;
+    return true;
   }
 
+    return false;
   };
 };

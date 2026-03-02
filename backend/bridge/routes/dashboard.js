@@ -1033,7 +1033,7 @@ function renderBuildCard(platform, runs) {
     statusEl.className = "value";
     metaEl.textContent = "";
     cardEl.style.borderLeftColor = "#6b7280";
-    return;
+    return true;
   }
 
   var data = runs[0]; // Latest run

@@ -22,7 +22,7 @@ module.exports = function createCipherRoutes(ctx) {
       duration_minutes: r.duration_minutes != null ? Math.round(r.duration_minutes * 10) / 10 : null,
     }));
     sendJSON(res, 200, { total, conversations });
-    return;
+    return true;
   }
 
   // GET /cipher/history — retrieve Cipher conversation history with full turns
@@ -73,7 +73,7 @@ module.exports = function createCipherRoutes(ctx) {
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
-    return;
+    return true;
   }
 
   // GET /cipher/context — assemble full Cipher context for CLAUDE.local.md
@@ -230,7 +230,7 @@ module.exports = function createCipherRoutes(ctx) {
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
-    return;
+    return true;
   }
 
   // GET /cipher/search?q=keyword — search actual conversation content
@@ -273,7 +273,7 @@ module.exports = function createCipherRoutes(ctx) {
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
-    return;
+    return true;
   }
 
   // POST /cipher/session-save — save CLI session transcript to conversation DB
@@ -427,7 +427,7 @@ module.exports = function createCipherRoutes(ctx) {
       log.memory.error("cipher session-save failed:", err.message);
       sendJSON(res, 500, { error: err.message });
     }
-    return;
+    return true;
   }
 
   // POST /cipher/backfill-memories — one-time extraction of facts from all existing conversations
@@ -555,7 +555,7 @@ module.exports = function createCipherRoutes(ctx) {
         log.memory.error("Backfill failed:", err.message);
       }
     })();
-    return;
+    return true;
   }
 
   // ── Real-time Cipher live sync (CLI ↔ Voice) ──
@@ -587,7 +587,7 @@ module.exports = function createCipherRoutes(ctx) {
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
-    return;
+    return true;
   }
 
   // GET /cipher/live-feed — CLI fetches recent voice/live turns for context injection
@@ -654,7 +654,7 @@ module.exports = function createCipherRoutes(ctx) {
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
-    return;
+    return true;
   }
 
     return false;
