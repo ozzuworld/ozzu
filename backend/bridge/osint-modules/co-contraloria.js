@@ -78,7 +78,50 @@ module.exports = {
       if (res.ok && typeof res.body === "string") {
         const html = res.body;
         const lower = html.toLowerCase();
+        const isPdf = html.startsWith("%PDF") || (res.headers?.["content-type"] || "").includes("pdf");
 
+        // PDF response = certificate was generated successfully
+        if (isPdf) {
+          // Try to extract text from compressed PDF (limited — works for some encoders)
+          const pdfLower = lower;
+          const isReportedPdf = pdfLower.includes("responsable fiscal") ||
+            pdfLower.includes("se encuentra reportado");
+          const isCleanPdf = pdfLower.includes("no aparece") ||
+            pdfLower.includes("no se encuentra") || !isReportedPdf;
+
+          if (isReportedPdf) {
+            findings.push({
+              category: "exposure",
+              severity: "critical",
+              title: "Contraloría: FISCAL RESPONSIBILITY REPORTED",
+              description: [
+                `CC: ${cedula} appears in the Contraloría's Boletín de Responsables Fiscales.`,
+                `A PDF certificate was generated confirming fiscal responsibility.`,
+                `This blocks public employment and government contracting.`,
+              ].join("\n"),
+              sourceUrl: FORM_URL,
+              rawData: { searched: cedula, reported: true, pdfGenerated: true },
+              remediation: "Being listed as 'responsable fiscal' blocks public employment and government contracting. Consult a public finance attorney.",
+            });
+          } else {
+            // Most PDF certificates mean "not reported" (clean)
+            findings.push({
+              category: "exposure",
+              severity: "info",
+              title: "Contraloría: Certificate generated — not reported",
+              description: [
+                `CC: ${cedula} — Contraloría fiscal responsibility certificate generated successfully.`,
+                `The certificate indicates this person does NOT appear in the Boletín de Responsables Fiscales.`,
+                `Clean fiscal record with the Contraloría General de la República.`,
+              ].join("\n"),
+              sourceUrl: FORM_URL,
+              rawData: { searched: cedula, reported: false, pdfGenerated: true, pdfSize: html.length },
+            });
+          }
+          return findings;
+        }
+
+        // HTML response — parse for text patterns
         // Check for positive result (person IS listed as fiscally responsible)
         const isReported = (
           lower.includes("responsable fiscal") ||
