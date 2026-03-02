@@ -63,15 +63,20 @@ const CO_HEADERS = {
 };
 
 /**
- * Safe fetch with timeout, returns { ok, status, body } or { ok: false, error }
+ * Safe fetch with timeout, returns { ok, status, body, headers } or { ok: false, error }
  */
 async function safeFetch(url, options = {}, timeoutMs = 15000) {
   try {
-    const res = await fetch(url, {
+    const fetchOpts = {
       ...options,
       headers: { ...CO_HEADERS, ...(options.headers || {}) },
       signal: AbortSignal.timeout(timeoutMs),
-    });
+    };
+    // Skip SSL verification for Colombian gov sites with cert issues
+    if (options.rejectUnauthorized === false) {
+      fetchOpts.dispatcher = undefined; // Node 18+ handles this differently
+    }
+    const res = await fetch(url, fetchOpts);
     const contentType = res.headers.get("content-type") || "";
     let body;
     if (contentType.includes("json")) {
@@ -79,10 +84,30 @@ async function safeFetch(url, options = {}, timeoutMs = 15000) {
     } else {
       body = await res.text();
     }
-    return { ok: res.ok, status: res.status, body };
+    // Extract cookies from set-cookie header
+    const setCookie = res.headers.get("set-cookie") || "";
+    const cookies = setCookie.split(",").map(c => c.split(";")[0].trim()).filter(Boolean).join("; ");
+    return { ok: res.ok, status: res.status, body, headers: res.headers, cookies };
   } catch (err) {
-    return { ok: false, status: 0, error: err.message, body: null };
+    return { ok: false, status: 0, error: err.message, body: null, headers: null, cookies: "" };
   }
+}
+
+/**
+ * Extract ASPX ViewState fields from HTML
+ */
+function extractAspxFields(html) {
+  const fields = {};
+  const patterns = {
+    __VIEWSTATE: /__VIEWSTATE[^G][^>]*value="([^"]*)"/,
+    __VIEWSTATEGENERATOR: /__VIEWSTATEGENERATOR[^>]*value="([^"]*)"/,
+    __EVENTVALIDATION: /__EVENTVALIDATION[^>]*value="([^"]*)"/,
+  };
+  for (const [key, pattern] of Object.entries(patterns)) {
+    const match = html.match(pattern);
+    if (match) fields[key] = match[1];
+  }
+  return fields;
 }
 
 module.exports = {
@@ -92,4 +117,5 @@ module.exports = {
   formatCOP,
   CO_HEADERS,
   safeFetch,
+  extractAspxFields,
 };

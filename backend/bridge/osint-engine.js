@@ -87,7 +87,7 @@ async function runScan(profileId, scanType = "full") {
         let modStatus = "success";
         let modError = null;
         try {
-          const findings = await mod.scan(profile, _rateLimiter);
+          const findings = await mod.scan(profile, _rateLimiter, { db });
           for (const finding of findings) {
             await db.upsertOsintFinding({
               scan_id: scanId,

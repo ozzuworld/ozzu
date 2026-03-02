@@ -1,5 +1,7 @@
 // Colombian OSINT: SIMIT (Sistema Integrado de Información sobre Multas y Sanciones por Infracciones de Tránsito)
-// Source: consulta.simit.org.co — traffic fines lookup
+// Source: SIMIT has been migrated to fcm.org.co and old APIs are offline (2025+).
+// The old consulta.simit.org.co is dead, simit.org.co redirects to fcm.org.co.
+// This module tries known endpoints and falls back to manual lookup instructions.
 const { validateCedula, safeFetch, formatCOP, CO_HEADERS } = require("./co-utils");
 
 module.exports = {
@@ -22,7 +24,7 @@ module.exports = {
 
     const release = await rateLimiter.acquire();
     try {
-      // SIMIT has a JSON API behind the consultation page
+      // Try the legacy endpoint (may still work intermittently)
       const url = `https://consulta.simit.org.co/Simit/verificar/multas/CC/${cedula}`;
       const res = await safeFetch(url, {
         method: "GET",
@@ -31,84 +33,67 @@ module.exports = {
           Accept: "application/json",
           Referer: "https://consulta.simit.org.co/",
         },
-      });
+      }, 10000);
 
       if (res.ok && res.body) {
         let data = res.body;
-        // Handle various response formats
         if (typeof data === "string") {
           try { data = JSON.parse(data); } catch { /* not JSON */ }
         }
 
-        const comparendos = data.comparendos || data.data || data.multas || [];
-        const isArray = Array.isArray(comparendos);
-
-        if (isArray && comparendos.length > 0) {
-          let totalFines = 0;
-          let totalAmount = 0;
-
-          for (const c of comparendos) {
-            const amount = parseFloat(c.valor || c.valorMulta || c.totalPagar || 0);
-            totalAmount += amount;
-            totalFines++;
+        if (typeof data === "object" && !Array.isArray(data)) {
+          const comparendos = data.comparendos || data.data || data.multas || [];
+          if (Array.isArray(comparendos) && comparendos.length > 0) {
+            let totalAmount = 0;
+            for (const c of comparendos) {
+              totalAmount += parseFloat(c.valor || c.valorMulta || c.totalPagar || 0);
+            }
 
             findings.push({
               category: "exposure",
-              severity: amount > 500000 ? "high" : "medium",
-              title: `SIMIT: Infracción — ${formatCOP(amount)}`,
+              severity: totalAmount > 2000000 ? "high" : "medium",
+              title: `SIMIT: ${comparendos.length} traffic fine(s) — ${formatCOP(totalAmount)} total`,
               description: [
-                c.codigoInfraccion ? `Código: ${c.codigoInfraccion}` : null,
-                c.descripcionInfraccion || c.descripcion ? `Descripción: ${(c.descripcionInfraccion || c.descripcion).substring(0, 200)}` : null,
-                c.fechaComparendo || c.fecha ? `Fecha: ${c.fechaComparendo || c.fecha}` : null,
-                `Valor: ${formatCOP(amount)}`,
-                c.estado ? `Estado: ${c.estado}` : null,
-                c.secretaria || c.organismo ? `Organismo: ${c.secretaria || c.organismo}` : null,
-              ].filter(Boolean).join("\n"),
-              sourceUrl: `https://consulta.simit.org.co/Simit/indexA.jsp`,
-              rawData: c,
-              remediation: "Pay outstanding fines at your local transit office or through the SIMIT online portal.",
+                `Found ${comparendos.length} traffic fine(s) totaling ${formatCOP(totalAmount)} for CC: ${cedula}`,
+                "",
+                ...comparendos.slice(0, 5).map((c, i) => {
+                  const amount = parseFloat(c.valor || c.valorMulta || c.totalPagar || 0);
+                  return `${i + 1}. ${c.codigoInfraccion || "N/A"} — ${formatCOP(amount)} (${c.fechaComparendo || c.fecha || "N/A"})`;
+                }),
+              ].join("\n"),
+              sourceUrl: "https://www.fcm.org.co/simit/",
+              rawData: { totalFines: comparendos.length, totalAmount, cedula, fines: comparendos.slice(0, 10) },
+              remediation: "Pay outstanding fines at your local transit office or through the SIMIT online portal at fcm.org.co/simit/",
             });
+            return findings;
+          } else if (data.deudor === false) {
+            findings.push({
+              category: "exposure",
+              severity: "info",
+              title: "SIMIT: No traffic fines",
+              description: `No outstanding traffic fines found in SIMIT for CC: ${cedula}. Clean driving record.`,
+              sourceUrl: "https://www.fcm.org.co/simit/",
+              rawData: { searched: cedula, deudor: false },
+            });
+            return findings;
           }
-
-          findings.unshift({
-            category: "exposure",
-            severity: totalAmount > 2000000 ? "high" : "medium",
-            title: `SIMIT: ${totalFines} traffic fine(s) — ${formatCOP(totalAmount)} total`,
-            description: `Found ${totalFines} traffic fine(s) totaling ${formatCOP(totalAmount)} for CC: ${cedula}`,
-            sourceUrl: "https://consulta.simit.org.co",
-            rawData: { totalFines, totalAmount, cedula },
-          });
-        } else if (data.deudor === false || (isArray && comparendos.length === 0)) {
-          findings.push({
-            category: "exposure",
-            severity: "info",
-            title: "SIMIT: No traffic fines",
-            description: `No outstanding traffic fines found in SIMIT for CC: ${cedula}. Clean driving record.`,
-            sourceUrl: "https://consulta.simit.org.co",
-            rawData: { searched: cedula, deudor: false },
-          });
-        } else {
-          findings.push({
-            category: "exposure",
-            severity: "info",
-            title: "SIMIT: Manual lookup required",
-            description: `Could not parse SIMIT response. Check manually at consulta.simit.org.co with CC: ${cedula}`,
-            sourceUrl: "https://consulta.simit.org.co/Simit/indexA.jsp",
-            rawData: { searched: cedula, response: typeof data === "string" ? data.substring(0, 500) : data },
-            remediation: "Visit https://consulta.simit.org.co and enter your cédula to check traffic fines.",
-          });
         }
-      } else {
-        findings.push({
-          category: "exposure",
-          severity: "info",
-          title: "SIMIT: Manual lookup required",
-          description: `Could not query SIMIT. Check manually at consulta.simit.org.co with CC: ${cedula}`,
-          sourceUrl: "https://consulta.simit.org.co/Simit/indexA.jsp",
-          rawData: { error: res.error || `HTTP ${res.status}`, searched: cedula },
-          remediation: "Visit https://consulta.simit.org.co and enter your cédula to check traffic fines.",
-        });
       }
+
+      // Old API didn't work — provide manual instructions
+      findings.push({
+        category: "exposure",
+        severity: "info",
+        title: "SIMIT: Manual lookup required",
+        description: [
+          `The SIMIT consultation system has been migrated (old API is offline since 2025).`,
+          `Traffic fine lookup for CC: ${cedula} must be done manually.`,
+          `Traffic fines affect driver's license renewal and vehicle registration.`,
+        ].join("\n"),
+        sourceUrl: "https://www.fcm.org.co/simit/",
+        rawData: { searched: cedula, reason: "api_migrated", error: res.error || `HTTP ${res.status}` },
+        remediation: "Visit https://www.fcm.org.co/simit/ to check traffic fines. Enter cédula and complete verification.",
+      });
     } catch (err) {
       findings.push({
         category: "exposure",

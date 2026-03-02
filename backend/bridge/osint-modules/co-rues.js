@@ -1,6 +1,11 @@
 // Colombian OSINT: RUES (Registro Único Empresarial y Social) — Business registry lookup
-// Source: rues.org.co — has internal API endpoints, no captcha
-const { validateCedula, validateNIT, safeFetch, CO_HEADERS } = require("./co-utils");
+// Source: datos.gov.co SODA API — dataset c82u-588k (Personas Naturales, Jurídicas y ESALES)
+// Also: dataset nb3d-v3n7 (Establecimientos, Agencias, Sucursales)
+// Access: Free, no auth, no captcha
+const { validateCedula, validateNIT, safeFetch } = require("./co-utils");
+
+const RUES_DATASET = "https://www.datos.gov.co/resource/c82u-588k.json";
+const ESTABLECIMIENTOS_DATASET = "https://www.datos.gov.co/resource/nb3d-v3n7.json";
 
 module.exports = {
   name: "co-rues",
@@ -9,101 +14,98 @@ module.exports = {
   async scan(profile, rateLimiter) {
     const findings = [];
     const value = profile.value;
+    const cleanValue = profile.profile_type === "nit"
+      ? (validateNIT(value) || value)
+      : (validateCedula(value) || value);
 
-    // RUES uses a token-based API internally
+    // Strategy 1: Query datos.gov.co RUES dataset
     const release = await rateLimiter.acquire();
-    let token = null;
     try {
-      // Step 1: Get RUES session token
-      const tokenRes = await safeFetch("https://www.rues.org.co/RM", {
-        method: "GET",
-      });
-      if (tokenRes.ok && typeof tokenRes.body === "string") {
-        const tokenMatch = tokenRes.body.match(/token['":\s]+['"]([^'"]+)['"]/i) ||
-          tokenRes.body.match(/antiForgeryToken['":\s]+['"]([^'"]+)['"]/i);
-        if (tokenMatch) token = tokenMatch[1];
-      }
-    } catch (e) {
-      // Continue without token
-    } finally {
-      release();
-    }
-
-    // Step 2: Search by NIT or cédula number
-    const release2 = await rateLimiter.acquire();
-    try {
-      const searchQuery = profile.profile_type === "nit" ? validateNIT(value) || value : value;
-      const searchUrl = "https://www.rues.org.co/RM/Search";
-      const formData = new URLSearchParams();
-      formData.append("query", searchQuery);
-      formData.append("type", profile.profile_type === "nit" ? "nit" : "name");
-      if (token) formData.append("__RequestVerificationToken", token);
-
-      const res = await safeFetch(searchUrl, {
-        method: "POST",
-        headers: {
-          ...CO_HEADERS,
-          "Content-Type": "application/x-www-form-urlencoded",
-          Referer: "https://www.rues.org.co/RM",
-        },
-        body: formData.toString(),
+      const query = `$where=numero_identificacion='${cleanValue}'&$limit=50&$order=fecha_matricula DESC`;
+      const url = `${RUES_DATASET}?${query}`;
+      const res = await safeFetch(url, {
+        headers: { Accept: "application/json" },
       });
 
-      if (res.ok && typeof res.body === "string") {
-        // Parse HTML response for company listings
-        const companies = parseRuesResults(res.body);
+      if (res.ok && Array.isArray(res.body) && res.body.length > 0) {
+        const companies = res.body;
+        const active = companies.filter(c => c.estado_matricula === "ACTIVA");
+        const cancelled = companies.filter(c => c.estado_matricula !== "ACTIVA");
 
-        if (companies.length > 0) {
-          for (const company of companies.slice(0, 10)) {
-            findings.push({
-              category: "exposure",
-              severity: company.status === "ACTIVA" ? "medium" : "low",
-              title: `RUES: ${company.name}`,
-              description: [
-                `Razón Social: ${company.name}`,
-                company.nit ? `NIT: ${company.nit}` : null,
-                company.status ? `Estado: ${company.status}` : null,
-                company.chamber ? `Cámara: ${company.chamber}` : null,
-                company.city ? `Ciudad: ${company.city}` : null,
-                company.registration ? `Matrícula: ${company.registration}` : null,
-              ].filter(Boolean).join("\n"),
-              sourceUrl: `https://www.rues.org.co/RM`,
-              rawData: company,
-              remediation: company.status === "ACTIVA"
-                ? "Active business registration found. Review if this company should be publicly listed."
-                : "Inactive/cancelled registration. No action needed.",
-            });
-          }
-
-          findings.unshift({
-            category: "exposure",
-            severity: companies.length >= 3 ? "high" : "medium",
-            title: `RUES: ${companies.length} business registration(s) found`,
-            description: `Found ${companies.length} business registration(s) in RUES for this ${profile.profile_type}.`,
-            rawData: { totalCompanies: companies.length, activeCount: companies.filter(c => c.status === "ACTIVA").length },
-          });
-        } else {
-          findings.push({
-            category: "exposure",
-            severity: "info",
-            title: "RUES: No business registrations found",
-            description: `No companies or business registrations found in RUES for ${profile.profile_type}: ${value}`,
-            sourceUrl: "https://www.rues.org.co/RM",
-            rawData: { searched: value, type: profile.profile_type },
-          });
-        }
-      } else {
-        // Fallback: manual lookup
+        // Summary finding
         findings.push({
           category: "exposure",
-          severity: "info",
-          title: "RUES: Manual lookup required",
-          description: `Could not automatically query RUES. Search manually at rues.org.co with ${profile.profile_type}: ${value}`,
+          severity: active.length >= 3 ? "high" : active.length > 0 ? "medium" : "low",
+          title: `RUES: ${companies.length} business registration(s) — ${active.length} active`,
+          description: [
+            `Found ${companies.length} business registration(s) for ${profile.profile_type.toUpperCase()}: ${cleanValue}`,
+            `Active: ${active.length} | Cancelled: ${cancelled.length}`,
+            "",
+            ...companies.slice(0, 8).map((c, i) => [
+              `${i + 1}. ${c.razon_social || "N/A"}`,
+              `   Chamber: ${c.camara_comercio || "N/A"}`,
+              `   Type: ${c.organizacion_juridica || c.tipo_sociedad || "N/A"}`,
+              `   Status: ${c.estado_matricula || "N/A"}`,
+              `   Registration: ${c.matricula || "N/A"}`,
+              c.cod_ciiu_act_econ_pri ? `   CIIU: ${c.cod_ciiu_act_econ_pri}` : null,
+              c.fecha_matricula ? `   Since: ${formatDate(c.fecha_matricula)}` : null,
+            ].filter(Boolean).join("\n")),
+          ].join("\n"),
           sourceUrl: "https://www.rues.org.co/RM",
-          rawData: { error: res.error || `HTTP ${res.status}`, searched: value },
-          remediation: "Visit https://www.rues.org.co/RM and search manually.",
+          rawData: {
+            totalCompanies: companies.length,
+            activeCount: active.length,
+            companies: companies.slice(0, 10).map(c => ({
+              name: c.razon_social,
+              chamber: c.camara_comercio,
+              type: c.organizacion_juridica,
+              status: c.estado_matricula,
+              registration: c.matricula,
+              ciiu: c.cod_ciiu_act_econ_pri,
+              date: c.fecha_matricula,
+              nit: c.numero_identificacion,
+            })),
+          },
+          remediation: active.length >= 3
+            ? "Multiple active business registrations found. Review for potential conflicts of interest."
+            : "Business registration data is public record. No remediation needed.",
         });
+
+        // Individual active business findings
+        for (const c of active.slice(0, 5)) {
+          findings.push({
+            category: "exposure",
+            severity: "medium",
+            title: `RUES: ${c.razon_social || "Business"} — ${c.camara_comercio || "Unknown Chamber"}`,
+            description: [
+              `Name: ${c.razon_social || "N/A"}`,
+              `NIT/CC: ${c.numero_identificacion || cleanValue}`,
+              `Chamber: ${c.camara_comercio || "N/A"}`,
+              `Type: ${c.organizacion_juridica || c.tipo_sociedad || "N/A"}`,
+              `Category: ${c.categoria_matricula || "N/A"}`,
+              `Registration #: ${c.matricula || "N/A"}`,
+              `Status: ${c.estado_matricula || "N/A"}`,
+              c.cod_ciiu_act_econ_pri ? `CIIU Activity: ${c.cod_ciiu_act_econ_pri}` : null,
+              c.fecha_matricula ? `Registered: ${formatDate(c.fecha_matricula)}` : null,
+              c.ultimo_ano_renovado && c.ultimo_ano_renovado !== "0" ? `Last renewed: ${c.ultimo_ano_renovado}` : null,
+            ].filter(Boolean).join("\n"),
+            sourceUrl: "https://www.rues.org.co/RM",
+            rawData: c,
+          });
+        }
+
+        return findings;
       }
+
+      // No results in main dataset
+      findings.push({
+        category: "exposure",
+        severity: "info",
+        title: "RUES: No business registrations found",
+        description: `No companies or business registrations found in RUES for ${profile.profile_type.toUpperCase()}: ${cleanValue}`,
+        sourceUrl: "https://www.rues.org.co/RM",
+        rawData: { searched: cleanValue, type: profile.profile_type },
+      });
     } catch (err) {
       findings.push({
         category: "exposure",
@@ -114,36 +116,18 @@ module.exports = {
         rawData: { error: err.message },
       });
     } finally {
-      release2();
+      release();
     }
 
     return findings;
   },
 };
 
-function parseRuesResults(html) {
-  const companies = [];
-  // Match table rows or result cards from RUES HTML
-  const rowPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  let match;
-  while ((match = rowPattern.exec(html)) !== null) {
-    const row = match[1];
-    const cells = [];
-    const cellPattern = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-    let cellMatch;
-    while ((cellMatch = cellPattern.exec(row)) !== null) {
-      cells.push(cellMatch[1].replace(/<[^>]+>/g, "").trim());
-    }
-    if (cells.length >= 3 && cells[0] && /\d/.test(cells[0] + cells[1])) {
-      companies.push({
-        registration: cells[0] || null,
-        name: cells[1] || cells[0],
-        nit: cells[2] || null,
-        status: (cells[3] || "").toUpperCase() || null,
-        chamber: cells[4] || null,
-        city: cells[5] || null,
-      });
-    }
+function formatDate(dateStr) {
+  if (!dateStr || dateStr.length < 8) return dateStr || "N/A";
+  // Format YYYYMMDD to YYYY-MM-DD
+  if (/^\d{8}$/.test(dateStr)) {
+    return `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
   }
-  return companies;
+  return dateStr;
 }

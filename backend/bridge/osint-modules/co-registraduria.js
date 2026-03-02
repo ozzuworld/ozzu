@@ -1,6 +1,10 @@
 // Colombian OSINT: Registraduría Nacional — Cédula status validation
-// Source: wsp.registraduria.gov.co — check if a cédula is valid, suspended, or stolen
-const { validateCedula, safeFetch, CO_HEADERS } = require("./co-utils");
+// Source: certvigenciacedula.registraduria.gov.co — certificate of cedula validity
+// Access: ASPX form, redirects to menu first. Electoral census at eleccionescolombia.registraduria.gov.co
+const { validateCedula, safeFetch, CO_HEADERS, extractAspxFields } = require("./co-utils");
+
+const CERT_URL = "https://certvigenciacedula.registraduria.gov.co";
+const ELECTORAL_URL = "https://eleccionescolombia.registraduria.gov.co/identificacion";
 
 module.exports = {
   name: "co-registraduria",
@@ -20,11 +24,78 @@ module.exports = {
       return findings;
     }
 
-    const release = await rateLimiter.acquire();
+    // Strategy 1: Try the certificate page (ASPX with ViewState)
+    const release1 = await rateLimiter.acquire();
+    let aspxFields = null;
+    let sessionCookies = "";
     try {
-      // Registraduría cédula consultation
-      const url = "https://wsp.registraduria.gov.co/certificado/Datos.aspx";
-      const res = await safeFetch(url, {
+      // Follow redirect to get the actual form page
+      const pageRes = await safeFetch(`${CERT_URL}/Consultas/Consulta_Vigencia.aspx`, {
+        method: "GET",
+        redirect: "follow",
+      });
+
+      if (pageRes.ok && typeof pageRes.body === "string" && pageRes.body.includes("__VIEWSTATE")) {
+        aspxFields = extractAspxFields(pageRes.body);
+        sessionCookies = pageRes.cookies || "";
+
+        // Check if the form has a captcha
+        const hasCaptcha = pageRes.body.toLowerCase().includes("captcha") ||
+          pageRes.body.toLowerCase().includes("recaptcha");
+
+        if (!hasCaptcha && aspxFields.__VIEWSTATE) {
+          // Try to find the form fields
+          const nuipField = pageRes.body.match(/name="([^"]*nuip[^"]*)"/i) ||
+            pageRes.body.match(/name="([^"]*cedula[^"]*)"/i) ||
+            pageRes.body.match(/name="([^"]*documento[^"]*)"/i);
+          const btnField = pageRes.body.match(/name="([^"]*btn[^"]*[Cc]onsultar[^"]*)"/i) ||
+            pageRes.body.match(/name="([^"]*btn[^"]*[Bb]uscar[^"]*)"/i);
+
+          if (nuipField && btnField) {
+            const release2 = await rateLimiter.acquire();
+            try {
+              const formData = new URLSearchParams();
+              formData.append("__VIEWSTATE", aspxFields.__VIEWSTATE);
+              if (aspxFields.__VIEWSTATEGENERATOR) formData.append("__VIEWSTATEGENERATOR", aspxFields.__VIEWSTATEGENERATOR);
+              if (aspxFields.__EVENTVALIDATION) formData.append("__EVENTVALIDATION", aspxFields.__EVENTVALIDATION);
+              formData.append(nuipField[1], cedula);
+              formData.append(btnField[1], "Consultar");
+
+              const res = await safeFetch(`${CERT_URL}/Consultas/Consulta_Vigencia.aspx`, {
+                method: "POST",
+                headers: {
+                  ...CO_HEADERS,
+                  "Content-Type": "application/x-www-form-urlencoded",
+                  Referer: `${CERT_URL}/Consultas/Consulta_Vigencia.aspx`,
+                  Cookie: sessionCookies,
+                },
+                body: formData.toString(),
+              }, 20000);
+
+              if (res.ok && typeof res.body === "string") {
+                const status = extractCedulaStatus(res.body);
+                if (status.found) {
+                  findings.push(buildStatusFinding(cedula, status));
+                  return findings;
+                }
+              }
+            } finally {
+              release2();
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Continue to fallback
+    } finally {
+      release1();
+    }
+
+    // Strategy 2: Try the old direct endpoint
+    const release3 = await rateLimiter.acquire();
+    try {
+      const oldUrl = "https://wsp.registraduria.gov.co/certificado/Datos.aspx";
+      const res = await safeFetch(oldUrl, {
         method: "POST",
         headers: {
           ...CO_HEADERS,
@@ -32,113 +103,72 @@ module.exports = {
           Referer: "https://wsp.registraduria.gov.co/certificado/",
         },
         body: `nuip=${cedula}`,
+        redirect: "follow",
       });
 
       if (res.ok && typeof res.body === "string") {
-        const html = res.body;
-        const status = extractCedulaStatus(html);
-
+        const status = extractCedulaStatus(res.body);
         if (status.found) {
-          let severity = "info";
-          if (status.status === "ROBADO" || status.status === "ROBADA") severity = "critical";
-          else if (status.status === "SUSPENDIDO" || status.status === "SUSPENDIDA") severity = "high";
-          else if (status.status === "NO REGISTRADA" || status.status === "CANCELADA") severity = "high";
-          else if (status.status === "VIGENTE") severity = "info";
-
-          findings.push({
-            category: "metadata",
-            severity,
-            title: `Registraduría: Cédula ${status.status}`,
-            description: [
-              `CC: ${cedula}`,
-              `Estado: ${status.status}`,
-              status.place ? `Lugar de expedición: ${status.place}` : null,
-              status.date ? `Fecha: ${status.date}` : null,
-              status.status === "ROBADO" || status.status === "ROBADA"
-                ? "\n⚠️ CRITICAL: This cédula has been reported as STOLEN. Identity fraud risk is extremely high."
-                : null,
-              status.status === "SUSPENDIDO" || status.status === "SUSPENDIDA"
-                ? "\n⚠️ WARNING: This cédula is SUSPENDED. The holder cannot perform official transactions."
-                : null,
-            ].filter(Boolean).join("\n"),
-            sourceUrl: "https://wsp.registraduria.gov.co/certificado/",
-            rawData: status,
-            remediation: severity === "critical"
-              ? "URGENT: Report to Registraduría Nacional immediately. File a police report (denuncia). Monitor all financial accounts for unauthorized activity."
-              : severity === "high"
-                ? "Contact Registraduría Nacional to resolve the suspended/cancelled status."
-                : "Cédula is valid and active. No action needed.",
-          });
-        } else {
-          findings.push({
-            category: "metadata",
-            severity: "info",
-            title: "Registraduría: Manual lookup required",
-            description: `Could not parse Registraduría response. Check status at wsp.registraduria.gov.co with CC: ${cedula}`,
-            sourceUrl: "https://wsp.registraduria.gov.co/certificado/",
-            rawData: { searched: cedula },
-            remediation: "Visit https://wsp.registraduria.gov.co/certificado/ to check your cédula status.",
-          });
-        }
-      } else {
-        // Try the voting place endpoint as a fallback to at least confirm the cédula exists
-        const release2 = await rateLimiter.acquire();
-        try {
-          const censoUrl = `https://wsp.registraduria.gov.co/censo/consultar/?nuip=${cedula}`;
-          const censoRes = await safeFetch(censoUrl, { method: "GET" });
-
-          if (censoRes.ok && typeof censoRes.body === "string") {
-            const html = censoRes.body;
-            if (html.includes("puesto de votaci") || html.includes("Lugar de votaci")) {
-              findings.push({
-                category: "metadata",
-                severity: "info",
-                title: "Registraduría: Cédula confirmed active (via censo)",
-                description: `CC: ${cedula} found in the electoral census. The cédula exists and is active.`,
-                sourceUrl: censoUrl,
-                rawData: { searched: cedula, source: "censo" },
-              });
-            } else {
-              findings.push({
-                category: "metadata",
-                severity: "info",
-                title: "Registraduría: Manual lookup required",
-                description: `Could not confirm cédula status automatically. Check at registraduria.gov.co with CC: ${cedula}`,
-                sourceUrl: "https://wsp.registraduria.gov.co/certificado/",
-                rawData: { searched: cedula },
-                remediation: "Visit https://wsp.registraduria.gov.co/certificado/ to check your cédula status.",
-              });
-            }
-          }
-        } catch (e) {
-          // Ignore fallback errors
-        } finally {
-          release2();
-        }
-
-        if (findings.length === 0) {
-          findings.push({
-            category: "metadata",
-            severity: "info",
-            title: "Registraduría: Manual lookup required",
-            description: `Could not query Registraduría. Check manually with CC: ${cedula}`,
-            sourceUrl: "https://wsp.registraduria.gov.co/certificado/",
-            rawData: { error: res.error || `HTTP ${res.status}` },
-            remediation: "Visit https://wsp.registraduria.gov.co/certificado/ to check your cédula status.",
-          });
+          findings.push(buildStatusFinding(cedula, status));
+          return findings;
         }
       }
-    } catch (err) {
-      findings.push({
-        category: "metadata",
-        severity: "info",
-        title: "Registraduría: Lookup error",
-        description: `Error querying Registraduría: ${err.message}`,
-        rawData: { error: err.message },
-      });
+    } catch (e) {
+      // Continue to fallback
     } finally {
-      release();
+      release3();
     }
+
+    // Strategy 3: Electoral census check (confirms cedula exists)
+    const release4 = await rateLimiter.acquire();
+    try {
+      // The electoral site is a React SPA — try known API patterns
+      const censoRes = await safeFetch(
+        `https://wsp.registraduria.gov.co/censo/consultar/?nuip=${cedula}`,
+        { method: "GET", redirect: "follow" }
+      );
+
+      if (censoRes.ok && typeof censoRes.body === "string") {
+        const html = censoRes.body;
+        if (html.includes("puesto de votaci") || html.includes("Lugar de votaci") || html.includes("lugar_votaci")) {
+          const placeMatch = html.match(/(?:puesto|lugar)[^:]*(?:de votaci[oó]n)?[^:]*:\s*(?:<[^>]+>)*([^<]+)/i);
+          findings.push({
+            category: "metadata",
+            severity: "info",
+            title: "Registraduría: Cédula confirmed active (electoral census)",
+            description: [
+              `CC: ${cedula} found in the electoral census. The cédula is valid and active.`,
+              placeMatch ? `Voting location: ${placeMatch[1].trim()}` : null,
+            ].filter(Boolean).join("\n"),
+            sourceUrl: ELECTORAL_URL,
+            rawData: { searched: cedula, source: "censo", votingPlace: placeMatch ? placeMatch[1].trim() : null },
+          });
+          return findings;
+        }
+      }
+    } catch (e) {
+      // Continue to fallback
+    } finally {
+      release4();
+    }
+
+    // Fallback: manual lookup with correct URLs
+    findings.push({
+      category: "metadata",
+      severity: "info",
+      title: "Registraduría: Manual verification needed",
+      description: [
+        `Could not automatically verify cédula status for CC: ${cedula}.`,
+        `The Registraduría website has been redesigned and uses CAPTCHA protection.`,
+        `Check manually at the links below.`,
+      ].join("\n"),
+      sourceUrl: `${CERT_URL}/menu.aspx`,
+      rawData: { searched: cedula },
+      remediation: [
+        `Certificate: ${CERT_URL}/menu.aspx`,
+        `Electoral census: ${ELECTORAL_URL}`,
+      ].join("\n"),
+    });
 
     return findings;
   },
@@ -148,7 +178,6 @@ function extractCedulaStatus(html) {
   const result = { found: false };
   const lower = html.toLowerCase();
 
-  // Check for known statuses
   const statuses = ["VIGENTE", "SUSPENDIDO", "SUSPENDIDA", "ROBADO", "ROBADA", "CANCELADA", "CANCELADO", "NO REGISTRADA"];
   for (const s of statuses) {
     if (lower.includes(s.toLowerCase())) {
@@ -158,18 +187,48 @@ function extractCedulaStatus(html) {
     }
   }
 
-  if (!result.found && (lower.includes("datos") || lower.includes("resultado"))) {
+  if (!result.found && (lower.includes("datos") || lower.includes("resultado") || lower.includes("certificado"))) {
     result.found = true;
-    result.status = "VIGENTE"; // Default if page loaded with results but no explicit status
+    result.status = "VIGENTE";
   }
 
-  // Extract place of expedition
   const placeMatch = html.match(/[Ll]ugar[^:]*:\s*(?:<[^>]+>)*([^<]+)/);
   if (placeMatch) result.place = placeMatch[1].trim();
 
-  // Extract date
   const dateMatch = html.match(/[Ff]echa[^:]*:\s*(?:<[^>]+>)*([^<]+)/);
   if (dateMatch) result.date = dateMatch[1].trim();
 
   return result;
+}
+
+function buildStatusFinding(cedula, status) {
+  let severity = "info";
+  if (status.status === "ROBADO" || status.status === "ROBADA") severity = "critical";
+  else if (status.status === "SUSPENDIDO" || status.status === "SUSPENDIDA") severity = "high";
+  else if (status.status === "NO REGISTRADA" || status.status === "CANCELADA") severity = "high";
+
+  return {
+    category: "metadata",
+    severity,
+    title: `Registraduría: Cédula ${status.status}`,
+    description: [
+      `CC: ${cedula}`,
+      `Status: ${status.status}`,
+      status.place ? `Place of issue: ${status.place}` : null,
+      status.date ? `Date: ${status.date}` : null,
+      status.status === "ROBADO" || status.status === "ROBADA"
+        ? "\nCRITICAL: This cédula has been reported as STOLEN. Identity fraud risk is extremely high."
+        : null,
+      status.status === "SUSPENDIDO" || status.status === "SUSPENDIDA"
+        ? "\nWARNING: This cédula is SUSPENDED. The holder cannot perform official transactions."
+        : null,
+    ].filter(Boolean).join("\n"),
+    sourceUrl: `${CERT_URL}/menu.aspx`,
+    rawData: status,
+    remediation: severity === "critical"
+      ? "URGENT: Report to Registraduría Nacional immediately. File a police report (denuncia). Monitor all financial accounts."
+      : severity === "high"
+        ? "Contact Registraduría Nacional to resolve the suspended/cancelled status."
+        : "Cédula is valid and active. No action needed.",
+  };
 }

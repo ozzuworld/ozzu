@@ -1,5 +1,6 @@
 // Colombian OSINT: ADRES (Administradora de los Recursos del SGSS) — Health system affiliation
-// Source: adres.gov.co — public health affiliation lookup, no captcha
+// Source: adres.gov.co redirects to miseguridadsocial.gov.co for actual consultation
+// The old BDUA API (aplicaciones.adres.gov.co) is offline. New system requires web interaction.
 const { validateCedula, safeFetch, CO_HEADERS } = require("./co-utils");
 
 module.exports = {
@@ -22,7 +23,7 @@ module.exports = {
 
     const release = await rateLimiter.acquire();
     try {
-      // ADRES BDUA consultation endpoint
+      // Try the legacy BDUA API endpoint (may still work)
       const url = "https://aplicaciones.adres.gov.co/bdua-internet-production/api/1.0/Afiliados/consultarAfiliado";
       const res = await safeFetch(url, {
         method: "POST",
@@ -55,39 +56,51 @@ module.exports = {
             severity: "medium",
             title: `ADRES: ${eps} — ${regime}`,
             description: [
-              `Nombre: ${fullName}`,
+              `Name: ${fullName}`,
               `EPS: ${eps}`,
-              `Régimen: ${regime}`,
-              `Estado: ${status}`,
-              `Municipio: ${municipality}`,
-              `Departamento: ${department}`,
+              `Regime: ${regime}`,
+              `Status: ${status}`,
+              `Municipality: ${municipality}`,
+              `Department: ${department}`,
             ].join("\n"),
             sourceUrl: "https://www.adres.gov.co/consulte-su-eps",
             rawData: data,
             remediation: "Health affiliation data is managed by your EPS. Contact them to update or correct information.",
           });
-        } else {
-          findings.push({
-            category: "metadata",
-            severity: "info",
-            title: "ADRES: No health affiliation found",
-            description: `No active health system affiliation found in ADRES/BDUA for CC: ${cedula}`,
-            sourceUrl: "https://www.adres.gov.co/consulte-su-eps",
-            rawData: { searched: cedula, response: data },
-          });
+          return findings;
         }
-      } else {
-        // Fallback: try alternate endpoint or provide manual link
-        findings.push({
-          category: "metadata",
-          severity: "info",
-          title: "ADRES: Manual lookup required",
-          description: `Could not automatically query ADRES. Check your health affiliation at adres.gov.co with CC: ${cedula}`,
-          sourceUrl: "https://www.adres.gov.co/consulte-su-eps",
-          rawData: { error: res.error || `HTTP ${res.status}`, searched: cedula },
-          remediation: "Visit https://www.adres.gov.co/consulte-su-eps and enter your cédula to check your EPS affiliation.",
-        });
       }
+
+      // Legacy API didn't work — try alternate approach
+      // Try miseguridadsocial.gov.co (the new platform)
+      const release2 = await rateLimiter.acquire();
+      try {
+        const msRes = await safeFetch("https://www.miseguridadsocial.gov.co/", { method: "GET" }, 10000);
+        // Even if we can reach it, it's a SPA that requires JS execution
+        // Just note it's available
+      } catch (e) {
+        // Continue
+      } finally {
+        release2();
+      }
+
+      findings.push({
+        category: "metadata",
+        severity: "info",
+        title: "ADRES: Manual lookup required",
+        description: [
+          `The ADRES BDUA API has been migrated. Health affiliation for CC: ${cedula} must be checked manually.`,
+          `Health affiliation reveals: EPS name, regime (contributivo/subsidiado), municipality, and affiliation status.`,
+          `This data can identify the person's name and location.`,
+        ].join("\n"),
+        sourceUrl: "https://www.adres.gov.co/consulte-su-eps",
+        rawData: { searched: cedula, reason: "api_migrated", error: res.error || `HTTP ${res.status}` },
+        remediation: [
+          "Primary: https://www.adres.gov.co/consulte-su-eps",
+          "Alternate: https://www.miseguridadsocial.gov.co/",
+          "Enter cédula to check health system affiliation (EPS, regime, status).",
+        ].join("\n"),
+      });
     } catch (err) {
       findings.push({
         category: "metadata",

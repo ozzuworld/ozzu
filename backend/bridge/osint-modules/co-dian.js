@@ -1,6 +1,12 @@
 // Colombian OSINT: DIAN RUT (Registro Único Tributario) — Tax registration lookup
-// Source: muisca.dian.gov.co — JSF form-based, no captcha but needs ViewState handling
+// Source: muisca.dian.gov.co — JSF form with ViewState + reCAPTCHA
+// Note: DIAN added reCAPTCHA (verificarCaptcha) — direct submission is blocked.
+// This module extracts the JSESSIONID and ViewState but cannot bypass captcha.
+// Falls back to datos.gov.co RUT datasets when available.
 const { validateCedula, validateNIT, safeFetch, CO_HEADERS } = require("./co-utils");
+
+// datos.gov.co has some RUT-related open datasets
+const DIAN_OPEN_DATA = "https://www.datos.gov.co/resource/f9g5-2wvi.json"; // Grandes Contribuyentes
 
 module.exports = {
   name: "co-dian",
@@ -12,10 +18,49 @@ module.exports = {
     const isCedula = profile.profile_type === "cedula";
     const cleanValue = isCedula ? (validateCedula(value) || value) : (validateNIT(value) || value);
 
-    // Step 1: Get JSF ViewState from the form page
+    // Strategy 1: Check open datasets on datos.gov.co (free, no captcha)
     const release1 = await rateLimiter.acquire();
+    try {
+      // Check Grandes Contribuyentes (large taxpayers)
+      const query = isCedula
+        ? `$where=nit='${cleanValue}' OR numero_documento='${cleanValue}'`
+        : `$where=nit='${cleanValue}'`;
+      const url = `${DIAN_OPEN_DATA}?${query}&$limit=10`;
+      const res = await safeFetch(url, {
+        headers: { Accept: "application/json" },
+      });
+
+      if (res.ok && Array.isArray(res.body) && res.body.length > 0) {
+        const record = res.body[0];
+        findings.push({
+          category: "exposure",
+          severity: "medium",
+          title: `DIAN: Large taxpayer — ${record.razon_social || record.nombre || cleanValue}`,
+          description: [
+            record.razon_social || record.nombre ? `Name: ${record.razon_social || record.nombre}` : null,
+            `NIT: ${record.nit || cleanValue}`,
+            record.actividad_economica ? `Economic activity: ${record.actividad_economica}` : null,
+            record.regimen ? `Tax regime: ${record.regimen}` : null,
+            record.direccion ? `Address: ${record.direccion}` : null,
+            record.municipio ? `City: ${record.municipio}` : null,
+            record.departamento ? `Department: ${record.departamento}` : null,
+          ].filter(Boolean).join("\n"),
+          sourceUrl: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
+          rawData: record,
+          remediation: "Large taxpayer registration is public. Verify tax obligations are current.",
+        });
+        return findings;
+      }
+    } catch (e) {
+      // Continue to next strategy
+    } finally {
+      release1();
+    }
+
+    // Strategy 2: Try the MUISCA JSF form (usually blocked by captcha)
+    const release2 = await rateLimiter.acquire();
     let viewState = null;
-    let cookies = "";
+    let sessionCookies = "";
     try {
       const pageRes = await safeFetch(
         "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
@@ -24,39 +69,41 @@ module.exports = {
       if (pageRes.ok && typeof pageRes.body === "string") {
         const vsMatch = pageRes.body.match(/javax\.faces\.ViewState[^>]*value="([^"]+)"/);
         if (vsMatch) viewState = vsMatch[1];
-        // Extract JSESSIONID if present in response
-        const cookieMatch = pageRes.body.match(/JSESSIONID=([^;]+)/);
-        if (cookieMatch) cookies = `JSESSIONID=${cookieMatch[1]}`;
+        // Extract JSESSIONID from the action URL or cookies
+        const jidMatch = pageRes.body.match(/jsessionid=([^"&]+)/i);
+        if (jidMatch) sessionCookies = `JSESSIONID=${jidMatch[1]}`;
+        if (pageRes.cookies) sessionCookies = pageRes.cookies;
       }
     } catch (e) {
       // Continue with fallback
     } finally {
-      release1();
+      release2();
     }
 
-    // Step 2: Submit the form with cédula/NIT
-    const release2 = await rateLimiter.acquire();
+    const release3 = await rateLimiter.acquire();
     try {
       if (viewState) {
         const formData = new URLSearchParams();
         formData.append("javax.faces.ViewState", viewState);
         formData.append("vistaConsultaEstadoRUT:formConsultaEstadoRUT:numNit", cleanValue);
-        formData.append("vistaConsultaEstadoRUT:formConsultaEstadoRUT:btnBuscar", "Buscar");
+        formData.append("vistaConsultaEstadoRUT:formConsultaEstadoRUT:btnBuscar.x", "1");
+        formData.append("vistaConsultaEstadoRUT:formConsultaEstadoRUT:btnBuscar.y", "1");
         formData.append("vistaConsultaEstadoRUT:formConsultaEstadoRUT_SUBMIT", "1");
 
-        const res = await safeFetch(
-          "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
-          {
-            method: "POST",
-            headers: {
-              ...CO_HEADERS,
-              "Content-Type": "application/x-www-form-urlencoded",
-              Referer: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
-              Cookie: cookies,
-            },
-            body: formData.toString(),
-          }
-        );
+        const actionUrl = sessionCookies.includes("JSESSIONID")
+          ? `https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces;${sessionCookies.replace("; ", ";")}`
+          : "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces";
+
+        const res = await safeFetch(actionUrl, {
+          method: "POST",
+          headers: {
+            ...CO_HEADERS,
+            "Content-Type": "application/x-www-form-urlencoded",
+            Referer: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
+            Cookie: sessionCookies,
+          },
+          body: formData.toString(),
+        });
 
         if (res.ok && typeof res.body === "string") {
           const html = res.body;
@@ -68,46 +115,40 @@ module.exports = {
               severity: rutData.status === "ACTIVO" ? "low" : "medium",
               title: `DIAN RUT: ${rutData.status || "Found"} — ${rutData.name || cleanValue}`,
               description: [
-                rutData.name ? `Nombre/Razón Social: ${rutData.name}` : null,
+                rutData.name ? `Name: ${rutData.name}` : null,
                 `NIT/CC: ${cleanValue}`,
-                rutData.dv ? `Dígito de verificación: ${rutData.dv}` : null,
-                rutData.status ? `Estado: ${rutData.status}` : null,
-                rutData.type ? `Tipo: ${rutData.type}` : null,
-                rutData.mainActivity ? `Actividad principal: ${rutData.mainActivity}` : null,
-                rutData.address ? `Dirección: ${rutData.address}` : null,
-                rutData.city ? `Ciudad: ${rutData.city}` : null,
+                rutData.dv ? `Verification digit: ${rutData.dv}` : null,
+                rutData.status ? `Status: ${rutData.status}` : null,
+                rutData.type ? `Type: ${rutData.type}` : null,
+                rutData.mainActivity ? `Main activity: ${rutData.mainActivity}` : null,
+                rutData.address ? `Address: ${rutData.address}` : null,
+                rutData.city ? `City: ${rutData.city}` : null,
               ].filter(Boolean).join("\n"),
               sourceUrl: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
               rawData: rutData,
               remediation: rutData.status !== "ACTIVO"
-                ? "RUT appears inactive or cancelled. If this is unexpected, contact DIAN."
-                : "Active RUT registration. Verify tax obligations are up to date.",
+                ? "RUT appears inactive or cancelled. Contact DIAN if unexpected."
+                : "Active RUT registration. Verify tax obligations are current.",
             });
-          } else {
-            findings.push({
-              category: "exposure",
-              severity: "info",
-              title: "DIAN RUT: No registration found",
-              description: `No RUT registration found for ${isCedula ? "CC" : "NIT"}: ${cleanValue}`,
-              sourceUrl: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
-              rawData: { searched: cleanValue, type: profile.profile_type },
-            });
+            return findings;
           }
-        } else {
-          throw new Error(`HTTP ${res.status}`);
         }
-      } else {
-        // ViewState extraction failed — provide manual link
-        findings.push({
-          category: "exposure",
-          severity: "info",
-          title: "DIAN RUT: Manual lookup required",
-          description: `Could not establish session with DIAN MUISCA. Search manually with ${isCedula ? "CC" : "NIT"}: ${cleanValue}`,
-          sourceUrl: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
-          rawData: { searched: cleanValue },
-          remediation: "Visit https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces to check RUT status.",
-        });
       }
+
+      // Captcha blocked or no data — provide manual link
+      findings.push({
+        category: "exposure",
+        severity: "info",
+        title: "DIAN RUT: Captcha-protected",
+        description: [
+          `The DIAN MUISCA portal uses reCAPTCHA to protect RUT lookups.`,
+          `Automated lookup not possible for ${isCedula ? "CC" : "NIT"}: ${cleanValue}`,
+          `Search manually at the DIAN website.`,
+        ].join("\n"),
+        sourceUrl: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
+        rawData: { searched: cleanValue, type: profile.profile_type, reason: "captcha" },
+        remediation: "Visit https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces — enter NIT/CC and complete captcha.",
+      });
     } catch (err) {
       findings.push({
         category: "exposure",
@@ -117,7 +158,7 @@ module.exports = {
         rawData: { error: err.message },
       });
     } finally {
-      release2();
+      release3();
     }
 
     return findings;
@@ -127,14 +168,17 @@ module.exports = {
 function parseDianResponse(html) {
   const result = { found: false };
 
-  // Check if results are present
-  if (html.includes("No se encontr") || html.includes("no encontr") || !html.includes("Estado")) {
+  if (html.includes("No se encontr") || html.includes("no encontr") || html.includes("captcha") || html.includes("reCAPTCHA")) {
+    return result;
+  }
+
+  // Check for results
+  if (!html.includes("Estado") && !html.includes("Razón Social") && !html.includes("Nombre")) {
     return result;
   }
 
   result.found = true;
 
-  // Extract fields from the HTML response
   const extract = (pattern) => {
     const m = html.match(pattern);
     return m ? m[1].replace(/<[^>]+>/g, "").trim() : null;
