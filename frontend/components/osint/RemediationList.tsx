@@ -19,7 +19,7 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const PRIORITY_LABELS: Record<number, string> = { 1: "P1 — CRITICAL", 2: "P2 — HIGH", 3: "P3 — MEDIUM" };
+const PRIORITY_LABELS: Record<number, string> = { 1: "Critical", 2: "High", 3: "Medium" };
 const PRIORITY_COLORS: Record<number, string> = { 1: "#EF4444", 2: "#F97316", 3: "#EAB308" };
 
 interface Props {

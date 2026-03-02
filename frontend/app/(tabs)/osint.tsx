@@ -321,7 +321,7 @@ export default function OsintScreen() {
             letterSpacing: 3,
           }}
         >
-          OSINT
+          INTELLIGENCE
         </Text>
         <StatusBadge />
       </View>
@@ -351,11 +351,12 @@ export default function OsintScreen() {
           onRefresh={() => { refreshGroups(); refresh(); }}
         />
 
-        {/* ─── TOOL STATUS ─── */}
-        {totalCount > 0 && (
-          <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 4 }}>
-            <Text style={{ color: "#555", fontFamily: "monospace", fontSize: 9 }}>
-              CLI TOOLS: {availableCount}/{totalCount}
+        {/* Tool status indicator — subtle dot only */}
+        {totalCount > 0 && availableCount < totalCount && (
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 4, alignItems: "center", gap: 4 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: availableCount > 0 ? "#EAB308" : "#EF4444" }} />
+            <Text style={{ color: "#444", fontFamily: "monospace", fontSize: 9 }}>
+              {totalCount - availableCount} tool{totalCount - availableCount !== 1 ? "s" : ""} offline
             </Text>
           </View>
         )}
@@ -448,14 +449,14 @@ export default function OsintScreen() {
                       <View
                         style={{
                           flex: 1,
-                          height: 4,
+                          height: 6,
                           backgroundColor: "#252525",
                           borderRadius: 2,
                         }}
                       >
                         <View
                           style={{
-                            height: 4,
+                            height: 6,
                             width: `${Math.max(2, pct)}%`,
                             backgroundColor: SEVERITY_COLORS[sev] || "#6B7280",
                             borderRadius: 2,
@@ -504,11 +505,8 @@ export default function OsintScreen() {
             }}
           >
             <ActivityIndicator color="#06B6D4" size="small" />
-            <Text style={{ color: "#06B6D4", fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>
-              SCANNING...
-            </Text>
-            <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
-              Polling every 3s
+            <Text style={{ color: "#06B6D4", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", flex: 1 }}>
+              Scanning profiles...
             </Text>
           </View>
         )}
@@ -524,12 +522,17 @@ export default function OsintScreen() {
               paddingHorizontal: 4,
             }}
           >
-            <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
+            <Text style={{ color: "#444", fontSize: 10, fontFamily: "monospace" }}>
               {schedule.lastScanAt
-                ? `LAST: ${new Date(schedule.lastScanAt).toLocaleDateString()} ${new Date(
-                    schedule.lastScanAt
-                  ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                : "NO SCANS YET"}
+                ? `Last scan ${(() => {
+                    const diff = Date.now() - new Date(schedule.lastScanAt).getTime();
+                    const mins = Math.floor(diff / 60000);
+                    if (mins < 60) return `${mins}m ago`;
+                    const hrs = Math.floor(mins / 60);
+                    if (hrs < 24) return `${hrs}h ago`;
+                    return `${Math.floor(hrs / 24)}d ago`;
+                  })()}`
+                : "Not scanned yet"}
             </Text>
             <Pressable
               onPress={async () => {
@@ -543,7 +546,9 @@ export default function OsintScreen() {
                   Alert.alert("Schedule Error", err.message);
                 }
               }}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
             >
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: schedule.enabled ? "#22C55E" : "#333" }} />
               <Text
                 style={{
                   color: schedule.enabled ? "#22C55E" : "#525252",
@@ -551,30 +556,30 @@ export default function OsintScreen() {
                   fontFamily: "monospace",
                 }}
               >
-                {schedule.enabled ? `EVERY ${schedule.intervalHours}H` : "SCHEDULE: OFF"} ▸
+                {schedule.enabled ? `Every ${schedule.intervalHours}h` : "Auto-scan off"}
               </Text>
             </Pressable>
           </View>
         )}
 
         {/* Action buttons */}
-        <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+        <View style={{ flexDirection: "row", gap: 10, marginBottom: 14 }}>
           <Pressable
             onPress={() => setShowAddModal(true)}
             style={({ pressed }) => ({
               flex: 1,
-              backgroundColor: pressed ? "#1E3A5F" : "#0E2A4F",
+              backgroundColor: pressed ? "#1A2A40" : "#111D2E",
               borderWidth: 1,
-              borderColor: "#3B82F6",
-              borderRadius: 8,
-              paddingVertical: 10,
+              borderColor: "#2563EB40",
+              borderRadius: 10,
+              paddingVertical: 12,
               alignItems: "center",
             })}
           >
             <Text
               style={{ color: "#60A5FA", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}
             >
-              + ADD PROFILE
+              + Add Profile
             </Text>
           </Pressable>
           <Pressable
@@ -582,11 +587,11 @@ export default function OsintScreen() {
             disabled={isScanning || profiles.length === 0}
             style={({ pressed }) => ({
               flex: 1,
-              backgroundColor: pressed ? "#1E3A2F" : "#0E2A1F",
+              backgroundColor: pressed ? "#1A2E1F" : "#111E16",
               borderWidth: 1,
-              borderColor: isScanning ? "#525252" : "#22C55E",
-              borderRadius: 8,
-              paddingVertical: 10,
+              borderColor: isScanning ? "#33333340" : "#22C55E40",
+              borderRadius: 10,
+              paddingVertical: 12,
               alignItems: "center",
               opacity: isScanning || profiles.length === 0 ? 0.5 : 1,
             })}
@@ -594,7 +599,7 @@ export default function OsintScreen() {
             <Text
               style={{ color: "#4ADE80", fontSize: 12, fontFamily: "monospace", fontWeight: "bold" }}
             >
-              {isScanning ? "SCANNING..." : "SCAN ALL"}
+              {isScanning ? "Scanning..." : "Scan All"}
             </Text>
           </Pressable>
         </View>
@@ -696,32 +701,20 @@ export default function OsintScreen() {
                     )}
                     <Pressable
                       onPress={() => handleScan(p.id)}
+                      onLongPress={() => handleDeleteProfile(p)}
                       disabled={isScanning}
                       style={({ pressed }) => ({
-                        backgroundColor: pressed ? "#252525" : "#1E1E1E",
+                        backgroundColor: pressed ? "#0A2030" : "#0A1A2A",
                         borderWidth: 1,
-                        borderColor: "#333",
-                        borderRadius: 6,
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
+                        borderColor: "#06B6D440",
+                        borderRadius: 8,
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
                         opacity: isScanning ? 0.5 : 1,
                       })}
                     >
-                      <Text style={{ color: "#06B6D4", fontSize: 10, fontFamily: "monospace" }}>
-                        SCAN
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleDeleteProfile(p)}
-                      style={({ pressed }) => ({
-                        backgroundColor: pressed ? "#3A1A1A" : "transparent",
-                        borderRadius: 6,
-                        paddingHorizontal: 6,
-                        paddingVertical: 4,
-                      })}
-                    >
-                      <Text style={{ color: "#EF4444", fontSize: 10, fontFamily: "monospace" }}>
-                        DEL
+                      <Text style={{ color: "#06B6D4", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                        {isScanning ? "..." : "SCAN"}
                       </Text>
                     </Pressable>
                   </View>
@@ -787,8 +780,9 @@ export default function OsintScreen() {
           style={{
             flexDirection: "row",
             marginBottom: 12,
-            borderBottomWidth: 1,
-            borderBottomColor: "#1A1A1A",
+            backgroundColor: "#151515",
+            borderRadius: 10,
+            padding: 3,
           }}
         >
           {VIEW_TABS.map((tab) => {
@@ -801,32 +795,40 @@ export default function OsintScreen() {
                 onPress={() => setActiveView(tab.key)}
                 style={{
                   flex: 1,
-                  paddingVertical: 10,
+                  paddingVertical: 9,
                   alignItems: "center",
-                  borderBottomWidth: active ? 3 : 0,
-                  borderBottomColor: "#06B6D4",
+                  backgroundColor: active ? "#1E1E1E" : "transparent",
+                  borderRadius: 8,
                 }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <Text style={{ fontSize: 12 }}>{tab.emoji}</Text>
                   <Text
                     style={{
-                      color: active ? "#06B6D4" : "#525252",
-                      fontSize: 11,
+                      color: active ? "#E5E5E5" : "#525252",
+                      fontSize: 10,
                       fontFamily: "monospace",
                       fontWeight: active ? "bold" : "normal",
                     }}
                   >
-                    {tab.emoji} {tab.label}
+                    {tab.label}
                   </Text>
                   {hasNew && (
                     <View
                       style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: 3,
+                        minWidth: 16,
+                        height: 16,
+                        borderRadius: 8,
                         backgroundColor: "#EF4444",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        paddingHorizontal: 4,
                       }}
-                    />
+                    >
+                      <Text style={{ color: "#FFF", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>
+                        {statusCounts.new > 99 ? "99+" : statusCounts.new}
+                      </Text>
+                    </View>
                   )}
                 </View>
               </Pressable>
@@ -847,10 +849,10 @@ export default function OsintScreen() {
                 >
                   <View style={{ flexDirection: "row", gap: 6 }}>
                     {([
-                      { key: "new", label: "NEW", emoji: "\uD83C\uDD95" },
-                      { key: "acknowledged", label: "ACK", emoji: "\uD83D\uDC41" },
-                      { key: "remediated", label: "FIXED", emoji: "\u2705" },
-                      { key: "false_positive", label: "FP", emoji: "\uD83D\uDEAB" },
+                      { key: "new", label: "NEW", emoji: "" },
+                      { key: "acknowledged", label: "REVIEWED", emoji: "" },
+                      { key: "remediated", label: "FIXED", emoji: "" },
+                      { key: "false_positive", label: "IGNORED", emoji: "" },
                       { key: "all", label: "ALL", emoji: "" },
                     ] as const).map((pill) => {
                       const active = statusFilter === pill.key;
@@ -885,40 +887,15 @@ export default function OsintScreen() {
                   </View>
                 </ScrollView>
 
-                {/* Bulk action bar */}
-                {statusFilter === "new" && statusCounts.new > 0 && (
+                {/* Bulk actions — compact */}
+                {statusFilter === "new" && statusCounts.new > 3 && (
                   <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
-                    {statusCounts.new > 0 && (statusCounts as any).info !== undefined && findings.filter((f) => f.status === "new" && f.severity === "info").length > 0 && (
-                      <Pressable
-                        disabled={bulkUpdating}
-                        onPress={() => {
-                          const infoCount = findings.filter((f) => f.status === "new" && f.severity === "info").length;
-                          Alert.alert("Acknowledge Info", `Mark ${infoCount} info-level findings as acknowledged?`, [
-                            { text: "Cancel", style: "cancel" },
-                            { text: "ACK ALL INFO", onPress: async () => {
-                              setBulkUpdating(true);
-                              try {
-                                await bulkUpdateOsintFindings({ status: "acknowledged", severity: "info", currentStatus: "new" });
-                                refresh();
-                              } catch (e: any) { Alert.alert("Error", e.message); }
-                              setBulkUpdating(false);
-                            }},
-                          ]);
-                        }}
-                      >
-                        <View style={{ backgroundColor: "#1A1A0A", borderWidth: 1, borderColor: "#444", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
-                          <Text style={{ color: "#EAB308", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-                            {bulkUpdating ? "..." : `\uD83D\uDC41 ACK ALL INFO (${findings.filter((f) => f.status === "new" && f.severity === "info").length})`}
-                          </Text>
-                        </View>
-                      </Pressable>
-                    )}
                     <Pressable
                       disabled={bulkUpdating}
                       onPress={() => {
-                        Alert.alert("Acknowledge All", `Mark all ${statusCounts.new} new findings as acknowledged?`, [
+                        Alert.alert("Mark All as Reviewed", `Mark ${statusCounts.new} findings as reviewed?`, [
                           { text: "Cancel", style: "cancel" },
-                          { text: "ACK ALL", onPress: async () => {
+                          { text: "Mark All", onPress: async () => {
                             setBulkUpdating(true);
                             try {
                               await bulkUpdateOsintFindings({ status: "acknowledged", currentStatus: "new" });
@@ -929,22 +906,22 @@ export default function OsintScreen() {
                         ]);
                       }}
                     >
-                      <View style={{ backgroundColor: "#0A1A1A", borderWidth: 1, borderColor: "#444", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
-                        <Text style={{ color: "#06B6D4", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-                          {bulkUpdating ? "..." : `\uD83D\uDC41 ACK ALL (${statusCounts.new})`}
+                      <View style={{ backgroundColor: "#151515", borderWidth: 1, borderColor: "#333", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
+                        <Text style={{ color: "#A3A3A3", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                          {bulkUpdating ? "..." : `MARK ALL REVIEWED`}
                         </Text>
                       </View>
                     </Pressable>
                   </View>
                 )}
-                {statusFilter === "acknowledged" && statusCounts.acknowledged > 0 && (
+                {statusFilter === "acknowledged" && statusCounts.acknowledged > 3 && (
                   <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
                     <Pressable
                       disabled={bulkUpdating}
                       onPress={() => {
-                        Alert.alert("Fix All", `Mark all ${statusCounts.acknowledged} acknowledged findings as fixed?`, [
+                        Alert.alert("Mark All Fixed", `Mark ${statusCounts.acknowledged} reviewed findings as fixed?`, [
                           { text: "Cancel", style: "cancel" },
-                          { text: "FIXED ALL", onPress: async () => {
+                          { text: "Mark Fixed", onPress: async () => {
                             setBulkUpdating(true);
                             try {
                               await bulkUpdateOsintFindings({ status: "remediated", currentStatus: "acknowledged" });
@@ -955,31 +932,9 @@ export default function OsintScreen() {
                         ]);
                       }}
                     >
-                      <View style={{ backgroundColor: "#0A1A0A", borderWidth: 1, borderColor: "#444", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
-                        <Text style={{ color: "#22C55E", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-                          {bulkUpdating ? "..." : `\u2705 FIXED ALL (${statusCounts.acknowledged})`}
-                        </Text>
-                      </View>
-                    </Pressable>
-                    <Pressable
-                      disabled={bulkUpdating}
-                      onPress={() => {
-                        Alert.alert("Reopen All", `Reopen all ${statusCounts.acknowledged} acknowledged findings?`, [
-                          { text: "Cancel", style: "cancel" },
-                          { text: "REOPEN ALL", onPress: async () => {
-                            setBulkUpdating(true);
-                            try {
-                              await bulkUpdateOsintFindings({ status: "new", currentStatus: "acknowledged" });
-                              refresh();
-                            } catch (e: any) { Alert.alert("Error", e.message); }
-                            setBulkUpdating(false);
-                          }},
-                        ]);
-                      }}
-                    >
-                      <View style={{ backgroundColor: "#1A0A0A", borderWidth: 1, borderColor: "#444", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
-                        <Text style={{ color: "#EF4444", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-                          {bulkUpdating ? "..." : `\uD83C\uDD95 REOPEN ALL (${statusCounts.acknowledged})`}
+                      <View style={{ backgroundColor: "#151515", borderWidth: 1, borderColor: "#333", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
+                        <Text style={{ color: "#A3A3A3", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                          {bulkUpdating ? "..." : `MARK ALL FIXED`}
                         </Text>
                       </View>
                     </Pressable>
@@ -1021,42 +976,45 @@ export default function OsintScreen() {
                 </View>
 
                 {/* Group-by toggle */}
-                <View style={{ flexDirection: "row", gap: 6, marginBottom: 10 }}>
-                  {(["severity", "module", "profile"] as GroupBy[]).map((g) => (
+                <View style={{ flexDirection: "row", gap: 6, marginBottom: 10, alignItems: "center" }}>
+                  {([
+                    { key: "severity" as GroupBy, label: "Priority" },
+                    { key: "module" as GroupBy, label: "Source" },
+                    { key: "profile" as GroupBy, label: "Profile" },
+                  ]).map((g) => (
                     <Pressable
-                      key={g}
-                      onPress={() => setGroupBy(g)}
+                      key={g.key}
+                      onPress={() => setGroupBy(g.key)}
                       style={{
-                        backgroundColor: groupBy === g ? "#1E1E1E" : "transparent",
+                        backgroundColor: groupBy === g.key ? "#1E1E1E" : "transparent",
                         borderWidth: 1,
-                        borderColor: groupBy === g ? "#444" : "#252525",
-                        borderRadius: 6,
+                        borderColor: groupBy === g.key ? "#444" : "#252525",
+                        borderRadius: 8,
                         paddingHorizontal: 10,
-                        paddingVertical: 4,
+                        paddingVertical: 5,
                       }}
                     >
                       <Text
                         style={{
-                          color: groupBy === g ? "#E5E5E5" : "#525252",
+                          color: groupBy === g.key ? "#E5E5E5" : "#525252",
                           fontSize: 10,
                           fontFamily: "monospace",
-                          fontWeight: groupBy === g ? "bold" : "normal",
+                          fontWeight: groupBy === g.key ? "bold" : "normal",
                         }}
                       >
-                        BY {g.toUpperCase()}
+                        {g.label}
                       </Text>
                     </Pressable>
                   ))}
                   <View style={{ flex: 1 }} />
                   <Text
                     style={{
-                      color: "#525252",
+                      color: "#444",
                       fontSize: 10,
                       fontFamily: "monospace",
-                      alignSelf: "center",
                     }}
                   >
-                    {filteredFindings.length} results
+                    {filteredFindings.length}
                   </Text>
                 </View>
 
@@ -1187,30 +1145,11 @@ export default function OsintScreen() {
               </Pressable>
             </View>
 
-            {/* Correlation stats strip */}
+            {/* Correlation summary */}
             {correlations.length > 0 && (
-              <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 4 }}>
-                <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
-                  AVG CONF:{" "}
-                  <Text style={{ color: "#A3A3A3", fontWeight: "bold" }}>
-                    {Math.round(
-                      (correlations.reduce((s, c) => s + c.confidence, 0) / correlations.length) *
-                        100
-                    )}
-                    %
-                  </Text>
-                </Text>
-                <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
-                  TOP TYPE:{" "}
-                  <Text style={{ color: "#A3A3A3", fontWeight: "bold" }}>
-                    {(() => {
-                      const counts: Record<string, number> = {};
-                      for (const c of correlations)
-                        counts[c.correlation_type] = (counts[c.correlation_type] || 0) + 1;
-                      const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-                      return top ? top[0].replace(/_/g, " ") : "-";
-                    })()}
-                  </Text>
+              <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 4 }}>
+                <Text style={{ color: "#444", fontSize: 10, fontFamily: "monospace" }}>
+                  {correlations.length} connection{correlations.length !== 1 ? "s" : ""} found
                 </Text>
               </View>
             )}

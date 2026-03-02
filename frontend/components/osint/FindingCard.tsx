@@ -39,17 +39,17 @@ export function FindingCard({ finding, onStatusChange }: Props) {
   const handleLongPress = () => {
     const options: Array<{ text: string; onPress?: () => void; style?: "cancel" | "destructive" }> = [];
     if (finding.status === "new") {
-      options.push({ text: "👁 Acknowledge", onPress: () => handleStatusUpdate("acknowledged") });
-      options.push({ text: "🚫 False Positive", onPress: () => handleStatusUpdate("false_positive") });
-      options.push({ text: "✅ Fixed", onPress: () => handleStatusUpdate("remediated") });
+      options.push({ text: "Mark as Reviewed", onPress: () => handleStatusUpdate("acknowledged") });
+      options.push({ text: "Ignore (Not Real)", onPress: () => handleStatusUpdate("false_positive") });
+      options.push({ text: "Mark Fixed", onPress: () => handleStatusUpdate("remediated") });
     } else if (finding.status === "acknowledged") {
-      options.push({ text: "✅ Fixed", onPress: () => handleStatusUpdate("remediated") });
-      options.push({ text: "🚫 False Positive", onPress: () => handleStatusUpdate("false_positive") });
+      options.push({ text: "Mark Fixed", onPress: () => handleStatusUpdate("remediated") });
+      options.push({ text: "Ignore (Not Real)", onPress: () => handleStatusUpdate("false_positive") });
     } else {
-      options.push({ text: "🆕 Reopen", onPress: () => handleStatusUpdate("new") });
+      options.push({ text: "Reopen", onPress: () => handleStatusUpdate("new") });
     }
     options.push({ text: "Cancel", style: "cancel" });
-    Alert.alert("Quick Action", finding.title, options);
+    Alert.alert("Actions", finding.title, options);
   };
 
   const handleStatusUpdate = async (newStatus: string) => {
@@ -184,17 +184,17 @@ export function FindingCard({ finding, onStatusChange }: Props) {
               {finding.status === "new" && (
                 <>
                   <StatusButton
-                    label="👁 ACK"
+                    label="Reviewed"
                     onPress={() => handleStatusUpdate("acknowledged")}
                     disabled={updating}
                   />
                   <StatusButton
-                    label="✅ FIXED"
+                    label="Fixed"
                     onPress={() => handleStatusUpdate("remediated")}
                     disabled={updating}
                   />
                   <StatusButton
-                    label="🚫 FALSE"
+                    label="Ignore"
                     onPress={() => handleStatusUpdate("false_positive")}
                     disabled={updating}
                   />
@@ -203,12 +203,12 @@ export function FindingCard({ finding, onStatusChange }: Props) {
               {finding.status === "acknowledged" && (
                 <>
                   <StatusButton
-                    label="✅ FIXED"
+                    label="Fixed"
                     onPress={() => handleStatusUpdate("remediated")}
                     disabled={updating}
                   />
                   <StatusButton
-                    label="🚫 FALSE"
+                    label="Ignore"
                     onPress={() => handleStatusUpdate("false_positive")}
                     disabled={updating}
                   />
@@ -216,7 +216,7 @@ export function FindingCard({ finding, onStatusChange }: Props) {
               )}
               {(finding.status === "remediated" || finding.status === "false_positive") && (
                 <StatusButton
-                  label="🆕 REOPEN"
+                  label="Reopen"
                   onPress={() => handleStatusUpdate("new")}
                   disabled={updating}
                 />
@@ -243,16 +243,16 @@ function StatusButton({
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => ({
-        backgroundColor: pressed ? "#333" : "#222",
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 6,
+        backgroundColor: pressed ? "#252525" : "#1E1E1E",
+        paddingHorizontal: 14,
+        paddingVertical: 7,
+        borderRadius: 8,
         borderWidth: 1,
         borderColor: "#333",
         opacity: disabled ? 0.5 : 1,
       })}
     >
-      <Text style={{ color: "#D4D4D4", fontSize: 11, fontFamily: "monospace", fontWeight: "600" }}>
+      <Text style={{ color: "#A3A3A3", fontSize: 11, fontFamily: "monospace", fontWeight: "600" }}>
         {label}
       </Text>
     </Pressable>

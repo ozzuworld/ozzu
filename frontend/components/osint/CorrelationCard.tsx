@@ -51,8 +51,8 @@ export function CorrelationCard({ correlation: c }: Props) {
         </View>
 
         {/* Confidence bar */}
-        <View style={{ height: 3, backgroundColor: "#1A1A1A", borderRadius: 2, marginBottom: 10 }}>
-          <View style={{ height: 3, width: `${confPct}%`, backgroundColor: confColor, borderRadius: 2 }} />
+        <View style={{ height: 6, backgroundColor: "#1A1A1A", borderRadius: 3, marginBottom: 10 }}>
+          <View style={{ height: 6, width: `${confPct}%`, backgroundColor: confColor, borderRadius: 3 }} />
         </View>
 
         {/* Source → Target */}
