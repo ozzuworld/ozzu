@@ -6131,8 +6131,8 @@ directiveBuildPollTimer = setInterval(pollDirectiveBuildStatus, 15000);
         sendJSON(res, 400, { error: "Missing required fields: label, profileType, value" });
         return;
       }
-      if (!["email", "username", "password", "phone", "domain", "ip", "image"].includes(profileType)) {
-        sendJSON(res, 400, { error: "profileType must be email, username, password, phone, domain, ip, or image" });
+      if (!["email", "username", "password", "phone", "domain", "ip", "image", "cedula", "nit"].includes(profileType)) {
+        sendJSON(res, 400, { error: "Invalid profile type" });
         return;
       }
       const id = await db.createOsintProfile(label, profileType, value, tags || []);
