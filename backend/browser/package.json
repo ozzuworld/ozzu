@@ -1,0 +1,9 @@
+{
+  "name": "ozzu-browser",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "^4.21.0",
+    "puppeteer-core": "^24.0.0"
+  }
+}

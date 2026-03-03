@@ -131,6 +131,21 @@ services:
     environment:
       - MODEL_DIR=/models
 
+  browser:
+    build: ./browser
+    container_name: browser
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /tmp/browser-data:/tmp/browser-data
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '1.5'
+    environment:
+      - BROWSER_PORT=3334
+
   # wyze-bridge now runs on dev-01 (172.168.0.59) for LAN camera access
   # See ~/wyze-bridge/docker-compose.yml on dev-01
 

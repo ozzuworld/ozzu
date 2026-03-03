@@ -2492,6 +2492,90 @@ const GEMINI_BRIDGE_TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "browser_navigate",
+    description:
+      "Navigate to a URL in the browser. Returns page title and screenshot. " +
+      "Use for web browsing, filling forms, checking websites on King Kazuma's behalf.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        url: { type: "STRING", description: "URL to navigate to" },
+        session_id: { type: "STRING", description: "Browser session ID (default: 'default')" },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "browser_click",
+    description:
+      "Click an element on the page by CSS selector. Returns screenshot after click. " +
+      "Use wait_after='navigation' if click triggers page navigation, 'idle' for AJAX.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        selector: { type: "STRING", description: "CSS selector of element to click" },
+        session_id: { type: "STRING", description: "Browser session ID (default: 'default')" },
+        wait_after: { type: "STRING", description: "'navigation', 'idle', or milliseconds to wait after click" },
+      },
+      required: ["selector"],
+    },
+  },
+  {
+    name: "browser_type",
+    description:
+      "Type text into an input field by CSS selector. Clears existing content first by default.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        selector: { type: "STRING", description: "CSS selector of input element" },
+        text: { type: "STRING", description: "Text to type" },
+        session_id: { type: "STRING", description: "Browser session ID (default: 'default')" },
+        press_enter: { type: "BOOLEAN", description: "Press Enter after typing (default: false)" },
+        clear: { type: "BOOLEAN", description: "Clear existing content first (default: true)" },
+      },
+      required: ["selector", "text"],
+    },
+  },
+  {
+    name: "browser_screenshot",
+    description:
+      "Take a screenshot of the current page. Returns base64 PNG image.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        session_id: { type: "STRING", description: "Browser session ID (default: 'default')" },
+        full_page: { type: "BOOLEAN", description: "Capture full scrollable page (default: false)" },
+      },
+    },
+  },
+  {
+    name: "browser_extract",
+    description:
+      "Extract text content from elements matching a CSS selector. Returns text, tag, id, href, value for each match.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        selector: { type: "STRING", description: "CSS selector to extract from" },
+        session_id: { type: "STRING", description: "Browser session ID (default: 'default')" },
+        attribute: { type: "STRING", description: "Optional HTML attribute to extract" },
+      },
+      required: ["selector"],
+    },
+  },
+  {
+    name: "browser_evaluate",
+    description:
+      "Execute JavaScript on the current page. For complex interactions like selecting dropdowns, scrolling, or reading dynamic content. Returns result + screenshot.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        script: { type: "STRING", description: "JavaScript code to evaluate in page context" },
+        session_id: { type: "STRING", description: "Browser session ID (default: 'default')" },
+      },
+      required: ["script"],
+    },
+  },
 ];
 
 const SWITCH_TO_CIPHER_TOOL = {
@@ -3345,6 +3429,91 @@ async function handleToolCall(name, args) {
         d.activity_log.push({ timestamp: Date.now(), type: "cancelled", actor: "June", message: `Cancelled by June: ${reason}` });
         saveDirectives(directives, d, prevCancelStatus, "June");
         return { success: true, message: `Directive ${args.directive_id} cancelled: ${reason}` };
+      }
+
+      // ── Browser automation tools ──
+      if (name.startsWith("browser_")) {
+        const BROWSER_URL = "http://127.0.0.1:3334";
+        const browserFetch = async (path, body) => {
+          const resp = await fetch(`${BROWSER_URL}${path}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          return resp.json();
+        };
+
+        if (name === "browser_navigate") {
+          if (!args.url) return { success: false, message: "url is required" };
+          const result = await browserFetch("/navigate", {
+            url: args.url,
+            session_id: args.session_id || "default",
+          });
+          if (!result.ok) return { success: false, message: result.error || "Navigation failed" };
+          log.bridge.info(`[browser] Navigated to ${result.url} — "${result.title}"`);
+          return { success: true, title: result.title, url: result.url, screenshot: result.screenshot };
+        }
+
+        if (name === "browser_click") {
+          if (!args.selector) return { success: false, message: "selector is required" };
+          const result = await browserFetch("/click", {
+            selector: args.selector,
+            session_id: args.session_id || "default",
+            wait_after: args.wait_after,
+          });
+          if (!result.ok) return { success: false, message: result.error || "Click failed" };
+          log.bridge.info(`[browser] Clicked ${args.selector} — ${result.clicked?.tag} "${result.clicked?.text?.slice(0, 50)}"`);
+          return { success: true, clicked: result.clicked, screenshot: result.screenshot };
+        }
+
+        if (name === "browser_type") {
+          if (!args.selector) return { success: false, message: "selector is required" };
+          if (args.text === undefined) return { success: false, message: "text is required" };
+          const result = await browserFetch("/type", {
+            selector: args.selector,
+            text: args.text,
+            session_id: args.session_id || "default",
+            press_enter: args.press_enter,
+            clear: args.clear,
+          });
+          if (!result.ok) return { success: false, message: result.error || "Type failed" };
+          log.bridge.info(`[browser] Typed ${result.typed} into ${args.selector}`);
+          return { success: true, message: `Typed ${result.typed} into ${args.selector}` };
+        }
+
+        if (name === "browser_screenshot") {
+          const result = await browserFetch("/screenshot", {
+            session_id: args.session_id || "default",
+            full_page: args.full_page,
+          });
+          if (!result.ok) return { success: false, message: result.error || "Screenshot failed" };
+          return { success: true, title: result.title, url: result.url, screenshot: result.screenshot };
+        }
+
+        if (name === "browser_extract") {
+          if (!args.selector) return { success: false, message: "selector is required" };
+          const result = await browserFetch("/extract", {
+            selector: args.selector,
+            session_id: args.session_id || "default",
+            attribute: args.attribute,
+          });
+          if (!result.ok) return { success: false, message: result.error || "Extract failed" };
+          log.bridge.info(`[browser] Extracted ${result.count} elements from ${args.selector}`);
+          return { success: true, count: result.count, elements: result.elements };
+        }
+
+        if (name === "browser_evaluate") {
+          if (!args.script) return { success: false, message: "script is required" };
+          const result = await browserFetch("/evaluate", {
+            script: args.script,
+            session_id: args.session_id || "default",
+          });
+          if (!result.ok) return { success: false, message: result.error || "Evaluate failed" };
+          log.bridge.info(`[browser] Evaluated script on page`);
+          return { success: true, result: result.result, screenshot: result.screenshot };
+        }
+
+        return { success: false, message: `Unknown browser tool: ${name}` };
       }
     } catch (err) {
       return { success: false, message: err.message || "Bridge call failed" };
