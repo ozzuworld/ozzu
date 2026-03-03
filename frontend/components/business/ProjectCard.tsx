@@ -3,10 +3,10 @@ import { ProgressBar } from "./ProgressBar";
 import { formatCOPCompact } from "./CostField";
 import type { BusinessProject } from "../../lib/bridge-api";
 
-const STATUS_BADGE: Record<string, { label: string; color: string }> = {
-  active: { label: "ACTIVE", color: "#22C55E" },
-  paused: { label: "PAUSED", color: "#EAB308" },
-  completed: { label: "DONE", color: "#06B6D4" },
+const STATUS_COLOR: Record<string, string> = {
+  active: "#22C55E",
+  paused: "#EAB308",
+  completed: "#06B6D4",
 };
 
 interface ProjectCardProps {
@@ -16,60 +16,63 @@ interface ProjectCardProps {
 }
 
 export function ProjectCard({ project, onPress, onLongPress }: ProjectCardProps) {
-  const badge = STATUS_BADGE[project.status] || STATUS_BADGE.active;
+  const statusColor = STATUS_COLOR[project.status] || STATUS_COLOR.active;
   const pct = project.task_count > 0 ? Math.round((project.done_count / project.task_count) * 100) : 0;
+  const accentColor = project.color || "#06B6D4";
 
   return (
-    <Pressable onPress={onPress} onLongPress={onLongPress}>
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      style={({ pressed }) => ({ opacity: pressed ? 0.92 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] })}
+    >
       <View
         style={{
           backgroundColor: "#1A1A1A",
-          borderRadius: 10,
+          borderRadius: 12,
           borderLeftWidth: 3,
-          borderLeftColor: project.color || "#06B6D4",
-          marginBottom: 10,
-          padding: 14,
+          borderLeftColor: accentColor,
+          marginBottom: 12,
+          padding: 16,
+          borderWidth: 1,
+          borderColor: "rgba(255,255,255,0.04)",
         }}
       >
         {/* Header row */}
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
-            <Text style={{ fontSize: 20 }}>{project.emoji}</Text>
-            <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 14, fontWeight: "bold", flex: 1 }} numberOfLines={1}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+            <Text style={{ fontSize: 22 }}>{project.emoji}</Text>
+            <Text style={{ color: "#E5E5E5", fontSize: 15, fontWeight: "600", flex: 1 }} numberOfLines={1}>
               {project.name}
             </Text>
           </View>
-          <View style={{ backgroundColor: badge.color + "22", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
-            <Text style={{ color: badge.color, fontFamily: "monospace", fontSize: 9, fontWeight: "bold", letterSpacing: 1 }}>
-              {badge.label}
-            </Text>
-          </View>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusColor }} />
         </View>
 
         {/* Description */}
         {project.description ? (
-          <Text style={{ color: "#737373", fontSize: 12, marginBottom: 8 }} numberOfLines={2}>
+          <Text style={{ color: "#737373", fontSize: 12, lineHeight: 17, marginBottom: 10 }} numberOfLines={2}>
             {project.description}
           </Text>
         ) : null}
 
         {/* Budget utilization bar */}
         {project.budget && project.budget > 0 ? (
-          <View style={{ marginBottom: 6 }}>
-            <ProgressBar done={project.total_actual || 0} total={project.budget} color={((project.total_actual || 0) / project.budget) > 1 ? "#EF4444" : ((project.total_actual || 0) / project.budget) > 0.8 ? "#EAB308" : "#22C55E"} height={3} />
-            <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>
+          <View style={{ marginBottom: 8 }}>
+            <ProgressBar done={project.total_actual || 0} total={project.budget} color={((project.total_actual || 0) / project.budget) > 1 ? "#EF4444" : ((project.total_actual || 0) / project.budget) > 0.8 ? "#EAB308" : "#22C55E"} height={4} />
+            <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 3 }}>
               {formatCOPCompact(project.total_actual || 0)} / {formatCOPCompact(project.budget)}
             </Text>
           </View>
         ) : null}
 
         {/* Progress */}
-        <ProgressBar done={project.done_count} total={project.task_count} color={project.color || "#06B6D4"} />
-        <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
+        <ProgressBar done={project.done_count} total={project.task_count} color={accentColor} height={5} />
+        <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
           <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 10 }}>
             {project.done_count}/{project.task_count} tasks
           </Text>
-          <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 10 }}>
+          <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
             {pct}%
           </Text>
         </View>

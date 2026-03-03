@@ -1,13 +1,7 @@
 import { useState } from "react";
-import { View, Text, Pressable, LayoutAnimation, ScrollView, Image } from "react-native";
-import { type BusinessTask, type TaskRequirement, getAttachmentUrl } from "../../lib/bridge-api";
+import { View, Text, Pressable, LayoutAnimation } from "react-native";
+import { type BusinessTask, type TaskRequirement } from "../../lib/bridge-api";
 import { formatCOPCompact } from "./CostField";
-
-const STATUS_ICON: Record<string, string> = {
-  pending: "○",
-  in_progress: "◐",
-  done: "●",
-};
 
 const STATUS_COLOR: Record<string, string> = {
   pending: "#525252",
@@ -53,29 +47,48 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
   };
 
   return (
-    <Pressable onPress={toggleExpand} onLongPress={onLongPress}>
+    <Pressable
+      onPress={toggleExpand}
+      onLongPress={onLongPress}
+      style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
+    >
       <View
         style={{
           backgroundColor: "#1A1A1A",
-          borderRadius: 8,
-          padding: 12,
-          marginBottom: 6,
-          opacity: isDone ? 0.6 : 1,
+          borderRadius: 10,
+          padding: 14,
+          marginBottom: 8,
+          opacity: isDone ? 0.55 : 1,
+          borderWidth: 1,
+          borderColor: "rgba(255,255,255,0.03)",
         }}
       >
-        {/* Collapsed header row */}
+        {/* Header row */}
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <Pressable onPress={onToggle} hitSlop={12} style={{ marginRight: 10 }}>
-            <Text style={{ color: STATUS_COLOR[task.status], fontSize: 18 }}>
-              {STATUS_ICON[task.status]}
-            </Text>
+          <Pressable onPress={onToggle} hitSlop={12} style={{ marginRight: 12 }}>
+            <View
+              style={{
+                width: 18,
+                height: 18,
+                borderRadius: 9,
+                borderWidth: 2,
+                borderColor: STATUS_COLOR[task.status],
+                backgroundColor: isDone ? STATUS_COLOR.done : "transparent",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {task.status === "in_progress" ? (
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: STATUS_COLOR.in_progress }} />
+              ) : null}
+            </View>
           </Pressable>
 
           <View style={{ flex: 1 }}>
             <Text
               style={{
                 color: isDone ? "#525252" : "#E5E5E5",
-                fontSize: 13,
+                fontSize: 14,
                 textDecorationLine: isDone ? "line-through" : "none",
               }}
               numberOfLines={1}
@@ -85,29 +98,28 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
           </View>
 
           {/* Badges */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: 8 }}>
-            {/* Verification dot */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 8 }}>
             {(() => {
               const reqs: TaskRequirement[] = task.requirements || [];
               if (reqs.length === 0) return null;
               const fulfilled = reqs.filter((r) => r.fulfilled).length;
               const color = fulfilled === 0 ? "#525252" : fulfilled >= reqs.length ? "#22C55E" : "#EAB308";
-              return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />;
+              return <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />;
             })()}
             {task.estimated_cost ? (
-              <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 9 }}>{formatCOPCompact(task.estimated_cost)}</Text>
+              <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>{formatCOPCompact(task.estimated_cost)}</Text>
             ) : null}
             {(task.expense_count || 0) > 0 ? (
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 9 }}>$ {task.expense_count}</Text>
+              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10 }}>$ {task.expense_count}</Text>
             ) : null}
             {attachCount > 0 ? (
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 9 }}>📎 {attachCount}</Text>
+              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10 }}>📎 {attachCount}</Text>
             ) : null}
             {due ? (
-              <Text style={{ color: due.color, fontFamily: "monospace", fontSize: 9 }}>{due.label}</Text>
+              <Text style={{ color: due.color, fontFamily: "monospace", fontSize: 10 }}>{due.label}</Text>
             ) : null}
-            <View style={{ backgroundColor: pBadge.color + "22", paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 }}>
-              <Text style={{ color: pBadge.color, fontFamily: "monospace", fontSize: 8, fontWeight: "bold" }}>
+            <View style={{ backgroundColor: pBadge.color + "18", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+              <Text style={{ color: pBadge.color, fontFamily: "monospace", fontSize: 9, fontWeight: "bold" }}>
                 {pBadge.label}
               </Text>
             </View>
@@ -116,29 +128,28 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
 
         {/* Expanded content */}
         {expanded ? (
-          <View style={{ marginTop: 10, marginLeft: 28 }}>
+          <View style={{ marginTop: 12, marginLeft: 30 }}>
             {task.description ? (
-              <Text style={{ color: "#737373", fontSize: 12, lineHeight: 18, marginBottom: 6 }}>
+              <Text style={{ color: "#737373", fontSize: 13, lineHeight: 19, marginBottom: 8 }}>
                 {task.description}
               </Text>
             ) : null}
             {task.notes ? (
-              <Text style={{ color: "#525252", fontSize: 11, fontStyle: "italic", marginBottom: 6 }} numberOfLines={2}>
+              <Text style={{ color: "#525252", fontSize: 12, fontStyle: "italic", marginBottom: 8 }} numberOfLines={2}>
                 {task.notes}
               </Text>
             ) : null}
 
-            {/* Details button */}
             <Pressable
               onPress={onPress}
-              style={{
+              style={({ pressed }) => ({
                 alignSelf: "flex-start",
-                backgroundColor: "#06B6D422",
-                paddingHorizontal: 12,
-                paddingVertical: 5,
-                borderRadius: 4,
-                marginTop: 4,
-              }}
+                backgroundColor: pressed ? "#06B6D433" : "#06B6D418",
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+                borderRadius: 6,
+                marginTop: 2,
+              })}
             >
               <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>DETAILS</Text>
             </Pressable>

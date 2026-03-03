@@ -42,21 +42,21 @@ export function FinancialSummaryCard({ financials, loading }: FinancialSummaryCa
 
   return (
     <Pressable onPress={toggleExpand}>
-      <View style={{ backgroundColor: "#1A1A1A", borderRadius: 10, padding: 14, marginBottom: 16 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-          <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 11 }}>FINANCIALS</Text>
-          <Text style={{ color: "#525252", fontSize: 10 }}>{expanded ? "v" : ">"}</Text>
+      <View style={{ backgroundColor: "#1A1A1A", borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.04)" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, letterSpacing: 2 }}>FINANCIALS</Text>
+          <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11 }}>{expanded ? "▾" : "▸"}</Text>
         </View>
 
         {/* Budget bar */}
         {hasBudget ? (
-          <View style={{ marginBottom: 8 }}>
+          <View style={{ marginBottom: 10 }}>
             <ProgressBar done={totalActual} total={budget} color={barColor} height={6} />
-            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-              <Text style={{ color: barColor, fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 5 }}>
+              <Text style={{ color: barColor, fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
                 {formatCOPCompact(totalActual)} / {formatCOPCompact(budget)}
               </Text>
-              <Text style={{ color: budgetUtilization && budgetUtilization > 100 ? "#EF4444" : "#525252", fontFamily: "monospace", fontSize: 10 }}>
+              <Text style={{ color: budgetUtilization && budgetUtilization > 100 ? "#EF4444" : "#525252", fontFamily: "monospace", fontSize: 11 }}>
                 {budgetUtilization?.toFixed(0)}%
               </Text>
             </View>
@@ -67,16 +67,16 @@ export function FinancialSummaryCard({ financials, loading }: FinancialSummaryCa
         <View style={{ flexDirection: "row", gap: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>ESTIMATED</Text>
-            <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 12 }}>{formatCOPCompact(totalEstimated)}</Text>
+            <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 14 }}>{formatCOPCompact(totalEstimated)}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>ACTUAL</Text>
-            <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>{formatCOPCompact(totalActual)}</Text>
+            <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 14, fontWeight: "bold" }}>{formatCOPCompact(totalActual)}</Text>
           </View>
           {remaining !== null ? (
             <View style={{ flex: 1 }}>
               <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>REMAINING</Text>
-              <Text style={{ color: remaining < 0 ? "#EF4444" : "#22C55E", fontFamily: "monospace", fontSize: 12 }}>
+              <Text style={{ color: remaining < 0 ? "#EF4444" : "#22C55E", fontFamily: "monospace", fontSize: 14 }}>
                 {remaining < 0 ? "-" : ""}{formatCOPCompact(Math.abs(remaining))}
               </Text>
             </View>
@@ -85,14 +85,14 @@ export function FinancialSummaryCard({ financials, loading }: FinancialSummaryCa
 
         {/* IVA */}
         {totalIVA > 0 ? (
-          <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 6 }}>
+          <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 8 }}>
             IVA: {formatCOPDisplay(totalIVA)}
           </Text>
         ) : null}
 
         {/* Category mini-bars */}
         {catEntries.length > 0 ? (
-          <View style={{ flexDirection: "row", height: 4, borderRadius: 2, overflow: "hidden", marginTop: 8 }}>
+          <View style={{ flexDirection: "row", height: 6, borderRadius: 3, overflow: "hidden", marginTop: 10 }}>
             {catEntries.map(([cat, val]) => (
               <View key={cat} style={{ flex: val / catTotal, backgroundColor: CATEGORY_COLORS[cat] || "#525252" }} />
             ))}

@@ -51,20 +51,28 @@ export default function BusinessScreen() {
           justifyContent: "space-between",
           paddingHorizontal: Math.max(16, insets.left, insets.right),
           backgroundColor: "#111111",
-          borderBottomWidth: 1,
-          borderBottomColor: "#222",
           zIndex: 10,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <HamburgerMenu />
-          <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2 }}>
-            BUSINESS
+          <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 3 }}>
+            VENTURES
           </Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Pressable onPress={() => setAddVisible(true)}>
-            <Text style={{ color: ACCENT, fontSize: 22 }}>+</Text>
+          <Pressable
+            onPress={() => setAddVisible(true)}
+            style={({ pressed }) => ({
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? ACCENT + "22" : "transparent",
+            })}
+          >
+            <Text style={{ color: ACCENT, fontSize: 22, lineHeight: 24 }}>+</Text>
           </Pressable>
           <StatusBadge />
         </View>
@@ -77,29 +85,38 @@ export default function BusinessScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#525252" />}
       >
-        {/* Summary card */}
-        <View style={{ backgroundColor: "#1A1A1A", borderRadius: 10, padding: 14, marginBottom: 16 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
-            <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 11, letterSpacing: 1 }}>OVERVIEW</Text>
-            <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>{overallPct}%</Text>
+        {/* Overview card */}
+        <View
+          style={{
+            backgroundColor: "#1A1A1A",
+            borderRadius: 14,
+            padding: 18,
+            marginBottom: 20,
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.04)",
+          }}
+        >
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12 }}>
+            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, letterSpacing: 2 }}>OVERVIEW</Text>
+            <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 28, fontWeight: "bold", lineHeight: 32 }}>{overallPct}%</Text>
           </View>
-          <ProgressBar done={totalDone} total={totalTasks} color={ACCENT} height={5} />
-          <View style={{ flexDirection: "row", gap: 16, marginTop: 10 }}>
+          <ProgressBar done={totalDone} total={totalTasks} color={ACCENT} height={8} glow />
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 14, paddingHorizontal: 4 }}>
             <View style={{ alignItems: "center" }}>
-              <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 16, fontWeight: "bold" }}>{totalProjects}</Text>
-              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>PROJECTS</Text>
+              <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalProjects}</Text>
+              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>PROJECTS</Text>
             </View>
             <View style={{ alignItems: "center" }}>
-              <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 16, fontWeight: "bold" }}>{totalTasks}</Text>
-              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>TASKS</Text>
+              <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalTasks}</Text>
+              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>TASKS</Text>
             </View>
             <View style={{ alignItems: "center" }}>
-              <Text style={{ color: "#22C55E", fontFamily: "monospace", fontSize: 16, fontWeight: "bold" }}>{totalDone}</Text>
-              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>DONE</Text>
+              <Text style={{ color: "#22C55E", fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalDone}</Text>
+              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>DONE</Text>
             </View>
             <View style={{ alignItems: "center" }}>
-              <Text style={{ color: "#EAB308", fontFamily: "monospace", fontSize: 16, fontWeight: "bold" }}>{totalInProgress}</Text>
-              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>ACTIVE</Text>
+              <Text style={{ color: "#EAB308", fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalInProgress}</Text>
+              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>ACTIVE</Text>
             </View>
           </View>
         </View>
@@ -114,14 +131,27 @@ export default function BusinessScreen() {
         {/* Projects list */}
         {loading && projects.length === 0 ? (
           <View style={{ alignItems: "center", paddingVertical: 40 }}>
-            <Text style={{ color: "#525252", fontFamily: "monospace" }}>Loading projects...</Text>
+            <Text style={{ color: "#525252", fontFamily: "monospace" }}>Loading ventures...</Text>
           </View>
         ) : projects.length === 0 ? (
           <View style={{ alignItems: "center", paddingVertical: 60 }}>
-            <Text style={{ fontSize: 40, marginBottom: 12 }}>📋</Text>
-            <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 13, marginBottom: 8 }}>No projects yet</Text>
-            <Pressable onPress={() => setAddVisible(true)}>
-              <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 13 }}>+ Create your first project</Text>
+            <Text style={{ fontSize: 48, marginBottom: 16 }}>🚀</Text>
+            <Text style={{ color: "#737373", fontSize: 15, marginBottom: 4 }}>No ventures yet</Text>
+            <Text style={{ color: "#525252", fontSize: 12, marginBottom: 16, textAlign: "center", paddingHorizontal: 40 }}>
+              Create your first project to start tracking
+            </Text>
+            <Pressable
+              onPress={() => setAddVisible(true)}
+              style={{
+                backgroundColor: ACCENT + "18",
+                paddingHorizontal: 20,
+                paddingVertical: 10,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: ACCENT + "44",
+              }}
+            >
+              <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>+ NEW PROJECT</Text>
             </Pressable>
           </View>
         ) : (

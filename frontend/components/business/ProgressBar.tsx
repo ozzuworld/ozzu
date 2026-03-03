@@ -5,13 +5,22 @@ interface ProgressBarProps {
   total: number;
   color?: string;
   height?: number;
+  glow?: boolean;
 }
 
-export function ProgressBar({ done, total, color = "#06B6D4", height = 4 }: ProgressBarProps) {
+export function ProgressBar({ done, total, color = "#06B6D4", height = 4, glow }: ProgressBarProps) {
   const pct = total > 0 ? (done / total) * 100 : 0;
   return (
-    <View style={{ height, backgroundColor: "#2A2A2A", borderRadius: height / 2, overflow: "hidden" }}>
-      <View style={{ width: `${pct}%`, height: "100%", backgroundColor: color, borderRadius: height / 2 }} />
+    <View style={{ height, backgroundColor: "#222", borderRadius: height / 2, overflow: "hidden" }}>
+      <View
+        style={{
+          width: `${pct}%`,
+          height: "100%",
+          backgroundColor: color,
+          borderRadius: height / 2,
+          ...(glow ? { shadowColor: color, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 4 } : {}),
+        }}
+      />
     </View>
   );
 }
