@@ -668,6 +668,18 @@ module.exports = function businessRoutes(ctx) {
       return true;
     }
 
+    // GET /business/dashboard?period=month|quarter|year|all
+    if (req.method === "GET" && pathname === "/business/dashboard") {
+      try {
+        const u = new URL(req.url, "http://localhost");
+        const period = u.searchParams.get("period") || "all";
+        const metrics = await db.getDashboardMetrics(period);
+        if (!metrics) { sendJSON(res, 500, { error: "Could not compute metrics" }); return true; }
+        sendJSON(res, 200, metrics);
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
     return false;
   };
 };

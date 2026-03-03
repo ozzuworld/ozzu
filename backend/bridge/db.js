@@ -434,7 +434,91 @@ async function init() {
     // Migration: receipt_data on business_attachments
     await pool.query(`ALTER TABLE business_attachments ADD COLUMN IF NOT EXISTS receipt_data JSONB DEFAULT NULL`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business)");
+    // Migration: project_type on business_projects
+    await pool.query(`ALTER TABLE business_projects ADD COLUMN IF NOT EXISTS project_type VARCHAR(20) DEFAULT 'general'`);
+
+    // Migration: business_contacts table
+    await pool.query(`CREATE TABLE IF NOT EXISTS business_contacts (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      company TEXT,
+      type VARCHAR(20) NOT NULL DEFAULT 'other',
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      city TEXT,
+      country TEXT DEFAULT 'Colombia',
+      currency VARCHAR(5) DEFAULT 'COP',
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // Migration: business_shipments table
+    await pool.query(`CREATE TABLE IF NOT EXISTS business_shipments (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER REFERENCES business_projects(id),
+      buyer_contact_id INTEGER REFERENCES business_contacts(id),
+      reference TEXT,
+      status VARCHAR(30) DEFAULT 'preparing',
+      coffee_type TEXT,
+      quantity_kg DECIMAL(12,2),
+      bags_count INTEGER,
+      price_per_kg DECIMAL(10,2),
+      total_value DECIMAL(15,2),
+      currency VARCHAR(5) DEFAULT 'USD',
+      shipping_cost DECIMAL(12,2) DEFAULT 0,
+      insurance_cost DECIMAL(12,2) DEFAULT 0,
+      customs_fees DECIMAL(12,2) DEFAULT 0,
+      origin_port TEXT DEFAULT 'Buenaventura',
+      destination_port TEXT DEFAULT 'Yokohama',
+      ship_date DATE,
+      estimated_arrival DATE,
+      actual_arrival DATE,
+      tracking_number TEXT,
+      vessel_name TEXT,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // Migration: business_invoices table
+    await pool.query(`CREATE TABLE IF NOT EXISTS business_invoices (
+      id SERIAL PRIMARY KEY,
+      shipment_id INTEGER REFERENCES business_shipments(id),
+      contact_id INTEGER REFERENCES business_contacts(id),
+      invoice_number TEXT,
+      amount DECIMAL(15,2) NOT NULL,
+      currency VARCHAR(5) DEFAULT 'USD',
+      status VARCHAR(20) DEFAULT 'draft',
+      issue_date DATE,
+      due_date DATE,
+      paid_date DATE,
+      paid_amount DECIMAL(15,2) DEFAULT 0,
+      payment_method VARCHAR(20),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // Migration: business_investments table
+    await pool.query(`CREATE TABLE IF NOT EXISTS business_investments (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER REFERENCES business_projects(id),
+      title TEXT NOT NULL,
+      description TEXT,
+      category VARCHAR(30) DEFAULT 'other',
+      amount DECIMAL(15,2) NOT NULL,
+      currency VARCHAR(5) DEFAULT 'COP',
+      status VARCHAR(20) DEFAULT 'planned',
+      investment_date DATE,
+      expected_return_date DATE,
+      roi_notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -2230,6 +2314,276 @@ async function updateBusinessAttachmentReceiptData(id, receiptData) {
   return res.rows[0] || null;
 }
 
+// ── Business Contacts ──
+
+async function createBusinessContact({ name, company, type, email, phone, address, city, country, currency, notes }) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO business_contacts (name, company, type, email, phone, address, city, country, currency, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [name, company || null, type || 'other', email || null, phone || null, address || null, city || null, country || 'Colombia', currency || 'COP', notes || null]
+  );
+  return res.rows[0];
+}
+
+async function getBusinessContacts(filterType) {
+  if (!_pgConnected) return [];
+  let q = `SELECT * FROM business_contacts ORDER BY name`;
+  const params = [];
+  if (filterType) {
+    q = `SELECT * FROM business_contacts WHERE type = $1 ORDER BY name`;
+    params.push(filterType);
+  }
+  const res = await query(q, params);
+  return res.rows;
+}
+
+async function getBusinessContact(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM business_contacts WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function updateBusinessContact(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = []; const vals = []; let idx = 1;
+  for (const key of ['name','company','type','email','phone','address','city','country','currency','notes']) {
+    if (updates[key] !== undefined) { fields.push(`${key} = $${idx}`); vals.push(updates[key]); idx++; }
+  }
+  if (fields.length === 0) return null;
+  fields.push(`updated_at = NOW()`);
+  vals.push(id);
+  const res = await query(`UPDATE business_contacts SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+async function deleteBusinessContact(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM business_contacts WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+// ── Business Shipments ──
+
+async function createBusinessShipment(data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO business_shipments (project_id, buyer_contact_id, reference, status, coffee_type, quantity_kg, bags_count, price_per_kg, total_value, currency, shipping_cost, insurance_cost, customs_fees, origin_port, destination_port, ship_date, estimated_arrival, tracking_number, vessel_name, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+    [data.project_id||null, data.buyer_contact_id||null, data.reference||null, data.status||'preparing', data.coffee_type||null, data.quantity_kg||null, data.bags_count||null, data.price_per_kg||null, data.total_value||null, data.currency||'USD', data.shipping_cost||0, data.insurance_cost||0, data.customs_fees||0, data.origin_port||'Buenaventura', data.destination_port||'Yokohama', data.ship_date||null, data.estimated_arrival||null, data.tracking_number||null, data.vessel_name||null, data.notes||null]
+  );
+  return res.rows[0];
+}
+
+async function getBusinessShipments(filterStatus) {
+  if (!_pgConnected) return [];
+  let q = `SELECT s.*, c.name AS buyer_name, c.company AS buyer_company
+    FROM business_shipments s LEFT JOIN business_contacts c ON c.id = s.buyer_contact_id ORDER BY s.created_at DESC`;
+  const params = [];
+  if (filterStatus) {
+    q = `SELECT s.*, c.name AS buyer_name, c.company AS buyer_company
+      FROM business_shipments s LEFT JOIN business_contacts c ON c.id = s.buyer_contact_id WHERE s.status = $1 ORDER BY s.created_at DESC`;
+    params.push(filterStatus);
+  }
+  const res = await query(q, params);
+  return res.rows;
+}
+
+async function getBusinessShipment(id) {
+  if (!_pgConnected) return null;
+  const sRes = await query(
+    `SELECT s.*, c.name AS buyer_name, c.company AS buyer_company
+     FROM business_shipments s LEFT JOIN business_contacts c ON c.id = s.buyer_contact_id WHERE s.id = $1`, [id]);
+  if (sRes.rows.length === 0) return null;
+  const iRes = await query(`SELECT * FROM business_invoices WHERE shipment_id = $1 ORDER BY created_at DESC`, [id]);
+  return { ...sRes.rows[0], invoices: iRes.rows };
+}
+
+async function updateBusinessShipment(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = []; const vals = []; let idx = 1;
+  for (const key of ['project_id','buyer_contact_id','reference','status','coffee_type','quantity_kg','bags_count','price_per_kg','total_value','currency','shipping_cost','insurance_cost','customs_fees','origin_port','destination_port','ship_date','estimated_arrival','actual_arrival','tracking_number','vessel_name','notes']) {
+    if (updates[key] !== undefined) { fields.push(`${key} = $${idx}`); vals.push(updates[key]); idx++; }
+  }
+  if (fields.length === 0) return null;
+  fields.push(`updated_at = NOW()`);
+  vals.push(id);
+  const res = await query(`UPDATE business_shipments SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+async function deleteBusinessShipment(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM business_shipments WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+// ── Business Invoices ──
+
+async function createBusinessInvoice(data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO business_invoices (shipment_id, contact_id, invoice_number, amount, currency, status, issue_date, due_date, paid_amount, payment_method, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [data.shipment_id||null, data.contact_id||null, data.invoice_number||null, data.amount, data.currency||'USD', data.status||'draft', data.issue_date||null, data.due_date||null, data.paid_amount||0, data.payment_method||null, data.notes||null]
+  );
+  return res.rows[0];
+}
+
+async function getBusinessInvoices(filterStatus) {
+  if (!_pgConnected) return [];
+  let q = `SELECT i.*, c.name AS contact_name FROM business_invoices i LEFT JOIN business_contacts c ON c.id = i.contact_id ORDER BY i.created_at DESC`;
+  const params = [];
+  if (filterStatus) {
+    q = `SELECT i.*, c.name AS contact_name FROM business_invoices i LEFT JOIN business_contacts c ON c.id = i.contact_id WHERE i.status = $1 ORDER BY i.created_at DESC`;
+    params.push(filterStatus);
+  }
+  const res = await query(q, params);
+  return res.rows;
+}
+
+async function getBusinessInvoice(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT i.*, c.name AS contact_name FROM business_invoices i LEFT JOIN business_contacts c ON c.id = i.contact_id WHERE i.id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function updateBusinessInvoice(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = []; const vals = []; let idx = 1;
+  for (const key of ['shipment_id','contact_id','invoice_number','amount','currency','status','issue_date','due_date','paid_date','paid_amount','payment_method','notes']) {
+    if (updates[key] !== undefined) { fields.push(`${key} = $${idx}`); vals.push(updates[key]); idx++; }
+  }
+  if (fields.length === 0) return null;
+  fields.push(`updated_at = NOW()`);
+  vals.push(id);
+  const res = await query(`UPDATE business_invoices SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+async function deleteBusinessInvoice(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM business_invoices WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+// ── Business Investments ──
+
+async function createBusinessInvestment(data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO business_investments (project_id, title, description, category, amount, currency, status, investment_date, expected_return_date, roi_notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [data.project_id||null, data.title, data.description||null, data.category||'other', data.amount, data.currency||'COP', data.status||'planned', data.investment_date||null, data.expected_return_date||null, data.roi_notes||null]
+  );
+  return res.rows[0];
+}
+
+async function getBusinessInvestments() {
+  if (!_pgConnected) return [];
+  const res = await query(`SELECT * FROM business_investments ORDER BY created_at DESC`);
+  return res.rows;
+}
+
+async function getBusinessInvestment(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM business_investments WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function updateBusinessInvestment(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = []; const vals = []; let idx = 1;
+  for (const key of ['project_id','title','description','category','amount','currency','status','investment_date','expected_return_date','roi_notes']) {
+    if (updates[key] !== undefined) { fields.push(`${key} = $${idx}`); vals.push(updates[key]); idx++; }
+  }
+  if (fields.length === 0) return null;
+  fields.push(`updated_at = NOW()`);
+  vals.push(id);
+  const res = await query(`UPDATE business_investments SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+async function deleteBusinessInvestment(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM business_investments WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+// ── CEO Dashboard Metrics ──
+
+async function getDashboardMetrics(period) {
+  if (!_pgConnected) return null;
+  let dateFilter = '';
+  let prevStart = '';
+  let prevEnd = '';
+  const now = new Date();
+  if (period === 'month') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    dateFilter = `AND created_at >= '${start}'`;
+    const ps = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+    const pe = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+    prevStart = ps; prevEnd = pe;
+  } else if (period === 'quarter') {
+    const qm = Math.floor(now.getMonth() / 3) * 3;
+    const start = new Date(now.getFullYear(), qm, 1).toISOString().split('T')[0];
+    dateFilter = `AND created_at >= '${start}'`;
+    const ps = new Date(now.getFullYear(), qm - 3, 1).toISOString().split('T')[0];
+    const pe = new Date(now.getFullYear(), qm, 0).toISOString().split('T')[0];
+    prevStart = ps; prevEnd = pe;
+  } else if (period === 'year') {
+    const start = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
+    dateFilter = `AND created_at >= '${start}'`;
+    const ps = new Date(now.getFullYear() - 1, 0, 1).toISOString().split('T')[0];
+    const pe = new Date(now.getFullYear() - 1, 11, 31).toISOString().split('T')[0];
+    prevStart = ps; prevEnd = pe;
+  }
+
+  // Revenue = paid invoices
+  const revRes = await query(`SELECT COALESCE(SUM(paid_amount), 0)::numeric AS total FROM business_invoices WHERE status = 'paid' ${dateFilter}`);
+  const totalRevenue = parseFloat(revRes.rows[0].total);
+
+  // Expenses
+  const expRes = await query(`SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM business_expenses WHERE 1=1 ${dateFilter.replace('created_at', 'expense_date')}`);
+  const totalExpenses = parseFloat(expRes.rows[0].total);
+
+  // Active shipments by status
+  const shipRes = await query(`SELECT status, COUNT(*)::int AS count FROM business_shipments WHERE status NOT IN ('paid') GROUP BY status`);
+  const shipmentsByStatus = {};
+  let activeShipments = 0;
+  for (const r of shipRes.rows) { shipmentsByStatus[r.status] = r.count; activeShipments += r.count; }
+
+  // Pending payments
+  const pendRes = await query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(amount - paid_amount), 0)::numeric AS total FROM business_invoices WHERE status IN ('sent','partial','overdue')`);
+  const pendingPayments = pendRes.rows[0].count;
+  const pendingPaymentAmount = parseFloat(pendRes.rows[0].total);
+
+  // Top buyers
+  const buyerRes = await query(`SELECT c.name, c.company, SUM(i.paid_amount)::numeric AS revenue FROM business_invoices i JOIN business_contacts c ON c.id = i.contact_id WHERE i.status = 'paid' GROUP BY c.id, c.name, c.company ORDER BY revenue DESC LIMIT 5`);
+  const topBuyers = buyerRes.rows.map(r => ({ name: r.name, company: r.company, revenue: parseFloat(r.revenue) }));
+
+  // Investments
+  const invRes = await query(`SELECT status, COUNT(*)::int AS count, COALESCE(SUM(amount), 0)::numeric AS total FROM business_investments GROUP BY status`);
+  const investmentsByStatus = {};
+  let totalInvestments = 0;
+  for (const r of invRes.rows) { investmentsByStatus[r.status] = { count: r.count, total: parseFloat(r.total) }; totalInvestments += parseFloat(r.total); }
+
+  // Previous period P&L
+  let previousPeriodPL = null;
+  if (prevStart && prevEnd) {
+    const prevRev = await query(`SELECT COALESCE(SUM(paid_amount), 0)::numeric AS total FROM business_invoices WHERE status = 'paid' AND created_at BETWEEN '${prevStart}' AND '${prevEnd}'`);
+    const prevExp = await query(`SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM business_expenses WHERE expense_date BETWEEN '${prevStart}' AND '${prevEnd}'`);
+    previousPeriodPL = parseFloat(prevRev.rows[0].total) - parseFloat(prevExp.rows[0].total);
+  }
+
+  return {
+    totalRevenue, totalExpenses, netPL: totalRevenue - totalExpenses,
+    activeShipments, shipmentsByStatus, pendingPayments, pendingPaymentAmount,
+    topBuyers, totalInvestments, investmentsByStatus,
+    periodLabel: period || 'all', previousPeriodPL
+  };
+}
+
 module.exports = {
   init,
   isConnected,
@@ -2384,6 +2738,32 @@ module.exports = {
   updateBusinessExpense,
   deleteBusinessExpense,
   getProjectFinancials,
+  // Business Contacts
+  createBusinessContact,
+  getBusinessContacts,
+  getBusinessContact,
+  updateBusinessContact,
+  deleteBusinessContact,
+  // Business Shipments
+  createBusinessShipment,
+  getBusinessShipments,
+  getBusinessShipment,
+  updateBusinessShipment,
+  deleteBusinessShipment,
+  // Business Invoices
+  createBusinessInvoice,
+  getBusinessInvoices,
+  getBusinessInvoice,
+  updateBusinessInvoice,
+  deleteBusinessInvoice,
+  // Business Investments
+  createBusinessInvestment,
+  getBusinessInvestments,
+  getBusinessInvestment,
+  updateBusinessInvestment,
+  deleteBusinessInvestment,
+  // CEO Dashboard
+  getDashboardMetrics,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

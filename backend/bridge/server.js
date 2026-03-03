@@ -86,6 +86,10 @@ const epicRoutes = require("./routes/epics");
 const cedulaRoutes = require("./routes/cedula");
 const cipherRoutes = require("./routes/cipher");
 const businessRoutes = require("./routes/business");
+const businessContactRoutes = require("./routes/business-contacts");
+const businessShipmentRoutes = require("./routes/business-shipments");
+const businessInvoiceRoutes = require("./routes/business-invoices");
+const businessInvestmentRoutes = require("./routes/business-investments");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -1411,6 +1415,10 @@ function getRouteHandlers() {
       cedula: cedulaRoutes(routeCtx),
       cipher: cipherRoutes(routeCtx),
       business: businessRoutes(routeCtx),
+      businessContacts: businessContactRoutes(routeCtx),
+      businessShipments: businessShipmentRoutes(routeCtx),
+      businessInvoices: businessInvoiceRoutes(routeCtx),
+      businessInvestments: businessInvestmentRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1441,6 +1449,10 @@ async function handleRequest(req, res) {
   if (await r.epics(req, res, pathname, url)) return;
   if (await r.osint(req, res, pathname, url)) return;
   if (await r.cedula(req, res, pathname, url)) return;
+  if (await r.businessContacts(req, res, pathname, url)) return;
+  if (await r.businessShipments(req, res, pathname, url)) return;
+  if (await r.businessInvoices(req, res, pathname, url)) return;
+  if (await r.businessInvestments(req, res, pathname, url)) return;
   if (await r.business(req, res, pathname, url)) return;
 
   // GET /tmp-file/:filename — serve temp files (for iOS pairing etc)

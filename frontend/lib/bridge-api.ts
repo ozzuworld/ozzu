@@ -1615,3 +1615,253 @@ export async function extractReceipt(attachmentId: number): Promise<{ ok: boolea
   if (!res.ok) throw new Error(`Extract receipt error: ${res.status}`);
   return res.json();
 }
+
+// ── CEO Command Center Types ──
+
+export interface BusinessContact {
+  id: number;
+  name: string;
+  company: string | null;
+  type: "buyer" | "supplier" | "logistics" | "broker" | "other";
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  country: string;
+  currency: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessShipment {
+  id: number;
+  project_id: number | null;
+  buyer_contact_id: number | null;
+  buyer_name?: string;
+  buyer_company?: string;
+  reference: string | null;
+  status: "preparing" | "customs_clearance" | "in_transit" | "arrived" | "delivered" | "paid";
+  coffee_type: string | null;
+  quantity_kg: number | null;
+  bags_count: number | null;
+  price_per_kg: number | null;
+  total_value: number | null;
+  currency: string;
+  shipping_cost: number;
+  insurance_cost: number;
+  customs_fees: number;
+  origin_port: string;
+  destination_port: string;
+  ship_date: string | null;
+  estimated_arrival: string | null;
+  actual_arrival: string | null;
+  tracking_number: string | null;
+  vessel_name: string | null;
+  notes: string | null;
+  invoices?: BusinessInvoice[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessInvoice {
+  id: number;
+  shipment_id: number | null;
+  contact_id: number | null;
+  contact_name?: string;
+  invoice_number: string | null;
+  amount: number;
+  currency: string;
+  status: "draft" | "sent" | "paid" | "partial" | "overdue" | "cancelled";
+  issue_date: string | null;
+  due_date: string | null;
+  paid_date: string | null;
+  paid_amount: number;
+  payment_method: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessInvestment {
+  id: number;
+  project_id: number | null;
+  title: string;
+  description: string | null;
+  category: "equipment" | "infrastructure" | "inventory" | "marketing" | "certification" | "logistics" | "other";
+  amount: number;
+  currency: string;
+  status: "planned" | "committed" | "paid" | "recovered";
+  investment_date: string | null;
+  expected_return_date: string | null;
+  roi_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DashboardMetrics {
+  totalRevenue: number;
+  totalExpenses: number;
+  netPL: number;
+  activeShipments: number;
+  shipmentsByStatus: Record<string, number>;
+  pendingPayments: number;
+  pendingPaymentAmount: number;
+  topBuyers: { name: string; company: string | null; revenue: number }[];
+  totalInvestments: number;
+  investmentsByStatus: Record<string, { count: number; total: number }>;
+  periodLabel: string;
+  previousPeriodPL: number | null;
+}
+
+// ── CEO Command Center API Functions ──
+
+// Contacts
+export async function fetchBusinessContacts(type?: string): Promise<BusinessContact[]> {
+  const q = type ? `?type=${type}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/contacts${q}`);
+  if (!res.ok) throw new Error(`Fetch contacts error: ${res.status}`);
+  return res.json();
+}
+
+export async function createBusinessContact(data: Partial<BusinessContact>): Promise<{ ok: boolean; contact: BusinessContact }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/contacts`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Create contact error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateBusinessContact(id: number, data: Partial<BusinessContact>): Promise<{ ok: boolean; contact: BusinessContact }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/contacts/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Update contact error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteBusinessContact(id: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/contacts/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete contact error: ${res.status}`);
+  return res.json();
+}
+
+// Shipments
+export async function fetchBusinessShipments(status?: string): Promise<BusinessShipment[]> {
+  const q = status ? `?status=${status}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/shipments${q}`);
+  if (!res.ok) throw new Error(`Fetch shipments error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchBusinessShipment(id: number): Promise<BusinessShipment> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/shipments/${id}`);
+  if (!res.ok) throw new Error(`Fetch shipment error: ${res.status}`);
+  return res.json();
+}
+
+export async function createBusinessShipment(data: Partial<BusinessShipment>): Promise<{ ok: boolean; shipment: BusinessShipment }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/shipments`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Create shipment error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateBusinessShipment(id: number, data: Partial<BusinessShipment>): Promise<{ ok: boolean; shipment: BusinessShipment }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/shipments/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Update shipment error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateShipmentStatus(id: number, status: string): Promise<{ ok: boolean; shipment: BusinessShipment }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/shipments/${id}/status`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(`Update shipment status error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteBusinessShipment(id: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/shipments/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete shipment error: ${res.status}`);
+  return res.json();
+}
+
+// Invoices
+export async function fetchBusinessInvoices(status?: string): Promise<BusinessInvoice[]> {
+  const q = status ? `?status=${status}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/invoices${q}`);
+  if (!res.ok) throw new Error(`Fetch invoices error: ${res.status}`);
+  return res.json();
+}
+
+export async function createBusinessInvoice(data: Partial<BusinessInvoice>): Promise<{ ok: boolean; invoice: BusinessInvoice }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/invoices`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Create invoice error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateBusinessInvoice(id: number, data: Partial<BusinessInvoice>): Promise<{ ok: boolean; invoice: BusinessInvoice }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/invoices/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Update invoice error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteBusinessInvoice(id: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/invoices/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete invoice error: ${res.status}`);
+  return res.json();
+}
+
+// Investments
+export async function fetchBusinessInvestments(): Promise<BusinessInvestment[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/investments`);
+  if (!res.ok) throw new Error(`Fetch investments error: ${res.status}`);
+  return res.json();
+}
+
+export async function createBusinessInvestment(data: Partial<BusinessInvestment>): Promise<{ ok: boolean; investment: BusinessInvestment }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/investments`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Create investment error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateBusinessInvestment(id: number, data: Partial<BusinessInvestment>): Promise<{ ok: boolean; investment: BusinessInvestment }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/investments/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Update investment error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteBusinessInvestment(id: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/investments/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete investment error: ${res.status}`);
+  return res.json();
+}
+
+// Dashboard
+export async function fetchDashboardMetrics(period?: string): Promise<DashboardMetrics> {
+  const q = period ? `?period=${period}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/dashboard${q}`);
+  if (!res.ok) throw new Error(`Fetch dashboard error: ${res.status}`);
+  return res.json();
+}
+
+// Multi-currency formatting
+export function formatCurrency(amount: number | null | undefined, currency: string = "COP"): string {
+  if (amount == null || isNaN(amount)) return currency === "JPY" ? "\u00a50" : "$0";
+  const rounded = Math.round(amount);
+  if (currency === "JPY") return "\u00a5" + rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  if (currency === "USD") return "$" + rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return "$" + rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}

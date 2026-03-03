@@ -16,10 +16,33 @@ import {
   updateExpense,
   deleteExpense,
   getProjectFinancials,
+  fetchBusinessContacts,
+  createBusinessContact,
+  updateBusinessContact,
+  deleteBusinessContact,
+  fetchBusinessShipments,
+  createBusinessShipment,
+  updateBusinessShipment,
+  updateShipmentStatus,
+  deleteBusinessShipment,
+  fetchBusinessInvoices,
+  createBusinessInvoice,
+  updateBusinessInvoice,
+  deleteBusinessInvoice,
+  fetchBusinessInvestments,
+  createBusinessInvestment,
+  updateBusinessInvestment,
+  deleteBusinessInvestment,
+  fetchDashboardMetrics,
   type BusinessProject,
   type BusinessTask,
   type BusinessExpense,
   type ProjectFinancials,
+  type BusinessContact,
+  type BusinessShipment,
+  type BusinessInvoice,
+  type BusinessInvestment,
+  type DashboardMetrics,
 } from "./bridge-api";
 
 export function useBusiness() {
@@ -206,4 +229,163 @@ export function useProjectFinancials(projectId: number | null) {
   }, [reload]);
 
   return { financials, loading, reload };
+}
+
+export function useContacts(filterType?: string) {
+  const [contacts, setContacts] = useState<BusinessContact[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    try {
+      const data = await fetchBusinessContacts(filterType);
+      setContacts(data);
+    } catch { setContacts([]); }
+    finally { setLoading(false); }
+  }, [filterType]);
+
+  useEffect(() => { setLoading(true); reload(); }, [reload]);
+
+  const add = useCallback(async (data: Partial<BusinessContact>) => {
+    const res = await createBusinessContact(data);
+    await reload();
+    return res.contact;
+  }, [reload]);
+
+  const edit = useCallback(async (id: number, data: Partial<BusinessContact>) => {
+    const res = await updateBusinessContact(id, data);
+    await reload();
+    return res.contact;
+  }, [reload]);
+
+  const remove = useCallback(async (id: number) => {
+    await deleteBusinessContact(id);
+    await reload();
+  }, [reload]);
+
+  return { contacts, loading, reload, add, edit, remove };
+}
+
+export function useShipments(filterStatus?: string) {
+  const [shipments, setShipments] = useState<BusinessShipment[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    try {
+      const data = await fetchBusinessShipments(filterStatus);
+      setShipments(data);
+    } catch { setShipments([]); }
+    finally { setLoading(false); }
+  }, [filterStatus]);
+
+  useEffect(() => { setLoading(true); reload(); }, [reload]);
+
+  const add = useCallback(async (data: Partial<BusinessShipment>) => {
+    const res = await createBusinessShipment(data);
+    await reload();
+    return res.shipment;
+  }, [reload]);
+
+  const edit = useCallback(async (id: number, data: Partial<BusinessShipment>) => {
+    const res = await updateBusinessShipment(id, data);
+    await reload();
+    return res.shipment;
+  }, [reload]);
+
+  const advanceStatus = useCallback(async (id: number, status: string) => {
+    const res = await updateShipmentStatus(id, status);
+    await reload();
+    return res.shipment;
+  }, [reload]);
+
+  const remove = useCallback(async (id: number) => {
+    await deleteBusinessShipment(id);
+    await reload();
+  }, [reload]);
+
+  return { shipments, loading, reload, add, edit, advanceStatus, remove };
+}
+
+export function useInvoices(filterStatus?: string) {
+  const [invoices, setInvoices] = useState<BusinessInvoice[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    try {
+      const data = await fetchBusinessInvoices(filterStatus);
+      setInvoices(data);
+    } catch { setInvoices([]); }
+    finally { setLoading(false); }
+  }, [filterStatus]);
+
+  useEffect(() => { setLoading(true); reload(); }, [reload]);
+
+  const add = useCallback(async (data: Partial<BusinessInvoice>) => {
+    const res = await createBusinessInvoice(data);
+    await reload();
+    return res.invoice;
+  }, [reload]);
+
+  const edit = useCallback(async (id: number, data: Partial<BusinessInvoice>) => {
+    const res = await updateBusinessInvoice(id, data);
+    await reload();
+    return res.invoice;
+  }, [reload]);
+
+  const remove = useCallback(async (id: number) => {
+    await deleteBusinessInvoice(id);
+    await reload();
+  }, [reload]);
+
+  return { invoices, loading, reload, add, edit, remove };
+}
+
+export function useInvestments() {
+  const [investments, setInvestments] = useState<BusinessInvestment[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    try {
+      const data = await fetchBusinessInvestments();
+      setInvestments(data);
+    } catch { setInvestments([]); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { setLoading(true); reload(); }, [reload]);
+
+  const add = useCallback(async (data: Partial<BusinessInvestment>) => {
+    const res = await createBusinessInvestment(data);
+    await reload();
+    return res.investment;
+  }, [reload]);
+
+  const edit = useCallback(async (id: number, data: Partial<BusinessInvestment>) => {
+    const res = await updateBusinessInvestment(id, data);
+    await reload();
+    return res.investment;
+  }, [reload]);
+
+  const remove = useCallback(async (id: number) => {
+    await deleteBusinessInvestment(id);
+    await reload();
+  }, [reload]);
+
+  return { investments, loading, reload, add, edit, remove };
+}
+
+export function useDashboardMetrics(period: string = "all") {
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    try {
+      const data = await fetchDashboardMetrics(period);
+      setMetrics(data);
+    } catch { setMetrics(null); }
+    finally { setLoading(false); }
+  }, [period]);
+
+  useEffect(() => { setLoading(true); reload(); }, [reload]);
+
+  return { metrics, loading, reload };
 }
