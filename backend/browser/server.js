@@ -1,59 +1,79 @@
 const express = require("express");
-const puppeteer = require("puppeteer-core");
+const { chromium } = require("playwright");
 
 const PORT = parseInt(process.env.BROWSER_PORT || "3334", 10);
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 min idle timeout
-const SCREENSHOT_DIR = "/tmp/browser-data";
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
 // --- Session management ---
 
-const sessions = new Map(); // id -> { page, browser, lastUsed, timer }
+const sessions = new Map(); // id -> { page, context, lastUsed, timer }
+let browser = null;
 
-async function launchBrowser() {
-  return puppeteer.launch({
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium",
+async function getBrowser() {
+  if (browser && browser.isConnected()) return browser;
+  browser = await chromium.launch({
     headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--disable-software-rasterizer",
-      "--window-size=1280,900",
-    ],
+    args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
   });
+  console.log("[browser] Chromium launched");
+  return browser;
 }
 
 async function getSession(sessionId = "default") {
   let session = sessions.get(sessionId);
   if (session) {
-    // Reset idle timer
     clearTimeout(session.timer);
     session.timer = setTimeout(() => closeSession(sessionId), SESSION_TIMEOUT_MS);
     session.lastUsed = Date.now();
-    // Check if page is still alive
     try {
       await session.page.title();
       return session;
     } catch {
-      // Page closed or crashed — recreate
       sessions.delete(sessionId);
     }
   }
 
-  // Create new session
-  const browser = await launchBrowser();
-  const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 900 });
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-  );
+  const b = await getBrowser();
+  const context = await b.newContext({
+    viewport: { width: 1280, height: 900 },
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    locale: "en-US",
+    timezoneId: "America/New_York",
+  });
+  const page = await context.newPage();
+
+  // Stealth: hide automation fingerprints
+  await page.addInitScript(() => {
+    // Hide webdriver flag
+    Object.defineProperty(navigator, "webdriver", { get: () => false });
+    // Fix platform to match user agent (Windows)
+    Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+    // Add chrome object
+    window.chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+    // Add plugins (mimic real Chrome)
+    Object.defineProperty(navigator, "plugins", {
+      get: () => [
+        { name: "Chrome PDF Plugin", filename: "internal-pdf-viewer" },
+        { name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai" },
+        { name: "Native Client", filename: "internal-nacl-plugin" },
+      ],
+    });
+    // Fix languages
+    Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+    // Override permissions query to not leak automation
+    const origQuery = window.Permissions.prototype.query;
+    window.Permissions.prototype.query = (params) =>
+      params.name === "notifications"
+        ? Promise.resolve({ state: Notification.permission })
+        : origQuery(params);
+  });
 
   const timer = setTimeout(() => closeSession(sessionId), SESSION_TIMEOUT_MS);
-  session = { page, browser, lastUsed: Date.now(), timer };
+  session = { page, context, lastUsed: Date.now(), timer };
   sessions.set(sessionId, session);
   console.log(`[browser] Session "${sessionId}" created`);
   return session;
@@ -64,7 +84,7 @@ async function closeSession(sessionId) {
   if (!session) return false;
   clearTimeout(session.timer);
   try {
-    await session.browser.close();
+    await session.context.close();
   } catch {}
   sessions.delete(sessionId);
   console.log(`[browser] Session "${sessionId}" closed`);
@@ -72,8 +92,8 @@ async function closeSession(sessionId) {
 }
 
 async function takeScreenshot(page, fullPage = false) {
-  const buf = await page.screenshot({ fullPage, encoding: "base64" });
-  return buf;
+  const buf = await page.screenshot({ fullPage, type: "png" });
+  return buf.toString("base64");
 }
 
 // --- Routes ---
@@ -121,7 +141,7 @@ app.post("/navigate", async (req, res) => {
 
     const { page } = await getSession(session_id);
     await page.goto(url, {
-      waitUntil: wait_for || "networkidle2",
+      waitUntil: wait_for || "networkidle",
       timeout: 30000,
     });
 
@@ -150,32 +170,54 @@ app.post("/screenshot", async (req, res) => {
 
 app.post("/click", async (req, res) => {
   try {
-    const { selector, session_id, wait_after } = req.body;
-    if (!selector) return res.status(400).json({ ok: false, error: "selector required" });
-
+    const { selector, session_id, wait_after, x, y, text_match, force } = req.body;
     const { page } = await getSession(session_id);
+    let info = null;
+    const clickOpts = { force: force === true, timeout: 10000 };
 
-    // Wait for element to appear
-    await page.waitForSelector(selector, { timeout: 10000 });
-    const element = await page.$(selector);
-    if (!element) return res.json({ ok: false, error: `Element not found: ${selector}` });
+    if (x !== undefined && y !== undefined) {
+      info = { x, y, method: "coordinates" };
+      await page.mouse.click(x, y);
+    } else if (text_match) {
+      // Playwright's getByText / getByRole — handles React properly
+      const locator = page.getByRole("button", { name: text_match }).or(
+        page.getByRole("link", { name: text_match })
+      );
+      const count = await locator.count();
+      if (count === 0) {
+        // Fallback to any element containing text
+        const fallback = page.locator(`text=${text_match}`).first();
+        if ((await fallback.count()) === 0) {
+          return res.json({ ok: false, error: `No element with text: ${text_match}` });
+        }
+        const tag = await fallback.evaluate((el) => el.tagName);
+        info = { tag, text: text_match, method: "text_fallback" };
+        await fallback.click(clickOpts);
+      } else {
+        const el = locator.first();
+        const tag = await el.evaluate((el) => el.tagName);
+        const text = await el.evaluate((el) => el.textContent?.trim());
+        info = { tag, text, method: "text_match" };
+        await el.click(clickOpts);
+      }
+    } else {
+      if (!selector) return res.status(400).json({ ok: false, error: "selector, text_match, or x/y required" });
+      await page.waitForSelector(selector, { timeout: 10000 });
+      info = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        return { tag: el.tagName, text: el.textContent?.trim().slice(0, 100), id: el.id };
+      }, selector);
+      await page.click(selector, clickOpts);
+    }
 
-    // Get element info before click
-    const info = await page.evaluate((sel) => {
-      const el = document.querySelector(sel);
-      if (!el) return null;
-      return { tag: el.tagName, text: el.textContent?.trim().slice(0, 100), id: el.id, className: el.className };
-    }, selector);
-
-    await element.click();
-
-    // Optional wait after click (for navigation/AJAX)
+    // Wait after click
     if (wait_after === "navigation") {
-      await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15000 }).catch(() => {});
+      await page.waitForLoadState("networkidle").catch(() => {});
     } else if (wait_after === "idle") {
-      await page.waitForNetworkIdle({ timeout: 10000 }).catch(() => {});
+      await page.waitForLoadState("networkidle").catch(() => {});
     } else if (typeof wait_after === "number") {
-      await new Promise((r) => setTimeout(r, wait_after));
+      await page.waitForTimeout(wait_after);
     }
 
     const screenshot = await takeScreenshot(page);
@@ -187,23 +229,43 @@ app.post("/click", async (req, res) => {
 
 app.post("/type", async (req, res) => {
   try {
-    const { selector, text, session_id, clear, press_enter } = req.body;
+    const { selector, text, session_id, clear, press_enter, react_compat } = req.body;
     if (!selector) return res.status(400).json({ ok: false, error: "selector required" });
     if (text === undefined) return res.status(400).json({ ok: false, error: "text required" });
 
     const { page } = await getSession(session_id);
     await page.waitForSelector(selector, { timeout: 10000 });
 
-    if (clear !== false) {
-      // Clear existing content first (triple-click to select all, then type over)
-      await page.click(selector, { clickCount: 3 });
+    if (react_compat) {
+      // React Hook Form compatible: click → select all → delete → type char by char
+      // This fires native input/keydown/keyup events that RHF registers
+      await page.click(selector);
+      await page.keyboard.press("Control+a");
+      await page.keyboard.press("Backspace");
+      await page.type(selector, String(text), { delay: 50 });
+      // Dispatch native input event + trigger blur for validation
+      await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (el) {
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, "value"
+          ).set;
+          nativeInputValueSetter.call(el, el.value);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }, selector);
+    } else if (clear !== false) {
+      // Playwright's fill() clears and sets value — works with React controlled inputs
+      await page.fill(selector, String(text));
+    } else {
+      // Append text without clearing
+      await page.type(selector, String(text), { delay: 30 });
     }
 
-    await page.type(selector, String(text), { delay: 30 });
-
     if (press_enter) {
-      await page.keyboard.press("Enter");
-      await page.waitForNetworkIdle({ timeout: 5000 }).catch(() => {});
+      await page.press(selector, "Enter");
+      await page.waitForLoadState("networkidle").catch(() => {});
     }
 
     res.json({ ok: true, typed: text.length + " chars" });
@@ -220,7 +282,7 @@ app.post("/extract", async (req, res) => {
     const { page } = await getSession(session_id);
 
     const results = await page.evaluate(
-      (sel, attr) => {
+      ({ sel, attr }) => {
         const elements = document.querySelectorAll(sel);
         return Array.from(elements).map((el) => {
           const result = {
@@ -237,8 +299,7 @@ app.post("/extract", async (req, res) => {
           return result;
         });
       },
-      selector,
-      attribute
+      { sel: selector, attr: attribute }
     );
 
     res.json({ ok: true, count: results.length, elements: results.slice(0, 50) });
@@ -254,7 +315,6 @@ app.post("/evaluate", async (req, res) => {
 
     const { page } = await getSession(session_id);
 
-    // Evaluate in page context
     const result = await page.evaluate((code) => {
       try {
         return eval(code);
@@ -273,12 +333,12 @@ app.post("/evaluate", async (req, res) => {
 // --- Start ---
 
 app.listen(PORT, "127.0.0.1", () => {
-  console.log(`[browser] Server listening on 127.0.0.1:${PORT}`);
+  console.log(`[browser] Playwright server listening on 127.0.0.1:${PORT}`);
 });
 
-// Cleanup on exit
 process.on("SIGTERM", async () => {
   console.log("[browser] Shutting down...");
   for (const [id] of sessions) await closeSession(id);
+  if (browser) await browser.close();
   process.exit(0);
 });
