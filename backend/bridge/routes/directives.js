@@ -847,6 +847,7 @@ module.exports = function directiveRoutes(ctx) {
           "Content-Type": contentType,
           "Content-Disposition": `attachment; filename="${targetFile}"`,
           "Content-Length": stat.size,
+          ...CORS_HEADERS,
         });
         const stream = fs.createReadStream(filePath);
         stream.pipe(res);
@@ -881,6 +882,7 @@ module.exports = function directiveRoutes(ctx) {
         "Content-Length": stat.size,
         "X-Artifact-Age-Hours": ageHours,
         "X-Artifact-Cached-At": new Date(stat.mtimeMs).toISOString(),
+        ...CORS_HEADERS,
       });
       const stream = fs.createReadStream(filePath);
       stream.pipe(res);

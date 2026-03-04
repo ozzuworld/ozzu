@@ -1,10 +1,8 @@
 import { useState, useCallback } from "react";
 import { View, Text, Pressable, Alert, Linking } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
-import { fetchDirectiveArtifacts, deployArtifact } from "../../lib/bridge-api";
+import { fetchDirectiveArtifacts, deployArtifact, getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
 import { relativeTime } from "../../lib/directive-constants";
-
-const BRIDGE_URL = process.env.EXPO_PUBLIC_BRIDGE_URL || "http://localhost:3333";
 
 interface BuildRun {
   platform: string;
@@ -45,7 +43,7 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
       const downloadResumable = FileSystem.createDownloadResumable(
         url,
         fileUri,
-        {},
+        { headers: getAuthHeaders() },
         (progress) => {
           const pct = progress.totalBytesWritten / progress.totalBytesExpectedToWrite;
           setDownloadProgress(pct);
@@ -114,7 +112,7 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
             {
               text: "Download",
               onPress: () => {
-                const url = `${BRIDGE_URL}/api/artifacts/${artifact.artifactId}/download`;
+                const url = `${getBridgeUrl()}/api/artifacts/${artifact.artifactId}/download`;
                 downloadInApp(url, "ozzu-latest.ipa");
               },
             },

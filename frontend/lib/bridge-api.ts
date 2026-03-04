@@ -39,7 +39,7 @@ export function getBridgeMode(): "lan" | "remote" {
 }
 
 /** Get auth headers when using public URL */
-function getAuthHeaders(): Record<string, string> {
+export function getAuthHeaders(): Record<string, string> {
   if (getBridgeMode() === "remote" && BRIDGE_API_KEY) {
     return { "Authorization": `Bearer ${BRIDGE_API_KEY}` };
   }
