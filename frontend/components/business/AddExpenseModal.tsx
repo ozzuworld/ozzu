@@ -50,12 +50,15 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
   const [paymentMethod, setPaymentMethod] = useState<string | null>(prefill?.paymentMethod || null);
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [scannedAttachmentId, setScannedAttachmentId] = useState<number | null>(null);
+  const [scannedReceiptData, setScannedReceiptData] = useState<any>(null);
 
   const ivaAmount = ivaAuto && amount ? Math.round(amount * 19 / 119) : (ivaManual || 0);
 
   const reset = () => {
     setAmount(null); setIvaAuto(true); setIvaManual(null); setCategory("other");
     setVendor(""); setDescription(""); setPaymentStatus("pending"); setPaymentMethod(null);
+    setScannedAttachmentId(null); setScannedReceiptData(null);
   };
 
   const handleScanReceipt = async () => {
@@ -82,11 +85,13 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
       // Upload as attachment to the task
       const uploadResult = await uploadTaskAttachment(taskId, asset.base64, fileName, "image");
       const attachmentId = uploadResult.attachment.id;
+      setScannedAttachmentId(attachmentId);
 
       // Extract receipt data via Gemini
       const extractResult = await extractReceipt(attachmentId);
       if (extractResult.ok && extractResult.receiptData) {
         const rd = extractResult.receiptData;
+        setScannedReceiptData(rd);
         if (rd.total) setAmount(rd.total);
         if (rd.iva) { setIvaAuto(false); setIvaManual(rd.iva); }
         if (rd.vendor) setVendor(rd.vendor);
@@ -116,6 +121,8 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
         description: description.trim(),
         payment_status: paymentStatus,
         payment_method: paymentMethod,
+        attachment_id: scannedAttachmentId,
+        receipt_data: scannedReceiptData,
       });
       reset();
       onCreated();
@@ -160,6 +167,26 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
                 </Text>
               </Pressable>
             </View>
+
+            {/* Verification status banner */}
+            {scannedReceiptData ? (
+              <View style={{
+                backgroundColor: "#22C55E22",
+                borderWidth: 1,
+                borderColor: "#22C55E44",
+                borderRadius: 8,
+                padding: 10,
+                marginBottom: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              }}>
+                <Text style={{ color: "#22C55E", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>VERIFIED</Text>
+                <Text style={{ color: "#22C55E99", fontFamily: "monospace", fontSize: 9, flex: 1 }}>
+                  Receipt scanned — expense will be marked as verified
+                </Text>
+              </View>
+            ) : null}
 
             {/* Amount */}
             <CostField value={amount} onChange={setAmount} label="AMOUNT (COP)" />

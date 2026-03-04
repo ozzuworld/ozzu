@@ -434,6 +434,10 @@ async function init() {
     // Migration: receipt_data on business_attachments
     await pool.query(`ALTER TABLE business_attachments ADD COLUMN IF NOT EXISTS receipt_data JSONB DEFAULT NULL`);
 
+    // Migration: verified column on business_expenses
+    await pool.query(`ALTER TABLE business_expenses ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT false`);
+    await pool.query(`UPDATE business_expenses SET verified = true WHERE attachment_id IS NOT NULL AND receipt_data IS NOT NULL AND verified = false`);
+
     // Migration: project_type on business_projects
     await pool.query(`ALTER TABLE business_projects ADD COLUMN IF NOT EXISTS project_type VARCHAR(20) DEFAULT 'general'`);
 
@@ -2212,10 +2216,11 @@ async function updateBusinessAttachmentVerification(id, verification) {
 async function createBusinessExpense({ task_id, project_id, attachment_id, amount, iva_amount, category, vendor, description, payment_status, payment_method, expense_date, receipt_data }) {
   if (!_pgConnected) return null;
   const subtotal = amount - (iva_amount || 0);
+  const verified = !!(attachment_id && receipt_data);
   const res = await query(
-    `INSERT INTO business_expenses (task_id, project_id, attachment_id, amount, iva_amount, subtotal, category, vendor, description, payment_status, payment_method, expense_date, receipt_data)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
-    [task_id || null, project_id || null, attachment_id || null, amount, iva_amount || 0, subtotal, category, vendor || '', description || '', payment_status || 'pending', payment_method || null, expense_date || new Date().toISOString().split('T')[0], receipt_data ? JSON.stringify(receipt_data) : null]
+    `INSERT INTO business_expenses (task_id, project_id, attachment_id, amount, iva_amount, subtotal, category, vendor, description, payment_status, payment_method, expense_date, receipt_data, verified)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+    [task_id || null, project_id || null, attachment_id || null, amount, iva_amount || 0, subtotal, category, vendor || '', description || '', payment_status || 'pending', payment_method || null, expense_date || new Date().toISOString().split('T')[0], receipt_data ? JSON.stringify(receipt_data) : null, verified]
   );
   return res.rows[0];
 }
@@ -2243,7 +2248,7 @@ async function updateBusinessExpense(id, updates) {
   const fields = [];
   const vals = [];
   let idx = 1;
-  for (const key of ['amount', 'iva_amount', 'category', 'vendor', 'description', 'payment_status', 'payment_method', 'expense_date', 'attachment_id', 'receipt_data']) {
+  for (const key of ['amount', 'iva_amount', 'category', 'vendor', 'description', 'payment_status', 'payment_method', 'expense_date', 'attachment_id', 'receipt_data', 'verified']) {
     if (updates[key] !== undefined) {
       fields.push(`${key} = $${idx}`);
       vals.push(key === 'receipt_data' ? JSON.stringify(updates[key]) : updates[key]);
@@ -2251,6 +2256,12 @@ async function updateBusinessExpense(id, updates) {
     }
   }
   if (fields.length === 0) return null;
+  // Auto-set verified when receipt is attached
+  if (updates.attachment_id && updates.receipt_data && updates.verified === undefined) {
+    fields.push(`verified = $${idx}`);
+    vals.push(true);
+    idx++;
+  }
   // Recompute subtotal if amount or iva changed
   if (updates.amount !== undefined || updates.iva_amount !== undefined) {
     const cur = await query(`SELECT amount, iva_amount FROM business_expenses WHERE id = $1`, [id]);
@@ -2290,9 +2301,13 @@ async function getProjectFinancials(projectId) {
   );
   const totalEstimated = parseFloat(taskRes.rows[0].total_estimated);
 
-  // Expense aggregates (task-linked + project-level)
+  // Expense aggregates (task-linked + project-level) with verified breakdown
   const expRes = await query(
-    `SELECT COALESCE(SUM(e.amount), 0)::numeric AS total_actual, COALESCE(SUM(e.iva_amount), 0)::numeric AS total_iva
+    `SELECT COALESCE(SUM(e.amount), 0)::numeric AS total_actual, COALESCE(SUM(e.iva_amount), 0)::numeric AS total_iva,
+       COALESCE(SUM(CASE WHEN e.verified THEN e.amount ELSE 0 END), 0)::numeric AS verified_total,
+       COALESCE(SUM(CASE WHEN NOT e.verified THEN e.amount ELSE 0 END), 0)::numeric AS unverified_total,
+       COUNT(CASE WHEN e.verified THEN 1 END)::int AS verified_count,
+       COUNT(CASE WHEN NOT e.verified THEN 1 END)::int AS unverified_count
      FROM business_expenses e
      LEFT JOIN business_tasks t ON t.id = e.task_id
      WHERE e.project_id = $1 OR t.project_id = $1`,
@@ -2300,6 +2315,10 @@ async function getProjectFinancials(projectId) {
   );
   const totalActual = parseFloat(expRes.rows[0].total_actual);
   const totalIVA = parseFloat(expRes.rows[0].total_iva);
+  const verifiedTotal = parseFloat(expRes.rows[0].verified_total);
+  const unverifiedTotal = parseFloat(expRes.rows[0].unverified_total);
+  const verifiedCount = expRes.rows[0].verified_count;
+  const unverifiedCount = expRes.rows[0].unverified_count;
 
   // By category
   const catRes = await query(
@@ -2343,7 +2362,7 @@ async function getProjectFinancials(projectId) {
   const budgetVal = budget ? parseFloat(budget) : null;
   const budgetUtilization = budgetVal ? Math.round((totalActual / budgetVal) * 10000) / 100 : null;
 
-  return { budget: budgetVal, currency, totalEstimated, totalActual, totalIVA, byCategory, byPhase, byPaymentStatus, budgetUtilization };
+  return { budget: budgetVal, currency, totalEstimated, totalActual, totalIVA, verifiedTotal, unverifiedTotal, verifiedCount, unverifiedCount, byCategory, byPhase, byPaymentStatus, budgetUtilization };
 }
 
 async function updateBusinessAttachmentReceiptData(id, receiptData) {

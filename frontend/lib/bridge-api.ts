@@ -1597,6 +1597,7 @@ export interface BusinessExpense {
   payment_method: string | null;
   expense_date: string;
   receipt_data: ReceiptData | null;
+  verified: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -1607,6 +1608,10 @@ export interface ProjectFinancials {
   totalEstimated: number;
   totalActual: number;
   totalIVA: number;
+  verifiedTotal: number;
+  unverifiedTotal: number;
+  verifiedCount: number;
+  unverifiedCount: number;
   byCategory: Record<string, number>;
   byPhase: Record<string, { estimated: number; actual: number; taskCount: number }>;
   byPaymentStatus: Record<string, { count: number; total: number }>;

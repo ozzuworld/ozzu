@@ -717,6 +717,7 @@ module.exports = function businessRoutes(ctx) {
         const expense = await db.createBusinessExpense({
           project_id: projectId,
           task_id: body.task_id || null,
+          attachment_id: body.attachment_id || null,
           amount: body.amount,
           iva_amount: body.iva_amount,
           category: body.category,
@@ -725,6 +726,7 @@ module.exports = function businessRoutes(ctx) {
           payment_status: body.payment_status,
           payment_method: body.payment_method,
           expense_date: body.expense_date,
+          receipt_data: body.receipt_data || null,
         });
         sendJSON(res, 201, { ok: true, expense });
       } catch (err) {

@@ -25,7 +25,7 @@ export function FinancialSummaryCard({ financials, loading }: FinancialSummaryCa
 
   if (loading || !financials) return null;
 
-  const { budget, totalEstimated, totalActual, totalIVA, byCategory, byPhase, budgetUtilization } = financials;
+  const { budget, totalEstimated, totalActual, totalIVA, verifiedTotal, unverifiedTotal, verifiedCount, unverifiedCount, byCategory, byPhase, budgetUtilization } = financials;
   const hasBudget = budget !== null && budget > 0;
   const remaining = hasBudget ? budget - totalActual : null;
 
@@ -89,6 +89,28 @@ export function FinancialSummaryCard({ financials, loading }: FinancialSummaryCa
             IVA: {formatCOPDisplay(totalIVA)}
           </Text>
         ) : null}
+
+        {/* Verified vs Unverified */}
+        <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#22C55E" }} />
+            <Text style={{ color: "#22C55E", fontFamily: "monospace", fontSize: 9 }}>
+              {formatCOPCompact(verifiedTotal || 0)}
+            </Text>
+            <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 8 }}>
+              ({verifiedCount || 0})
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#EAB308" }} />
+            <Text style={{ color: "#EAB308", fontFamily: "monospace", fontSize: 9 }}>
+              {formatCOPCompact(unverifiedTotal || 0)}
+            </Text>
+            <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 8 }}>
+              ({unverifiedCount || 0})
+            </Text>
+          </View>
+        </View>
 
         {/* Category mini-bars */}
         {catEntries.length > 0 ? (

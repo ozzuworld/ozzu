@@ -77,11 +77,23 @@ export function ExpenseRow({ expense, onPress, onDelete }: ExpenseRowProps) {
           </View>
         </View>
 
-        {/* Status badge + receipt icon */}
+        {/* Verified badge + status badge */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          {expense.receipt_data ? (
-            <Text style={{ fontSize: 12 }}>R</Text>
-          ) : null}
+          <View style={{
+            backgroundColor: expense.verified ? "#22C55E22" : "#EAB30822",
+            paddingHorizontal: 5,
+            paddingVertical: 2,
+            borderRadius: 4,
+          }}>
+            <Text style={{
+              color: expense.verified ? "#22C55E" : "#EAB308",
+              fontFamily: "monospace",
+              fontSize: 7,
+              fontWeight: "bold",
+            }}>
+              {expense.verified ? "VERIFIED" : "UNVERIFIED"}
+            </Text>
+          </View>
           <View style={{ backgroundColor: statusColor + "22", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
             <Text style={{ color: statusColor, fontFamily: "monospace", fontSize: 8, fontWeight: "bold" }}>
               {expense.payment_status.toUpperCase()}

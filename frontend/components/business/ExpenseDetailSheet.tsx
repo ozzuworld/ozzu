@@ -30,6 +30,8 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
   const [description, setDescription] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("pending");
   const [scanning, setScanning] = useState(false);
+  const [scannedAttachmentId, setScannedAttachmentId] = useState<number | null>(null);
+  const [scannedReceiptData, setScannedReceiptData] = useState<any>(null);
 
   useEffect(() => {
     if (expense) {
@@ -39,20 +41,25 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
       setVendor(expense.vendor);
       setDescription(expense.description);
       setPaymentStatus(expense.payment_status);
+      setScannedAttachmentId(null);
+      setScannedReceiptData(null);
     }
   }, [expense?.id]);
 
   if (!expense) return null;
 
   const handleSave = () => {
-    onSave(expense.id, {
+    const data: Partial<BusinessExpense> = {
       amount: amount || expense.amount,
       iva_amount: ivaAmount || 0,
       category,
       vendor: vendor.trim(),
       description: description.trim(),
       payment_status: paymentStatus as any,
-    });
+    };
+    if (scannedAttachmentId) data.attachment_id = scannedAttachmentId;
+    if (scannedReceiptData) data.receipt_data = scannedReceiptData;
+    onSave(expense.id, data);
     onClose();
   };
 
@@ -87,9 +94,11 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
       const fileName = `receipt_${Date.now()}.${ext}`;
 
       const uploadResult = await uploadTaskAttachment(taskId, asset.base64, fileName, "image");
+      setScannedAttachmentId(uploadResult.attachment.id);
       const extractResult = await extractReceipt(uploadResult.attachment.id);
       if (extractResult.ok && extractResult.receiptData) {
         const rd = extractResult.receiptData;
+        setScannedReceiptData(rd);
         if (rd.total) setAmount(rd.total);
         if (rd.iva) setIvaAmount(rd.iva);
         if (rd.vendor) setVendor(rd.vendor);
@@ -119,9 +128,26 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
           </Pressable>
 
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-            <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2, marginBottom: 16 }}>
-              EXPENSE DETAIL
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2 }}>
+                EXPENSE DETAIL
+              </Text>
+              <View style={{
+                backgroundColor: (expense.verified || scannedReceiptData) ? "#22C55E22" : "#EAB30822",
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+              }}>
+                <Text style={{
+                  color: (expense.verified || scannedReceiptData) ? "#22C55E" : "#EAB308",
+                  fontFamily: "monospace",
+                  fontSize: 9,
+                  fontWeight: "bold",
+                }}>
+                  {(expense.verified || scannedReceiptData) ? "VERIFIED" : "UNVERIFIED"}
+                </Text>
+              </View>
+            </View>
 
             {/* Amount */}
             <CostField value={amount} onChange={setAmount} label="AMOUNT (COP)" />
