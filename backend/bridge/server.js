@@ -1317,18 +1317,6 @@ function sendJSON(res, status, data, req) {
   res.end(JSON.stringify(data));
 }
 
-// ── API key auth for sensitive (mutating) endpoints ──
-function requireAuth(req, res) {
-  if (!BRIDGE_API_KEY) return true; // no key configured — skip auth (backward compatible)
-  const authHeader = req.headers["authorization"] || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (token !== BRIDGE_API_KEY) {
-    sendJSON(res, 401, { error: "Unauthorized — invalid or missing API key" });
-    return false;
-  }
-  return true;
-}
-
 // ── Auth gate for public-facing requests (via nginx reverse proxy) ──
 // LAN/VPN requests pass through without auth. Public requests (through nginx) need API key.
 const TRUSTED_NETS = [
@@ -1339,18 +1327,27 @@ const TRUSTED_NETS = [
 ];
 
 function isPublicRequest(req) {
-  // If nginx forwarded the request, X-Forwarded-For will be set
   const forwarded = req.headers["x-forwarded-for"];
   if (!forwarded) return false; // Direct connection — local/VPN
-  // Check if the original client IP is from a trusted network
   const clientIp = forwarded.split(",")[0].trim();
   return !TRUSTED_NETS.some(net => clientIp.startsWith(net.prefix));
 }
 
-function requireAuthIfPublic(req, res) {
+// ── API key auth — only enforced for public requests ──
+// LAN/VPN devices work without auth (backward compatible). Public requests need Bearer token.
+function requireAuth(req, res) {
+  if (!BRIDGE_API_KEY) return true; // no key configured — skip auth
   if (!isPublicRequest(req)) return true; // LAN/VPN — no auth needed
-  return requireAuth(req, res); // Public — require API key
+  const authHeader = req.headers["authorization"] || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (token !== BRIDGE_API_KEY) {
+    sendJSON(res, 401, { error: "Unauthorized — invalid or missing API key" });
+    return false;
+  }
+  return true;
 }
+
+const requireAuthIfPublic = requireAuth;
 
 // ── Cosine similarity for face embeddings ──
 function cosineSimilarity(a, b) {
@@ -1480,11 +1477,6 @@ async function handleRequest(req, res) {
     res.writeHead(204, getCorsHeaders(req));
     res.end();
     return;
-  }
-
-  // ── Public access auth gate: require API key for mutating requests from outside LAN/VPN ──
-  if (["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) {
-    if (!requireAuthIfPublic(req, res)) return;
   }
 
   // ── Extracted route dispatch ──
