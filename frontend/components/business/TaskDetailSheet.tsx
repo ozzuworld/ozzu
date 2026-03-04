@@ -149,16 +149,19 @@ export function TaskDetailSheet({
       const opts: ImagePicker.ImagePickerOptions = {
         quality: 0.8,
         base64: true,
+        allowsMultipleSelection: source === "library",
       };
       const result = source === "camera"
         ? await ImagePicker.launchCameraAsync(opts)
         : await ImagePicker.launchImageLibraryAsync(opts);
-      if (result.canceled || !result.assets?.[0]?.base64) return;
-      const asset = result.assets[0];
-      const ext = asset.uri.split(".").pop() || "jpg";
-      const fileName = `photo_${Date.now()}.${ext}`;
+      if (result.canceled || !result.assets?.length) return;
       setUploading(true);
-      await onUpload(task.id, asset.base64, fileName, "image");
+      for (const asset of result.assets) {
+        if (!asset.base64) continue;
+        const ext = asset.uri.split(".").pop() || "jpg";
+        const fileName = `photo_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+        await onUpload(task.id, asset.base64, fileName, "image");
+      }
       await loadAttachments(task.id);
       await loadRequirements(task.id);
     } catch (err: any) {
@@ -171,20 +174,20 @@ export function TaskDetailSheet({
   const handlePickDocument = useCallback(async () => {
     if (!task) return;
     try {
-      const result = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
-      if (result.canceled || !result.assets?.[0]) return;
-      const doc = result.assets[0];
+      const result = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true, multiple: true });
+      if (result.canceled || !result.assets?.length) return;
       setUploading(true);
-      // Copy to local cache first — iOS sandboxing blocks direct reads from picker URIs
-      const localUri = FileSystem.cacheDirectory + "upload_" + Date.now() + "_" + doc.name;
-      await FileSystem.copyAsync({ from: doc.uri, to: localUri });
-      const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 });
-      const fileType = doc.mimeType?.includes("pdf") ? "document" : "image";
-      await onUpload(task.id, base64, doc.name, fileType);
+      for (const doc of result.assets) {
+        // Copy to local cache first — iOS sandboxing blocks direct reads from picker URIs
+        const localUri = FileSystem.cacheDirectory + "upload_" + Date.now() + "_" + doc.name;
+        await FileSystem.copyAsync({ from: doc.uri, to: localUri });
+        const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 });
+        const fileType = doc.mimeType?.includes("pdf") ? "document" : "image";
+        await onUpload(task.id, base64, doc.name, fileType);
+        FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
+      }
       await loadAttachments(task.id);
       await loadRequirements(task.id);
-      // Clean up temp file
-      FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
     } catch (err: any) {
       Alert.alert("Upload Failed", err?.message || "Could not read or upload the file");
     } finally {

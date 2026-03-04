@@ -1369,7 +1369,7 @@ const routeCtx = {
   db, redis, log, metrics, osintEngine, osintMonitor, cliRunner, buildVerifier, anthropicUsage,
   // Agent spawner
   getRunningAgents, killAgent, smartDeploy, mergeWorktreeToMain, cleanupWorktree, getConfig, setConfig,
-  routeDirective: orchestrator.routeDirective,
+  routeDirective,
   // State accessors
   getDirectives, saveDirectives, findSimilarDirective,
   getApprovals, saveApprovals, expireApprovals,
