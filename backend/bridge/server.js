@@ -90,6 +90,7 @@ const businessContactRoutes = require("./routes/business-contacts");
 const businessShipmentRoutes = require("./routes/business-shipments");
 const businessInvoiceRoutes = require("./routes/business-invoices");
 const businessInvestmentRoutes = require("./routes/business-investments");
+const backupRoutes = require("./routes/backup");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -1459,6 +1460,7 @@ function getRouteHandlers() {
       businessShipments: businessShipmentRoutes(routeCtx),
       businessInvoices: businessInvoiceRoutes(routeCtx),
       businessInvestments: businessInvestmentRoutes(routeCtx),
+      backup: backupRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1494,6 +1496,7 @@ async function handleRequest(req, res) {
   if (await r.businessInvoices(req, res, pathname, url)) return;
   if (await r.businessInvestments(req, res, pathname, url)) return;
   if (await r.business(req, res, pathname, url)) return;
+  if (await r.backup(req, res, pathname, url)) return;
 
   // GET /tmp-file/:filename — serve temp files (for iOS pairing etc)
   if (req.method === "GET" && pathname.startsWith("/tmp-file/")) {

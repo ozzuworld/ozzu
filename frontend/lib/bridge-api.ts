@@ -1902,6 +1902,66 @@ export async function fetchDashboardMetrics(period?: string): Promise<DashboardM
   return res.json();
 }
 
+// ── Backup API ──
+
+export interface BackupInfo {
+  filename: string;
+  size: number;
+  sizeHuman: string;
+  encrypted: boolean;
+  timestamp: string;
+  createdAt: string;
+}
+
+export interface BackupListResponse {
+  backups: BackupInfo[];
+  total: number;
+  cronEnabled: boolean;
+  backupDir: string;
+}
+
+export interface BackupStatus {
+  healthy: boolean;
+  cronEnabled: boolean;
+  lastBackup: string | null;
+  lastBackupAgeHours: number | null;
+  totalBackups: number;
+}
+
+export async function fetchBackups(): Promise<BackupListResponse> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/api/backups`);
+  if (!res.ok) throw new Error(`Fetch backups error: ${res.status}`);
+  return res.json();
+}
+
+export async function triggerBackup(): Promise<{ ok: boolean; file: string; size: string; checksum: string }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/api/backups`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Trigger backup error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchBackupStatus(): Promise<BackupStatus> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/api/backups/status`);
+  if (!res.ok) throw new Error(`Backup status error: ${res.status}`);
+  return res.json();
+}
+
+export function getBackupDownloadUrl(filename: string): string {
+  return `${BRIDGE_URL}/api/backups/${encodeURIComponent(filename)}/download`;
+}
+
+export async function deleteBackup(filename: string): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/api/backups/${encodeURIComponent(filename)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Delete backup error: ${res.status}`);
+  return res.json();
+}
+
 // Multi-currency formatting
 export function formatCurrency(amount: number | null | undefined, currency: string = "COP"): string {
   if (amount == null || isNaN(amount)) return currency === "JPY" ? "\u00a50" : "$0";
