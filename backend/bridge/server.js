@@ -2576,6 +2576,33 @@ const GEMINI_BRIDGE_TOOLS = [
       required: ["script"],
     },
   },
+  {
+    name: "browser_set_objective",
+    description:
+      "REQUIRED before starting browser automation. Sets the mission objective for this session. " +
+      "The objective persists across context resets so the agent always knows what it's doing. " +
+      "Example: 'Renew matrícula #852156 for SKYLINE CAPITAL S.A.S.'",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        objective: { type: "STRING", description: "Clear description of what this browser session should accomplish" },
+        session_id: { type: "STRING", description: "Browser session ID (default: 'default')" },
+      },
+      required: ["objective"],
+    },
+  },
+  {
+    name: "browser_form_snapshot",
+    description:
+      "Capture all form field values on the current page. Masks credit card numbers and passwords. " +
+      "Use before submitting any form to verify the correct data is filled in.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        session_id: { type: "STRING", description: "Browser session ID (default: 'default')" },
+      },
+    },
+  },
 ];
 
 const SWITCH_TO_CIPHER_TOOL = {
@@ -3431,9 +3458,10 @@ async function handleToolCall(name, args) {
         return { success: true, message: `Directive ${args.directive_id} cancelled: ${reason}` };
       }
 
-      // ── Browser automation tools ──
+      // ── Browser automation tools (with financial safeguards) ──
       if (name.startsWith("browser_")) {
         const BROWSER_URL = "http://127.0.0.1:3334";
+        const sessionId = args.session_id || "default";
         const browserFetch = async (path, body) => {
           const resp = await fetch(`${BROWSER_URL}${path}`, {
             method: "POST",
@@ -3443,77 +3471,196 @@ async function handleToolCall(name, args) {
           return resp.json();
         };
 
+        // ── Meta-tools: no gate needed ──
+        if (name === "browser_set_objective") {
+          if (!args.objective) return { success: false, message: "objective is required" };
+          _browserSessionState.set(sessionId, {
+            ..._browserSessionState.get(sessionId),
+            objective: args.objective,
+            isFinancial: false,
+            lastUrl: null,
+          });
+          db.upsertBrowserSession(sessionId, { objective: args.objective }).catch(() => {});
+          db.addBrowserAuditEntry({ session_id: sessionId, tool_name: name, args: { objective: args.objective }, result_summary: "Objective set" }).catch(() => {});
+          log.bridge.info(`[browser] Session ${sessionId} objective: ${args.objective}`);
+          return { success: true, message: `Session objective set: ${args.objective}` };
+        }
+
+        if (name === "browser_form_snapshot") {
+          const script = `(() => {
+            const fields = [];
+            document.querySelectorAll('input, select, textarea').forEach(el => {
+              const name = el.name || el.id || el.getAttribute('aria-label') || el.type || 'unnamed';
+              let val = el.value || '';
+              const type = el.type || el.tagName.toLowerCase();
+              if (type === 'password') val = '****';
+              if (/\\b\\d{13,19}\\b/.test(val)) val = val.replace(/\\d(?=\\d{4})/g, '*');
+              fields.push({ name, type, value: val, tag: el.tagName });
+            });
+            return fields;
+          })()`;
+          const result = await browserFetch("/evaluate", { script, session_id: sessionId });
+          if (!result.ok) return { success: false, message: result.error || "Form snapshot failed" };
+          db.addBrowserAuditEntry({ session_id: sessionId, tool_name: name, args: {}, result_summary: `${(result.result || []).length} fields captured` }).catch(() => {});
+          return { success: true, fields: result.result, screenshot: result.screenshot };
+        }
+
+        // ── Financial detection for browser_type, browser_click, browser_navigate ──
+        const financialReasons = _detectFinancialAction(name, args, sessionId);
+        if (financialReasons.length > 0) {
+          log.bridge.warn(`[browser] FINANCIAL ACTION DETECTED: ${financialReasons.join(", ")}`);
+
+          // Log the flagged action
+          db.addBrowserAuditEntry({
+            session_id: sessionId,
+            tool_name: name,
+            args,
+            flagged: true,
+            flag_reason: financialReasons.join("; "),
+            url_at_time: _browserSessionState.get(sessionId)?.lastUrl || null,
+          }).catch(() => {});
+
+          // Capture form snapshot (best effort)
+          let formFields = [];
+          try {
+            const snapScript = `(() => {
+              const fields = [];
+              document.querySelectorAll('input, select, textarea').forEach(el => {
+                const n = el.name || el.id || el.type || 'unnamed';
+                let v = el.value || '';
+                if (el.type === 'password') v = '****';
+                if (/\\b\\d{13,19}\\b/.test(v)) v = v.replace(/\\d(?=\\d{4})/g, '*');
+                if (v) fields.push(n + '=' + v);
+              });
+              return fields.join(', ');
+            })()`;
+            const snap = await browserFetch("/evaluate", { script: snapScript, session_id: sessionId });
+            if (snap.ok && snap.result) formFields = snap.result;
+          } catch {}
+
+          // Build description for PIN request
+          const sess = _browserSessionState.get(sessionId) || {};
+          const pinDescription = [
+            `⚠️ FINANCIAL ACTION DETECTED`,
+            `Reasons: ${financialReasons.join(", ")}`,
+            sess.objective ? `Objective: ${sess.objective}` : null,
+            sess.lastUrl ? `URL: ${sess.lastUrl}` : null,
+            `Action: ${name}(${JSON.stringify(_maskSensitiveArgs(args))})`,
+            formFields ? `Form: ${typeof formFields === 'string' ? formFields.slice(0, 300) : ''}` : null,
+          ].filter(Boolean).join("\n");
+
+          // Create approval and send PIN request
+          const approvalId = `fin_${Date.now()}`;
+          const approvals = getApprovals();
+          const approval = {
+            id: approvalId,
+            tool: name,
+            description: pinDescription,
+            risk: "high",
+            resolved: false,
+            approved: false,
+            createdAt: Date.now(),
+          };
+          approvals.push(approval);
+          saveApprovals(approvals, approval);
+
+          // Notify June
+          sendNotification(`[SYSTEM — Tell King Kazuma casually.]\n⚠️ Financial action detected in browser automation. Check your iPhone for PIN approval. ${financialReasons.join(", ")}`);
+
+          // Send PIN request to iPhone and wait
+          const pinResult = await new Promise((resolve) => {
+            const pinId = `pin_${Date.now()}`;
+            pendingPinRequests.set(pinId, { approvalId, approved: true, resolve });
+            broadcastToDeviceType("phone", {
+              type: "pinRequest",
+              approvalId: pinId,
+              description: pinDescription,
+              directiveTitle: "Financial Action Approval",
+              planSummary: null,
+            });
+
+            // 3-minute timeout for financial actions
+            setTimeout(() => {
+              if (pendingPinRequests.has(pinId)) {
+                pendingPinRequests.delete(pinId);
+                broadcastToDeviceType("phone", { type: "pinResolved", approvalId: pinId });
+                resolve({ success: false, message: "Financial action BLOCKED: PIN entry timed out (3 min). Action was NOT executed." });
+              }
+            }, 180000);
+          });
+
+          if (!pinResult.success) {
+            db.addBrowserAuditEntry({
+              session_id: sessionId,
+              tool_name: name,
+              args: _maskSensitiveArgs(args),
+              result_summary: "BLOCKED: " + pinResult.message,
+              flagged: true,
+              flag_reason: "denied_or_timeout",
+              approval_id: approvalId,
+            }).catch(() => {});
+            return pinResult;
+          }
+          // PIN approved — fall through to execute the action
+          log.bridge.info(`[browser] Financial action APPROVED by King Kazuma — proceeding`);
+        }
+
+        // ── Standard browser tool dispatch ──
+        let toolResult;
+
         if (name === "browser_navigate") {
           if (!args.url) return { success: false, message: "url is required" };
-          const result = await browserFetch("/navigate", {
-            url: args.url,
-            session_id: args.session_id || "default",
-          });
+          const result = await browserFetch("/navigate", { url: args.url, session_id: sessionId });
           if (!result.ok) return { success: false, message: result.error || "Navigation failed" };
           log.bridge.info(`[browser] Navigated to ${result.url} — "${result.title}"`);
-          return { success: true, title: result.title, url: result.url, screenshot: result.screenshot };
-        }
-
-        if (name === "browser_click") {
+          // Update session state
+          const sess = _browserSessionState.get(sessionId) || {};
+          sess.lastUrl = result.url;
+          _browserSessionState.set(sessionId, sess);
+          toolResult = { success: true, title: result.title, url: result.url, screenshot: result.screenshot };
+        } else if (name === "browser_click") {
           if (!args.selector) return { success: false, message: "selector is required" };
-          const result = await browserFetch("/click", {
-            selector: args.selector,
-            session_id: args.session_id || "default",
-            wait_after: args.wait_after,
-          });
+          const result = await browserFetch("/click", { selector: args.selector, session_id: sessionId, wait_after: args.wait_after });
           if (!result.ok) return { success: false, message: result.error || "Click failed" };
           log.bridge.info(`[browser] Clicked ${args.selector} — ${result.clicked?.tag} "${result.clicked?.text?.slice(0, 50)}"`);
-          return { success: true, clicked: result.clicked, screenshot: result.screenshot };
-        }
-
-        if (name === "browser_type") {
+          toolResult = { success: true, clicked: result.clicked, screenshot: result.screenshot };
+        } else if (name === "browser_type") {
           if (!args.selector) return { success: false, message: "selector is required" };
           if (args.text === undefined) return { success: false, message: "text is required" };
-          const result = await browserFetch("/type", {
-            selector: args.selector,
-            text: args.text,
-            session_id: args.session_id || "default",
-            press_enter: args.press_enter,
-            clear: args.clear,
-          });
+          const result = await browserFetch("/type", { selector: args.selector, text: args.text, session_id: sessionId, press_enter: args.press_enter, clear: args.clear });
           if (!result.ok) return { success: false, message: result.error || "Type failed" };
           log.bridge.info(`[browser] Typed ${result.typed} into ${args.selector}`);
-          return { success: true, message: `Typed ${result.typed} into ${args.selector}` };
-        }
-
-        if (name === "browser_screenshot") {
-          const result = await browserFetch("/screenshot", {
-            session_id: args.session_id || "default",
-            full_page: args.full_page,
-          });
+          toolResult = { success: true, message: `Typed ${result.typed} into ${args.selector}` };
+        } else if (name === "browser_screenshot") {
+          const result = await browserFetch("/screenshot", { session_id: sessionId, full_page: args.full_page });
           if (!result.ok) return { success: false, message: result.error || "Screenshot failed" };
-          return { success: true, title: result.title, url: result.url, screenshot: result.screenshot };
-        }
-
-        if (name === "browser_extract") {
+          toolResult = { success: true, title: result.title, url: result.url, screenshot: result.screenshot };
+        } else if (name === "browser_extract") {
           if (!args.selector) return { success: false, message: "selector is required" };
-          const result = await browserFetch("/extract", {
-            selector: args.selector,
-            session_id: args.session_id || "default",
-            attribute: args.attribute,
-          });
+          const result = await browserFetch("/extract", { selector: args.selector, session_id: sessionId, attribute: args.attribute });
           if (!result.ok) return { success: false, message: result.error || "Extract failed" };
           log.bridge.info(`[browser] Extracted ${result.count} elements from ${args.selector}`);
-          return { success: true, count: result.count, elements: result.elements };
-        }
-
-        if (name === "browser_evaluate") {
+          toolResult = { success: true, count: result.count, elements: result.elements };
+        } else if (name === "browser_evaluate") {
           if (!args.script) return { success: false, message: "script is required" };
-          const result = await browserFetch("/evaluate", {
-            script: args.script,
-            session_id: args.session_id || "default",
-          });
+          const result = await browserFetch("/evaluate", { script: args.script, session_id: sessionId });
           if (!result.ok) return { success: false, message: result.error || "Evaluate failed" };
           log.bridge.info(`[browser] Evaluated script on page`);
-          return { success: true, result: result.result, screenshot: result.screenshot };
+          toolResult = { success: true, result: result.result, screenshot: result.screenshot };
+        } else {
+          return { success: false, message: `Unknown browser tool: ${name}` };
         }
 
-        return { success: false, message: `Unknown browser tool: ${name}` };
+        // ── Post-action audit logging ──
+        db.addBrowserAuditEntry({
+          session_id: sessionId,
+          tool_name: name,
+          args: _maskSensitiveArgs(args),
+          result_summary: toolResult.success ? "ok" : toolResult.message,
+          url_at_time: _browserSessionState.get(sessionId)?.lastUrl || null,
+        }).catch(() => {});
+
+        return toolResult;
       }
     } catch (err) {
       return { success: false, message: err.message || "Bridge call failed" };
@@ -3726,6 +3873,101 @@ async function handleToolCall(name, args) {
 const devices = new Map(); // ws -> { role, deviceId, deviceType, zone, capabilities, speakerPriority }
 let audioMsgCount = 0;
 const pendingPinRequests = new Map(); // pinId -> { approvalId, approved, resolve }
+
+// ── Financial safeguards for browser automation ──
+const _browserSessionState = new Map(); // sessionId -> { objective, isFinancial, lastUrl }
+
+const FINANCIAL_SELECTOR_PATTERNS = [
+  /card[-_]?num/i, /credit[-_]?card/i, /cvv/i, /cvc/i, /expir/i,
+  /billing/i, /payment[-_]?method/i, /cc[-_]?number/i, /cardnumber/i,
+];
+const PAYMENT_BUTTON_PATTERNS = [
+  /\bpay\b/i, /\bpagar\b/i, /\bcomprar\b/i, /\bcheckout\b/i,
+  /\bfinalizar\b/i, /\brealizar.?pago\b/i, /\bsubmit.?payment\b/i,
+  /\bconfirm.?order\b/i, /\bplace.?order\b/i, /\bprocesar\b/i,
+];
+const PAYMENT_GATEWAY_URLS = [
+  "epayco.co", "paypal.com", "stripe.com", "mercadopago",
+  "placetopay", "wompi.co", "bold.co", "checkout.stripe.com",
+  "payulatam.com", "kushki.com",
+];
+
+function _luhnCheck(num) {
+  const digits = num.replace(/\D/g, "");
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  let alt = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = parseInt(digits[i], 10);
+    if (alt) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+function _maskSensitiveArgs(args) {
+  const safe = { ...args };
+  if (safe.text && typeof safe.text === "string") {
+    // Mask CC numbers
+    safe.text = safe.text.replace(/\b(\d{4})\d{9,15}/g, "$1****");
+  }
+  return safe;
+}
+
+function _detectFinancialAction(toolName, args, sessionId) {
+  const reasons = [];
+  const sess = _browserSessionState.get(sessionId) || {};
+
+  if (toolName === "browser_type") {
+    // Check if selector matches financial field patterns
+    const sel = (args.selector || "").toLowerCase();
+    for (const pattern of FINANCIAL_SELECTOR_PATTERNS) {
+      if (pattern.test(sel)) {
+        reasons.push(`Typing into financial field: ${sel}`);
+        break;
+      }
+    }
+    // Check if typed text looks like a CC number (Luhn check)
+    const text = (args.text || "").replace(/[\s-]/g, "");
+    if (/^\d{13,19}$/.test(text) && _luhnCheck(text)) {
+      reasons.push("Text matches credit card number (Luhn valid)");
+    }
+    // Check CVV on financial pages
+    if (/cvv|cvc|security.?code/i.test(sel) && /^\d{3,4}$/.test(args.text || "")) {
+      reasons.push("Typing CVV/security code");
+    }
+  }
+
+  if (toolName === "browser_click") {
+    const sel = (args.selector || "").toLowerCase();
+    const textMatch = (args.text_match || "").toLowerCase();
+    const combined = sel + " " + textMatch;
+    for (const pattern of PAYMENT_BUTTON_PATTERNS) {
+      if (pattern.test(combined)) {
+        reasons.push(`Clicking payment button: ${combined.trim().slice(0, 60)}`);
+        break;
+      }
+    }
+  }
+
+  if (toolName === "browser_navigate") {
+    const url = (args.url || "").toLowerCase();
+    for (const gateway of PAYMENT_GATEWAY_URLS) {
+      if (url.includes(gateway)) {
+        reasons.push(`Navigating to payment gateway: ${gateway}`);
+        sess.isFinancial = true;
+        _browserSessionState.set(sessionId, sess);
+        break;
+      }
+    }
+  }
+
+  return reasons;
+}
 
 // Voice latency metrics: ring buffer of recent measurements
 const LATENCY_RING_MAX = 100;

@@ -518,7 +518,33 @@ async function init() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo)");
+    // Browser automation: audit log + session objectives (financial safeguards)
+    await pool.query(`CREATE TABLE IF NOT EXISTS browser_audit_log (
+      id SERIAL PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      args JSONB DEFAULT '{}',
+      result_summary TEXT,
+      url_at_time TEXT,
+      flagged BOOLEAN DEFAULT false,
+      flag_reason TEXT,
+      approval_id TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_browser_audit_session ON browser_audit_log(session_id, created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_browser_audit_flagged ON browser_audit_log(flagged) WHERE flagged = true`);
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS browser_sessions (
+      id TEXT PRIMARY KEY,
+      objective TEXT,
+      started_at TIMESTAMPTZ DEFAULT NOW(),
+      last_action_at TIMESTAMPTZ DEFAULT NOW(),
+      url_history TEXT[] DEFAULT '{}',
+      is_financial BOOLEAN DEFAULT false,
+      payment_context JSONB DEFAULT '{}'
+    )`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -2584,6 +2610,60 @@ async function getDashboardMetrics(period) {
   };
 }
 
+// ── Browser Audit & Sessions ──
+
+async function addBrowserAuditEntry(entry) {
+  if (!_pgConnected) return null;
+  // Mask sensitive data in args before storing
+  const safeArgs = entry.args ? JSON.parse(JSON.stringify(entry.args)) : {};
+  if (safeArgs.text && typeof safeArgs.text === 'string') {
+    // Mask anything that looks like a CC number (13-19 digits)
+    safeArgs.text = safeArgs.text.replace(/\b(\d{4})\d{9,15}/g, '$1****');
+  }
+  const res = await query(
+    `INSERT INTO browser_audit_log (session_id, tool_name, args, result_summary, url_at_time, flagged, flag_reason, approval_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [entry.session_id || 'default', entry.tool_name, JSON.stringify(safeArgs),
+     entry.result_summary || null, entry.url_at_time || null,
+     !!entry.flagged, entry.flag_reason || null, entry.approval_id || null]
+  );
+  return res.rows[0]?.id;
+}
+
+async function getBrowserAuditLog(sessionId, limit = 50) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT id, session_id, tool_name, args, result_summary, url_at_time, flagged, flag_reason, approval_id, created_at
+     FROM browser_audit_log WHERE session_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    [sessionId, limit]
+  );
+  return res.rows;
+}
+
+async function upsertBrowserSession(sessionId, data) {
+  if (!_pgConnected) return;
+  await query(
+    `INSERT INTO browser_sessions (id, objective, is_financial, payment_context)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET
+       objective = COALESCE(EXCLUDED.objective, browser_sessions.objective),
+       is_financial = COALESCE(EXCLUDED.is_financial, browser_sessions.is_financial),
+       payment_context = COALESCE(EXCLUDED.payment_context, browser_sessions.payment_context),
+       last_action_at = NOW()`,
+    [sessionId, data.objective || null, !!data.is_financial, JSON.stringify(data.payment_context || {})]
+  );
+}
+
+async function getBrowserSession(sessionId) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `SELECT id, objective, started_at, last_action_at, url_history, is_financial, payment_context
+     FROM browser_sessions WHERE id = $1`,
+    [sessionId]
+  );
+  return res.rows[0] || null;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -2764,6 +2844,11 @@ module.exports = {
   deleteBusinessInvestment,
   // CEO Dashboard
   getDashboardMetrics,
+  // Browser Audit & Sessions
+  addBrowserAuditEntry,
+  getBrowserAuditLog,
+  upsertBrowserSession,
+  getBrowserSession,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

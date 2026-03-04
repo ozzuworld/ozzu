@@ -294,10 +294,11 @@ export default function LandingScreen() {
         setResponseText("");
         setIsStreaming(true);
       },
-      onPinRequest: async (approvalId) => {
-        // Approvals are now handled via the dashboard — no auto-biometric popups
-        console.log("[index] pinRequest received for", approvalId, "— handled via dashboard");
-        return;
+      onPinRequest: async (approvalId, description) => {
+        // Show keypad for financial approvals (and other PIN requests)
+        console.log("[index] pinRequest received for", approvalId);
+        pendingPinRef.current = { approvalId };
+        setShowKeypad(true);
       },
       onPinResolved: () => {
         pendingPinRef.current = null;
