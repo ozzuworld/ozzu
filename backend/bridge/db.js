@@ -2209,15 +2209,24 @@ async function updateBusinessAttachmentVerification(id, verification) {
 
 // ── Business Expenses ──
 
-async function createBusinessExpense({ task_id, attachment_id, amount, iva_amount, category, vendor, description, payment_status, payment_method, expense_date, receipt_data }) {
+async function createBusinessExpense({ task_id, project_id, attachment_id, amount, iva_amount, category, vendor, description, payment_status, payment_method, expense_date, receipt_data }) {
   if (!_pgConnected) return null;
   const subtotal = amount - (iva_amount || 0);
   const res = await query(
-    `INSERT INTO business_expenses (task_id, attachment_id, amount, iva_amount, subtotal, category, vendor, description, payment_status, payment_method, expense_date, receipt_data)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-    [task_id, attachment_id || null, amount, iva_amount || 0, subtotal, category, vendor || '', description || '', payment_status || 'pending', payment_method || null, expense_date || new Date().toISOString().split('T')[0], receipt_data ? JSON.stringify(receipt_data) : null]
+    `INSERT INTO business_expenses (task_id, project_id, attachment_id, amount, iva_amount, subtotal, category, vendor, description, payment_status, payment_method, expense_date, receipt_data)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+    [task_id || null, project_id || null, attachment_id || null, amount, iva_amount || 0, subtotal, category, vendor || '', description || '', payment_status || 'pending', payment_method || null, expense_date || new Date().toISOString().split('T')[0], receipt_data ? JSON.stringify(receipt_data) : null]
   );
   return res.rows[0];
+}
+
+async function getProjectExpenses(project_id) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT * FROM business_expenses WHERE project_id = $1 ORDER BY expense_date DESC, created_at DESC`,
+    [project_id]
+  );
+  return res.rows;
 }
 
 async function getBusinessExpenses(task_id) {
@@ -2281,10 +2290,12 @@ async function getProjectFinancials(projectId) {
   );
   const totalEstimated = parseFloat(taskRes.rows[0].total_estimated);
 
-  // Expense aggregates
+  // Expense aggregates (task-linked + project-level)
   const expRes = await query(
     `SELECT COALESCE(SUM(e.amount), 0)::numeric AS total_actual, COALESCE(SUM(e.iva_amount), 0)::numeric AS total_iva
-     FROM business_expenses e JOIN business_tasks t ON t.id = e.task_id WHERE t.project_id = $1`,
+     FROM business_expenses e
+     LEFT JOIN business_tasks t ON t.id = e.task_id
+     WHERE e.project_id = $1 OR t.project_id = $1`,
     [projectId]
   );
   const totalActual = parseFloat(expRes.rows[0].total_actual);
@@ -2293,7 +2304,9 @@ async function getProjectFinancials(projectId) {
   // By category
   const catRes = await query(
     `SELECT e.category, SUM(e.amount)::numeric AS total
-     FROM business_expenses e JOIN business_tasks t ON t.id = e.task_id WHERE t.project_id = $1
+     FROM business_expenses e
+     LEFT JOIN business_tasks t ON t.id = e.task_id
+     WHERE e.project_id = $1 OR t.project_id = $1
      GROUP BY e.category ORDER BY total DESC`,
     [projectId]
   );
@@ -2318,7 +2331,9 @@ async function getProjectFinancials(projectId) {
   // By payment status
   const payRes = await query(
     `SELECT e.payment_status, COUNT(*)::int AS count, SUM(e.amount)::numeric AS total
-     FROM business_expenses e JOIN business_tasks t ON t.id = e.task_id WHERE t.project_id = $1
+     FROM business_expenses e
+     LEFT JOIN business_tasks t ON t.id = e.task_id
+     WHERE e.project_id = $1 OR t.project_id = $1
      GROUP BY e.payment_status`,
     [projectId]
   );
@@ -2815,6 +2830,7 @@ module.exports = {
   // Business Expenses
   createBusinessExpense,
   getBusinessExpenses,
+  getProjectExpenses,
   updateBusinessExpense,
   deleteBusinessExpense,
   getProjectFinancials,

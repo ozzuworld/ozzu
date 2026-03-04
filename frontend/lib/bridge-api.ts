@@ -1645,6 +1645,22 @@ export async function deleteExpense(expenseId: number): Promise<{ ok: boolean }>
   return res.json();
 }
 
+export async function getProjectExpenses(projectId: number): Promise<BusinessExpense[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects/${projectId}/expenses`);
+  if (!res.ok) throw new Error(`Fetch project expenses error: ${res.status}`);
+  return res.json();
+}
+
+export async function createProjectExpense(projectId: number, data: Partial<BusinessExpense>): Promise<{ ok: boolean; expense: BusinessExpense }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects/${projectId}/expenses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Create project expense error: ${res.status}`);
+  return res.json();
+}
+
 export async function getProjectFinancials(projectId: number): Promise<ProjectFinancials> {
   const res = await fetchWithTimeout(`${BRIDGE_URL}/business/projects/${projectId}/financials`);
   if (!res.ok) throw new Error(`Fetch financials error: ${res.status}`);

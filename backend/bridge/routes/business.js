@@ -693,6 +693,46 @@ module.exports = function businessRoutes(ctx) {
       return true;
     }
 
+    // GET /business/projects/:id/expenses — list project-level expenses
+    const projectExpensesMatch = pathname.match(/^\/business\/projects\/(\d+)\/expenses$/);
+    if (req.method === "GET" && projectExpensesMatch) {
+      try {
+        const expenses = await db.getProjectExpenses(parseInt(projectExpensesMatch[1]));
+        sendJSON(res, 200, expenses);
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /business/projects/:id/expenses — create project-level expense
+    if (req.method === "POST" && projectExpensesMatch) {
+      try {
+        const projectId = parseInt(projectExpensesMatch[1]);
+        const body = await parseBody(req);
+        if (!body.amount || !body.category) {
+          sendJSON(res, 400, { error: "amount and category are required" });
+          return true;
+        }
+        const expense = await db.createBusinessExpense({
+          project_id: projectId,
+          task_id: body.task_id || null,
+          amount: body.amount,
+          iva_amount: body.iva_amount,
+          category: body.category,
+          vendor: body.vendor,
+          description: body.description,
+          payment_status: body.payment_status,
+          payment_method: body.payment_method,
+          expense_date: body.expense_date,
+        });
+        sendJSON(res, 201, { ok: true, expense });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     // GET /business/projects/:id/financials — financial summary
     const financialsMatch = pathname.match(/^\/business\/projects\/(\d+)\/financials$/);
     if (req.method === "GET" && financialsMatch) {

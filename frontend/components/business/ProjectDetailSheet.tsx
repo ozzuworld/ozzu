@@ -1,9 +1,12 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { View, Text, ScrollView, Pressable, Modal, Alert, LayoutAnimation } from "react-native";
 import { ProgressBar } from "./ProgressBar";
 import { TaskCard } from "./TaskCard";
 import { TaskDetailSheet } from "./TaskDetailSheet";
 import { AddTaskModal } from "./AddTaskModal";
+import { AddExpenseModal } from "./AddExpenseModal";
+import { ExpenseRow } from "./ExpenseRow";
+import { ExpenseDetailSheet } from "./ExpenseDetailSheet";
 import { FinancialSummaryCard } from "./FinancialSummaryCard";
 import { CostField } from "./CostField";
 import { useBusinessProject, useProjectFinancials } from "../../lib/business-hooks";
@@ -12,7 +15,12 @@ import {
   deleteBusinessTask,
   updateBusinessProject,
   archiveBusinessProject,
+  getProjectExpenses,
+  createProjectExpense,
+  updateExpense,
+  deleteExpense,
   type BusinessTask,
+  type BusinessExpense,
 } from "../../lib/bridge-api";
 
 const PROJECT_STATUSES = [
@@ -39,6 +47,44 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
   const [detailTask, setDetailTask] = useState<BusinessTask | null>(null);
   const [editingBudget, setEditingBudget] = useState(false);
   const [budgetVal, setBudgetVal] = useState<number | null>(null);
+  const [projectExpenses, setProjectExpenses] = useState<BusinessExpense[]>([]);
+  const [addProjectExpenseVisible, setAddProjectExpenseVisible] = useState(false);
+  const [editingProjectExpense, setEditingProjectExpense] = useState<BusinessExpense | null>(null);
+  const [expensesExpanded, setExpensesExpanded] = useState(false);
+
+  const loadProjectExpenses = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const exps = await getProjectExpenses(projectId);
+      setProjectExpenses(exps);
+    } catch {}
+  }, [projectId]);
+
+  useEffect(() => { loadProjectExpenses(); }, [loadProjectExpenses]);
+
+  const handleAddProjectExpense = useCallback(async (_taskId: number, data: any) => {
+    if (!projectId) return;
+    await createProjectExpense(projectId, data);
+    loadProjectExpenses();
+    reloadFinancials();
+  }, [projectId, loadProjectExpenses, reloadFinancials]);
+
+  const handleEditProjectExpense = useCallback(async (expenseId: number, data: Partial<BusinessExpense>) => {
+    await updateExpense(expenseId, data);
+    setProjectExpenses((prev) => prev.map((e) => e.id === expenseId ? { ...e, ...data } : e));
+    reloadFinancials();
+  }, [reloadFinancials]);
+
+  const handleDeleteProjectExpense = useCallback(async (exp: BusinessExpense) => {
+    Alert.alert("Delete Expense", `Delete this expense?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+        await deleteExpense(exp.id);
+        setProjectExpenses((prev) => prev.filter((e) => e.id !== exp.id));
+        reloadFinancials();
+      }},
+    ]);
+  }, [reloadFinancials]);
 
   const handleToggleTask = useCallback(async (taskId: number) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -286,6 +332,41 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
                 </Pressable>
               )}
 
+              {/* Project-level expenses */}
+              <View style={{ marginBottom: 16 }}>
+                <Pressable
+                  onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setExpensesExpanded((e) => !e); }}
+                  style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, letterSpacing: 2 }}>
+                      EXPENSES ({projectExpenses.length})
+                    </Text>
+                    <Text style={{ color: "#525252", fontSize: 10 }}>{expensesExpanded ? "▾" : "▸"}</Text>
+                  </View>
+                  <Pressable onPress={() => setAddProjectExpenseVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <Text style={{ color: "#06B6D4", fontSize: 16 }}>+</Text>
+                    <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>LOG EXPENSE</Text>
+                  </Pressable>
+                </Pressable>
+                {expensesExpanded ? (
+                  projectExpenses.length > 0 ? (
+                    projectExpenses.map((exp) => (
+                      <ExpenseRow
+                        key={exp.id}
+                        expense={exp}
+                        onPress={() => setEditingProjectExpense(exp)}
+                        onDelete={() => handleDeleteProjectExpense(exp)}
+                      />
+                    ))
+                  ) : (
+                    <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11, paddingVertical: 8 }}>
+                      No expenses logged yet. Tap + to add transport, fees, or other costs.
+                    </Text>
+                  )
+                ) : null}
+              </View>
+
               {/* Status toggles */}
               <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>STATUS</Text>
               <View style={{ flexDirection: "row", gap: 6, marginBottom: 16 }}>
@@ -387,6 +468,26 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
             onAddExpense={addExpense}
             onEditExpense={editExpense}
             onRemoveExpense={removeExpense}
+          />
+
+          {/* Project-level expense modal */}
+          {projectId ? (
+            <AddExpenseModal
+              visible={addProjectExpenseVisible}
+              taskId={0}
+              onClose={() => setAddProjectExpenseVisible(false)}
+              onCreated={() => { loadProjectExpenses(); reloadFinancials(); }}
+              onAddExpense={handleAddProjectExpense}
+            />
+          ) : null}
+
+          {/* Edit project expense sheet */}
+          <ExpenseDetailSheet
+            expense={editingProjectExpense}
+            visible={editingProjectExpense !== null}
+            onClose={() => setEditingProjectExpense(null)}
+            onSave={handleEditProjectExpense}
+            onDelete={(exp) => { handleDeleteProjectExpense(exp); setEditingProjectExpense(null); }}
           />
         </View>
       </View>
