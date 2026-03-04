@@ -1,8 +1,37 @@
 // HTTP client for the Command Bridge server
 
-const BRIDGE_URL =
+const LAN_URL =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "http://localhost:3333";
+const PUBLIC_URL =
+  process.env.EXPO_PUBLIC_BRIDGE_PUBLIC_URL || "";
 const FETCH_TIMEOUT_MS = 15000; // 15s timeout for all bridge HTTP calls
+const PROBE_TIMEOUT_MS = 2000; // 2s probe to check LAN reachability
+
+// Auto-detect: LAN or public URL. Starts on LAN, falls back to public after probe.
+let BRIDGE_URL = LAN_URL;
+let _probed = false;
+
+/** Probe LAN reachability and switch to public URL if needed. Call once on app start. */
+export async function probeBridgeUrl(): Promise<void> {
+  if (_probed || !PUBLIC_URL) return;
+  _probed = true;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+    const res = await fetch(`${LAN_URL}/status`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (res.ok) return; // LAN works, keep it
+  } catch {}
+  BRIDGE_URL = PUBLIC_URL; // LAN unreachable, switch to public
+}
+
+/** Force re-probe on next call (e.g. after network change) */
+export function resetBridgeUrl() { _probed = false; BRIDGE_URL = LAN_URL; }
+
+/** Which URL is active — "lan" | "remote" */
+export function getBridgeMode(): "lan" | "remote" {
+  return BRIDGE_URL === LAN_URL ? "lan" : "remote";
+}
 
 function fetchWithTimeout(url: string, opts?: RequestInit): Promise<Response> {
   const controller = new AbortController();

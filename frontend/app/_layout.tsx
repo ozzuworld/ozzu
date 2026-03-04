@@ -1,10 +1,11 @@
 import "../global.css";
 import React, { useEffect } from "react";
-import { LogBox, View, Text, Platform, Dimensions } from "react-native";
+import { AppState, LogBox, View, Text, Platform, Dimensions } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { HAProvider } from "../lib/ha-context";
 import { setImmersiveCallback } from "../lib/immersive-events";
+import { probeBridgeUrl, resetBridgeUrl } from "../lib/bridge-api";
 
 if (!__DEV__) {
   LogBox.ignoreAllLogs();
@@ -118,6 +119,14 @@ function ImmersiveListener() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    probeBridgeUrl();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") { resetBridgeUrl(); probeBridgeUrl(); }
+    });
+    return () => sub.remove();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
