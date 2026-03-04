@@ -4,8 +4,9 @@
 #
 # Backs up:
 #   - PostgreSQL database (full dump)
+#   - JSON state files (directives, approvals, epics, etc.)
 #   - OSINT images (/tmp/ozzu-bridge/osint-images/)
-#   - Business attachments (/tmp/ozzu-bridge/uploads/)
+#   - Business attachments (/tmp/ozzu-bridge/business-attachments/)
 #   - Build artifacts (/home/gcp/ozzu/artifacts/)
 #   - Home Assistant config (/home/gcp/ozzu/backend/config/)
 #   - Environment files (.env, .env.local)
@@ -45,8 +46,17 @@ PGPASSWORD=ozzu_pg_s3cure pg_dump -h 127.0.0.1 -U ozzu -d ozzu -Fc -f "${WORK_DI
 DB_SIZE=$(du -sh "${WORK_DIR}/database.dump" | cut -f1)
 echo "  Database dump: ${DB_SIZE}"
 
-# 2. OSINT images
-echo "[2/7] Backing up OSINT images..."
+# 2. JSON state files (directives, approvals, epics, orchestrator)
+echo "[2/8] Backing up JSON state files..."
+mkdir -p "${WORK_DIR}/state"
+for f in directives.json approvals.json epics.json orchestrator-knowledge.json status.json; do
+  [ -f "/tmp/ozzu-bridge/$f" ] && cp "/tmp/ozzu-bridge/$f" "${WORK_DIR}/state/$f"
+done
+STATE_COUNT=$(ls "${WORK_DIR}/state/" 2>/dev/null | wc -l)
+echo "  State files: ${STATE_COUNT} files"
+
+# 3. OSINT images
+echo "[3/8] Backing up OSINT images..."
 if [ -d /tmp/ozzu-bridge/osint-images ] && [ "$(ls -A /tmp/ozzu-bridge/osint-images 2>/dev/null)" ]; then
   tar -cf "${WORK_DIR}/osint-images.tar" -C /tmp/ozzu-bridge osint-images 2>/dev/null || true
   echo "  OSINT images: $(du -sh "${WORK_DIR}/osint-images.tar" 2>/dev/null | cut -f1)"
@@ -54,26 +64,24 @@ else
   echo "  OSINT images: (none)"
 fi
 
-# 3. Business attachments
-echo "[3/7] Backing up business attachments..."
-if [ -d /tmp/ozzu-bridge/uploads ] && [ "$(ls -A /tmp/ozzu-bridge/uploads 2>/dev/null)" ]; then
-  tar -cf "${WORK_DIR}/uploads.tar" -C /tmp/ozzu-bridge uploads 2>/dev/null || true
-  echo "  Uploads: $(du -sh "${WORK_DIR}/uploads.tar" 2>/dev/null | cut -f1)"
-else
-  echo "  Uploads: (none)"
-fi
+# 4. Business attachments
+echo "[4/8] Backing up business attachments..."
+ATTACH_FOUND=false
+for dir in business-attachments uploads; do
+  if [ -d "/tmp/ozzu-bridge/$dir" ] && [ "$(ls -A "/tmp/ozzu-bridge/$dir" 2>/dev/null)" ]; then
+    tar -cf "${WORK_DIR}/uploads.tar" -C /tmp/ozzu-bridge "$dir" 2>/dev/null || true
+    echo "  Uploads ($dir): $(du -sh "${WORK_DIR}/uploads.tar" 2>/dev/null | cut -f1)"
+    ATTACH_FOUND=true
+    break
+  fi
+done
+$ATTACH_FOUND || echo "  Uploads: (none)"
 
-# 4. Build artifacts (latest IPA/APK)
-echo "[4/7] Backing up build artifacts..."
-if [ -d "${PROJECT_ROOT}/artifacts" ] && [ "$(ls -A "${PROJECT_ROOT}/artifacts" 2>/dev/null)" ]; then
-  tar -cf "${WORK_DIR}/artifacts.tar" -C "${PROJECT_ROOT}" artifacts 2>/dev/null || true
-  echo "  Artifacts: $(du -sh "${WORK_DIR}/artifacts.tar" 2>/dev/null | cut -f1)"
-else
-  echo "  Artifacts: (none)"
-fi
+# 5. Build artifacts (latest IPA/APK) — skipped by default (large, rebuildable from CI)
+echo "[5/8] Build artifacts: skipped (rebuildable from GitHub CI)"
 
-# 5. Home Assistant config (exclude large DB WAL files, include core config)
-echo "[5/7] Backing up Home Assistant config..."
+# 6. Home Assistant config (exclude large DB WAL files, include core config)
+echo "[6/8] Backing up Home Assistant config..."
 if [ -d "${PROJECT_ROOT}/backend/config" ]; then
   tar -cf "${WORK_DIR}/ha-config.tar" \
     -C "${PROJECT_ROOT}/backend" \
@@ -88,16 +96,16 @@ else
   echo "  HA config: (none)"
 fi
 
-# 6. Environment files
-echo "[6/7] Backing up environment files..."
+# 7. Environment files
+echo "[7/8] Backing up environment files..."
 mkdir -p "${WORK_DIR}/env"
 [ -f "${PROJECT_ROOT}/backend/.env" ] && cp "${PROJECT_ROOT}/backend/.env" "${WORK_DIR}/env/backend.env"
 [ -f "${PROJECT_ROOT}/frontend/.env.local" ] && cp "${PROJECT_ROOT}/frontend/.env.local" "${WORK_DIR}/env/frontend.env.local"
 [ -f "${PROJECT_ROOT}/frontend/.env" ] && cp "${PROJECT_ROOT}/frontend/.env" "${WORK_DIR}/env/frontend.env"
 echo "  Env files: $(ls "${WORK_DIR}/env/" | wc -l) files"
 
-# 7. Redis snapshot
-echo "[7/7] Snapshotting Redis..."
+# 8. Redis snapshot
+echo "[8/8] Snapshotting Redis..."
 redis-cli -h 127.0.0.1 BGSAVE >/dev/null 2>&1 || true
 sleep 1
 REDIS_CONTAINER=$(docker ps -qf "name=redis" | head -1)
@@ -118,6 +126,7 @@ cat > "${WORK_DIR}/manifest.json" <<MANIFEST
   "hostname": "$(hostname)",
   "components": {
     "database": $([ -f "${WORK_DIR}/database.dump" ] && echo "true" || echo "false"),
+    "state_files": $([ -d "${WORK_DIR}/state" ] && echo "true" || echo "false"),
     "osint_images": $([ -f "${WORK_DIR}/osint-images.tar" ] && echo "true" || echo "false"),
     "uploads": $([ -f "${WORK_DIR}/uploads.tar" ] && echo "true" || echo "false"),
     "artifacts": $([ -f "${WORK_DIR}/artifacts.tar" ] && echo "true" || echo "false"),

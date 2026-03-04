@@ -7,10 +7,11 @@ import {
   Pressable,
   Alert,
   ActivityIndicator,
-  Linking,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import {
   fetchBackups,
@@ -69,11 +70,31 @@ export default function BackupScreen() {
     }
   }, [loadBackups]);
 
-  const handleDownload = useCallback((backup: BackupInfo) => {
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  const handleDownload = useCallback(async (backup: BackupInfo) => {
     const url = getBackupDownloadUrl(backup.filename);
-    Linking.openURL(url).catch(() => {
-      Alert.alert("Download Error", "Could not open download URL");
-    });
+    const localUri = FileSystem.cacheDirectory + backup.filename;
+    setDownloading(backup.filename);
+    try {
+      const dl = await FileSystem.downloadAsync(url, localUri);
+      if (dl.status !== 200) throw new Error(`Download failed (${dl.status})`);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(dl.uri, {
+          mimeType: "application/octet-stream",
+          dialogTitle: "Save backup to Files (iCloud)",
+          UTI: "public.data",
+        });
+      } else {
+        Alert.alert("Downloaded", `Saved to: ${dl.uri}`);
+      }
+    } catch (e: any) {
+      Alert.alert("Download Error", e.message);
+    } finally {
+      setDownloading(null);
+      // Clean up cache
+      FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
+    }
   }, []);
 
   const handleDelete = useCallback((backup: BackupInfo) => {
@@ -207,14 +228,21 @@ export default function BackupScreen() {
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   <Pressable
                     onPress={() => handleDownload(b)}
+                    disabled={downloading === b.filename}
                     style={{
-                      backgroundColor: "#064E3B",
+                      backgroundColor: downloading === b.filename ? "#1A1A1A" : "#064E3B",
                       paddingHorizontal: 10,
                       paddingVertical: 6,
                       borderRadius: 4,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
                     }}
                   >
-                    <Text style={{ color: "#34D399", fontFamily: "monospace", fontSize: 11 }}>DOWNLOAD</Text>
+                    {downloading === b.filename && <ActivityIndicator size={10} color="#34D399" />}
+                    <Text style={{ color: "#34D399", fontFamily: "monospace", fontSize: 11 }}>
+                      {downloading === b.filename ? "SAVING..." : "SAVE TO ICLOUD"}
+                    </Text>
                   </Pressable>
                   <Pressable
                     onPress={() => handleDelete(b)}

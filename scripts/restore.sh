@@ -109,38 +109,48 @@ else
   echo "[1/7] Skipping PostgreSQL (not selected or dump missing)"
 fi
 
-# 2. OSINT images
+# 2. JSON state files
+if should_restore "state" && [ -d "${BACKUP_CONTENT}/state" ]; then
+  echo "[2/8] Restoring JSON state files..."
+  mkdir -p /tmp/ozzu-bridge
+  cp "${BACKUP_CONTENT}"/state/*.json /tmp/ozzu-bridge/ 2>/dev/null || true
+  echo "  State files restored to /tmp/ozzu-bridge/"
+else
+  echo "[2/8] Skipping JSON state files"
+fi
+
+# 3. OSINT images
 if should_restore "osint" && [ -f "${BACKUP_CONTENT}/osint-images.tar" ]; then
-  echo "[2/7] Restoring OSINT images..."
+  echo "[3/8] Restoring OSINT images..."
   mkdir -p /tmp/ozzu-bridge
   tar -xf "${BACKUP_CONTENT}/osint-images.tar" -C /tmp/ozzu-bridge
   echo "  OSINT images restored to /tmp/ozzu-bridge/osint-images/"
 else
-  echo "[2/7] Skipping OSINT images"
+  echo "[3/8] Skipping OSINT images"
 fi
 
-# 3. Business uploads
+# 4. Business uploads
 if should_restore "uploads" && [ -f "${BACKUP_CONTENT}/uploads.tar" ]; then
-  echo "[3/7] Restoring business attachments..."
+  echo "[4/8] Restoring business attachments..."
   mkdir -p /tmp/ozzu-bridge
   tar -xf "${BACKUP_CONTENT}/uploads.tar" -C /tmp/ozzu-bridge
-  echo "  Uploads restored to /tmp/ozzu-bridge/uploads/"
+  echo "  Uploads restored to /tmp/ozzu-bridge/"
 else
-  echo "[3/7] Skipping business attachments"
+  echo "[4/8] Skipping business attachments"
 fi
 
-# 4. Build artifacts
+# 5. Build artifacts
 if should_restore "artifacts" && [ -f "${BACKUP_CONTENT}/artifacts.tar" ]; then
-  echo "[4/7] Restoring build artifacts..."
+  echo "[5/8] Restoring build artifacts..."
   tar -xf "${BACKUP_CONTENT}/artifacts.tar" -C "${PROJECT_ROOT}"
   echo "  Artifacts restored to ${PROJECT_ROOT}/artifacts/"
 else
-  echo "[4/7] Skipping build artifacts"
+  echo "[5/8] Skipping build artifacts"
 fi
 
-# 5. Home Assistant config
+# 6. Home Assistant config
 if should_restore "ha" && [ -f "${BACKUP_CONTENT}/ha-config.tar" ]; then
-  echo "[5/7] Restoring Home Assistant config..."
+  echo "[6/8] Restoring Home Assistant config..."
   echo "  Stopping Home Assistant container..."
   docker stop $(docker ps -qf "name=homeassistant" 2>/dev/null) 2>/dev/null || true
   tar -xf "${BACKUP_CONTENT}/ha-config.tar" -C "${PROJECT_ROOT}/backend/"
@@ -148,23 +158,23 @@ if should_restore "ha" && [ -f "${BACKUP_CONTENT}/ha-config.tar" ]; then
   docker start $(docker ps -aqf "name=homeassistant" 2>/dev/null) 2>/dev/null || true
   echo "  HA config restored"
 else
-  echo "[5/7] Skipping Home Assistant config"
+  echo "[6/8] Skipping Home Assistant config"
 fi
 
-# 6. Environment files
+# 7. Environment files
 if should_restore "env" && [ -d "${BACKUP_CONTENT}/env" ]; then
-  echo "[6/7] Restoring environment files..."
+  echo "[7/8] Restoring environment files..."
   [ -f "${BACKUP_CONTENT}/env/backend.env" ] && cp "${BACKUP_CONTENT}/env/backend.env" "${PROJECT_ROOT}/backend/.env"
   [ -f "${BACKUP_CONTENT}/env/frontend.env.local" ] && cp "${BACKUP_CONTENT}/env/frontend.env.local" "${PROJECT_ROOT}/frontend/.env.local"
   [ -f "${BACKUP_CONTENT}/env/frontend.env" ] && cp "${BACKUP_CONTENT}/env/frontend.env" "${PROJECT_ROOT}/frontend/.env"
   echo "  Env files restored"
 else
-  echo "[6/7] Skipping environment files"
+  echo "[7/8] Skipping environment files"
 fi
 
-# 7. Redis
+# 8. Redis
 if should_restore "redis" && [ -f "${BACKUP_CONTENT}/redis-dump.rdb" ]; then
-  echo "[7/7] Restoring Redis data..."
+  echo "[8/8] Restoring Redis data..."
   REDIS_CONTAINER=$(docker ps -qf "name=redis" | head -1)
   if [ -n "$REDIS_CONTAINER" ]; then
     docker cp "${BACKUP_CONTENT}/redis-dump.rdb" "${REDIS_CONTAINER}:/data/dump.rdb"
@@ -176,7 +186,7 @@ if should_restore "redis" && [ -f "${BACKUP_CONTENT}/redis-dump.rdb" ]; then
     echo "  Redis container not found — skipping"
   fi
 else
-  echo "[7/7] Skipping Redis"
+  echo "[8/8] Skipping Redis"
 fi
 
 echo ""
