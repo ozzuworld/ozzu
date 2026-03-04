@@ -4,15 +4,33 @@
 import { getDeviceType } from "../modules/pcm-player";
 import { Dimensions, Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
+import { getBridgeMode } from "./bridge-api";
 
 // Module-level cache: survives reconnects even if FileSystem persistence fails (e.g. iOS sideloaded apps)
 let cachedDeviceId: string | null = null;
 
-const BRIDGE_WS_URL =
+const LAN_WS_URL =
   (process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333").replace(
     /^http/,
     "ws"
   ) + "/ws";
+
+const PUBLIC_BASE =
+  process.env.EXPO_PUBLIC_BRIDGE_PUBLIC_URL || "https://home.ozzu.world/bridge";
+const PUBLIC_WS_URL =
+  PUBLIC_BASE.replace(/^https/, "wss").replace(/^http/, "ws") + "/ws";
+
+const BRIDGE_API_KEY = process.env.EXPO_PUBLIC_BRIDGE_API_KEY || "";
+
+function getWsUrl(): string {
+  const mode = getBridgeMode();
+  if (mode === "remote") {
+    // Append token for public WS auth
+    const base = PUBLIC_WS_URL;
+    return BRIDGE_API_KEY ? `${base}?token=${BRIDGE_API_KEY}` : base;
+  }
+  return LAN_WS_URL;
+}
 
 export interface BridgeCallbacks {
   onReady: () => void;
@@ -118,9 +136,10 @@ export class BridgeSession {
   }
 
   private _connect(): void {
-    console.log(`[BridgeSession] Connecting to ${BRIDGE_WS_URL} as ${this._role}...`);
+    const wsUrl = getWsUrl();
+    console.log(`[BridgeSession] Connecting to ${wsUrl} as ${this._role}...`);
 
-    const ws = new WebSocket(BRIDGE_WS_URL);
+    const ws = new WebSocket(wsUrl);
     this.ws = ws;
 
     ws.onopen = () => {
@@ -344,7 +363,9 @@ export class BridgeSession {
 
   /** Send crash report via HTTP (works even when WS is down) */
   sendCrashReport(error: string, stack?: string | null, componentStack?: string | null, context?: string | null): void {
-    const bridgeUrl = (process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333");
+    // Use dynamic URL — import inline to avoid circular deps
+    const { getBridgeUrl } = require("./bridge-api");
+    const bridgeUrl = getBridgeUrl();
     const body = JSON.stringify({
       deviceId: this.deviceId,
       deviceType: this._deviceType,

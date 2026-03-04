@@ -1283,16 +1283,36 @@ function escapeJsString(str) {
   return String(str).replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
 }
 
+const CORS_ALLOWED_ORIGINS = [
+  "https://home.ozzu.world",
+  "http://10.8.0.1:3333",
+  "http://localhost:3333",
+];
+
+function getCorsHeaders(req) {
+  const origin = req?.headers?.origin;
+  // React Native doesn't send Origin — allow all non-browser requests
+  const allowedOrigin = !origin ? "*" : CORS_ALLOWED_ORIGINS.includes(origin) ? origin : CORS_ALLOWED_ORIGINS[0];
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    ...(origin ? { "Vary": "Origin" } : {}),
+  };
+}
+
+// Legacy constant for route modules that reference CORS_HEADERS directly
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
-function sendJSON(res, status, data) {
+function sendJSON(res, status, data, req) {
+  const headers = req ? getCorsHeaders(req) : CORS_HEADERS;
   res.writeHead(status, {
     "Content-Type": "application/json",
-    ...CORS_HEADERS,
+    ...headers,
   });
   res.end(JSON.stringify(data));
 }
@@ -1307,6 +1327,29 @@ function requireAuth(req, res) {
     return false;
   }
   return true;
+}
+
+// ── Auth gate for public-facing requests (via nginx reverse proxy) ──
+// LAN/VPN requests pass through without auth. Public requests (through nginx) need API key.
+const TRUSTED_NETS = [
+  { prefix: "10.8.0.", label: "VPN" },
+  { prefix: "172.168.0.", label: "LAN" },
+  { prefix: "127.0.0.", label: "localhost" },
+  { prefix: "10.128.0.", label: "GCP-internal" },
+];
+
+function isPublicRequest(req) {
+  // If nginx forwarded the request, X-Forwarded-For will be set
+  const forwarded = req.headers["x-forwarded-for"];
+  if (!forwarded) return false; // Direct connection — local/VPN
+  // Check if the original client IP is from a trusted network
+  const clientIp = forwarded.split(",")[0].trim();
+  return !TRUSTED_NETS.some(net => clientIp.startsWith(net.prefix));
+}
+
+function requireAuthIfPublic(req, res) {
+  if (!isPublicRequest(req)) return true; // LAN/VPN — no auth needed
+  return requireAuth(req, res); // Public — require API key
 }
 
 // ── Cosine similarity for face embeddings ──
@@ -1324,7 +1367,7 @@ function cosineSimilarity(a, b) {
 // ── Route context (shared deps for extracted route modules) ──
 const routeCtx = {
   // Utilities
-  sendJSON, parseBody, requireAuth, escapeHtml, escapeJsString, cosineSimilarity,
+  sendJSON, parseBody, requireAuth, requireAuthIfPublic, isPublicRequest, escapeHtml, escapeJsString, cosineSimilarity,
   // Database + external modules
   db, redis, log, metrics, osintEngine, osintMonitor, cliRunner, buildVerifier, anthropicUsage,
   // Agent spawner
@@ -1434,9 +1477,14 @@ async function handleRequest(req, res) {
 
   // CORS preflight
   if (req.method === "OPTIONS") {
-    res.writeHead(204, CORS_HEADERS);
+    res.writeHead(204, getCorsHeaders(req));
     res.end();
     return;
+  }
+
+  // ── Public access auth gate: require API key for mutating requests from outside LAN/VPN ──
+  if (["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) {
+    if (!requireAuthIfPublic(req, res)) return;
   }
 
   // ── Extracted route dispatch ──
@@ -5376,7 +5424,22 @@ _intervals.push(setInterval(() => {
   }
 }, WS_PING_INTERVAL_MS));
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
+  // Auth gate: public WS connections (via nginx) need a valid token
+  if (BRIDGE_API_KEY && req.headers["x-forwarded-for"]) {
+    const clientIp = (req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    const isTrusted = TRUSTED_NETS.some(net => clientIp.startsWith(net.prefix));
+    if (!isTrusted) {
+      const wsUrl = new URL(req.url, `http://localhost:${PORT}`);
+      const token = wsUrl.searchParams.get("token");
+      if (token !== BRIDGE_API_KEY) {
+        log.ws.warn(`Rejected public WS connection from ${clientIp} — invalid token`);
+        ws.close(4001, "Unauthorized");
+        return;
+      }
+    }
+  }
+
   log.ws.info("New device connection");
   ws._pongPending = false;
   ws.on("pong", () => { ws._pongPending = false; });

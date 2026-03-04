@@ -4,6 +4,8 @@ const LAN_URL =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "http://localhost:3333";
 const PUBLIC_URL =
   process.env.EXPO_PUBLIC_BRIDGE_PUBLIC_URL || "";
+const BRIDGE_API_KEY =
+  process.env.EXPO_PUBLIC_BRIDGE_API_KEY || "";
 const FETCH_TIMEOUT_MS = 15000; // 15s timeout for all bridge HTTP calls
 const PROBE_TIMEOUT_MS = 2000; // 2s probe to check LAN reachability
 
@@ -28,15 +30,29 @@ export async function probeBridgeUrl(): Promise<void> {
 /** Force re-probe on next call (e.g. after network change) */
 export function resetBridgeUrl() { _probed = false; BRIDGE_URL = LAN_URL; }
 
+/** Get the current bridge URL */
+export function getBridgeUrl(): string { return BRIDGE_URL; }
+
 /** Which URL is active — "lan" | "remote" */
 export function getBridgeMode(): "lan" | "remote" {
   return BRIDGE_URL === LAN_URL ? "lan" : "remote";
 }
 
+/** Get auth headers when using public URL */
+function getAuthHeaders(): Record<string, string> {
+  if (getBridgeMode() === "remote" && BRIDGE_API_KEY) {
+    return { "Authorization": `Bearer ${BRIDGE_API_KEY}` };
+  }
+  return {};
+}
+
 function fetchWithTimeout(url: string, opts?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+  // Inject auth headers for public requests
+  const authHeaders = getAuthHeaders();
+  const mergedHeaders = { ...authHeaders, ...(opts?.headers || {}) };
+  return fetch(url, { ...opts, headers: mergedHeaders, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
 export interface StatusEntry {
