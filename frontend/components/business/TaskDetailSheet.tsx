@@ -13,6 +13,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import {
   type BusinessTask,
   type BusinessAttachment,
@@ -203,6 +204,24 @@ export function TaskDetailSheet({
       { text: "Cancel", style: "cancel" },
     ]);
   }, [handlePickImage, handlePickDocument]);
+
+  const handleDownloadAttachment = useCallback(async (att: BusinessAttachment) => {
+    try {
+      const url = getAttachmentUrl(att.id, false);
+      const fileUri = FileSystem.cacheDirectory + att.file_name;
+      const download = FileSystem.createDownloadResumable(url, fileUri);
+      const result = await download.downloadAsync();
+      if (!result) { Alert.alert("Error", "Download failed"); return; }
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(result.uri, { mimeType: att.mime_type || "application/octet-stream" });
+      } else {
+        Alert.alert("Downloaded", `Saved to ${result.uri}`);
+      }
+    } catch (err: any) {
+      Alert.alert("Download Failed", err?.message || "Could not download file");
+    }
+  }, []);
 
   const handleDeleteAttachment = useCallback((att: BusinessAttachment) => {
     Alert.alert("Delete Attachment", `Delete "${att.file_name}"?`, [
@@ -413,13 +432,20 @@ export function TaskDetailSheet({
                       <Pressable
                         key={att.id}
                         onPress={() => {
-                          if (att.verification) {
-                            setVerificationDetail(att.verification);
-                          } else if (att.file_type === "image") {
+                          if (att.file_type === "image") {
                             setViewImage(att.id);
+                          } else {
+                            handleDownloadAttachment(att);
                           }
                         }}
-                        onLongPress={() => handleDeleteAttachment(att)}
+                        onLongPress={() => {
+                          Alert.alert(att.file_name, "Choose action", [
+                            { text: "Download / Share", onPress: () => handleDownloadAttachment(att) },
+                            ...(att.verification ? [{ text: "View Verification", onPress: () => setVerificationDetail(att.verification!) }] : []),
+                            { text: "Delete", style: "destructive" as const, onPress: () => handleDeleteAttachment(att) },
+                            { text: "Cancel", style: "cancel" as const },
+                          ]);
+                        }}
                       >
                         <View>
                           {att.file_type === "image" ? (
@@ -551,11 +577,29 @@ export function TaskDetailSheet({
           onPress={() => setViewImage(null)}
         >
           {viewImage !== null && (
-            <Image
-              source={{ uri: getAttachmentUrl(viewImage, false) }}
-              style={{ width: "90%", height: "70%", borderRadius: 12 }}
-              resizeMode="contain"
-            />
+            <>
+              <Image
+                source={{ uri: getAttachmentUrl(viewImage, false) }}
+                style={{ width: "90%", height: "70%", borderRadius: 12 }}
+                resizeMode="contain"
+              />
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation();
+                  const att = attachments.find((a) => a.id === viewImage);
+                  if (att) handleDownloadAttachment(att);
+                }}
+                style={{
+                  marginTop: 16,
+                  backgroundColor: "#06B6D4",
+                  paddingHorizontal: 20,
+                  paddingVertical: 10,
+                  borderRadius: 8,
+                }}
+              >
+                <Text style={{ color: "#111", fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>DOWNLOAD / SHARE</Text>
+              </Pressable>
+            </>
           )}
         </Pressable>
       </Modal>
