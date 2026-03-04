@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { View, Text, Modal, TextInput, Pressable, ScrollView, Switch } from "react-native";
+import { View, Text, Modal, TextInput, Pressable, ScrollView, Switch, Alert, ActivityIndicator } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { CostField } from "./CostField";
+import { uploadTaskAttachment, extractReceipt } from "../../lib/bridge-api";
 
 const CATEGORIES = [
   { value: "materials", label: "Materials", icon: "M" },
@@ -47,12 +49,59 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
   const [paymentStatus, setPaymentStatus] = useState("pending");
   const [paymentMethod, setPaymentMethod] = useState<string | null>(prefill?.paymentMethod || null);
   const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
 
   const ivaAmount = ivaAuto && amount ? Math.round(amount * 19 / 119) : (ivaManual || 0);
 
   const reset = () => {
     setAmount(null); setIvaAuto(true); setIvaManual(null); setCategory("other");
     setVendor(""); setDescription(""); setPaymentStatus("pending"); setPaymentMethod(null);
+  };
+
+  const handleScanReceipt = async () => {
+    Alert.alert("Scan Receipt", "Choose source", [
+      { text: "Camera", onPress: () => scanFrom("camera") },
+      { text: "Photo Library", onPress: () => scanFrom("library") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
+  const scanFrom = async (source: "camera" | "library") => {
+    try {
+      const opts: ImagePicker.ImagePickerOptions = { quality: 0.8, base64: true };
+      const result = source === "camera"
+        ? await ImagePicker.launchCameraAsync(opts)
+        : await ImagePicker.launchImageLibraryAsync(opts);
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+
+      setScanning(true);
+      const asset = result.assets[0];
+      const ext = asset.uri.split(".").pop() || "jpg";
+      const fileName = `receipt_${Date.now()}.${ext}`;
+
+      // Upload as attachment to the task
+      const uploadResult = await uploadTaskAttachment(taskId, asset.base64, fileName, "image");
+      const attachmentId = uploadResult.attachment.id;
+
+      // Extract receipt data via Gemini
+      const extractResult = await extractReceipt(attachmentId);
+      if (extractResult.ok && extractResult.receiptData) {
+        const rd = extractResult.receiptData;
+        if (rd.total) setAmount(rd.total);
+        if (rd.iva) { setIvaAuto(false); setIvaManual(rd.iva); }
+        if (rd.vendor) setVendor(rd.vendor);
+        if (rd.lineItems?.length) {
+          setDescription(rd.lineItems.map((li: any) => `${li.description}: $${li.total}`).join("\n"));
+        }
+        Alert.alert("Receipt Scanned", "Fields auto-filled from receipt. Review and adjust before saving.");
+      } else {
+        Alert.alert("Scan Complete", "Could not extract data from this image. Fill in manually.");
+      }
+    } catch (err: any) {
+      Alert.alert("Scan Failed", err.message);
+    } finally {
+      setScanning(false);
+    }
   };
 
   const handleCreate = async () => {
@@ -83,9 +132,34 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
       <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", padding: 20 }} onPress={onClose}>
         <Pressable onPress={() => {}} style={{ backgroundColor: "#1A1A1A", borderRadius: 12, maxHeight: "85%" }}>
           <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
-            <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2, marginBottom: 16 }}>
-              NEW EXPENSE
-            </Text>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2 }}>
+                NEW EXPENSE
+              </Text>
+              <Pressable
+                onPress={handleScanReceipt}
+                disabled={scanning}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 4,
+                  backgroundColor: "#06B6D422",
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 6,
+                  borderWidth: 1,
+                  borderColor: "#06B6D4",
+                  opacity: scanning ? 0.5 : 1,
+                }}
+              >
+                {scanning ? (
+                  <ActivityIndicator size={12} color="#06B6D4" />
+                ) : null}
+                <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
+                  {scanning ? "SCANNING..." : "SCAN RECEIPT"}
+                </Text>
+              </Pressable>
+            </View>
 
             {/* Amount */}
             <CostField value={amount} onChange={setAmount} label="AMOUNT (COP)" />

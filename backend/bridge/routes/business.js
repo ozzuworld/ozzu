@@ -166,9 +166,89 @@ If it is NOT a receipt/invoice, respond with:
   });
 }
 
+async function extractReceiptWithClaude(apiKey, fileBuffer, mimeType) {
+  const base64Data = fileBuffer.toString("base64");
+  const mediaType = mimeType || "image/jpeg";
+  const prompt = `You are a receipt/invoice data extraction assistant for Colombian businesses.
+
+Analyze this document and determine if it is a receipt, invoice, factura, or similar financial document.
+
+If it IS a receipt/invoice/factura:
+- Extract all financial data
+- All amounts should be in COP (Colombian Pesos) if visible, or the currency shown
+- IVA in Colombia is 19%
+
+Respond ONLY with valid JSON:
+{
+  "isReceipt": true,
+  "amount": 0,
+  "total": 0,
+  "subtotal": 0,
+  "iva": 0,
+  "vendor": "string",
+  "date": "YYYY-MM-DD",
+  "lineItems": [{ "description": "string", "quantity": 1, "unitPrice": 0, "total": 0 }],
+  "paymentMethod": "cash|card|transfer|other",
+  "documentNumber": "string or null",
+  "rawText": "brief summary of document content"
+}
+
+If it is NOT a receipt/invoice, respond with:
+{ "isReceipt": false }`;
+
+  const payload = JSON.stringify({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 2048,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } },
+        { type: "text", text: prompt },
+      ],
+    }],
+  });
+
+  return new Promise((resolve, reject) => {
+    const reqOpts = {
+      hostname: "api.anthropic.com",
+      path: "/v1/messages",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Length": Buffer.byteLength(payload),
+      },
+      timeout: 30000,
+    };
+
+    const httpReq = https.request(reqOpts, (httpRes) => {
+      let data = "";
+      httpRes.on("data", (chunk) => { data += chunk; });
+      httpRes.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          const text = json.content?.[0]?.text || "";
+          const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, text];
+          const parsed = JSON.parse(jsonMatch[1].trim());
+          resolve(parsed.isReceipt ? parsed : null);
+        } catch (e) {
+          reject(new Error(`Claude receipt parse error: ${e.message}`));
+        }
+      });
+    });
+
+    httpReq.on("error", (e) => reject(new Error(`Claude receipt request error: ${e.message}`)));
+    httpReq.on("timeout", () => { httpReq.destroy(); reject(new Error("Claude receipt request timeout (30s)")); });
+    httpReq.write(payload);
+    httpReq.end();
+  });
+}
+
 module.exports = function businessRoutes(ctx) {
   const { sendJSON, parseBody, db, CORS_HEADERS } = ctx;
   const GEMINI_API_KEY = ctx.GEMINI_API_KEY || "";
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 
   return async function (req, res, pathname, url) {
     // GET /business/projects — list all with task counts
@@ -633,14 +713,16 @@ module.exports = function businessRoutes(ctx) {
     const extractReceiptMatch = pathname.match(/^\/business\/attachments\/(\d+)\/extract-receipt$/);
     if (req.method === "POST" && extractReceiptMatch) {
       try {
-        if (!GEMINI_API_KEY) { sendJSON(res, 500, { error: "GEMINI_API_KEY not configured" }); return true; }
+        if (!ANTHROPIC_API_KEY && !GEMINI_API_KEY) { sendJSON(res, 500, { error: "No AI API key configured (ANTHROPIC_API_KEY or GEMINI_API_KEY)" }); return true; }
         const attId = parseInt(extractReceiptMatch[1]);
         const attachment = await db.getBusinessAttachment(attId);
         if (!attachment) { sendJSON(res, 404, { error: "Attachment not found" }); return true; }
         if (!fs.existsSync(attachment.file_path)) { sendJSON(res, 404, { error: "File not found on disk" }); return true; }
 
         const buf = fs.readFileSync(attachment.file_path);
-        const receiptData = await extractReceiptWithGemini(GEMINI_API_KEY, buf, attachment.mime_type);
+        const receiptData = ANTHROPIC_API_KEY
+          ? await extractReceiptWithClaude(ANTHROPIC_API_KEY, buf, attachment.mime_type)
+          : await extractReceiptWithGemini(GEMINI_API_KEY, buf, attachment.mime_type);
         if (!receiptData) {
           sendJSON(res, 200, { ok: false, message: "No receipt data detected" });
           return true;

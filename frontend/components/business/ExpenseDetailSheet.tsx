@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
-import { View, Text, Modal, ScrollView, Pressable, TextInput, Alert } from "react-native";
+import { View, Text, Modal, ScrollView, Pressable, TextInput, Alert, ActivityIndicator } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { CostField, formatCOPDisplay } from "./CostField";
 import type { BusinessExpense, ReceiptData } from "../../lib/bridge-api";
+import { uploadTaskAttachment, extractReceipt } from "../../lib/bridge-api";
 
 const CATEGORIES = ["materials", "labor", "services", "equipment", "transport", "permits", "fees", "other"] as const;
 const PAYMENT_STATUSES = [
@@ -17,15 +19,17 @@ interface ExpenseDetailSheetProps {
   onClose: () => void;
   onSave: (expenseId: number, data: Partial<BusinessExpense>) => void;
   onDelete: (expense: BusinessExpense) => void;
+  taskId?: number;
 }
 
-export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete }: ExpenseDetailSheetProps) {
+export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete, taskId }: ExpenseDetailSheetProps) {
   const [amount, setAmount] = useState<number | null>(null);
   const [ivaAmount, setIvaAmount] = useState<number | null>(null);
   const [category, setCategory] = useState("other");
   const [vendor, setVendor] = useState("");
   const [description, setDescription] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("pending");
+  const [scanning, setScanning] = useState(false);
 
   useEffect(() => {
     if (expense) {
@@ -57,6 +61,50 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: () => { onDelete(expense); onClose(); } },
     ]);
+  };
+
+  const handleScanReceipt = () => {
+    if (!taskId) return;
+    Alert.alert("Scan Receipt", "Choose source", [
+      { text: "Camera", onPress: () => scanFrom("camera") },
+      { text: "Photo Library", onPress: () => scanFrom("library") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
+  const scanFrom = async (source: "camera" | "library") => {
+    if (!taskId) return;
+    try {
+      const opts: ImagePicker.ImagePickerOptions = { quality: 0.8, base64: true };
+      const result = source === "camera"
+        ? await ImagePicker.launchCameraAsync(opts)
+        : await ImagePicker.launchImageLibraryAsync(opts);
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+
+      setScanning(true);
+      const asset = result.assets[0];
+      const ext = asset.uri.split(".").pop() || "jpg";
+      const fileName = `receipt_${Date.now()}.${ext}`;
+
+      const uploadResult = await uploadTaskAttachment(taskId, asset.base64, fileName, "image");
+      const extractResult = await extractReceipt(uploadResult.attachment.id);
+      if (extractResult.ok && extractResult.receiptData) {
+        const rd = extractResult.receiptData;
+        if (rd.total) setAmount(rd.total);
+        if (rd.iva) setIvaAmount(rd.iva);
+        if (rd.vendor) setVendor(rd.vendor);
+        if (rd.lineItems?.length) {
+          setDescription(rd.lineItems.map((li: any) => `${li.description}: $${li.total}`).join("\n"));
+        }
+        Alert.alert("Receipt Scanned", "Fields updated from receipt. Review and save.");
+      } else {
+        Alert.alert("Scan Complete", "Could not extract data from this image.");
+      }
+    } catch (err: any) {
+      Alert.alert("Scan Failed", err.message);
+    } finally {
+      setScanning(false);
+    }
   };
 
   const receiptData: ReceiptData | null = expense.receipt_data;
@@ -148,6 +196,32 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
                 </Pressable>
               ))}
             </View>
+
+            {/* Scan receipt button */}
+            {taskId ? (
+              <Pressable
+                onPress={handleScanReceipt}
+                disabled={scanning}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  backgroundColor: "#06B6D422",
+                  paddingVertical: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: "#06B6D4",
+                  marginBottom: 16,
+                  opacity: scanning ? 0.5 : 1,
+                }}
+              >
+                {scanning ? <ActivityIndicator size={14} color="#06B6D4" /> : null}
+                <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
+                  {scanning ? "SCANNING RECEIPT..." : "SCAN RECEIPT"}
+                </Text>
+              </Pressable>
+            ) : null}
 
             {/* Receipt data panel */}
             {receiptData ? (

@@ -675,6 +675,7 @@ export function TaskDetailSheet({
             onRemoveExpense?.(exp.id);
             setExpenses((prev) => prev.filter((e) => e.id !== exp.id));
           }}
+          taskId={task?.id}
         />
       ) : null}
     </>
