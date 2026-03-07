@@ -1253,6 +1253,52 @@ export async function fetchOsintToolStatus(): Promise<OsintToolStatus> {
   return res.json();
 }
 
+// ── Identity Clusters & Timeline ──
+
+export interface IdentityCluster {
+  id: number;
+  cluster_label: string;
+  confidence: number;
+  entity_ids: number[];
+  profile_ids: number[];
+  evidence: string;
+  breakdown: {
+    faceScore: number;
+    usernameScore: number;
+    emailScore: number;
+    breachScore: number;
+    platformScore: number;
+  };
+  entity_count: number;
+  profile_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimelineEvent {
+  type: "scan" | "finding" | "alert";
+  timestamp: string;
+  title: string;
+  severity: string;
+  data: Record<string, any>;
+}
+
+export async function fetchIdentityClusters(minConfidence = 0): Promise<IdentityCluster[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/identity-clusters?minConfidence=${minConfidence}`);
+  if (!res.ok) throw new Error(`Cluster fetch error: ${res.status}`);
+  const data = await res.json();
+  return data.clusters || [];
+}
+
+export async function fetchOsintTimeline(limit = 100, profileId?: number): Promise<TimelineEvent[]> {
+  let url = `${BRIDGE_URL}/osint/timeline?limit=${limit}`;
+  if (profileId) url += `&profileId=${profileId}`;
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error(`Timeline fetch error: ${res.status}`);
+  const data = await res.json();
+  return data.events || [];
+}
+
 // ── Epics (integrated into directives — type="epic" with epicId/phaseOrder) ──
 
 export interface EpicProgress {

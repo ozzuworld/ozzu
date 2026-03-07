@@ -17,7 +17,7 @@ import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { StatusBadge } from "../../components/StatusBadge";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
-import { useOsint, useOsintGraph, useOsintAlerts, useOsintGroups, useOsintToolStatus } from "../../lib/osint-hooks";
+import { useOsint, useOsintGraph, useOsintAlerts, useOsintGroups, useOsintToolStatus, useIdentityClusters, useOsintTimeline } from "../../lib/osint-hooks";
 import {
   deleteOsintProfile,
   triggerOsintScan,
@@ -54,7 +54,11 @@ import { AlertBanner } from "../../components/osint/AlertBanner";
 import { AlertList } from "../../components/osint/AlertList";
 import { GroupManager } from "../../components/osint/GroupManager";
 import { RemediationList } from "../../components/osint/RemediationList";
+import { EntityDetailSheet } from "../../components/osint/EntityDetailSheet";
+import { IdentityClusterCard } from "../../components/osint/IdentityClusterCard";
+import { Timeline } from "../../components/osint/Timeline";
 import CedulaDbManager from "../../components/osint/CedulaDbManager";
+import type { OsintEntity } from "../../lib/bridge-api";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -66,6 +70,7 @@ const VIEW_TABS = [
   { key: "findings", label: "FINDINGS", emoji: "🔍" },
   { key: "graph", label: "GRAPH", emoji: "🕸" },
   { key: "correlations", label: "LINKS", emoji: "🔗" },
+  { key: "timeline", label: "TIMELINE", emoji: "⏱" },
   { key: "reports", label: "REPORTS", emoji: "📊" },
   { key: "fixit", label: "FIX IT", emoji: "🔧" },
 ];
@@ -92,6 +97,8 @@ export default function OsintScreen() {
   const { alerts, unreadCount, refresh: refreshAlerts } = useOsintAlerts();
   const { groups, refresh: refreshGroups } = useOsintGroups();
   const { availableCount, totalCount } = useOsintToolStatus();
+  const { clusters } = useIdentityClusters();
+  const timeline = useOsintTimeline();
 
   const [activeView, setActiveView] = useState("findings");
   const [showAlerts, setShowAlerts] = useState(false);
@@ -110,6 +117,7 @@ export default function OsintScreen() {
   const [statusFilter, setStatusFilter] = useState<string>("new");
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [profilesExpanded, setProfilesExpanded] = useState(true);
+  const [selectedEntity, setSelectedEntity] = useState<OsintEntity | null>(null);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1110,12 +1118,29 @@ export default function OsintScreen() {
 
         {/* ─── GRAPH VIEW ─── */}
         {activeView === "graph" && (
-          <EntityGraph
-            entities={graph.entities}
-            relationships={graph.relationships}
-            summary={graph.summary}
-            loading={graph.loading}
-          />
+          <>
+            {/* Identity Clusters */}
+            {clusters.length > 0 && (
+              <View style={{ gap: 8, marginBottom: 12 }}>
+                <Text style={{ color: "#06B6D4", fontSize: 11, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+                  🧬 IDENTITY CLUSTERS ({clusters.length})
+                </Text>
+                {clusters.slice(0, 5).map((c) => (
+                  <IdentityClusterCard key={c.id} cluster={c} />
+                ))}
+              </View>
+            )}
+            <EntityGraph
+              entities={graph.entities}
+              relationships={graph.relationships}
+              summary={graph.summary}
+              loading={graph.loading}
+              onEntityPress={(entity) => setSelectedEntity(entity as OsintEntity)}
+            />
+            <Text style={{ color: "#404040", fontSize: 9, fontFamily: "monospace", textAlign: "center", marginTop: 8 }}>
+              Long-press an entity to view details and pivot scan
+            </Text>
+          </>
         )}
 
         {/* ─── CORRELATIONS VIEW ─── */}
@@ -1268,6 +1293,11 @@ export default function OsintScreen() {
         )}
 
         {/* ─── FIX IT VIEW ─── */}
+        {/* ─── TIMELINE VIEW ─── */}
+        {activeView === "timeline" && (
+          <Timeline events={timeline.events} loading={timeline.loading} />
+        )}
+
         {activeView === "fixit" && (
           <RemediationList />
         )}
@@ -1299,6 +1329,13 @@ export default function OsintScreen() {
           <CedulaDbManager onClose={() => setShowFaceDb(false)} />
         </View>
       )}
+
+      <EntityDetailSheet
+        entity={selectedEntity}
+        visible={!!selectedEntity}
+        onClose={() => setSelectedEntity(null)}
+        onRefresh={() => { refresh(); graph.refresh(); }}
+      />
     </View>
   );
 }

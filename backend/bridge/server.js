@@ -35,6 +35,7 @@ osintEngine.registerModule(require("./osint-modules/secret-scanner"));
 osintEngine.registerModule(require("./osint-modules/exif-extract"));
 osintEngine.registerModule(require("./osint-modules/reverse-image"));
 osintEngine.registerModule(require("./osint-modules/avatar-compare"));
+osintEngine.registerModule(require("./osint-modules/face-match"));
 // CLI-based modules (Epic 6) — run in osint-tools Docker container
 osintEngine.registerModule(require("./osint-modules/sherlock-cli"));
 osintEngine.registerModule(require("./osint-modules/maigret-cli"));

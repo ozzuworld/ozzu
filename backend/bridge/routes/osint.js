@@ -1335,6 +1335,76 @@ module.exports = function osintRoutes(ctx) {
       return true;
     }
 
+    // ── Identity Clusters (Hardening Epic) ──
+
+    // GET /osint/identity-clusters — list identity clusters
+    if (req.method === "GET" && pathname === "/osint/identity-clusters") {
+      try {
+        const minConfidence = parseInt(url.searchParams.get("minConfidence") || "0", 10);
+        const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+        const clusters = await db.getIdentityClusters({ minConfidence, limit });
+        sendJSON(res, 200, { ok: true, clusters });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /osint/timeline — activity timeline (scans, findings, alerts)
+    if (req.method === "GET" && pathname === "/osint/timeline") {
+      try {
+        const limit = parseInt(url.searchParams.get("limit") || "100", 10);
+        const profileId = url.searchParams.get("profileId");
+        const events = [];
+
+        // Get recent scans
+        const scans = await db.getOsintScans(profileId ? parseInt(profileId, 10) : undefined);
+        for (const s of (scans || []).slice(0, limit)) {
+          events.push({
+            type: "scan",
+            timestamp: s.created_at,
+            title: `Scan ${s.status} — ${s.findings_count || 0} findings`,
+            severity: s.status === "failed" ? "high" : "info",
+            data: { scanId: s.id, status: s.status, modules: s.modules, findingsCount: s.findings_count },
+          });
+        }
+
+        // Get recent findings (new ones)
+        const findingFilters = { limit, sortBy: "created_at" };
+        if (profileId) findingFilters.profileId = parseInt(profileId, 10);
+        const findings = await db.getOsintFindings(findingFilters);
+        for (const f of (findings || []).slice(0, limit)) {
+          events.push({
+            type: "finding",
+            timestamp: f.first_seen_at || f.created_at,
+            title: f.title,
+            severity: f.severity,
+            data: { findingId: f.id, module: f.module, category: f.category, status: f.status },
+          });
+        }
+
+        // Get recent alerts
+        const alerts = await db.getOsintAlerts({ limit });
+        for (const a of (alerts || []).slice(0, limit)) {
+          events.push({
+            type: "alert",
+            timestamp: a.created_at,
+            title: a.title,
+            severity: a.severity,
+            data: { alertId: a.id, alertType: a.alert_type, read: a.read },
+          });
+        }
+
+        // Sort by timestamp descending
+        events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+        sendJSON(res, 200, { ok: true, events: events.slice(0, limit) });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     return false;
   };
 };

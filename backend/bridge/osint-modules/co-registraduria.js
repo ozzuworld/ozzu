@@ -2,6 +2,7 @@
 // Source: certvigenciacedula.registraduria.gov.co — certificate of cedula validity
 // Access: ASPX form, redirects to menu first. Electoral census at eleccionescolombia.registraduria.gov.co
 const { validateCedula, safeFetch, CO_HEADERS, extractAspxFields } = require("./co-utils");
+const browserHelper = require("../osint-browser-helper");
 
 const CERT_URL = "https://certvigenciacedula.registraduria.gov.co";
 const ELECTORAL_URL = "https://eleccionescolombia.registraduria.gov.co/identificacion";
@@ -150,6 +151,68 @@ module.exports = {
       // Continue to fallback
     } finally {
       release4();
+    }
+
+    // Strategy 4: Browser automation for CAPTCHA-protected forms
+    if (await browserHelper.isAvailable()) {
+      const sessionId = `co-registraduria-${Date.now()}`;
+      try {
+        await browserHelper.navigate(sessionId, `${CERT_URL}/Consultas/Consulta_Vigencia.aspx`);
+
+        // Check for captcha
+        const captcha = await browserHelper.detectCaptcha(sessionId);
+
+        if (!captcha.hasRecaptcha && !captcha.hasCaptchaImage) {
+          // Find and fill the cedula input
+          const nuipSelector = await browserHelper.evaluate(sessionId, `
+            const input = document.querySelector('input[id*="nuip"], input[id*="cedula"], input[id*="documento"], input[name*="nuip"], input[name*="cedula"]');
+            input ? (input.id ? '#' + input.id : '[name="' + input.name + '"]') : null;
+          `);
+
+          if (nuipSelector.result && nuipSelector.result !== "null") {
+            const selector = JSON.parse(nuipSelector.result);
+            await browserHelper.type(sessionId, selector, cedula);
+
+            // Find and click submit button
+            const btnSelector = await browserHelper.evaluate(sessionId, `
+              const btn = document.querySelector('input[id*="btn"][id*="onsultar"], input[value*="Consultar"], button[id*="btn"]');
+              btn ? (btn.id ? '#' + btn.id : '[value="' + btn.value + '"]') : null;
+            `);
+
+            if (btnSelector.result && btnSelector.result !== "null") {
+              await browserHelper.click(sessionId, JSON.parse(btnSelector.result), { waitAfter: "idle" });
+              const result = await browserHelper.evaluate(sessionId, "document.body.innerHTML");
+              if (result.result) {
+                const status = extractCedulaStatus(result.result);
+                if (status.found) {
+                  findings.push(buildStatusFinding(cedula, status));
+                  return findings;
+                }
+              }
+            }
+          }
+        }
+
+        findings.push({
+          category: "metadata",
+          severity: "info",
+          title: "Registraduría: Browser automation — CAPTCHA present",
+          description: `Browser automation reached the form but CAPTCHA prevents automated submission for CC: ${cedula}.`,
+          sourceUrl: `${CERT_URL}/menu.aspx`,
+          rawData: { searched: cedula, browserAttempt: true, captcha },
+        });
+      } catch (browserErr) {
+        findings.push({
+          category: "metadata",
+          severity: "info",
+          title: "Registraduría: Browser automation failed",
+          description: `Browser attempt failed: ${browserErr.message}`,
+          rawData: { searched: cedula, error: browserErr.message, browserAttempt: true },
+        });
+      } finally {
+        await browserHelper.closeSession(sessionId);
+      }
+      return findings;
     }
 
     // Fallback: manual lookup with correct URLs

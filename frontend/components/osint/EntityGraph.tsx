@@ -25,6 +25,7 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
   member_of: "MEMBER",
   found_on: "FOUND ON",
   resolves_to: "RESOLVES",
+  face_match: "FACE",
 };
 
 interface Entity {
@@ -64,6 +65,7 @@ interface Props {
     relationshipTypes: Record<string, number>;
   } | null;
   loading: boolean;
+  onEntityPress?: (entity: Entity) => void;
 }
 
 function confidenceColor(conf: number): string {
@@ -73,7 +75,7 @@ function confidenceColor(conf: number): string {
   return "#6B7280";
 }
 
-export function EntityGraph({ entities, relationships, summary, loading }: Props) {
+export function EntityGraph({ entities, relationships, summary, loading, onEntityPress }: Props) {
   const [expandedType, setExpandedType] = useState<string | null>(null);
   const [expandedEntity, setExpandedEntity] = useState<number | null>(null);
 
@@ -174,6 +176,7 @@ export function EntityGraph({ entities, relationships, summary, loading }: Props
                       <View key={entity.id}>
                         <Pressable
                           onPress={() => setExpandedEntity(isEntityExpanded ? null : entity.id)}
+                          onLongPress={() => onEntityPress?.(entity)}
                           style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: "#1A1A1A" }}
                         >
                           <View style={{ flex: 1 }}>

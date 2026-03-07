@@ -1208,6 +1208,63 @@ const EXTRACTION_RULES = [
       return { entities, relationships };
     },
   },
+
+  // face-match: facial recognition match → image entity + face_match relationship
+  {
+    module: "face-match",
+    match: (f) => f.category === "identity" && f.raw_data?.faceMatch === true,
+    extract: (f, profile) => {
+      const entities = [];
+      const relationships = [];
+      const sim = f.raw_data.similarity || 0;
+      const confidence = Math.round(sim * 100);
+
+      // Create image entity for the matched avatar
+      if (f.raw_data.avatarUrl) {
+        entities.push({
+          entity_type: "image",
+          value: f.raw_data.avatarUrl,
+          label: `Face from ${f.raw_data.platform || "unknown"}`,
+          metadata: {
+            faceMatch: true,
+            similarity: sim,
+            matchedProfileId: f.raw_data.matchedProfileId,
+            platform: f.raw_data.platform,
+          },
+          source_module: "face-match",
+        });
+      }
+
+      // Create cross-profile face_match relationship
+      if (f.raw_data.matchedProfileId) {
+        relationships.push({
+          fromType: profile.profile_type,
+          fromValue: profile.value,
+          toType: "image",
+          toValue: f.raw_data.avatarUrl || `face:${f.raw_data.matchedProfileId}`,
+          relationship: "face_match",
+          confidence,
+          evidence: `ArcFace similarity: ${(sim * 100).toFixed(1)}% (${f.raw_data.matchedProfileLabel || f.raw_data.matchedProfileId})`,
+        });
+      }
+
+      // Store embedding as entity metadata for future cross-profile comparison
+      if (f.raw_data.embedding) {
+        entities.push({
+          entity_type: "image",
+          value: `face_embedding:${profile.id}`,
+          label: `Face embedding for ${profile.label}`,
+          metadata: {
+            faceEmbedding: f.raw_data.embedding,
+            profileId: profile.id,
+          },
+          source_module: "face-match",
+        });
+      }
+
+      return { entities, relationships };
+    },
+  },
 ];
 
 // ── Core Correlation Functions ──

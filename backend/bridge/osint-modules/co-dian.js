@@ -4,6 +4,7 @@
 // This module extracts the JSESSIONID and ViewState but cannot bypass captcha.
 // Falls back to datos.gov.co RUT datasets when available.
 const { validateCedula, validateNIT, safeFetch, insecureFetch, CO_HEADERS } = require("./co-utils");
+const browser = require("../osint-browser-helper");
 
 // datos.gov.co has some RUT-related open datasets
 const DIAN_OPEN_DATA = "https://www.datos.gov.co/resource/f9g5-2wvi.json"; // Grandes Contribuyentes
@@ -135,7 +136,84 @@ module.exports = {
         }
       }
 
-      // Captcha blocked or no data — provide manual link
+      // Strategy 3: Browser automation for CAPTCHA bypass
+      if (await browser.isAvailable()) {
+        const sessionId = `co-dian-${Date.now()}`;
+        try {
+          await browser.navigate(sessionId, "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces");
+
+          // Fill the NIT/CC field
+          await browser.type(sessionId, 'input[id*="numNit"], input[name*="numNit"]', cleanValue);
+
+          // Check for captcha
+          const captcha = await browser.detectCaptcha(sessionId);
+          if (captcha.hasRecaptcha) {
+            // Can't solve reCAPTCHA automatically — report what we found
+            findings.push({
+              category: "exposure",
+              severity: "info",
+              title: "DIAN RUT: reCAPTCHA detected (browser mode)",
+              description: `Browser automation reached the DIAN form but reCAPTCHA blocks automated submission.\nManual lookup required for ${isCedula ? "CC" : "NIT"}: ${cleanValue}`,
+              sourceUrl: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
+              rawData: { searched: cleanValue, type: profile.profile_type, reason: "recaptcha", browserAttempt: true },
+              remediation: "Visit https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces — enter NIT/CC and complete captcha.",
+            });
+          } else {
+            // No captcha — try to submit
+            await browser.click(sessionId, 'input[id*="btnBuscar"], input[name*="btnBuscar"]', { waitAfter: "idle" });
+            const result = await browser.evaluate(sessionId, "document.body.innerHTML");
+            if (result.result) {
+              const rutData = parseDianResponse(result.result);
+              if (rutData.found) {
+                findings.push({
+                  category: "exposure",
+                  severity: rutData.status === "ACTIVO" ? "low" : "medium",
+                  title: `DIAN RUT: ${rutData.status || "Found"} — ${rutData.name || cleanValue}`,
+                  description: [
+                    rutData.name ? `Name: ${rutData.name}` : null,
+                    `NIT/CC: ${cleanValue}`,
+                    rutData.dv ? `Verification digit: ${rutData.dv}` : null,
+                    rutData.status ? `Status: ${rutData.status}` : null,
+                    rutData.type ? `Type: ${rutData.type}` : null,
+                    rutData.mainActivity ? `Main activity: ${rutData.mainActivity}` : null,
+                    rutData.address ? `Address: ${rutData.address}` : null,
+                    rutData.city ? `City: ${rutData.city}` : null,
+                    "(Retrieved via browser automation)",
+                  ].filter(Boolean).join("\n"),
+                  sourceUrl: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
+                  rawData: { ...rutData, browserAutomation: true },
+                  remediation: rutData.status !== "ACTIVO"
+                    ? "RUT appears inactive or cancelled. Contact DIAN if unexpected."
+                    : "Active RUT registration. Verify tax obligations are current.",
+                });
+                return findings;
+              }
+            }
+            // Browser attempt didn't find data
+            findings.push({
+              category: "exposure",
+              severity: "info",
+              title: "DIAN RUT: No results via browser",
+              description: `Browser automation submitted the form but no RUT data was returned for ${isCedula ? "CC" : "NIT"}: ${cleanValue}`,
+              sourceUrl: "https://muisca.dian.gov.co/WebRutMuisca/DefConsultaEstadoRUT.faces",
+              rawData: { searched: cleanValue, type: profile.profile_type, reason: "no_results", browserAttempt: true },
+            });
+          }
+        } catch (browserErr) {
+          findings.push({
+            category: "exposure",
+            severity: "info",
+            title: "DIAN RUT: Browser automation failed",
+            description: `Browser attempt failed: ${browserErr.message}`,
+            rawData: { searched: cleanValue, error: browserErr.message, browserAttempt: true },
+          });
+        } finally {
+          await browser.closeSession(sessionId);
+        }
+        return findings;
+      }
+
+      // Captcha blocked, no browser available — provide manual link
       findings.push({
         category: "exposure",
         severity: "info",

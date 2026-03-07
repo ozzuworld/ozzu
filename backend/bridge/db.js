@@ -2698,6 +2698,80 @@ async function getBrowserSession(sessionId) {
   return res.rows[0] || null;
 }
 
+// ── Identity Clusters ──
+
+async function upsertIdentityCluster(cluster) {
+  if (!_pgConnected) return null;
+  await query(`
+    CREATE TABLE IF NOT EXISTS osint_identity_clusters (
+      id SERIAL PRIMARY KEY,
+      cluster_label TEXT NOT NULL,
+      confidence INTEGER DEFAULT 0,
+      entity_ids JSONB DEFAULT '[]',
+      profile_ids JSONB DEFAULT '[]',
+      evidence TEXT,
+      breakdown JSONB DEFAULT '{}',
+      entity_count INTEGER DEFAULT 0,
+      profile_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  // Upsert by matching entity_ids set (sorted for consistency)
+  const sortedIds = [...cluster.entity_ids].sort((a, b) => a - b);
+  const existing = await query(
+    `SELECT id FROM osint_identity_clusters WHERE entity_ids::text = $1::text`,
+    [JSON.stringify(sortedIds)]
+  );
+
+  if (existing.rows.length > 0) {
+    const res = await query(
+      `UPDATE osint_identity_clusters SET
+        cluster_label = $1, confidence = $2, evidence = $3,
+        breakdown = $4, entity_count = $5, profile_count = $6,
+        profile_ids = $7, updated_at = NOW()
+      WHERE id = $8 RETURNING *`,
+      [cluster.label, cluster.confidence, cluster.evidence,
+       JSON.stringify(cluster.breakdown), cluster.entity_count, cluster.profile_count,
+       JSON.stringify(cluster.profile_ids), existing.rows[0].id]
+    );
+    return res.rows[0];
+  }
+
+  const res = await query(
+    `INSERT INTO osint_identity_clusters
+      (cluster_label, confidence, entity_ids, profile_ids, evidence, breakdown, entity_count, profile_count)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [cluster.label, cluster.confidence, JSON.stringify(sortedIds),
+     JSON.stringify(cluster.profile_ids), cluster.evidence,
+     JSON.stringify(cluster.breakdown), cluster.entity_count, cluster.profile_count]
+  );
+  return res.rows[0];
+}
+
+async function getIdentityClusters(filters = {}) {
+  if (!_pgConnected) return [];
+  // Table might not exist yet
+  try {
+    let sql = `SELECT * FROM osint_identity_clusters WHERE 1=1`;
+    const params = [];
+    if (filters.minConfidence) {
+      params.push(filters.minConfidence);
+      sql += ` AND confidence >= $${params.length}`;
+    }
+    sql += ` ORDER BY confidence DESC`;
+    if (filters.limit) {
+      params.push(filters.limit);
+      sql += ` LIMIT $${params.length}`;
+    }
+    const res = await query(sql, params);
+    return res.rows;
+  } catch {
+    return [];
+  }
+}
+
 module.exports = {
   init,
   isConnected,
@@ -2884,6 +2958,9 @@ module.exports = {
   getBrowserAuditLog,
   upsertBrowserSession,
   getBrowserSession,
+  // Identity Clusters
+  upsertIdentityCluster,
+  getIdentityClusters,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

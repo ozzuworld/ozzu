@@ -2,6 +2,7 @@
 const db = require("./db");
 const correlator = require("./osint-correlator");
 const remEngine = require("./osint-remediation-engine");
+const { runIdentityClustering } = require("./osint-identity-cluster");
 
 // ── Rate Limiter ──
 class RateLimiter {
@@ -153,6 +154,13 @@ async function runScan(profileId, scanType = "full") {
         });
       } catch (remErr) {
         console.error(`[osint] Auto-remediation error:`, remErr.message);
+      }
+
+      // Identity clustering — group entities into "same person" clusters
+      try {
+        await runIdentityClustering(profileId);
+      } catch (clusterErr) {
+        console.error(`[osint] Identity clustering error:`, clusterErr.message);
       }
 
       // Delta detection + alert generation

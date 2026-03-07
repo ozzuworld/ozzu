@@ -11,6 +11,8 @@ import {
   fetchOsintUnreadAlertCount,
   fetchOsintGroups,
   fetchOsintToolStatus,
+  fetchIdentityClusters,
+  fetchOsintTimeline,
   type OsintProfile,
   type OsintFinding,
   type ExposureScore,
@@ -22,6 +24,8 @@ import {
   type OsintAlert,
   type OsintGroup,
   type OsintToolStatus,
+  type IdentityCluster,
+  type TimelineEvent,
 } from "./bridge-api";
 
 interface UseOsintResult {
@@ -256,4 +260,72 @@ export function useOsintToolStatus(): UseOsintToolStatusResult {
   const totalCount = toolStatus ? Object.keys(toolStatus.tools).length : 0;
 
   return { toolStatus, availableCount, totalCount, loading, refresh: fetchData };
+}
+
+// useIdentityClusters() hook — identity clustering results
+interface UseIdentityClustersResult {
+  clusters: IdentityCluster[];
+  loading: boolean;
+  refresh: () => Promise<void>;
+}
+
+export function useIdentityClusters(): UseIdentityClustersResult {
+  const [clusters, setClusters] = useState<IdentityCluster[]>([]);
+  const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const c = await fetchIdentityClusters();
+      if (mountedRef.current) setClusters(c);
+    } catch (_) {}
+    finally { if (mountedRef.current) setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchData();
+    return () => { mountedRef.current = false; };
+  }, [fetchData]);
+
+  useEffect(() => {
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  return { clusters, loading, refresh: fetchData };
+}
+
+// useOsintTimeline() hook — activity timeline
+interface UseOsintTimelineResult {
+  events: TimelineEvent[];
+  loading: boolean;
+  refresh: () => Promise<void>;
+}
+
+export function useOsintTimeline(profileId?: number): UseOsintTimelineResult {
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const e = await fetchOsintTimeline(100, profileId);
+      if (mountedRef.current) setEvents(e);
+    } catch (_) {}
+    finally { if (mountedRef.current) setLoading(false); }
+  }, [profileId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchData();
+    return () => { mountedRef.current = false; };
+  }, [fetchData]);
+
+  useEffect(() => {
+    const interval = setInterval(fetchData, 15000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  return { events, loading, refresh: fetchData };
 }
