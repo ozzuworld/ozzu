@@ -1506,6 +1506,68 @@ module.exports = function osintRoutes(ctx) {
       return true;
     }
 
+    // ── Intelligence Assessment Endpoints ──
+
+    // POST /osint/assessment/:profileId — generate new assessment
+    const assessMatch = pathname.match(/^\/osint\/assessment\/(\d+)$/);
+    if (req.method === "POST" && assessMatch) {
+      try {
+        const analysisEngine = require("../osint-analysis-engine");
+        const profileId = parseInt(assessMatch[1]);
+        const assessment = await analysisEngine.generateAssessment(profileId);
+        sendJSON(res, 200, { ok: true, assessment });
+      } catch (err) {
+        log.bridge.error("Assessment generation error:", err.message);
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /osint/assessment/:profileId — get latest assessment
+    if (req.method === "GET" && assessMatch) {
+      try {
+        const analysisEngine = require("../osint-analysis-engine");
+        const profileId = parseInt(assessMatch[1]);
+        let assessment = await analysisEngine.getLatestAssessment(profileId);
+        if (!assessment) {
+          sendJSON(res, 200, { ok: true, assessment: null, message: "No assessment yet. POST to generate." });
+          return true;
+        }
+        sendJSON(res, 200, { ok: true, assessment });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /osint/findings/:profileId/graded — get graded findings
+    const gradedMatch = pathname.match(/^\/osint\/findings\/(\d+)\/graded$/);
+    if (req.method === "GET" && gradedMatch) {
+      try {
+        const analysisEngine = require("../osint-analysis-engine");
+        const profileId = parseInt(gradedMatch[1]);
+        const graded = await analysisEngine.gradeAllFindings(profileId);
+        sendJSON(res, 200, { ok: true, findings: graded });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /osint/relationships/:profileId/typed — get typed relationships
+    const typedRelMatch = pathname.match(/^\/osint\/relationships\/(\d+)\/typed$/);
+    if (req.method === "GET" && typedRelMatch) {
+      try {
+        const analysisEngine = require("../osint-analysis-engine");
+        const profileId = parseInt(typedRelMatch[1]);
+        const relationships = await analysisEngine.extractTypedRelationships(profileId);
+        sendJSON(res, 200, { ok: true, relationships });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     return false;
   };
 };

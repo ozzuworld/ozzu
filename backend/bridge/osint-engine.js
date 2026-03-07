@@ -194,6 +194,18 @@ async function runScan(profileId, scanType = "full") {
       } catch (deltaErr) {
         console.error(`[osint] Delta/alert error for scan ${scanId}:`, deltaErr.message);
       }
+
+      // Auto-generate intelligence assessment (only for image profiles — they aggregate pivot data)
+      try {
+        const profile_ = await db.getOsintProfile(profileId);
+        if (profile_?.profile_type === "image") {
+          const analysisEngine = require("./osint-analysis-engine");
+          const assessment = await analysisEngine.generateAssessment(profileId);
+          console.log(`[osint] Auto-assessment: ${assessment.identityConfidence} confidence, ${assessment.keyFindings?.length || 0} key findings, exposure: ${assessment.exposureScore?.overall || 0}/100`);
+        }
+      } catch (assessErr) {
+        console.error(`[osint] Auto-assessment error:`, assessErr.message);
+      }
     } catch (err) {
       console.error(`[osint] Scan ${scanId} failed:`, err.message);
       await db.updateOsintScan(scanId, {

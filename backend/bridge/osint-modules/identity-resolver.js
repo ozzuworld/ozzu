@@ -159,8 +159,9 @@ module.exports = {
     const pivotedNames = new Set();
 
     for (const candidate of topCandidates.filter(c => c.confidence >= 0.5)) {
-      // Recommend username search if looks like a username (no spaces, reasonable length)
-      if (!candidate.name.includes(" ") && candidate.name.length <= 30) {
+      // Recommend username search if looks like a username (no spaces, reasonable length, Latin only)
+      const isLatinUsername = /^[a-zA-Z0-9._\-\u00C0-\u024F]+$/.test(candidate.name);
+      if (!candidate.name.includes(" ") && candidate.name.length <= 30 && isLatinUsername) {
         findings.push({
           category: "identity",
           severity: "info",
@@ -177,7 +178,9 @@ module.exports = {
       }
 
       // If it looks like a full name, create name profile + generate username variants
-      if (candidate.name.includes(" ") && isPersonName(candidate.name)) {
+      // Only pivot on Latin names — Cyrillic/CJK names waste pivots (Wikipedia/News need Latin queries)
+      const isLatinName = /^[a-zA-Z\s\u00C0-\u024F]+$/.test(candidate.name);
+      if (candidate.name.includes(" ") && isPersonName(candidate.name) && isLatinName) {
         const parts = candidate.name.split(/\s+/).filter(p => p.length > 1);
         const nameKey = candidate.name.toLowerCase().trim();
         if (parts.length >= 2 && !pivotedNames.has(nameKey)) {

@@ -20,17 +20,21 @@ interface Props {
   onBack: () => void;
 }
 
-type Tab = "overview" | "identity" | "faces" | "scene" | "threats";
+type Tab = "assessment" | "overview" | "identity" | "faces" | "sources";
 
 export function IntelDossier({ profile, findings, onBack }: Props) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("assessment");
   const [dossier, setDossier] = useState<any>(null);
   const [dossierLoading, setDossierLoading] = useState(true);
   const [ekf, setEkf] = useState<EkfSummary | null>(null);
+  const [assessment, setAssessment] = useState<any>(null);
+  const [assessLoading, setAssessLoading] = useState(true);
+  const [assessGenerating, setAssessGenerating] = useState(false);
+  const [typedRels, setTypedRels] = useState<any[]>([]);
 
   const imgUrl = `${getBridgeUrl()}/osint/images/${profile.id}/thumbnail`;
 
-  // Parse — pick first Latin candidate, skip Russian/dimensions
+  // Parse — pick first Latin candidate
   const idCand = findings.find(f => f.module === "identity-resolver" && f.raw_data?.type === "identity_candidates");
   const allCandidates = idCand?.raw_data?.candidates || [];
   const top = allCandidates.find((c: any) => {
@@ -41,10 +45,8 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
   const name = (top?.name && isLatin(top.name) ? top.name : null) || profile.label || "Unknown";
   const conf = top?.confidence || 0;
 
-  const faceGuess = findings.find(f => f.module === "face-search" && f.raw_data?.type === "identity_candidates");
   const verified = findings.filter(f => f.raw_data?.type === "verified_face_matches");
   const discovered = findings.filter(f => f.raw_data?.type === "discovered_profile");
-  const unverified = findings.filter(f => f.raw_data?.type === "unverified_matches");
   const scenes = findings.filter(f => f.raw_data?.type === "scene_analysis");
   const pivots = findings.filter(f => f.raw_data?.type === "pivot_recommendation");
 
@@ -59,56 +61,79 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
   }, [profile.id]);
   useEffect(() => { fetchOsintEkf(profile.id).then(d => setEkf(d.summary)).catch(() => {}); }, [profile.id]);
 
+  // Load assessment
+  useEffect(() => {
+    setAssessLoading(true);
+    apiFetch(`/osint/assessment/${profile.id}`)
+      .then(d => setAssessment(d.assessment))
+      .catch(() => {})
+      .finally(() => setAssessLoading(false));
+  }, [profile.id]);
+
+  // Load typed relationships
+  useEffect(() => {
+    apiFetch(`/osint/relationships/${profile.id}/typed`)
+      .then(d => setTypedRels(d.relationships || []))
+      .catch(() => {});
+  }, [profile.id]);
+
+  const generateAssessment = useCallback(async () => {
+    setAssessGenerating(true);
+    try {
+      const d = await apiFetch(`/osint/assessment/${profile.id}`, { method: "POST" });
+      setAssessment(d.assessment);
+    } catch (e: any) {
+      console.error("Assessment generation failed:", e);
+    } finally {
+      setAssessGenerating(false);
+    }
+  }, [profile.id]);
+
   const tabs: { key: Tab; label: string; badge?: number }[] = [
+    { key: "assessment", label: "Intel" },
     { key: "overview", label: "Overview" },
-    { key: "identity", label: "Identity", badge: idCand?.raw_data?.candidates?.length || 0 },
+    { key: "identity", label: "Identity", badge: allCandidates.length },
     { key: "faces", label: "Faces", badge: totalFaces },
-    { key: "scene", label: "Scene", badge: scenes.length },
-    { key: "threats", label: "Threats", badge: crit + high },
+    { key: "sources", label: "Sources" },
   ];
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
-      {/* ═══ HUD HEADER ═══ */}
+      {/* HUD HEADER */}
       <View style={{ borderBottomWidth: 1, borderBottomColor: "#111" }}>
-        {/* Back + classification */}
         <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>
           <Pressable onPress={onBack} hitSlop={16} style={{ marginRight: 12, padding: 4 }}>
             <Text style={{ color: "#444", fontSize: 18 }}>{"<"}</Text>
           </Pressable>
           <View style={{ flex: 1, alignItems: "center" }}>
-            <Text style={{ color: "#dc262644", fontSize: 8, fontWeight: "800", letterSpacing: 4 }}>CONFIDENTIAL</Text>
+            <Text style={{ color: assessment?.classification === "SECRET" ? "#dc262644" : "#dc262622", fontSize: 8, fontWeight: "800", letterSpacing: 4 }}>
+              {assessment?.classification || "CONFIDENTIAL"}
+            </Text>
           </View>
           <View style={{ width: 30 }} />
         </View>
 
-        {/* Subject HUD — photo, gauge, key stats */}
         <View style={{ flexDirection: "row", padding: 16, paddingTop: 8, gap: 16, alignItems: "center" }}>
-          {/* Photo with threat ring glow */}
           <View style={{ position: "relative" }}>
             <View style={{ position: "absolute", top: -6, left: -6, right: -6, bottom: -6, borderRadius: 40, backgroundColor: ringColor, opacity: 0.07 }} />
-            <View style={{ position: "absolute", top: -3, left: -3, right: -3, bottom: -3, borderRadius: 37, backgroundColor: ringColor, opacity: 0.05 }} />
             <View style={{ width: 64, height: 64, borderRadius: 32, borderWidth: 2.5, borderColor: ringColor, overflow: "hidden" }}>
               <Image source={{ uri: imgUrl, headers: getAuthHeaders() }} style={{ width: 59, height: 59, borderRadius: 29 }} />
             </View>
           </View>
-
-          {/* Name + quick stats */}
           <View style={{ flex: 1 }}>
             <Text style={{ color: "#f5f5f5", fontSize: 17, fontWeight: "800" }} numberOfLines={1}>{name}</Text>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
-              {conf > 0 && <HudBadge text={`${(conf * 100).toFixed(0)}%`} color={conf > 0.7 ? "#16a34a" : "#ca8a04"} />}
-              <HudBadge text={`${findings.length} findings`} color="#555" />
-              {totalFaces > 0 && <HudBadge text={`${totalFaces} faces`} color="#a855f7" />}
+              {assessment?.identityConfidence && <ConfBadge level={assessment.identityConfidence} />}
+              {assessment?.exposureScore && <ExposureBadge score={assessment.exposureScore} />}
+              {!assessment && conf > 0 && <HudBadge text={`${(conf * 100).toFixed(0)}%`} color={conf > 0.7 ? "#16a34a" : "#ca8a04"} />}
+              <HudBadge text={`${findings.length}`} color="#555" />
             </View>
           </View>
-
-          {/* Circular threat gauge */}
           <ThreatGauge crit={crit} high={high} med={med} total={findings.length} />
         </View>
       </View>
 
-      {/* ═══ TAB BAR ═══ */}
+      {/* TAB BAR */}
       <View style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "#111" }}>
         {tabs.map(t => {
           const active = tab === t.key;
@@ -125,28 +150,260 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
         })}
       </View>
 
-      {/* ═══ TAB CONTENT ═══ */}
+      {/* TAB CONTENT */}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 50 }} showsVerticalScrollIndicator={false} key={tab}>
+        {tab === "assessment" && <AssessmentScreen assessment={assessment} loading={assessLoading} generating={assessGenerating} onGenerate={generateAssessment} typedRels={typedRels} />}
         {tab === "overview" && <OverviewScreen findings={findings} crit={crit} high={high} med={med} totalFaces={totalFaces} scenes={scenes} ekf={ekf} discovered={discovered} dossier={dossier} dossierLoading={dossierLoading} conf={conf} />}
-        {tab === "identity" && <IdentityScreen candidates={idCand?.raw_data?.candidates || []} guesses={(faceGuess?.raw_data?.identityGuesses || []).filter(isLatin)} dossier={dossier} />}
-        {tab === "faces" && <FacesScreen verified={verified} discovered={discovered} unverified={unverified} profileId={profile.id} />}
-        {tab === "scene" && <SceneScreen scenes={scenes} />}
-        {tab === "threats" && <ThreatsScreen findings={findings} crit={crit} high={high} med={med} dossier={dossier} pivots={pivots} />}
+        {tab === "identity" && <IdentityScreen candidates={idCand?.raw_data?.candidates || []} dossier={dossier} />}
+        {tab === "faces" && <FacesScreen verified={verified} discovered={discovered} profileId={profile.id} />}
+        {tab === "sources" && <SourcesScreen assessment={assessment} findings={findings} />}
       </ScrollView>
     </View>
   );
 }
 
-// ═══════════════════════════════════════════
-// OVERVIEW — visual dashboard
-// ═══════════════════════════════════════════
+// =============================================
+// ASSESSMENT — CIA-style intelligence report
+// =============================================
+function AssessmentScreen({ assessment, loading, generating, onGenerate, typedRels }: any) {
+  if (loading) return <View style={{ alignItems: "center", paddingVertical: 60 }}><ActivityIndicator color="#00b4d8" /><Text style={{ color: "#333", fontSize: 10, marginTop: 12 }}>Loading assessment...</Text></View>;
+
+  if (!assessment) {
+    return (
+      <View style={{ alignItems: "center", paddingVertical: 40, gap: 16 }}>
+        <View style={{ width: 64, height: 64, borderRadius: 32, borderWidth: 1, borderColor: "#1a1a1a", justifyContent: "center", alignItems: "center" }}>
+          <Text style={{ color: "#1a1a1a", fontSize: 24 }}>?</Text>
+        </View>
+        <Text style={{ color: "#333", fontSize: 12 }}>No intelligence assessment generated yet</Text>
+        <Pressable onPress={onGenerate} disabled={generating} style={{ backgroundColor: generating ? "#111" : "#00b4d815", borderRadius: 12, paddingHorizontal: 24, paddingVertical: 14, borderWidth: 1, borderColor: "#00b4d830" }}>
+          {generating ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <ActivityIndicator size="small" color="#00b4d8" />
+              <Text style={{ color: "#00b4d8", fontSize: 12, fontWeight: "700" }}>Analyzing intelligence...</Text>
+            </View>
+          ) : (
+            <Text style={{ color: "#00b4d8", fontSize: 12, fontWeight: "800" }}>GENERATE ASSESSMENT</Text>
+          )}
+        </Pressable>
+        <Text style={{ color: "#222", fontSize: 9, textAlign: "center", paddingHorizontal: 40 }}>
+          Synthesizes all findings into a CIA-style intelligence assessment using AI analysis
+        </Text>
+      </View>
+    );
+  }
+
+  const a = assessment;
+  const confColor = a.identityConfidence === "HIGH" ? "#16a34a" : a.identityConfidence === "MODERATE" ? "#ca8a04" : "#dc2626";
+  const riskColor = (r: string) => r === "CRITICAL" ? "#dc2626" : r === "HIGH" ? "#ea580c" : r === "MODERATE" ? "#ca8a04" : "#16a34a";
+
+  return (
+    <View style={{ gap: 14 }}>
+      {/* EXECUTIVE SUMMARY */}
+      <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+        <Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>EXECUTIVE SUMMARY</Text>
+        <Text style={{ color: "#ccc", fontSize: 12, lineHeight: 20 }}>{a.executiveSummary}</Text>
+      </View>
+
+      {/* IDENTITY CONFIDENCE */}
+      <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: confColor + "30" }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <Text style={{ color: "#555", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>IDENTITY CONFIDENCE</Text>
+          <View style={{ backgroundColor: confColor + "18", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 4 }}>
+            <Text style={{ color: confColor, fontSize: 12, fontWeight: "900" }}>{a.identityConfidence}</Text>
+          </View>
+        </View>
+        <Text style={{ color: "#888", fontSize: 11, lineHeight: 18 }}>{a.identityConfidenceJustification}</Text>
+      </View>
+
+      {/* KEY FINDINGS */}
+      {a.keyFindings?.length > 0 && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#00b4d8", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 12 }}>KEY FINDINGS</Text>
+          {a.keyFindings.map((kf: any, i: number) => (
+            <View key={i} style={{ marginBottom: 12, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: riskColor(kf.confidence) + "40" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <ConfBadge level={kf.confidence} small />
+                {kf.sourceGrades?.map((g: string, j: number) => <GradeBadge key={j} grade={g} />)}
+                {kf.category && <Text style={{ color: "#222", fontSize: 8, fontWeight: "600" }}>{kf.category.toUpperCase()}</Text>}
+              </View>
+              <Text style={{ color: "#bbb", fontSize: 11, lineHeight: 18 }}>{kf.finding}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* VULNERABILITY ASSESSMENT */}
+      {a.vulnerabilityAssessment && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <Text style={{ color: "#ea580c", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>VULNERABILITY ASSESSMENT</Text>
+            <View style={{ backgroundColor: riskColor(a.vulnerabilityAssessment.overallRisk) + "18", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
+              <Text style={{ color: riskColor(a.vulnerabilityAssessment.overallRisk), fontSize: 10, fontWeight: "900" }}>{a.vulnerabilityAssessment.overallRisk}</Text>
+            </View>
+          </View>
+          {["identity", "digital", "financial", "social", "physical"].map(cat => {
+            const v = a.vulnerabilityAssessment[cat];
+            if (!v) return null;
+            const c = riskColor(v.risk);
+            return (
+              <View key={cat} style={{ marginBottom: 12 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <Text style={{ color: "#555", fontSize: 10, fontWeight: "700", textTransform: "uppercase" }}>{cat}</Text>
+                  <Text style={{ color: c, fontSize: 9, fontWeight: "800" }}>{v.risk}</Text>
+                </View>
+                <View style={{ height: 4, backgroundColor: "#111", borderRadius: 2, overflow: "hidden", marginBottom: 4 }}>
+                  <View style={{ height: 4, width: v.risk === "CRITICAL" ? "100%" : v.risk === "HIGH" ? "75%" : v.risk === "MODERATE" ? "50%" : "25%", backgroundColor: c, borderRadius: 2 }} />
+                </View>
+                <Text style={{ color: "#444", fontSize: 10, lineHeight: 16 }}>{v.detail}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      {/* EXPOSURE SCORE */}
+      {a.exposureScore && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <Text style={{ color: "#a855f7", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>DIGITAL EXPOSURE</Text>
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
+              <Text style={{ color: riskColor(a.exposureScore.level), fontSize: 24, fontWeight: "900" }}>{a.exposureScore.overall}</Text>
+              <Text style={{ color: "#333", fontSize: 10 }}>/100</Text>
+            </View>
+          </View>
+          <View style={{ height: 8, backgroundColor: "#111", borderRadius: 4, overflow: "hidden", marginBottom: 14 }}>
+            <AnimatedBar width={a.exposureScore.overall} color={riskColor(a.exposureScore.level)} />
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {Object.entries(a.exposureScore.categories || {}).map(([cat, data]: [string, any]) => (
+              <View key={cat} style={{ backgroundColor: "#0a0a0a", borderRadius: 10, padding: 12, minWidth: (SW - 64) / 2 - 4, flex: 1 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                  <Text style={{ color: "#444", fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>{cat}</Text>
+                  <Text style={{ color: "#888", fontSize: 9, fontWeight: "800" }}>{data.score}/{data.max}</Text>
+                </View>
+                <View style={{ height: 3, backgroundColor: "#111", borderRadius: 1, overflow: "hidden" }}>
+                  <View style={{ height: 3, width: `${data.max > 0 ? (data.score / data.max) * 100 : 0}%`, backgroundColor: data.score / data.max > 0.7 ? "#dc2626" : data.score / data.max > 0.4 ? "#ca8a04" : "#16a34a", borderRadius: 1 }} />
+                </View>
+                {data.factors?.length > 0 && <Text style={{ color: "#333", fontSize: 8, marginTop: 4 }} numberOfLines={2}>{data.factors[0]}</Text>}
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
+      {/* NETWORK ANALYSIS */}
+      {a.networkAnalysis && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#00b4d8", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>NETWORK ANALYSIS</Text>
+          <Text style={{ color: "#999", fontSize: 11, lineHeight: 20 }}>{a.networkAnalysis}</Text>
+
+          {/* Typed relationships */}
+          {typedRels.length > 0 && (
+            <View style={{ marginTop: 14 }}>
+              <Text style={{ color: "#333", fontSize: 9, fontWeight: "700", letterSpacing: 1, marginBottom: 8 }}>RELATIONSHIPS ({typedRels.length})</Text>
+              {typedRels.slice(0, 12).map((r: any, i: number) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <Text style={{ color: "#555", fontSize: 10, fontWeight: "700", width: 80 }} numberOfLines={1}>{r.source === "subject" ? name : r.source}</Text>
+                  <View style={{ backgroundColor: "#111", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                    <Text style={{ color: "#00b4d8", fontSize: 8, fontWeight: "700" }}>{r.type.replace(/_/g, " ")}</Text>
+                  </View>
+                  <Text style={{ color: "#888", fontSize: 10, flex: 1 }} numberOfLines={1}>{r.target}</Text>
+                  <Text style={{ color: "#222", fontSize: 8 }}>{r.confidence}%</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* BEHAVIORAL PATTERNS */}
+      {a.behavioralPatterns && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#ca8a04", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>BEHAVIORAL PATTERNS</Text>
+          <Text style={{ color: "#999", fontSize: 11, lineHeight: 20 }}>{a.behavioralPatterns}</Text>
+        </View>
+      )}
+
+      {/* OUTLOOK */}
+      {a.outlook && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#16a34a", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>OUTLOOK</Text>
+          <Text style={{ color: "#999", fontSize: 11, lineHeight: 20 }}>{a.outlook}</Text>
+        </View>
+      )}
+
+      {/* INTELLIGENCE GAPS */}
+      {a.intelligenceGaps?.length > 0 && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>INTELLIGENCE GAPS</Text>
+          {a.intelligenceGaps.map((gap: string, i: number) => (
+            <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
+              <Text style={{ color: "#dc262660", fontSize: 10 }}>{i + 1}.</Text>
+              <Text style={{ color: "#888", fontSize: 11, lineHeight: 18, flex: 1 }}>{gap}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* COLLECTION RECOMMENDATIONS */}
+      {a.collectionRecommendations?.length > 0 && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#555", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>COLLECTION RECOMMENDATIONS</Text>
+          {a.collectionRecommendations.map((rec: string, i: number) => (
+            <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#333", marginTop: 5 }} />
+              <Text style={{ color: "#777", fontSize: 11, lineHeight: 18, flex: 1 }}>{rec}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* SOURCE MATRIX mini */}
+      {a.metadata && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#333", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>SOURCE MATRIX</Text>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            {["A", "B", "C", "D", "E", "F"].map(g => {
+              const count = a.metadata.gradedFindings?.[g] || 0;
+              if (count === 0) return null;
+              return (
+                <View key={g} style={{ alignItems: "center", gap: 4 }}>
+                  <GradeBadge grade={g} />
+                  <Text style={{ color: "#555", fontSize: 10, fontWeight: "800" }}>{count}</Text>
+                </View>
+              );
+            })}
+          </View>
+          <Text style={{ color: "#222", fontSize: 9, marginTop: 10 }}>
+            {a.metadata.totalFindings} total findings | {a.metadata.modelUsed} | {new Date(a.metadata.generatedAt).toLocaleDateString()}
+          </Text>
+        </View>
+      )}
+
+      {/* Re-generate button */}
+      <Pressable onPress={onGenerate} disabled={generating} style={{ backgroundColor: "#080808", borderRadius: 14, padding: 14, alignItems: "center", borderWidth: 1, borderColor: "#111" }}>
+        {generating ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <ActivityIndicator size="small" color="#00b4d8" />
+            <Text style={{ color: "#333", fontSize: 11, fontWeight: "600" }}>Re-analyzing...</Text>
+          </View>
+        ) : (
+          <Text style={{ color: "#222", fontSize: 11, fontWeight: "600" }}>Regenerate Assessment</Text>
+        )}
+      </Pressable>
+    </View>
+  );
+}
+
+// =============================================
+// OVERVIEW — visual dashboard (existing)
+// =============================================
 function OverviewScreen({ findings, crit, high, med, totalFaces, scenes, ekf, discovered, dossier, dossierLoading, conf }: any) {
   const threatColor = crit > 0 ? "#dc2626" : high > 0 ? "#ea580c" : "#16a34a";
   const exposurePct = Math.min(100, Math.max(5, crit * 25 + high * 15 + findings.length * 2));
 
   return (
     <View style={{ gap: 14 }}>
-      {/* Exposure bar — visual gauge across full width */}
       <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 10 }}>
           <Text style={{ color: "#555", fontSize: 10, fontWeight: "700", letterSpacing: 2 }}>EXPOSURE</Text>
@@ -157,7 +414,6 @@ function OverviewScreen({ findings, crit, high, med, totalFaces, scenes, ekf, di
         <View style={{ height: 8, backgroundColor: "#111", borderRadius: 4, overflow: "hidden" }}>
           <AnimatedBar width={exposurePct} color={threatColor} />
         </View>
-        {/* Severity breakdown dots */}
         <View style={{ flexDirection: "row", gap: 16, marginTop: 12, justifyContent: "center" }}>
           <SevDot count={crit} label="CRIT" color="#dc2626" />
           <SevDot count={high} label="HIGH" color="#ea580c" />
@@ -166,17 +422,15 @@ function OverviewScreen({ findings, crit, high, med, totalFaces, scenes, ekf, di
         </View>
       </View>
 
-      {/* Quick intel tiles — 2x2 */}
       <View style={{ flexDirection: "row", gap: 10 }}>
-        <IntelTile icon="eye" value={findings.length} label="Findings" color="#00b4d8" />
-        <IntelTile icon="face" value={totalFaces} label="Face Hits" color="#a855f7" />
+        <IntelTile value={findings.length} label="Findings" color="#00b4d8" />
+        <IntelTile value={totalFaces} label="Face Hits" color="#a855f7" />
       </View>
       <View style={{ flexDirection: "row", gap: 10 }}>
-        <IntelTile icon="link" value={discovered.length} label="Profiles" color="#00b4d8" />
-        <IntelTile icon="target" value={conf > 0 ? `${(conf * 100).toFixed(0)}%` : "--"} label="ID Confidence" color={conf > 0.7 ? "#16a34a" : "#ca8a04"} />
+        <IntelTile value={discovered.length} label="Profiles" color="#00b4d8" />
+        <IntelTile value={conf > 0 ? `${(conf * 100).toFixed(0)}%` : "--"} label="ID Confidence" color={conf > 0.7 ? "#16a34a" : "#ca8a04"} />
       </View>
 
-      {/* Scene snapshot — if available, show key location/context as visual block */}
       {scenes.length > 0 && (() => {
         const a = scenes[0].raw_data?.analysis;
         if (!a) return null;
@@ -197,17 +451,14 @@ function OverviewScreen({ findings, crit, high, med, totalFaces, scenes, ekf, di
         );
       })()}
 
-      {/* EKF confidence bars — compact */}
       {ekf && <EkfBars summary={ekf} />}
 
-      {/* Digital footprint summary */}
       {!dossierLoading && dossier?.digitalFootprint?.totalAccounts > 0 && (
         <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <Text style={{ color: "#00b4d8", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>DIGITAL FOOTPRINT</Text>
             <Text style={{ color: "#333", fontSize: 10 }}>{dossier.digitalFootprint.totalAccounts} accounts</Text>
           </View>
-          {/* Category pills */}
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
             {Object.entries(dossier.digitalFootprint.byCategory || {}).map(([cat, accounts]: [string, any]) => (
               accounts.length > 0 ? (
@@ -223,23 +474,19 @@ function OverviewScreen({ findings, crit, high, med, totalFaces, scenes, ekf, di
   );
 }
 
-// ═══════════════════════════════════════════
+// =============================================
 // IDENTITY
-// ═══════════════════════════════════════════
-function IdentityScreen({ candidates, guesses, dossier }: any) {
-  if (candidates.length === 0 && guesses.length === 0 && !dossier?.subjectOverview) {
-    return <Empty text="No identity data yet" />;
-  }
+// =============================================
+function IdentityScreen({ candidates, dossier }: any) {
+  if (candidates.length === 0 && !dossier?.subjectOverview) return <Empty text="No identity data yet" />;
 
   return (
     <View style={{ gap: 14 }}>
-      {/* Candidate cards with confidence bars */}
       {candidates.map((c: any, i: number) => {
         const n = clean(c.name);
         if (!n) return null;
         return (
           <View key={i} style={{ backgroundColor: "#080808", borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#111" }}>
-            {/* Confidence bar fills the top */}
             <View style={{ height: 4, backgroundColor: "#111" }}>
               <View style={{ height: 4, width: `${c.confidence * 100}%`, backgroundColor: c.confidence > 0.7 ? "#16a34a" : c.confidence > 0.4 ? "#ca8a04" : "#dc2626" }} />
             </View>
@@ -259,20 +506,6 @@ function IdentityScreen({ candidates, guesses, dossier }: any) {
           </View>
         );
       })}
-
-      {guesses.length > 0 && (
-        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
-          <Text style={{ color: "#ca8a04", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>SEARCH ENGINE MATCHES</Text>
-          {guesses.map((g: string, i: number) => (
-            <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "#111", justifyContent: "center", alignItems: "center" }}>
-                <Text style={{ color: "#555", fontSize: 9, fontWeight: "800" }}>{i + 1}</Text>
-              </View>
-              <Text style={{ color: "#aaa", fontSize: 12 }}>{g}</Text>
-            </View>
-          ))}
-        </View>
-      )}
 
       {dossier?.subjectOverview && (() => {
         const s = dossier.subjectOverview;
@@ -300,27 +533,23 @@ function IdentityScreen({ candidates, guesses, dossier }: any) {
   );
 }
 
-// ═══════════════════════════════════════════
-// FACES — thumbnail grid + match list
-// ═══════════════════════════════════════════
-function FacesScreen({ verified, discovered, unverified, profileId }: any) {
-  const hasAny = verified.length > 0 || discovered.length > 0 || unverified.length > 0;
+// =============================================
+// FACES
+// =============================================
+function FacesScreen({ verified, discovered, profileId }: any) {
+  const hasAny = verified.length > 0 || discovered.length > 0;
   if (!hasAny) return <Empty text="No face matches yet" />;
 
   const allVerified = (verified[0]?.raw_data?.verifiedMatches || []).filter((m: any) => isLatin(m.title || ""));
 
   return (
     <View style={{ gap: 14 }}>
-      {/* Verified face match cards with similarity visual */}
       {allVerified.length > 0 && (
         <>
-          <Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>
-            VERIFIED MATCHES ({allVerified.length})
-          </Text>
+          <Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>VERIFIED MATCHES ({allVerified.length})</Text>
           {allVerified.slice(0, 15).map((m: any, j: number) => (
             <Pressable key={j} onPress={() => m.sourceUrl && Linking.openURL(m.sourceUrl)}>
               <View style={{ backgroundColor: "#080808", borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: "#111" }}>
-                {/* Similarity bar */}
                 <View style={{ height: 3, backgroundColor: "#111" }}>
                   <View style={{ height: 3, width: `${m.similarity * 100}%`, backgroundColor: m.similarity > 0.7 ? "#dc2626" : "#ca8a04" }} />
                 </View>
@@ -330,9 +559,7 @@ function FacesScreen({ verified, discovered, unverified, profileId }: any) {
                     <Text style={{ color: "#222", fontSize: 9, marginTop: 3 }} numberOfLines={1}>{m.engine}</Text>
                   </View>
                   <View style={{ backgroundColor: (m.similarity > 0.7 ? "#dc2626" : "#ca8a04") + "18", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
-                    <Text style={{ color: m.similarity > 0.7 ? "#dc2626" : "#ca8a04", fontSize: 12, fontWeight: "900" }}>
-                      {(m.similarity * 100).toFixed(0)}%
-                    </Text>
+                    <Text style={{ color: m.similarity > 0.7 ? "#dc2626" : "#ca8a04", fontSize: 12, fontWeight: "900" }}>{(m.similarity * 100).toFixed(0)}%</Text>
                   </View>
                 </View>
               </View>
@@ -341,12 +568,9 @@ function FacesScreen({ verified, discovered, unverified, profileId }: any) {
         </>
       )}
 
-      {/* Discovered profiles — platform icons */}
       {discovered.length > 0 && (
         <>
-          <Text style={{ color: "#00b4d8", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginTop: 4 }}>
-            DISCOVERED PROFILES ({discovered.length})
-          </Text>
+          <Text style={{ color: "#00b4d8", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginTop: 4 }}>DISCOVERED PROFILES ({discovered.length})</Text>
           {discovered.map((f: any, i: number) => (
             <Pressable key={i} onPress={() => f.source_url && Linking.openURL(f.source_url)}>
               <View style={{ backgroundColor: "#080808", borderRadius: 12, padding: 14, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#111" }}>
@@ -363,154 +587,54 @@ function FacesScreen({ verified, discovered, unverified, profileId }: any) {
           ))}
         </>
       )}
-
-      {/* Unverified — compact link list */}
-      {unverified.map((f: any, i: number) => {
-        const urls = (f.raw_data?.sourceUrls || []).filter(isLatin);
-        if (!urls.length) return null;
-        return (
-          <View key={i}>
-            <Text style={{ color: "#333", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginTop: 4, marginBottom: 8 }}>
-              UNVERIFIED ({urls.length})
-            </Text>
-            {urls.slice(0, 10).map((url: string, j: number) => (
-              <Pressable key={j} onPress={() => Linking.openURL(url)}>
-                <Text style={{ color: "#444", fontSize: 10, marginBottom: 6 }} numberOfLines={1}>{url}</Text>
-              </Pressable>
-            ))}
-          </View>
-        );
-      })}
     </View>
   );
 }
 
-// ═══════════════════════════════════════════
-// SCENE — visual intel blocks
-// ═══════════════════════════════════════════
-function SceneScreen({ scenes }: { scenes: OsintFinding[] }) {
-  if (!scenes.length) return <Empty text="No scene analysis available" />;
+// =============================================
+// SOURCES — source reliability matrix
+// =============================================
+function SourcesScreen({ assessment, findings }: any) {
+  const matrix = assessment?.sourceMatrix || [];
+
+  if (!matrix.length && !findings.length) return <Empty text="No source data" />;
 
   return (
     <View style={{ gap: 14 }}>
-      {scenes.map((f, i) => {
-        const a = f.raw_data?.analysis;
-        if (!a) return (
-          <View key={i} style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
-            <Text style={{ color: "#888", fontSize: 11, lineHeight: 18 }}>{clean(f.description || "")}</Text>
-          </View>
-        );
-        return (
-          <View key={i} style={{ gap: 12 }}>
-            {a.location && (
-              <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
-                <Text style={{ color: "#ca8a04", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>GEOLOCATION</Text>
-                {a.location.estimated_region && <IntelLine icon="pin" text={a.location.estimated_region} color="#ca8a04" big />}
-                <View style={{ gap: 6, marginTop: 8 }}>
-                  {a.location.environment && <IntelLine icon="env" text={a.location.environment} />}
-                  {a.location.climate_clues && <IntelLine icon="climate" text={a.location.climate_clues} />}
-                  {a.location.confidence && <IntelLine icon="conf" text={`Confidence: ${a.location.confidence}`} />}
-                  {(a.location.indicators || []).map((ind: string, j: number) => <IntelLine key={j} icon="indicator" text={ind} />)}
-                </View>
-              </View>
-            )}
-
-            {a.people?.count > 0 && (
-              <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
-                <Text style={{ color: "#a855f7", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>PEOPLE ({a.people.count})</Text>
-                {(a.people.details || []).map((p: any, j: number) => (
-                  <View key={j} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8, backgroundColor: "#0a0a0a", borderRadius: 10, padding: 12 }}>
-                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: "#a855f712", justifyContent: "center", alignItems: "center" }}>
-                      <Text style={{ color: "#a855f7", fontSize: 14, fontWeight: "800" }}>{j + 1}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: "#ccc", fontSize: 11, fontWeight: "600" }}>{p.estimated_age_range || "?"}, {p.gender || "?"}</Text>
-                      {p.clothing && <Text style={{ color: "#444", fontSize: 10, marginTop: 2 }}>{p.clothing}</Text>}
-                      {p.distinguishing_features && <Text style={{ color: "#444", fontSize: 10, marginTop: 1 }}>{p.distinguishing_features}</Text>}
-                    </View>
+      {/* Grade distribution */}
+      {assessment?.metadata?.gradedFindings && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#555", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 14 }}>SOURCE RELIABILITY DISTRIBUTION</Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {["A", "B", "C", "D", "E", "F"].map(g => {
+              const count = assessment.metadata.gradedFindings[g] || 0;
+              const total = assessment.metadata.totalFindings || 1;
+              const pct = (count / total) * 100;
+              const labels: Record<string, string> = { A: "Reliable", B: "Usually Reliable", C: "Fairly Reliable", D: "Not Reliable", E: "Unreliable", F: "Unknown" };
+              return (
+                <View key={g} style={{ flex: 1, alignItems: "center", gap: 6 }}>
+                  <GradeBadge grade={g} />
+                  <View style={{ width: "100%", height: 60, backgroundColor: "#0a0a0a", borderRadius: 4, justifyContent: "flex-end", overflow: "hidden" }}>
+                    <View style={{ width: "100%", height: `${Math.max(2, pct)}%`, backgroundColor: GRADE_COLORS[g] + "40", borderRadius: 2 }} />
                   </View>
-                ))}
-              </View>
-            )}
-
-            {(a.organizations?.logos?.length > 0 || a.organizations?.affiliations?.length > 0) && (
-              <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
-                <Text style={{ color: "#00b4d8", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>ORGANIZATIONS</Text>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                  {[...(a.organizations.logos || []), ...(a.organizations.affiliations || [])].filter(isLatin).map((o: string, j: number) => (
-                    <View key={j} style={{ backgroundColor: "#00b4d80a", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "#00b4d815" }}>
-                      <Text style={{ color: "#888", fontSize: 10, fontWeight: "600" }}>{o}</Text>
-                    </View>
-                  ))}
+                  <Text style={{ color: "#555", fontSize: 12, fontWeight: "800" }}>{count}</Text>
+                  <Text style={{ color: "#222", fontSize: 7, textAlign: "center" }}>{labels[g]}</Text>
                 </View>
-              </View>
-            )}
-
-            {a.intelligence_notes && isLatin(a.intelligence_notes) && (
-              <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
-                <Text style={{ color: "#555", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 8 }}>ANALYST NOTES</Text>
-                <Text style={{ color: "#999", fontSize: 11, lineHeight: 20 }}>{a.intelligence_notes}</Text>
-              </View>
-            )}
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-// ═══════════════════════════════════════════
-// THREATS
-// ═══════════════════════════════════════════
-function ThreatsScreen({ findings, crit, high, med, dossier, pivots }: any) {
-  const critF = findings.filter((f: any) => f.severity === "critical");
-  const highF = findings.filter((f: any) => f.severity === "high");
-
-  if (crit === 0 && high === 0 && med === 0) return <Empty text="No threats detected" />;
-
-  return (
-    <View style={{ gap: 14 }}>
-      {/* Threat counters */}
-      <View style={{ flexDirection: "row", gap: 10 }}>
-        <ThreatCounter value={crit} label="Critical" color="#dc2626" />
-        <ThreatCounter value={high} label="High" color="#ea580c" />
-        <ThreatCounter value={med} label="Medium" color="#ca8a04" />
-      </View>
-
-      {/* Critical findings */}
-      {critF.length > 0 && (
-        <View style={{ gap: 8 }}>
-          <Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>CRITICAL</Text>
-          {critF.map((f: any, i: number) => <ThreatCard key={i} finding={f} color="#dc2626" />)}
-        </View>
-      )}
-
-      {highF.length > 0 && (
-        <View style={{ gap: 8 }}>
-          <Text style={{ color: "#ea580c", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>HIGH</Text>
-          {highF.slice(0, 10).map((f: any, i: number) => <ThreatCard key={i} finding={f} color="#ea580c" />)}
-        </View>
-      )}
-
-      {/* Exposure */}
-      {dossier?.exposureAssessment && (dossier.exposureAssessment.breachCount > 0 || dossier.exposureAssessment.dataBrokerCount > 0) && (
-        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
-          <Text style={{ color: "#ea580c", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>EXPOSURE</Text>
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            {dossier.exposureAssessment.breachCount > 0 && <IntelTile icon="breach" value={dossier.exposureAssessment.breachCount} label="Breaches" color="#dc2626" />}
-            {dossier.exposureAssessment.dataBrokerCount > 0 && <IntelTile icon="broker" value={dossier.exposureAssessment.dataBrokerCount} label="Brokers" color="#ea580c" />}
+              );
+            })}
           </View>
         </View>
       )}
 
-      {/* Leads */}
-      {pivots.length > 0 && (
+      {/* Module breakdown */}
+      {matrix.length > 0 && (
         <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
-          <Text style={{ color: "#16a34a", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>LEADS ({pivots.length})</Text>
-          {pivots.slice(0, 6).filter((f: any) => isLatin(f.title || "")).map((f: any, i: number) => (
-            <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#16a34a" }} />
-              <Text style={{ color: "#888", fontSize: 11, flex: 1 }}>{clean(f.title) || clean(f.raw_data?.pivotValue)}</Text>
+          <Text style={{ color: "#555", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 12 }}>MODULE SOURCE MATRIX</Text>
+          {matrix.slice(0, 25).map((m: any, i: number) => (
+            <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <GradeBadge grade={m.grade} />
+              <Text style={{ color: "#888", fontSize: 10, flex: 1, fontWeight: "500" }}>{m.module}</Text>
+              <Text style={{ color: "#444", fontSize: 10, fontWeight: "700" }}>{m.count}</Text>
             </View>
           ))}
         </View>
@@ -519,31 +643,49 @@ function ThreatsScreen({ findings, crit, high, med, dossier, pivots }: any) {
   );
 }
 
-// ═══════════════════════════════════════════
+// =============================================
 // SHARED COMPONENTS
-// ═══════════════════════════════════════════
+// =============================================
+
+const GRADE_COLORS: Record<string, string> = {
+  A: "#16a34a", B: "#22c55e", C: "#ca8a04", D: "#ea580c", E: "#dc2626", F: "#555",
+};
+
+function GradeBadge({ grade }: { grade: string }) {
+  const c = GRADE_COLORS[grade] || "#555";
+  return (
+    <View style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: c + "18", justifyContent: "center", alignItems: "center" }}>
+      <Text style={{ color: c, fontSize: 10, fontWeight: "900" }}>{grade}</Text>
+    </View>
+  );
+}
+
+function ConfBadge({ level, small }: { level: string; small?: boolean }) {
+  const c = level === "HIGH" ? "#16a34a" : level === "MODERATE" ? "#ca8a04" : "#dc2626";
+  return (
+    <View style={{ backgroundColor: c + "15", borderRadius: 6, paddingHorizontal: small ? 6 : 8, paddingVertical: small ? 2 : 3 }}>
+      <Text style={{ color: c, fontSize: small ? 8 : 9, fontWeight: "700" }}>{level}</Text>
+    </View>
+  );
+}
+
+function ExposureBadge({ score }: { score: any }) {
+  const c = score.level === "CRITICAL" ? "#dc2626" : score.level === "HIGH" ? "#ea580c" : score.level === "MODERATE" ? "#ca8a04" : "#16a34a";
+  return (
+    <View style={{ backgroundColor: c + "15", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+      <Text style={{ color: c, fontSize: 9, fontWeight: "700" }}>{score.overall}/100</Text>
+    </View>
+  );
+}
 
 function ThreatGauge({ crit, high, med, total }: { crit: number; high: number; med: number; total: number }) {
   const color = crit > 0 ? "#dc2626" : high > 0 ? "#ea580c" : "#16a34a";
   const label = crit > 0 ? "HIGH" : high > 0 ? "MED" : "LOW";
   const pct = Math.min(100, Math.max(5, crit * 25 + high * 15 + total * 2));
-
-  // Circular gauge using border trick
   return (
     <View style={{ width: 48, height: 48, justifyContent: "center", alignItems: "center" }}>
-      {/* Outer ring */}
       <View style={{ width: 48, height: 48, borderRadius: 24, borderWidth: 3, borderColor: "#111", justifyContent: "center", alignItems: "center", position: "absolute" }} />
-      {/* Colored arc — simplified as a colored ring segment */}
-      <View style={{
-        width: 48, height: 48, borderRadius: 24,
-        borderWidth: 3,
-        borderColor: color,
-        borderTopColor: pct > 75 ? color : "#111",
-        borderRightColor: pct > 50 ? color : "#111",
-        borderBottomColor: pct > 25 ? color : "#111",
-        position: "absolute",
-        transform: [{ rotate: "-90deg" }],
-      }} />
+      <View style={{ width: 48, height: 48, borderRadius: 24, borderWidth: 3, borderColor: color, borderTopColor: pct > 75 ? color : "#111", borderRightColor: pct > 50 ? color : "#111", borderBottomColor: pct > 25 ? color : "#111", position: "absolute", transform: [{ rotate: "-90deg" }] }} />
       <Text style={{ color, fontSize: 9, fontWeight: "900" }}>{label}</Text>
     </View>
   );
@@ -557,10 +699,10 @@ function HudBadge({ text, color }: { text: string; color: string }) {
   );
 }
 
-function IntelTile({ icon, value, label, color }: { icon: string; value: any; label: string; color: string }) {
+function IntelTile({ value, label, color }: { value: any; label: string; color: string }) {
   return (
     <View style={{ flex: 1, backgroundColor: "#080808", borderRadius: 14, padding: 16, alignItems: "center", borderWidth: 1, borderColor: "#111" }}>
-      <Text style={{ color, fontSize: 26, fontWeight: "900" }}>{typeof value === "number" ? value : value}</Text>
+      <Text style={{ color, fontSize: 26, fontWeight: "900" }}>{value}</Text>
       <Text style={{ color: "#2a2a2a", fontSize: 9, fontWeight: "600", letterSpacing: 1, marginTop: 4 }}>{label}</Text>
     </View>
   );
@@ -602,7 +744,6 @@ function EkfBars({ summary }: { summary: EkfSummary }) {
     { key: "name_confidence", label: "Name" },
     { key: "location_confidence", label: "Location" },
   ];
-
   return (
     <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 12 }}>
@@ -625,28 +766,6 @@ function EkfBars({ summary }: { summary: EkfSummary }) {
           </View>
         );
       })}
-    </View>
-  );
-}
-
-function ThreatCounter({ value, label, color }: { value: number; label: string; color: string }) {
-  return (
-    <View style={{ flex: 1, backgroundColor: value > 0 ? color + "08" : "#080808", borderRadius: 14, padding: 16, alignItems: "center", borderWidth: 1, borderColor: value > 0 ? color + "20" : "#111" }}>
-      <Text style={{ color: value > 0 ? color : "#222", fontSize: 28, fontWeight: "900" }}>{value}</Text>
-      <Text style={{ color: "#333", fontSize: 9, fontWeight: "600", marginTop: 4 }}>{label}</Text>
-    </View>
-  );
-}
-
-function ThreatCard({ finding, color }: { finding: any; color: string }) {
-  const title = clean(finding.title);
-  if (!title) return null;
-  return (
-    <View style={{ backgroundColor: "#080808", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#111", borderLeftWidth: 3, borderLeftColor: color }}>
-      <Text style={{ color: "#ccc", fontSize: 11, fontWeight: "600" }}>{title}</Text>
-      {finding.description && isLatin(finding.description) && (
-        <Text style={{ color: "#333", fontSize: 10, marginTop: 4 }} numberOfLines={2}>{finding.description}</Text>
-      )}
     </View>
   );
 }
