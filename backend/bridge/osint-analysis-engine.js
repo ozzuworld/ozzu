@@ -72,6 +72,8 @@ const MODULE_GRADES = {
   "geoint-collector": "C",
   "photo-forensics": "C",
   "movement-intel": "B",
+  "satellite-intel": "B",
+  "surveillance-intel": "B",
   "ip-geolocation": "C",
   "timezone-inference": "D",
 

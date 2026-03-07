@@ -619,6 +619,8 @@ function GeointScreen({ locations, findings }: { locations: any[], findings: any
     timezone_inferred: "#333",
     visual_heuristic: "#f59e0b",
     flight_destination: "#0284c7",
+    infrastructure: "#78716c",
+    surveillance_camera: "#ef4444",
   };
 
   const TYPE_LABELS: Record<string, string> = {
@@ -635,6 +637,8 @@ function GeointScreen({ locations, findings }: { locations: any[], findings: any
     timezone_inferred: "TIMEZONE",
     visual_heuristic: "VISUAL",
     flight_destination: "FLIGHT",
+    infrastructure: "INFRA",
+    surveillance_camera: "CAMERA",
   };
 
   // Sort by confidence
@@ -850,6 +854,50 @@ function GeointScreen({ locations, findings }: { locations: any[], findings: any
                       {f.raw_data.airportsVisited.slice(0, 10).map((ap: string, j: number) => (
                         <View key={j} style={{ backgroundColor: "#0284c720", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
                           <Text style={{ color: "#0284c7", fontSize: 8, fontWeight: "700" }}>{ap}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        );
+      })()}
+
+      {/* Satellite & Surveillance Intel */}
+      {(() => {
+        const satFindings = (findings || []).filter((f: any) =>
+          (f.module === "satellite-intel" || f.module === "surveillance-intel") && f.severity !== "info"
+        );
+        if (!satFindings.length) return null;
+        return (
+          <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+            <Text style={{ color: "#78716c", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>SATELLITE & SURVEILLANCE</Text>
+            {satFindings.map((f: any, i: number) => {
+              const isOSM = f.raw_data?.type === "osm_infrastructure";
+              const isShodan = f.raw_data?.type === "shodan_scan";
+              const isSentinel = f.raw_data?.type === "sentinel_coverage";
+              const isProperty = f.raw_data?.type === "property_record";
+              const isSV = f.raw_data?.type === "street_view";
+              const tagLabel = isShodan ? "SHODAN" : isOSM ? "OSM" : isSentinel ? "SAT" : isProperty ? "PROPERTY" : isSV ? "STREET" : "INTEL";
+              const tagColor = isShodan ? "#ef4444" : isOSM ? "#78716c" : isSentinel ? "#0ea5e9" : isProperty ? "#a855f7" : "#555";
+              return (
+                <View key={i} style={{ marginBottom: 10, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: tagColor + "40" }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                    <View style={{ backgroundColor: tagColor + "20", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                      <Text style={{ color: tagColor, fontSize: 8, fontWeight: "800" }}>{tagLabel}</Text>
+                    </View>
+                    <Text style={{ color: "#ccc", fontSize: 11, fontWeight: "600", flex: 1 }} numberOfLines={2}>
+                      {f.title?.replace("OSM infrastructure: ", "").replace("Shodan: ", "").replace("Satellite: ", "").replace("Property: ", "").replace("Street View: ", "")}
+                    </Text>
+                  </View>
+                  {f.description && <Text style={{ color: "#555", fontSize: 9, marginTop: 2 }} numberOfLines={4}>{f.description}</Text>}
+                  {isOSM && f.raw_data?.results && (
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                      {Object.keys(f.raw_data.results).map((k: string) => (
+                        <View key={k} style={{ backgroundColor: "#78716c15", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
+                          <Text style={{ color: "#78716c", fontSize: 7, fontWeight: "700" }}>{k.replace(/_/g, " ").toUpperCase()} ({f.raw_data.results[k].length})</Text>
                         </View>
                       ))}
                     </View>
