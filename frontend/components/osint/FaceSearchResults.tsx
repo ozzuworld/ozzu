@@ -8,7 +8,7 @@ interface Props {
 export function FaceSearchResults({ findings }: Props) {
   const faceFindings = findings.filter(f => f.module === "face-search" || f.module === "scene-analysis" || f.module === "identity-resolver");
 
-  const verifiedMatches = faceFindings.filter(f => f.raw_data?.type === "verified_face_matches");
+  const verifiedMatches = faceFindings.filter(f => f.raw_data?.type === "verified_face_matches" || f.raw_data?.type === "biometric_face_matches");
   const identityCandidates = faceFindings.filter(f => f.raw_data?.type === "identity_candidates");
   const discoveredProfiles = faceFindings.filter(f => f.raw_data?.type === "discovered_profile");
   const sceneAnalysis = faceFindings.filter(f => f.raw_data?.type === "scene_analysis");

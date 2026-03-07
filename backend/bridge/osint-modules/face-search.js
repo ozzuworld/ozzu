@@ -97,7 +97,7 @@ module.exports = {
           verifiedMatches: result.matches,
           totalProcessed: result.totalProcessed,
           totalIndexed: result.totalIndexed,
-          engines: result.engines,
+          sources: result.sources,
           type: "biometric_face_matches",
         },
         remediation: "These matches are biometric — ArcFace confirmed the same person appears in these images.",
@@ -162,7 +162,7 @@ module.exports = {
         totalScraped: result.totalScraped,
         totalIndexed: result.totalIndexed,
         matchCount: result.matches?.length || 0,
-        engines: result.engines,
+        sources: result.sources,
         qdrantStats: stats,
       },
     });

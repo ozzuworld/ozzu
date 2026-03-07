@@ -46,7 +46,7 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
   const name = (top?.name && isLatin(top.name) ? top.name : null) || profile.label || "Unknown";
   const conf = top?.confidence || 0;
 
-  const verified = findings.filter(f => f.raw_data?.type === "verified_face_matches");
+  const verified = findings.filter(f => f.raw_data?.type === "verified_face_matches" || f.raw_data?.type === "biometric_face_matches");
   const discovered = findings.filter(f => f.raw_data?.type === "discovered_profile");
   const scenes = findings.filter(f => f.raw_data?.type === "scene_analysis");
   const pivots = findings.filter(f => f.raw_data?.type === "pivot_recommendation");
@@ -160,7 +160,7 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
         {tab === "assessment" && <AssessmentScreen assessment={assessment} loading={assessLoading} generating={assessGenerating} onGenerate={generateAssessment} typedRels={typedRels} />}
         {tab === "overview" && <OverviewScreen findings={findings} crit={crit} high={high} med={med} totalFaces={totalFaces} scenes={scenes} ekf={ekf} discovered={discovered} dossier={dossier} dossierLoading={dossierLoading} conf={conf} />}
         {tab === "identity" && <IdentityScreen candidates={idCand?.raw_data?.candidates || []} dossier={dossier} />}
-        {tab === "faces" && <FacesScreen verified={verified} discovered={discovered} profileId={profile.id} />}
+        {tab === "faces" && <FacesScreen verified={verified} discovered={discovered} profileId={profile.id} imgUrl={imgUrl} findings={findings} />}
         {tab === "geoint" && <GeointScreen locations={locations} findings={findings} />}
         {tab === "sources" && <SourcesScreen assessment={assessment} findings={findings} />}
       </ScrollView>
@@ -542,38 +542,184 @@ function IdentityScreen({ candidates, dossier }: any) {
 // =============================================
 // FACES
 // =============================================
-function FacesScreen({ verified, discovered, profileId }: any) {
-  const hasAny = verified.length > 0 || discovered.length > 0;
+function FacesScreen({ verified, discovered, profileId, imgUrl, findings }: any) {
+  const [faceStats, setFaceStats] = useState<any>(null);
+  const [expandedMatch, setExpandedMatch] = useState<number | null>(null);
+
+  useEffect(() => {
+    apiFetch("/osint/face/stats").then(d => setFaceStats(d)).catch(() => {});
+  }, []);
+
+  const allMatches = (verified[0]?.raw_data?.verifiedMatches || []);
+  const sources = verified[0]?.raw_data?.sources || {};
+  const statsFinding = findings.find((f: any) => f.raw_data?.type === "search_stats");
+  const pipelineStats = statsFinding?.raw_data || {};
+
+  const hasAny = allMatches.length > 0 || discovered.length > 0;
   if (!hasAny) return <Empty text="No face matches yet" />;
 
-  const allVerified = (verified[0]?.raw_data?.verifiedMatches || []).filter((m: any) => isLatin(m.title || ""));
+  const confirmed = allMatches.filter((m: any) => m.similarity >= 0.7);
+  const probable = allMatches.filter((m: any) => m.similarity >= 0.5 && m.similarity < 0.7);
+  const possible = allMatches.filter((m: any) => m.similarity >= 0.4 && m.similarity < 0.5);
+
+  const tierColor = (sim: number) => sim >= 0.7 ? "#dc2626" : sim >= 0.5 ? "#ea580c" : "#ca8a04";
+  const tierLabel = (sim: number) => sim >= 0.7 ? "CONFIRMED" : sim >= 0.5 ? "PROBABLE" : "POSSIBLE";
+
+  // Source breakdown for the bar
+  const sourceEntries = Object.entries(sources).filter(([, v]) => (v as number) > 0).sort((a, b) => (b[1] as number) - (a[1] as number));
+  const totalSourced = sourceEntries.reduce((s, [, v]) => s + (v as number), 0);
+  const SOURCE_COLORS: Record<string, string> = {
+    yandex: "#ff3d00", bing: "#00a4ef", google: "#4285f4", serpapi: "#34a853",
+    facecheck: "#e91e63", search4faces: "#9c27b0", wikipedia: "#636363", google_news: "#ea580c",
+  };
 
   return (
     <View style={{ gap: 14 }}>
-      {allVerified.length > 0 && (
-        <>
-          <Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>VERIFIED MATCHES ({allVerified.length})</Text>
-          {allVerified.slice(0, 15).map((m: any, j: number) => (
-            <Pressable key={j} onPress={() => m.sourceUrl && Linking.openURL(m.sourceUrl)}>
-              <View style={{ backgroundColor: "#080808", borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: "#111" }}>
-                <View style={{ height: 3, backgroundColor: "#111" }}>
-                  <View style={{ height: 3, width: `${m.similarity * 100}%`, backgroundColor: m.similarity > 0.7 ? "#dc2626" : "#ca8a04" }} />
-                </View>
-                <View style={{ padding: 14, flexDirection: "row", alignItems: "center" }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: "#ccc", fontSize: 12, fontWeight: "600" }} numberOfLines={1}>{m.title}</Text>
-                    <Text style={{ color: "#222", fontSize: 9, marginTop: 3 }} numberOfLines={1}>{m.engine}</Text>
-                  </View>
-                  <View style={{ backgroundColor: (m.similarity > 0.7 ? "#dc2626" : "#ca8a04") + "18", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
-                    <Text style={{ color: m.similarity > 0.7 ? "#dc2626" : "#ca8a04", fontSize: 12, fontWeight: "900" }}>{(m.similarity * 100).toFixed(0)}%</Text>
-                  </View>
-                </View>
+      {/* Pipeline summary */}
+      <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+        <Text style={{ color: "#333", fontSize: 9, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>BIOMETRIC ANALYSIS</Text>
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <View style={{ flex: 1, alignItems: "center" }}>
+            <Text style={{ color: "#dc2626", fontSize: 22, fontWeight: "900" }}>{allMatches.length}</Text>
+            <Text style={{ color: "#333", fontSize: 8, fontWeight: "700", marginTop: 2 }}>MATCHES</Text>
+          </View>
+          <View style={{ width: 1, backgroundColor: "#111" }} />
+          <View style={{ flex: 1, alignItems: "center" }}>
+            <Text style={{ color: "#555", fontSize: 22, fontWeight: "900" }}>{pipelineStats.totalProcessed || 0}</Text>
+            <Text style={{ color: "#333", fontSize: 8, fontWeight: "700", marginTop: 2 }}>PROCESSED</Text>
+          </View>
+          <View style={{ width: 1, backgroundColor: "#111" }} />
+          <View style={{ flex: 1, alignItems: "center" }}>
+            <Text style={{ color: "#555", fontSize: 22, fontWeight: "900" }}>{faceStats?.points_count || "—"}</Text>
+            <Text style={{ color: "#333", fontSize: 8, fontWeight: "700", marginTop: 2 }}>IN DB</Text>
+          </View>
+        </View>
+
+        {/* Confidence tier breakdown */}
+        {allMatches.length > 0 && (
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+            {confirmed.length > 0 && (
+              <View style={{ backgroundColor: "#dc262612", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#dc2626" }} />
+                <Text style={{ color: "#dc2626", fontSize: 9, fontWeight: "800" }}>{confirmed.length} CONFIRMED</Text>
               </View>
-            </Pressable>
-          ))}
+            )}
+            {probable.length > 0 && (
+              <View style={{ backgroundColor: "#ea580c12", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#ea580c" }} />
+                <Text style={{ color: "#ea580c", fontSize: 9, fontWeight: "800" }}>{probable.length} PROBABLE</Text>
+              </View>
+            )}
+            {possible.length > 0 && (
+              <View style={{ backgroundColor: "#ca8a0412", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#ca8a04" }} />
+                <Text style={{ color: "#ca8a04", fontSize: 9, fontWeight: "800" }}>{possible.length} POSSIBLE</Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+
+      {/* Source breakdown bar */}
+      {sourceEntries.length > 0 && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#333", fontSize: 9, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>SOURCE BREAKDOWN</Text>
+          <View style={{ height: 6, borderRadius: 3, backgroundColor: "#111", flexDirection: "row", overflow: "hidden", marginBottom: 8 }}>
+            {sourceEntries.map(([name, count]) => (
+              <View key={name} style={{ flex: count as number, backgroundColor: SOURCE_COLORS[name] || "#555" }} />
+            ))}
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {sourceEntries.map(([name, count]) => (
+              <View key={name} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: SOURCE_COLORS[name] || "#555" }} />
+                <Text style={{ color: "#444", fontSize: 9, fontWeight: "600" }}>{name} ({count as number})</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
+      {/* Side-by-side: target vs top match */}
+      {allMatches.length > 0 && allMatches[0].imageUrl && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#333", fontSize: 9, fontWeight: "800", letterSpacing: 2, marginBottom: 12 }}>TOP MATCH COMPARISON</Text>
+          <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
+            <View style={{ flex: 1, alignItems: "center" }}>
+              <View style={{ width: 80, height: 80, borderRadius: 12, borderWidth: 2, borderColor: "#00b4d8", overflow: "hidden" }}>
+                <Image source={{ uri: imgUrl, headers: getAuthHeaders() }} style={{ width: 76, height: 76 }} resizeMode="cover" />
+              </View>
+              <Text style={{ color: "#333", fontSize: 8, fontWeight: "700", marginTop: 6 }}>TARGET</Text>
+            </View>
+            <View style={{ alignItems: "center" }}>
+              <Text style={{ color: tierColor(allMatches[0].similarity), fontSize: 18, fontWeight: "900" }}>{(allMatches[0].similarity * 100).toFixed(0)}%</Text>
+              <Text style={{ color: "#222", fontSize: 7, fontWeight: "700", marginTop: 2 }}>{tierLabel(allMatches[0].similarity)}</Text>
+            </View>
+            <View style={{ flex: 1, alignItems: "center" }}>
+              <View style={{ width: 80, height: 80, borderRadius: 12, borderWidth: 2, borderColor: tierColor(allMatches[0].similarity), overflow: "hidden" }}>
+                <Image source={{ uri: allMatches[0].imageUrl }} style={{ width: 76, height: 76 }} resizeMode="cover" />
+              </View>
+              <Text style={{ color: "#333", fontSize: 8, fontWeight: "700", marginTop: 6 }}>MATCH</Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Verified match cards */}
+      {allMatches.length > 0 && (
+        <>
+          <Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>BIOMETRIC MATCHES ({allMatches.length})</Text>
+          {allMatches.slice(0, 20).map((m: any, j: number) => {
+            const expanded = expandedMatch === j;
+            const color = tierColor(m.similarity);
+            return (
+              <Pressable key={j} onPress={() => setExpandedMatch(expanded ? null : j)}>
+                <View style={{ backgroundColor: "#080808", borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: expanded ? color + "44" : "#111" }}>
+                  <View style={{ height: 3, backgroundColor: "#111" }}>
+                    <View style={{ height: 3, width: `${m.similarity * 100}%`, backgroundColor: color }} />
+                  </View>
+                  <View style={{ padding: 12, flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    {m.imageUrl && (
+                      <View style={{ width: 40, height: 40, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: "#1a1a1a" }}>
+                        <Image source={{ uri: m.imageUrl }} style={{ width: 38, height: 38 }} resizeMode="cover" />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: "#ccc", fontSize: 11, fontWeight: "600" }} numberOfLines={1}>
+                        {clean(m.label) || clean(m.title) || (m.sourceUrl ? new URL(m.sourceUrl).hostname : "Unknown")}
+                      </Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
+                        {m.engine && <Text style={{ color: "#222", fontSize: 8, fontWeight: "700", backgroundColor: "#0a0a0a", paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>{m.engine}</Text>}
+                        <Text style={{ color: "#1a1a1a", fontSize: 8 }}>{tierLabel(m.similarity)}</Text>
+                      </View>
+                    </View>
+                    <View style={{ backgroundColor: color + "18", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
+                      <Text style={{ color, fontSize: 12, fontWeight: "900" }}>{(m.similarity * 100).toFixed(1)}%</Text>
+                    </View>
+                  </View>
+                  {expanded && (
+                    <View style={{ paddingHorizontal: 12, paddingBottom: 12, gap: 6 }}>
+                      {m.sourceUrl && (
+                        <Pressable onPress={() => Linking.openURL(m.sourceUrl)}>
+                          <Text style={{ color: "#00b4d8", fontSize: 9, fontWeight: "600" }} numberOfLines={2}>{m.sourceUrl}</Text>
+                        </Pressable>
+                      )}
+                      {m.imageUrl && m.imageUrl !== m.sourceUrl && (
+                        <Pressable onPress={() => Linking.openURL(m.imageUrl)}>
+                          <Text style={{ color: "#333", fontSize: 9 }} numberOfLines={1}>Image: {m.imageUrl}</Text>
+                        </Pressable>
+                      )}
+                      {m.faceId && <Text style={{ color: "#1a1a1a", fontSize: 8 }}>Face ID: {m.faceId}</Text>}
+                    </View>
+                  )}
+                </View>
+              </Pressable>
+            );
+          })}
         </>
       )}
 
+      {/* Discovered social profiles */}
       {discovered.length > 0 && (
         <>
           <Text style={{ color: "#00b4d8", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginTop: 4 }}>DISCOVERED PROFILES ({discovered.length})</Text>
