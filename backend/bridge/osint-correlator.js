@@ -1209,6 +1209,212 @@ const EXTRACTION_RULES = [
     },
   },
 
+  // bluesky-intel: Bluesky profile → social_account entity
+  {
+    module: "bluesky-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "bluesky",
+    extract: (f, profile) => {
+      const pd = f.raw_data?.profileData || {};
+      const entities = [
+        { entity_type: "social_account", value: `bluesky:${pd.handle || profile.value}`, label: `Bluesky (${pd.handle || profile.value})`, metadata: { platform: "bluesky", handle: pd.handle, did: pd.did, avatar: pd.avatar, followers: pd.followersCount }, source_module: "bluesky-intel" },
+      ];
+      const relationships = [
+        { fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `bluesky:${pd.handle || profile.value}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Bluesky profile: @${pd.handle}` },
+      ];
+      if (pd.displayName) {
+        entities.push({ entity_type: "person", value: pd.displayName.toLowerCase(), label: pd.displayName, metadata: { source: "bluesky" }, source_module: "bluesky-intel" });
+        relationships.push({ fromType: "social_account", fromValue: `bluesky:${pd.handle || profile.value}`, toType: "person", toValue: pd.displayName.toLowerCase(), relationship: "linked_to", confidence: 80, evidence: "Bluesky display name" });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // youtube-intel: YouTube channel → social_account entity
+  {
+    module: "youtube-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "youtube",
+    extract: (f, profile) => {
+      const pd = f.raw_data?.profileData || {};
+      return {
+        entities: [
+          { entity_type: "social_account", value: `youtube:${pd.channelName || profile.value}`, label: `YouTube (${pd.channelName || profile.value})`, metadata: { platform: "youtube", channelId: pd.channelId, subscribers: pd.subscriberCount, url: pd.channelUrl }, source_module: "youtube-intel" },
+        ],
+        relationships: [
+          { fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `youtube:${pd.channelName || profile.value}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `YouTube channel: ${pd.channelName}` },
+        ],
+      };
+    },
+  },
+
+  // reddit-intel: Reddit profile → social_account entity
+  {
+    module: "reddit-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "reddit",
+    extract: (f, profile) => {
+      const pd = f.raw_data?.profileData || {};
+      const entities = [
+        { entity_type: "social_account", value: `reddit:${pd.name || profile.value}`, label: `Reddit (u/${pd.name || profile.value})`, metadata: { platform: "reddit", karma: pd.total_karma, created: pd.created_utc, avatar: pd.icon_img }, source_module: "reddit-intel" },
+      ];
+      const relationships = [
+        { fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `reddit:${pd.name || profile.value}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Reddit profile: u/${pd.name}` },
+      ];
+      if (pd.displayName && pd.displayName !== pd.name) {
+        entities.push({ entity_type: "person", value: pd.displayName.toLowerCase(), label: pd.displayName, metadata: { source: "reddit" }, source_module: "reddit-intel" });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // mastodon-intel: Mastodon profile → social_account entity + linked URLs
+  {
+    module: "mastodon-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "mastodon",
+    extract: (f, profile) => {
+      const pd = f.raw_data?.profileData || {};
+      const entities = [
+        { entity_type: "social_account", value: `mastodon:${pd.acct}@${f.raw_data.instance}`, label: `Mastodon (@${pd.acct}@${f.raw_data.instance})`, metadata: { platform: "mastodon", instance: f.raw_data.instance, followers: pd.followers_count, avatar: pd.avatar }, source_module: "mastodon-intel" },
+      ];
+      const relationships = [
+        { fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `mastodon:${pd.acct}@${f.raw_data.instance}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Mastodon profile on ${f.raw_data.instance}` },
+      ];
+      // Extract linked URLs from profile fields
+      for (const link of (f.raw_data.linkedUrls || [])) {
+        if (link.url) {
+          try {
+            const hostname = new URL(link.url).hostname;
+            entities.push({ entity_type: "domain", value: hostname, label: `${link.name}: ${hostname}`, metadata: { verified: link.verified, linkedFrom: "mastodon" }, source_module: "mastodon-intel" });
+            relationships.push({ fromType: "social_account", fromValue: `mastodon:${pd.acct}@${f.raw_data.instance}`, toType: "domain", toValue: hostname, relationship: "linked_to", confidence: link.verified ? 90 : 70, evidence: `Mastodon profile field: ${link.name}` });
+          } catch (_) {}
+        }
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // telegram-intel: Telegram channel/user → social_account entity
+  {
+    module: "telegram-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "telegram",
+    extract: (f, profile) => ({
+      entities: [
+        { entity_type: "social_account", value: `telegram:${f.raw_data?.profileData?.username || profile.value}`, label: `Telegram (${f.raw_data?.profileData?.name || profile.value})`, metadata: { platform: "telegram", name: f.raw_data?.profileData?.name, memberCount: f.raw_data?.profileData?.memberCount }, source_module: "telegram-intel" },
+      ],
+      relationships: [
+        { fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `telegram:${f.raw_data?.profileData?.username || profile.value}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Telegram: ${f.raw_data?.profileData?.name || profile.value}` },
+      ],
+    }),
+  },
+
+  // instagram-intel: Instagram profile → social_account entity
+  {
+    module: "instagram-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "instagram",
+    extract: (f, profile) => {
+      const pd = f.raw_data?.profileData || {};
+      const entities = [
+        { entity_type: "social_account", value: `instagram:${pd.username || profile.value}`, label: `Instagram (@${pd.username || profile.value})`, metadata: { platform: "instagram", followers: pd.followersCount, verified: pd.isVerified, avatar: pd.profilePicUrl, fbid: pd.fbid }, source_module: "instagram-intel" },
+      ];
+      const relationships = [
+        { fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `instagram:${pd.username || profile.value}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Instagram profile: @${pd.username}` },
+      ];
+      if (pd.fullName) {
+        entities.push({ entity_type: "person", value: pd.fullName.toLowerCase(), label: pd.fullName, metadata: { source: "instagram" }, source_module: "instagram-intel" });
+        relationships.push({ fromType: "social_account", fromValue: `instagram:${pd.username || profile.value}`, toType: "person", toValue: pd.fullName.toLowerCase(), relationship: "linked_to", confidence: 80, evidence: "Instagram display name" });
+      }
+      if (pd.externalUrl) {
+        try {
+          const hostname = new URL(pd.externalUrl).hostname;
+          entities.push({ entity_type: "domain", value: hostname, label: hostname, metadata: { linkedFrom: "instagram" }, source_module: "instagram-intel" });
+          relationships.push({ fromType: "social_account", fromValue: `instagram:${pd.username || profile.value}`, toType: "domain", toValue: hostname, relationship: "linked_to", confidence: 85, evidence: "Instagram external URL" });
+        } catch (_) {}
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // tiktok-intel: TikTok profile → social_account entity
+  {
+    module: "tiktok-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "tiktok",
+    extract: (f, profile) => {
+      const pd = f.raw_data?.profileData || {};
+      const entities = [
+        { entity_type: "social_account", value: `tiktok:${pd.uniqueId || profile.value}`, label: `TikTok (@${pd.uniqueId || profile.value})`, metadata: { platform: "tiktok", followers: pd.followerCount, verified: pd.verified, avatar: pd.avatarLarger }, source_module: "tiktok-intel" },
+      ];
+      const relationships = [
+        { fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `tiktok:${pd.uniqueId || profile.value}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `TikTok profile: @${pd.uniqueId}` },
+      ];
+      if (pd.nickname) {
+        entities.push({ entity_type: "person", value: pd.nickname.toLowerCase(), label: pd.nickname, metadata: { source: "tiktok" }, source_module: "tiktok-intel" });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // facebook-intel: Facebook profile/page → social_account entity
+  {
+    module: "facebook-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "facebook",
+    extract: (f, profile) => {
+      const pd = f.raw_data?.profileData || {};
+      const entities = [
+        { entity_type: "social_account", value: `facebook:${profile.value}`, label: `Facebook (${pd.name || profile.value})`, metadata: { platform: "facebook", name: pd.name, avatar: pd.profileImage, followersText: pd.followersText }, source_module: "facebook-intel" },
+      ];
+      const relationships = [
+        { fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `facebook:${profile.value}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Facebook: ${pd.name || profile.value}` },
+      ];
+      if (pd.name) {
+        entities.push({ entity_type: "person", value: pd.name.toLowerCase(), label: pd.name, metadata: { source: "facebook" }, source_module: "facebook-intel" });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // linkedin-intel: LinkedIn profile → social_account entity
+  {
+    module: "linkedin-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "linkedin",
+    extract: (f, profile) => {
+      const pd = f.raw_data?.profileData || {};
+      const entities = [
+        { entity_type: "social_account", value: `linkedin:${profile.value}`, label: `LinkedIn (${pd.name || profile.value})`, metadata: { platform: "linkedin", name: pd.name, headline: pd.headline, location: pd.location, profileUrl: pd.profileUrl }, source_module: "linkedin-intel" },
+      ];
+      const relationships = [
+        { fromType: profile.profile_type, fromValue: profile.value, toType: "social_account", toValue: `linkedin:${profile.value}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `LinkedIn: ${pd.name || profile.value}` },
+      ];
+      if (pd.name) {
+        entities.push({ entity_type: "person", value: pd.name.toLowerCase(), label: pd.name, metadata: { source: "linkedin" }, source_module: "linkedin-intel" });
+        relationships.push({ fromType: "social_account", fromValue: `linkedin:${profile.value}`, toType: "person", toValue: pd.name.toLowerCase(), relationship: "linked_to", confidence: 85, evidence: "LinkedIn profile name" });
+      }
+      if (pd.location) {
+        entities.push({ entity_type: "location", value: pd.location.toLowerCase(), label: pd.location, metadata: { source: "linkedin" }, source_module: "linkedin-intel" });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // twitter-intel: Twitter/X profile → social_account entity
+  {
+    module: "twitter-intel",
+    match: (f) => f.category === "account_found" && f.raw_data?.platform === "twitter",
+    extract: (f, profile) => {
+      const pd = f.raw_data?.profileData || {};
+      const entities = [
+        { entity_type: "social_account", value: `twitter:${pd.username || profile.value}`, label: `Twitter/X (@${pd.username || profile.value})`, metadata: { platform: "twitter", followers: pd.followers, verified: pd.verified, avatar: pd.profile_image }, source_module: "twitter-intel" },
+      ];
+      const relationships = [
+        { fromType: "username", fromValue: profile.value, toType: "social_account", toValue: `twitter:${pd.username || profile.value}`, relationship: "uses", confidence: CONFIDENCE.SOCIAL_DEEP, evidence: `Twitter/X: @${pd.username}` },
+      ];
+      if (pd.displayname) {
+        entities.push({ entity_type: "person", value: pd.displayname.toLowerCase(), label: pd.displayname, metadata: { source: "twitter" }, source_module: "twitter-intel" });
+      }
+      if (pd.location) {
+        entities.push({ entity_type: "location", value: pd.location.toLowerCase(), label: pd.location, metadata: { source: "twitter" }, source_module: "twitter-intel" });
+      }
+      return { entities, relationships };
+    },
+  },
+
   // face-match: facial recognition match → image entity + face_match relationship
   {
     module: "face-match",
@@ -1440,6 +1646,16 @@ const LOCATION_EXTRACTORS = [
   },
   { module: "exif-extract", match: (f) => f.raw_data?.city || f.raw_data?.country,
     extract: (f) => ({ location_text: [f.raw_data.city, f.raw_data.province, f.raw_data.country].filter(Boolean).join(", "), location_type: "iptc", confidence: 0.8, raw_data: { source: "iptc_metadata" } }),
+  },
+  // Social intel modules location extraction
+  { module: "twitter-intel", match: (f) => f.raw_data?.profileData?.location,
+    extract: (f) => ({ location_text: f.raw_data.profileData.location, location_type: "profile_text", confidence: 0.6, raw_data: { source: "twitter-intel" } }),
+  },
+  { module: "linkedin-intel", match: (f) => f.raw_data?.profileData?.location,
+    extract: (f) => ({ location_text: f.raw_data.profileData.location, location_type: "profile_text", confidence: 0.7, raw_data: { source: "linkedin-intel" } }),
+  },
+  { module: "tiktok-intel", match: (f) => f.raw_data?.profileData?.region,
+    extract: (f) => ({ location_text: f.raw_data.profileData.region, location_type: "profile_text", confidence: 0.5, raw_data: { source: "tiktok-intel" } }),
   },
 ];
 

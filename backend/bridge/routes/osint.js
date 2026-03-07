@@ -1405,6 +1405,31 @@ module.exports = function osintRoutes(ctx) {
       return true;
     }
 
+    // GET /osint/dossier — generate dossier (combined or per-profile)
+    // GET /osint/dossier/:profileId?days=30
+    const dossierMatch = pathname.match(/^\/osint\/dossier(?:\/(\d+))?$/);
+    if (req.method === "GET" && dossierMatch) {
+      try {
+        const { generateDossier, dossierToMarkdown } = require("../osint-dossier-generator");
+        const profileId = dossierMatch[1] ? parseInt(dossierMatch[1]) : null;
+        const days = parseInt(url.searchParams.get("days") || "30");
+        const format = url.searchParams.get("format") || "json";
+        const dossier = await generateDossier(profileId, days);
+
+        if (format === "markdown") {
+          const md = dossierToMarkdown(dossier);
+          res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
+          res.end(md);
+        } else {
+          sendJSON(res, 200, { ok: true, dossier });
+        }
+      } catch (err) {
+        log.bridge.error("Dossier generation error:", err.message);
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     return false;
   };
 };

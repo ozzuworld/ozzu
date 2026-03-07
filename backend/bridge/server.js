@@ -73,6 +73,17 @@ osintEngine.registerModule(require("./osint-modules/co-rama-judicial"));
 osintEngine.registerModule(require("./osint-modules/co-fiscalia"));
 osintEngine.registerModule(require("./osint-modules/co-libreta-militar"));
 osintEngine.registerModule(require("./osint-modules/co-risk-score"));
+// Social media intelligence modules (Intelligence Tab Epic)
+osintEngine.registerModule(require("./osint-modules/bluesky-intel"));
+osintEngine.registerModule(require("./osint-modules/youtube-intel"));
+osintEngine.registerModule(require("./osint-modules/reddit-intel"));
+osintEngine.registerModule(require("./osint-modules/mastodon-intel"));
+osintEngine.registerModule(require("./osint-modules/telegram-intel"));
+osintEngine.registerModule(require("./osint-modules/instagram-intel"));
+osintEngine.registerModule(require("./osint-modules/tiktok-intel"));
+osintEngine.registerModule(require("./osint-modules/facebook-intel"));
+osintEngine.registerModule(require("./osint-modules/linkedin-intel"));
+osintEngine.registerModule(require("./osint-modules/twitter-intel"));
 // OSINT monitoring + CLI runner
 const osintMonitor = require("./osint-monitor");
 const cliRunner = require("./osint-cli-runner");

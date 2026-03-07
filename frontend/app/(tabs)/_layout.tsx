@@ -44,8 +44,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="osint"
         options={{
-          title: "OSINT",
-          tabBarIcon: () => <TabIcon emoji="🛡" />,
+          title: "INTEL",
+          tabBarIcon: () => <TabIcon emoji="🕵️" />,
         }}
       />
       <Tabs.Screen

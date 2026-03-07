@@ -126,6 +126,17 @@ export const MODULE_EMOJI: Record<string, string> = {
   "crtsh-monitor": "📜",
   "darkweb-search": "🕵",
   "leak-search": "💧",
+  // Social media intelligence
+  "bluesky-intel": "🦋",
+  "youtube-intel": "▶",
+  "reddit-intel": "🤖",
+  "mastodon-intel": "🐘",
+  "telegram-intel": "✈",
+  "instagram-intel": "📷",
+  "tiktok-intel": "🎵",
+  "facebook-intel": "👥",
+  "linkedin-intel": "💼",
+  "twitter-intel": "𝕏",
 };
 
 export const MODULE_LABELS: Record<string, string> = {
@@ -164,6 +175,17 @@ export const MODULE_LABELS: Record<string, string> = {
   "crtsh-monitor": "CRT.SH",
   "darkweb-search": "DARK WEB",
   "leak-search": "INTELX",
+  // Social media intelligence
+  "bluesky-intel": "BLUESKY",
+  "youtube-intel": "YOUTUBE",
+  "reddit-intel": "REDDIT",
+  "mastodon-intel": "MASTODON",
+  "telegram-intel": "TELEGRAM",
+  "instagram-intel": "INSTAGRAM",
+  "tiktok-intel": "TIKTOK",
+  "facebook-intel": "FACEBOOK",
+  "linkedin-intel": "LINKEDIN",
+  "twitter-intel": "TWITTER/X",
 };
 
 export const ALERT_TYPE_EMOJI: Record<string, string> = {

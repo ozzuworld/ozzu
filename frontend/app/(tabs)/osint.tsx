@@ -57,6 +57,7 @@ import { RemediationList } from "../../components/osint/RemediationList";
 import { EntityDetailSheet } from "../../components/osint/EntityDetailSheet";
 import { IdentityClusterCard } from "../../components/osint/IdentityClusterCard";
 import { Timeline } from "../../components/osint/Timeline";
+import { DossierView } from "../../components/osint/DossierView";
 import CedulaDbManager from "../../components/osint/CedulaDbManager";
 import type { OsintEntity } from "../../lib/bridge-api";
 
@@ -71,6 +72,7 @@ const VIEW_TABS = [
   { key: "graph", label: "GRAPH", emoji: "🕸" },
   { key: "correlations", label: "LINKS", emoji: "🔗" },
   { key: "timeline", label: "TIMELINE", emoji: "⏱" },
+  { key: "dossier", label: "DOSSIER", emoji: "📋" },
   { key: "reports", label: "REPORTS", emoji: "📊" },
   { key: "fixit", label: "FIX IT", emoji: "🔧" },
 ];
@@ -1261,6 +1263,11 @@ export default function OsintScreen() {
                 <CorrelationCard key={c.id} correlation={c} />
               ))}
           </View>
+        )}
+
+        {/* ─── DOSSIER VIEW ─── */}
+        {activeView === "dossier" && (
+          <DossierView />
         )}
 
         {/* ─── REPORTS VIEW ─── */}
