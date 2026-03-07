@@ -338,6 +338,36 @@ app.post("/evaluate", async (req, res) => {
   }
 });
 
+// Upload file to a file input element on the page
+app.post("/upload-file", async (req, res) => {
+  try {
+    const { selector, session_id, base64, filename, mime_type } = req.body;
+    if (!base64) return res.status(400).json({ ok: false, error: "base64 required" });
+
+    const { page } = await getSession(session_id);
+    const buffer = Buffer.from(base64, "base64");
+    const fname = filename || "upload.jpg";
+    const mime = mime_type || "image/jpeg";
+
+    // If selector provided, use setInputFiles on that element
+    if (selector) {
+      await page.setInputFiles(selector, { name: fname, mimeType: mime, buffer });
+    } else {
+      // Find the first file input on the page
+      const fileInput = await page.$('input[type="file"]');
+      if (!fileInput) return res.status(400).json({ ok: false, error: "No file input found on page" });
+      await fileInput.setInputFiles({ name: fname, mimeType: mime, buffer });
+    }
+
+    // Wait a bit for upload processing
+    await new Promise(r => setTimeout(r, 2000));
+    const screenshot = await takeScreenshot(page);
+    res.json({ ok: true, uploaded: fname, size: buffer.length, screenshot });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // --- Start ---
 
 app.listen(PORT, "127.0.0.1", () => {

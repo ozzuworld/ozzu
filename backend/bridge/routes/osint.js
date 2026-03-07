@@ -124,6 +124,15 @@ module.exports = function osintRoutes(ctx) {
         });
 
         const profile = await db.getOsintProfile(profileId);
+
+        // Auto-trigger scan after upload
+        try {
+          const result = await osintEngine.runScan(profileId, "full");
+          log.bridge.info(`Auto-scan triggered for image profile ${profileId} (scan ${result.scanId})`);
+        } catch (scanErr) {
+          log.bridge.warn(`Auto-scan failed for profile ${profileId}: ${scanErr.message}`);
+        }
+
         sendJSON(res, 201, { ok: true, profile, image: imageRecord });
       } catch (err) {
         if (err.message.includes("duplicate key")) {
