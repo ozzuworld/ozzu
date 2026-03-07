@@ -68,6 +68,11 @@ const MODULE_GRADES = {
   "reverse-image": "D",
   "dnstwist-scan": "D",
 
+  // C-tier (continued): geoint collector inherits source confidence
+  "geoint-collector": "C",
+  "ip-geolocation": "C",
+  "timezone-inference": "D",
+
   // E-tier: very low signal
   "scene-analysis": "E",
   "avatar-compare": "E",
@@ -168,7 +173,7 @@ async function callGemini(prompt, maxTokens = 4096) {
   throw lastErr || new Error("All Gemini models failed");
 }
 
-function buildAnalysisPrompt(profileLabel, gradedFindings, wikiData, newsData, githubData, relationships) {
+function buildAnalysisPrompt(profileLabel, gradedFindings, wikiData, newsData, githubData, relationships, locations) {
   // Summarize findings by grade and category
   const byGrade = { A: [], B: [], C: [], D: [], E: [], F: [] };
   for (const f of gradedFindings) {
@@ -279,6 +284,11 @@ ${socialFindings.slice(0, 20).map(f => `- ${f.title} [Grade: ${f.source_grade}]`
 === RELATIONSHIP GRAPH ===
 ${relContext || "No relationships mapped."}
 
+=== GEOSPATIAL INTELLIGENCE ===
+${(locations || []).length > 0 ? locations.slice(0, 15).map(l =>
+    `- ${l.location_text} | Type: ${l.location_type} | Confidence: ${(l.confidence * 100).toFixed(0)}% | Coords: ${l.latitude ? `${l.latitude.toFixed(4)}, ${l.longitude.toFixed(4)}` : "unknown"} | Source: ${l.source_module}`
+  ).join("\n") : "No geospatial data collected."}
+
 === STATISTICS ===
 Total findings: ${gradedFindings.length}
 By grade: A=${byGrade.A.length} B=${byGrade.B.length} C=${byGrade.C.length} D=${byGrade.D.length} E=${byGrade.E.length} F=${byGrade.F.length}
@@ -343,9 +353,21 @@ async function generateAssessment(profileId) {
     relationships = graphData?.relationships || [];
   } catch {}
 
+  // Get GEOINT locations
+  let locations = [];
+  try {
+    locations = await db.getOsintLocations({ profile_id: profileId });
+    // Also get locations from auto-pivot profiles
+    const allProfiles = await db.getOsintProfiles();
+    for (const p of allProfiles.filter(p => p.tags?.includes("auto-pivot"))) {
+      const pLocs = await db.getOsintLocations({ profile_id: p.id });
+      locations.push(...pLocs);
+    }
+  } catch {}
+
   // Build prompt and call Gemini
   const prompt = buildAnalysisPrompt(
-    profile.label, allGraded, wikiData, newsData, githubData, relationships
+    profile.label, allGraded, wikiData, newsData, githubData, relationships, locations
   );
 
   const rawResponse = await callGemini(prompt, 4096);
@@ -476,6 +498,14 @@ function computeExposureScore(gradedFindings) {
     if (f.module === "scene-analysis" && f.raw_data?.type === "scene_analysis") {
       categories.physical.score += 2 * w;
       categories.physical.factors.push("Scene/environment data extracted from photo");
+    }
+    if (f.module === "geoint-collector" && f.raw_data?.type === "geoint_summary") {
+      const exact = f.raw_data.exact || 0;
+      const geocoded = f.raw_data.geocoded || 0;
+      categories.physical.score += Math.min(10, exact * 5 + geocoded * 2) * w;
+      if (exact > 0) categories.physical.factors.push(`${exact} exact GPS location(s) exposed`);
+      if (geocoded > 0) categories.physical.factors.push(`${geocoded} geocoded location(s) identified`);
+      if (f.raw_data.clusters?.length > 0) categories.physical.factors.push(`${f.raw_data.clusters.length} location cluster(s) — probable home/work identifiable`);
     }
   }
 

@@ -20,7 +20,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Tab = "assessment" | "overview" | "identity" | "faces" | "sources";
+type Tab = "assessment" | "overview" | "identity" | "faces" | "geoint" | "sources";
 
 export function IntelDossier({ profile, findings, onBack }: Props) {
   const [tab, setTab] = useState<Tab>("assessment");
@@ -31,6 +31,7 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
   const [assessLoading, setAssessLoading] = useState(true);
   const [assessGenerating, setAssessGenerating] = useState(false);
   const [typedRels, setTypedRels] = useState<any[]>([]);
+  const [locations, setLocations] = useState<any[]>([]);
 
   const imgUrl = `${getBridgeUrl()}/osint/images/${profile.id}/thumbnail`;
 
@@ -70,10 +71,13 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
       .finally(() => setAssessLoading(false));
   }, [profile.id]);
 
-  // Load typed relationships
+  // Load typed relationships + GEOINT locations
   useEffect(() => {
     apiFetch(`/osint/relationships/${profile.id}/typed`)
       .then(d => setTypedRels(d.relationships || []))
+      .catch(() => {});
+    apiFetch(`/osint/locations/${profile.id}`)
+      .then(d => setLocations(d.locations || []))
       .catch(() => {});
   }, [profile.id]);
 
@@ -94,6 +98,7 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
     { key: "overview", label: "Overview" },
     { key: "identity", label: "Identity", badge: allCandidates.length },
     { key: "faces", label: "Faces", badge: totalFaces },
+    { key: "geoint", label: "GEOINT", badge: locations.length },
     { key: "sources", label: "Sources" },
   ];
 
@@ -156,6 +161,7 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
         {tab === "overview" && <OverviewScreen findings={findings} crit={crit} high={high} med={med} totalFaces={totalFaces} scenes={scenes} ekf={ekf} discovered={discovered} dossier={dossier} dossierLoading={dossierLoading} conf={conf} />}
         {tab === "identity" && <IdentityScreen candidates={idCand?.raw_data?.candidates || []} dossier={dossier} />}
         {tab === "faces" && <FacesScreen verified={verified} discovered={discovered} profileId={profile.id} />}
+        {tab === "geoint" && <GeointScreen locations={locations} />}
         {tab === "sources" && <SourcesScreen assessment={assessment} findings={findings} />}
       </ScrollView>
     </View>
@@ -587,6 +593,119 @@ function FacesScreen({ verified, discovered, profileId }: any) {
           ))}
         </>
       )}
+    </View>
+  );
+}
+
+// =============================================
+// GEOINT — geospatial intelligence
+// =============================================
+function GeointScreen({ locations }: { locations: any[] }) {
+  if (!locations.length) return <Empty text="No geospatial data collected" />;
+
+  const TYPE_COLORS: Record<string, string> = {
+    exact_gps: "#dc2626",
+    iptc_location: "#ea580c",
+    profile_declared: "#ca8a04",
+    geocoded_address: "#ca8a04",
+    citizenship: "#00b4d8",
+    education: "#a855f7",
+    employer: "#16a34a",
+    scene_estimated: "#555",
+    ip_geolocation: "#0ea5e9",
+    news_mention: "#6366f1",
+    whois_registrant: "#8b5cf6",
+    timezone_inferred: "#333",
+  };
+
+  const TYPE_LABELS: Record<string, string> = {
+    exact_gps: "EXACT GPS",
+    iptc_location: "IPTC",
+    profile_declared: "PROFILE",
+    citizenship: "CITIZENSHIP",
+    education: "EDUCATION",
+    employer: "EMPLOYER",
+    scene_estimated: "SCENE EST.",
+    ip_geolocation: "IP GEO",
+    news_mention: "NEWS",
+    whois_registrant: "WHOIS",
+    timezone_inferred: "TIMEZONE",
+  };
+
+  // Sort by confidence
+  const sorted = [...locations].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+
+  // Group by type
+  const byType: Record<string, number> = {};
+  for (const l of sorted) {
+    byType[l.location_type || "unknown"] = (byType[l.location_type || "unknown"] || 0) + 1;
+  }
+
+  const exact = sorted.filter(l => l.location_type === "exact_gps");
+  const highConf = sorted.filter(l => (l.confidence || 0) >= 0.7 && l.location_type !== "exact_gps");
+
+  return (
+    <View style={{ gap: 14 }}>
+      {/* Summary */}
+      <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <Text style={{ color: "#16a34a", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>GEOSPATIAL INTELLIGENCE</Text>
+          <Text style={{ color: "#555", fontSize: 10 }}>{locations.length} signals</Text>
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {Object.entries(byType).map(([type, count]) => (
+            <View key={type} style={{ backgroundColor: (TYPE_COLORS[type] || "#333") + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: (TYPE_COLORS[type] || "#333") + "20" }}>
+              <Text style={{ color: TYPE_COLORS[type] || "#555", fontSize: 9, fontWeight: "700" }}>{TYPE_LABELS[type] || type} ({count})</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* Exact GPS — critical */}
+      {exact.length > 0 && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#dc262630" }}>
+          <Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>EXACT GPS COORDINATES</Text>
+          {exact.map((l, i) => (
+            <View key={i} style={{ marginBottom: 8, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: "#dc262640" }}>
+              <Text style={{ color: "#ccc", fontSize: 12, fontWeight: "600" }}>{l.latitude?.toFixed(6)}, {l.longitude?.toFixed(6)}</Text>
+              <Text style={{ color: "#444", fontSize: 10, marginTop: 2 }}>{l.location_text} | Source: {l.source_module}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* High confidence locations */}
+      {highConf.length > 0 && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#ca8a04", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>HIGH CONFIDENCE LOCATIONS</Text>
+          {highConf.slice(0, 15).map((l, i) => (
+            <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: (TYPE_COLORS[l.location_type] || "#333") + "18", justifyContent: "center", alignItems: "center" }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: TYPE_COLORS[l.location_type] || "#333" }} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: "#ccc", fontSize: 11, fontWeight: "600" }} numberOfLines={1}>{l.location_text}</Text>
+                <Text style={{ color: "#333", fontSize: 9, marginTop: 2 }}>
+                  {TYPE_LABELS[l.location_type] || l.location_type} | {((l.confidence || 0) * 100).toFixed(0)}% | {l.source_module}
+                  {l.latitude ? ` | ${l.latitude.toFixed(4)}, ${l.longitude.toFixed(4)}` : ""}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* All locations — compact list */}
+      <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+        <Text style={{ color: "#555", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>ALL LOCATION SIGNALS ({sorted.length})</Text>
+        {sorted.slice(0, 30).map((l, i) => (
+          <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: TYPE_COLORS[l.location_type] || "#333" }} />
+            <Text style={{ color: "#888", fontSize: 10, flex: 1 }} numberOfLines={1}>{l.location_text}</Text>
+            <Text style={{ color: "#333", fontSize: 9 }}>{((l.confidence || 0) * 100).toFixed(0)}%</Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
