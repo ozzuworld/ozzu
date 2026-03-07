@@ -618,6 +618,7 @@ function GeointScreen({ locations, findings }: { locations: any[], findings: any
     whois_registrant: "#8b5cf6",
     timezone_inferred: "#333",
     visual_heuristic: "#f59e0b",
+    flight_destination: "#0284c7",
   };
 
   const TYPE_LABELS: Record<string, string> = {
@@ -633,6 +634,7 @@ function GeointScreen({ locations, findings }: { locations: any[], findings: any
     whois_registrant: "WHOIS",
     timezone_inferred: "TIMEZONE",
     visual_heuristic: "VISUAL",
+    flight_destination: "FLIGHT",
   };
 
   // Sort by confidence
@@ -711,6 +713,43 @@ function GeointScreen({ locations, findings }: { locations: any[], findings: any
           ))}
         </View>
       )}
+
+      {/* Movement Intelligence */}
+      {(() => {
+        const movementFindings = (findings || []).filter((f: any) => f.module === "movement-intel" && f.severity !== "info");
+        if (!movementFindings.length) return null;
+        return (
+          <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+            <Text style={{ color: "#0284c7", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>MOVEMENT INTELLIGENCE</Text>
+            {movementFindings.map((f: any, i: number) => {
+              const isFlightHigh = f.raw_data?.type === "flight_tracking" && f.raw_data?.flightCount > 0;
+              const isVessel = f.raw_data?.type === "vessel_tracking";
+              const icon = isFlightHigh ? "+" : isVessel ? "~" : "-";
+              const sevColor = f.severity === "high" ? "#0284c7" : f.severity === "medium" ? "#ca8a04" : "#555";
+              return (
+                <View key={i} style={{ marginBottom: 10, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: sevColor + "40" }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                    <View style={{ backgroundColor: sevColor + "20", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                      <Text style={{ color: sevColor, fontSize: 8, fontWeight: "800" }}>{isFlightHigh ? "FLIGHT" : isVessel ? "VESSEL" : f.raw_data?.type === "wigle_scan" ? "WI-FI" : "MOVE"}</Text>
+                    </View>
+                    <Text style={{ color: "#ccc", fontSize: 11, fontWeight: "600", flex: 1 }} numberOfLines={2}>{f.title?.replace("Flight tracking: ", "").replace("Vessel tracking: ", "").replace("Wi-Fi scan: ", "")}</Text>
+                  </View>
+                  {f.description && <Text style={{ color: "#555", fontSize: 9, marginTop: 2 }} numberOfLines={4}>{f.description}</Text>}
+                  {isFlightHigh && f.raw_data?.airportsVisited?.length > 0 && (
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                      {f.raw_data.airportsVisited.slice(0, 10).map((ap: string, j: number) => (
+                        <View key={j} style={{ backgroundColor: "#0284c720", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                          <Text style={{ color: "#0284c7", fontSize: 8, fontWeight: "700" }}>{ap}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        );
+      })()}
 
       {/* Photo Forensics */}
       {forensicFindings.length > 0 && (
