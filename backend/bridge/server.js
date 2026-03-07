@@ -84,6 +84,14 @@ osintEngine.registerModule(require("./osint-modules/tiktok-intel"));
 osintEngine.registerModule(require("./osint-modules/facebook-intel"));
 osintEngine.registerModule(require("./osint-modules/linkedin-intel"));
 osintEngine.registerModule(require("./osint-modules/twitter-intel"));
+// Photo intelligence pipeline modules
+osintEngine.registerModule(require("./osint-modules/face-search"));
+osintEngine.registerModule(require("./osint-modules/scene-analysis"));
+osintEngine.registerModule(require("./osint-modules/identity-resolver"));
+osintEngine.registerModule(require("./osint-modules/social-network-mapper"));
+osintEngine.registerModule(require("./osint-modules/fullcontact-lookup"));
+osintEngine.registerModule(require("./osint-modules/hunter-lookup"));
+osintEngine.registerModule(require("./osint-modules/pimeyes-search"));
 // OSINT monitoring + CLI runner
 const osintMonitor = require("./osint-monitor");
 const cliRunner = require("./osint-cli-runner");

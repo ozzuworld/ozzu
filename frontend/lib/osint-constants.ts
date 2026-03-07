@@ -137,6 +137,14 @@ export const MODULE_EMOJI: Record<string, string> = {
   "facebook-intel": "👥",
   "linkedin-intel": "💼",
   "twitter-intel": "𝕏",
+  // Photo intelligence pipeline
+  "face-search": "🔎",
+  "scene-analysis": "🎬",
+  "identity-resolver": "🆔",
+  "social-network-mapper": "🕸",
+  "fullcontact-lookup": "📇",
+  "hunter-lookup": "🎯",
+  "pimeyes-search": "👁",
 };
 
 export const MODULE_LABELS: Record<string, string> = {
@@ -186,6 +194,14 @@ export const MODULE_LABELS: Record<string, string> = {
   "facebook-intel": "FACEBOOK",
   "linkedin-intel": "LINKEDIN",
   "twitter-intel": "TWITTER/X",
+  // Photo intelligence pipeline
+  "face-search": "FACE SEARCH",
+  "scene-analysis": "SCENE ANALYSIS",
+  "identity-resolver": "ID RESOLVER",
+  "social-network-mapper": "SOCIAL MAP",
+  "fullcontact-lookup": "FULLCONTACT",
+  "hunter-lookup": "HUNTER.IO",
+  "pimeyes-search": "PIMEYES",
 };
 
 export const ALERT_TYPE_EMOJI: Record<string, string> = {

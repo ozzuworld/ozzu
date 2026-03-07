@@ -3,6 +3,8 @@ const db = require("./db");
 const correlator = require("./osint-correlator");
 const remEngine = require("./osint-remediation-engine");
 const { runIdentityClustering } = require("./osint-identity-cluster");
+const pivotEngine = require("./osint-pivot-engine");
+const ekfEngine = require("./osint-ekf-engine");
 
 // ── Rate Limiter ──
 class RateLimiter {
@@ -161,6 +163,29 @@ async function runScan(profileId, scanType = "full") {
         await runIdentityClustering(profileId);
       } catch (clusterErr) {
         console.error(`[osint] Identity clustering error:`, clusterErr.message);
+      }
+
+      // EKF fusion — update state estimate with new observations
+      try {
+        const ekfState = await ekfEngine.fuseScanResults(profileId, scanId);
+        if (ekfState) {
+          console.log(`[osint] EKF fusion: ${ekfState.observationCount} observations, identity certainty: ${(ekfState.x[ekfEngine.STATE.IDENTITY_CERTAINTY] * 100).toFixed(1)}%`);
+        }
+      } catch (ekfErr) {
+        console.error(`[osint] EKF fusion error:`, ekfErr.message);
+      }
+
+      // Pivot engine — auto-create profiles from identity discoveries (image profiles only)
+      try {
+        const profile_ = await db.getOsintProfile(profileId);
+        if (profile_?.profile_type === "image") {
+          const pivotResult = await pivotEngine.executePivots(profileId, scanId, { runScan });
+          if (pivotResult.pivoted > 0) {
+            console.log(`[osint] Pivot engine: created ${pivotResult.pivoted} new profiles from image scan`);
+          }
+        }
+      } catch (pivotErr) {
+        console.error(`[osint] Pivot engine error:`, pivotErr.message);
       }
 
       // Delta detection + alert generation

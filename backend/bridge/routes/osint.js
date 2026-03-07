@@ -1430,6 +1430,82 @@ module.exports = function osintRoutes(ctx) {
       return true;
     }
 
+    // ── Investigation Endpoints ──
+
+    // POST /osint/investigations — create investigation from image profile
+    if (req.method === "POST" && pathname === "/osint/investigations") {
+      try {
+        const body = await parseBody(req);
+        const pivotEngine = require("../osint-pivot-engine");
+        const inv = await pivotEngine.createInvestigation(body.seedProfileId, body.name, body.config);
+        if (!inv) { sendJSON(res, 500, { error: "Failed to create investigation" }); return true; }
+        // Link seed profile to investigation
+        if (body.seedProfileId) {
+          await db.updateOsintProfilePivot(body.seedProfileId, { investigation_id: inv.id, pivot_depth: 0 });
+        }
+        sendJSON(res, 201, { ok: true, investigation: inv });
+      } catch (err) {
+        log.bridge.error("Investigation create error:", err.message);
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /osint/investigations — list all investigations
+    if (req.method === "GET" && pathname === "/osint/investigations") {
+      try {
+        const pivotEngine = require("../osint-pivot-engine");
+        const investigations = await pivotEngine.getInvestigations();
+        sendJSON(res, 200, investigations);
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /osint/investigations/:id — get investigation details
+    const invMatch = pathname.match(/^\/osint\/investigations\/(\d+)$/);
+    if (req.method === "GET" && invMatch) {
+      try {
+        const pivotEngine = require("../osint-pivot-engine");
+        const inv = await pivotEngine.getInvestigation(parseInt(invMatch[1]));
+        if (!inv) { sendJSON(res, 404, { error: "Investigation not found" }); return true; }
+        // Get linked profiles
+        const profiles = await db.getOsintProfiles();
+        const linked = profiles.filter(p => p.investigation_id === inv.id);
+        sendJSON(res, 200, { investigation: inv, profiles: linked });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // ── EKF Endpoints ──
+
+    // GET /osint/ekf/:profileId — get EKF state for a profile
+    const ekfMatch = pathname.match(/^\/osint\/ekf\/(\d+)$/);
+    if (req.method === "GET" && ekfMatch) {
+      try {
+        const ekfEngine = require("../osint-ekf-engine");
+        const profileId = parseInt(ekfMatch[1]);
+        const ekfState = await db.getOsintEkfState(profileId);
+        if (!ekfState) {
+          sendJSON(res, 200, { state: null, summary: null });
+          return true;
+        }
+        const state = {
+          x: ekfState.state_vector,
+          P: ekfState.covariance_matrix,
+          observationCount: ekfState.observation_count,
+        };
+        const summary = ekfEngine.getStateSummary(state);
+        sendJSON(res, 200, { state: ekfState, summary });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     return false;
   };
 };

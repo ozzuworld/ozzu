@@ -1299,6 +1299,62 @@ export async function fetchOsintTimeline(limit = 100, profileId?: number): Promi
   return data.events || [];
 }
 
+// ── OSINT Investigations (Photo Intelligence Pipeline) ──
+
+export interface OsintInvestigation {
+  id: number;
+  name: string;
+  seed_profile_id: number | null;
+  seed_label?: string;
+  seed_type?: string;
+  status: string;
+  max_depth: number;
+  pivot_count: number;
+  config: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EkfSummary {
+  identity_certainty: string;
+  name_confidence: string;
+  location_confidence: string;
+  age_estimate: string;
+  employer_confidence: string;
+  online_presence: string;
+  threat_level: string;
+  observations: number;
+  confidence_intervals: Record<string, { value: number; stddev: number; ci95_low: number; ci95_high: number }>;
+}
+
+export async function fetchOsintInvestigations(): Promise<OsintInvestigation[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/investigations`);
+  if (!res.ok) throw new Error(`Investigations fetch error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintInvestigation(id: number): Promise<{ investigation: OsintInvestigation; profiles: OsintProfile[] }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/investigations/${id}`);
+  if (!res.ok) throw new Error(`Investigation fetch error: ${res.status}`);
+  return res.json();
+}
+
+export async function createOsintInvestigation(seedProfileId: number, name: string, config?: Record<string, any>): Promise<{ ok: boolean; investigation: OsintInvestigation }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/investigations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seedProfileId, name, config }),
+  });
+  if (!res.ok) throw new Error(`Investigation create error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchOsintEkf(profileId: number): Promise<{ state: any; summary: EkfSummary | null }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/osint/ekf/${profileId}`);
+  if (!res.ok) throw new Error(`EKF fetch error: ${res.status}`);
+  return res.json();
+}
+
 // ── Epics (integrated into directives — type="epic" with epicId/phaseOrder) ──
 
 export interface EpicProgress {

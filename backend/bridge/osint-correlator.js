@@ -1471,6 +1471,122 @@ const EXTRACTION_RULES = [
       return { entities, relationships };
     },
   },
+
+  // face-search: verified face matches → discovered profile entities
+  {
+    module: "face-search",
+    match: (f) => f.raw_data?.type === "discovered_profile",
+    extract: (f, profile) => ({
+      entities: [
+        { entity_type: "social_account", value: `${f.raw_data.platform}:${f.raw_data.username}`, label: `${f.raw_data.platform} (${f.raw_data.username})`, metadata: { platform: f.raw_data.platform, similarity: f.raw_data.similarity, source: "face_search" }, source_module: "face-search" },
+      ],
+      relationships: [
+        { fromType: profile.profile_type, fromValue: profile.value, toType: "social_account", toValue: `${f.raw_data.platform}:${f.raw_data.username}`, relationship: "face_match", confidence: Math.round((f.raw_data.similarity || 0.5) * 100), evidence: `Face match ${((f.raw_data.similarity || 0) * 100).toFixed(0)}% on ${f.raw_data.platform}` },
+      ],
+    }),
+  },
+
+  // face-search: identity candidates from search engines
+  {
+    module: "face-search",
+    match: (f) => f.raw_data?.type === "identity_candidates" && f.raw_data?.identityGuesses?.length > 0,
+    extract: (f, profile) => ({
+      entities: f.raw_data.identityGuesses.map(name => ({
+        entity_type: "person", value: name.toLowerCase(), label: name, metadata: { source: "face_search_guess" }, source_module: "face-search",
+      })),
+      relationships: f.raw_data.identityGuesses.map(name => ({
+        fromType: profile.profile_type, fromValue: profile.value, toType: "person", toValue: name.toLowerCase(), relationship: "identity_guess", confidence: 70, evidence: `Search engine identity guess: ${name}`,
+      })),
+    }),
+  },
+
+  // scene-analysis: location detection
+  {
+    module: "scene-analysis",
+    match: (f) => f.raw_data?.type === "location_detection" && f.raw_data?.location?.estimated_region,
+    extract: (f, profile) => ({
+      entities: [
+        { entity_type: "location", value: f.raw_data.location.estimated_region.toLowerCase(), label: f.raw_data.location.estimated_region, metadata: { confidence: f.raw_data.location.confidence, indicators: f.raw_data.location.indicators }, source_module: "scene-analysis" },
+      ],
+      relationships: [
+        { fromType: profile.profile_type, fromValue: profile.value, toType: "location", toValue: f.raw_data.location.estimated_region.toLowerCase(), relationship: "located_at", confidence: f.raw_data.location.confidence === "high" ? 85 : 60, evidence: `Scene analysis: ${f.raw_data.location.indicators?.join(", ") || "visual clues"}` },
+      ],
+    }),
+  },
+
+  // scene-analysis: organization detection
+  {
+    module: "scene-analysis",
+    match: (f) => f.raw_data?.type === "org_detection" && f.raw_data?.organizations?.length > 0,
+    extract: (f, profile) => ({
+      entities: f.raw_data.organizations.map(org => ({
+        entity_type: "organization", value: org.toLowerCase(), label: org, metadata: { source: "scene_analysis" }, source_module: "scene-analysis",
+      })),
+      relationships: f.raw_data.organizations.map(org => ({
+        fromType: profile.profile_type, fromValue: profile.value, toType: "organization", toValue: org.toLowerCase(), relationship: "affiliated_with", confidence: 65, evidence: `Logo/branding visible in image`,
+      })),
+    }),
+  },
+
+  // scene-analysis: name tag detection
+  {
+    module: "scene-analysis",
+    match: (f) => f.raw_data?.type === "name_tag_detection" && f.raw_data?.names?.length > 0,
+    extract: (f, profile) => ({
+      entities: f.raw_data.names.map(name => ({
+        entity_type: "person", value: name.toLowerCase(), label: name, metadata: { source: "name_tag" }, source_module: "scene-analysis",
+      })),
+      relationships: f.raw_data.names.map(name => ({
+        fromType: profile.profile_type, fromValue: profile.value, toType: "person", toValue: name.toLowerCase(), relationship: "identified_as", confidence: 80, evidence: `Name tag visible in image: ${name}`,
+      })),
+    }),
+  },
+
+  // identity-resolver: identity candidates
+  {
+    module: "identity-resolver",
+    match: (f) => f.raw_data?.type === "identity_candidates" && f.raw_data?.candidates?.length > 0,
+    extract: (f, profile) => {
+      const top = f.raw_data.candidates.slice(0, 5);
+      return {
+        entities: top.map(c => ({
+          entity_type: c.name.includes(" ") ? "person" : "username", value: c.name.toLowerCase(), label: c.name, metadata: { confidence: c.confidence, sources: c.sourceCount, platforms: c.platforms }, source_module: "identity-resolver",
+        })),
+        relationships: top.map(c => ({
+          fromType: profile.profile_type, fromValue: profile.value, toType: c.name.includes(" ") ? "person" : "username", toValue: c.name.toLowerCase(), relationship: "resolved_identity", confidence: Math.round(c.confidence * 100), evidence: `${c.sourceCount} sources: ${c.platforms?.join(", ")}`,
+        })),
+      };
+    },
+  },
+
+  // fullcontact-lookup: enriched person data
+  {
+    module: "fullcontact-lookup",
+    match: (f) => f.raw_data?.type === "fullcontact_enrichment" && f.raw_data?.fullName,
+    extract: (f, profile) => {
+      const entities = [{ entity_type: "person", value: f.raw_data.fullName.toLowerCase(), label: f.raw_data.fullName, metadata: { source: "fullcontact" }, source_module: "fullcontact-lookup" }];
+      const relationships = [{ fromType: profile.profile_type, fromValue: profile.value, toType: "person", toValue: f.raw_data.fullName.toLowerCase(), relationship: "identified_as", confidence: 90, evidence: "FullContact enrichment" }];
+      if (f.raw_data.organization) {
+        entities.push({ entity_type: "organization", value: f.raw_data.organization.toLowerCase(), label: f.raw_data.organization, metadata: { source: "fullcontact" }, source_module: "fullcontact-lookup" });
+        relationships.push({ fromType: "person", fromValue: f.raw_data.fullName.toLowerCase(), toType: "organization", toValue: f.raw_data.organization.toLowerCase(), relationship: "works_at", confidence: 85, evidence: "FullContact enrichment" });
+      }
+      return { entities, relationships };
+    },
+  },
+
+  // hunter-lookup: discovered emails at domain
+  {
+    module: "hunter-lookup",
+    match: (f) => f.raw_data?.type === "hunter_domain_search" && f.raw_data?.emails?.length > 0,
+    extract: (f, profile) => ({
+      entities: f.raw_data.emails.slice(0, 10).map(e => ({
+        entity_type: "email", value: e.email.toLowerCase(), label: `${e.firstName || ""} ${e.lastName || ""} <${e.email}>`.trim(), metadata: { confidence: e.confidence, position: e.position }, source_module: "hunter-lookup",
+      })),
+      relationships: f.raw_data.emails.slice(0, 10).map(e => ({
+        fromType: "domain", fromValue: profile.value, toType: "email", toValue: e.email.toLowerCase(), relationship: "email_at_domain", confidence: Math.round(e.confidence || 70), evidence: `Hunter.io domain search`,
+      })),
+    }),
+  },
 ];
 
 // ── Core Correlation Functions ──

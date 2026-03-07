@@ -548,7 +548,35 @@ async function init() {
       payment_context JSONB DEFAULT '{}'
     )`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit)");
+    // OSINT Investigations (Photo Intelligence Pipeline)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_investigations (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      seed_profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE SET NULL,
+      status VARCHAR(20) DEFAULT 'active',
+      max_depth INTEGER DEFAULT 2,
+      pivot_count INTEGER DEFAULT 0,
+      config JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // OSINT EKF State (Extended Kalman Filter fusion)
+    await pool.query(`CREATE TABLE IF NOT EXISTS osint_ekf_state (
+      id SERIAL PRIMARY KEY,
+      profile_id INTEGER REFERENCES osint_profiles(id) ON DELETE CASCADE UNIQUE,
+      state_vector JSONB NOT NULL DEFAULT '[]',
+      covariance_matrix JSONB NOT NULL DEFAULT '[]',
+      observation_count INTEGER DEFAULT 0,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // Migration: pivot columns on osint_profiles
+    await pool.query(`ALTER TABLE osint_profiles ADD COLUMN IF NOT EXISTS investigation_id INTEGER REFERENCES osint_investigations(id) ON DELETE SET NULL`);
+    await pool.query(`ALTER TABLE osint_profiles ADD COLUMN IF NOT EXISTS pivot_depth INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE osint_profiles ADD COLUMN IF NOT EXISTS pivot_source TEXT`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -1605,6 +1633,75 @@ async function getOsintImageByProfile(profileId) {
   if (!_pgConnected) return null;
   const res = await query(`SELECT * FROM osint_images WHERE profile_id = $1`, [profileId]);
   return res.rows[0] || null;
+}
+
+// ── OSINT Investigations ──
+
+async function createOsintInvestigation(data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_investigations (name, seed_profile_id, max_depth, config)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [data.name, data.seed_profile_id || null, data.max_depth || 2, JSON.stringify(data.config || {})]
+  );
+  return res.rows[0];
+}
+
+async function getOsintInvestigation(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM osint_investigations WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function getOsintInvestigations() {
+  if (!_pgConnected) return [];
+  const res = await query(`SELECT i.*, p.label as seed_label, p.profile_type as seed_type FROM osint_investigations i LEFT JOIN osint_profiles p ON i.seed_profile_id = p.id ORDER BY i.created_at DESC`);
+  return res.rows;
+}
+
+async function incrementInvestigationPivots(id, count) {
+  if (!_pgConnected) return;
+  await query(`UPDATE osint_investigations SET pivot_count = pivot_count + $2, updated_at = NOW() WHERE id = $1`, [id, count]);
+}
+
+// ── OSINT Profile Pivot Support ──
+
+async function getOsintProfileByValue(profileType, value) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `SELECT * FROM osint_profiles WHERE profile_type = $1 AND value = $2 AND is_active = true`,
+    [profileType, value]
+  );
+  return res.rows[0] || null;
+}
+
+async function updateOsintProfilePivot(id, data) {
+  if (!_pgConnected) return;
+  await query(
+    `UPDATE osint_profiles SET investigation_id = $2, pivot_depth = $3, pivot_source = $4, updated_at = NOW() WHERE id = $1`,
+    [id, data.investigation_id || null, data.pivot_depth || 0, data.pivot_source || null]
+  );
+}
+
+// ── OSINT EKF State ──
+
+async function getOsintEkfState(profileId) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM osint_ekf_state WHERE profile_id = $1`, [profileId]);
+  return res.rows[0] || null;
+}
+
+async function upsertOsintEkfState(profileId, data) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO osint_ekf_state (profile_id, state_vector, covariance_matrix, observation_count)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (profile_id) DO UPDATE SET
+       state_vector = $2, covariance_matrix = $3, observation_count = $4, updated_at = NOW()
+     RETURNING *`,
+    [profileId, JSON.stringify(data.state_vector), JSON.stringify(data.covariance_matrix), data.observation_count || 0]
+  );
+  return res.rows[0];
 }
 
 // ── OSINT Schedules ──
@@ -2857,6 +2954,17 @@ module.exports = {
   createOsintImage,
   getOsintImage,
   getOsintImageByProfile,
+  // OSINT Investigations
+  createOsintInvestigation,
+  getOsintInvestigation,
+  getOsintInvestigations,
+  incrementInvestigationPivots,
+  // OSINT Profile Pivot
+  getOsintProfileByValue,
+  updateOsintProfilePivot,
+  // OSINT EKF State
+  getOsintEkfState,
+  upsertOsintEkfState,
   // OSINT Schedules
   getOsintSchedules,
   upsertOsintSchedule,

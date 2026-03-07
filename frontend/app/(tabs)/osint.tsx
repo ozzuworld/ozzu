@@ -58,6 +58,9 @@ import { EntityDetailSheet } from "../../components/osint/EntityDetailSheet";
 import { IdentityClusterCard } from "../../components/osint/IdentityClusterCard";
 import { Timeline } from "../../components/osint/Timeline";
 import { DossierView } from "../../components/osint/DossierView";
+import { InvestigationView } from "../../components/osint/InvestigationView";
+import { FaceSearchResults } from "../../components/osint/FaceSearchResults";
+import { EKFDashboard } from "../../components/osint/EKFDashboard";
 import CedulaDbManager from "../../components/osint/CedulaDbManager";
 import type { OsintEntity } from "../../lib/bridge-api";
 
@@ -71,6 +74,7 @@ const VIEW_TABS = [
   { key: "findings", label: "FINDINGS", emoji: "🔍" },
   { key: "graph", label: "GRAPH", emoji: "🕸" },
   { key: "correlations", label: "LINKS", emoji: "🔗" },
+  { key: "intel", label: "INTEL", emoji: "🎯" },
   { key: "timeline", label: "TIMELINE", emoji: "⏱" },
   { key: "dossier", label: "DOSSIER", emoji: "📋" },
   { key: "reports", label: "REPORTS", emoji: "📊" },
@@ -1262,6 +1266,21 @@ export default function OsintScreen() {
               .map((c) => (
                 <CorrelationCard key={c.id} correlation={c} />
               ))}
+          </View>
+        )}
+
+        {/* ─── INTEL VIEW (Face Search + EKF + Investigations) ─── */}
+        {activeView === "intel" && (
+          <View style={{ gap: 12 }}>
+            {/* Face search results for image profiles */}
+            <FaceSearchResults findings={findings} />
+            {/* EKF dashboard for first image profile */}
+            {(() => {
+              const imageProfile = profiles.find(p => p.profile_type === "image");
+              return imageProfile ? <EKFDashboard profileId={imageProfile.id} /> : null;
+            })()}
+            {/* Investigations list */}
+            <InvestigationView />
           </View>
         )}
 
