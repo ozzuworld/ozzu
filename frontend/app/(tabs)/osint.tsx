@@ -160,9 +160,9 @@ function SubjectRow({ profile, findings, onPress, onScan, index }: {
     if (!n || /^[0-9×x]+$/.test(n)) return false;
     const latin = n.replace(/[\s\d\W]/g, "").split("").filter((ch: string) => /[a-zA-Z\u00C0-\u024F]/.test(ch)).length;
     const total = n.replace(/[\s\d\W]/g, "").length;
-    return total === 0 || latin / total > 0.5;
-  }) || candidates[0];
-  const name = bestCandidate?.name || profile.label || "Unknown";
+    return total > 0 && latin / total > 0.5;
+  });
+  const name = (bestCandidate?.name) || profile.label || "Unknown";
   const confidence = bestCandidate?.confidence || 0;
 
   const crit = findings.filter(f => f.severity === "critical").length;

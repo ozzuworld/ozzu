@@ -55,6 +55,12 @@ function fetchWithTimeout(url: string, opts?: RequestInit): Promise<Response> {
   return fetch(url, { ...opts, headers: mergedHeaders, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+export async function apiFetch(path: string, opts?: RequestInit): Promise<any> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}${path}`, opts);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 export interface StatusEntry {
   event: string;
   tool: string;
