@@ -80,17 +80,39 @@ module.exports = {
     const findings = [];
     const locationsToStore = [];
 
-    // Get all existing findings for this profile
-    const allFindings = await db.getOsintFindings({ profileId: profile.id, limit: 1000 });
+    // Get all existing findings for this profile AND its auto-pivot profiles
+    let allFindings = await db.getOsintFindings({ profileId: profile.id, limit: 1000 });
+
+    // If this is the parent image profile, aggregate findings from auto-pivot profiles
+    if (profile.profile_type === "image") {
+      try {
+        const allProfiles = await db.getOsintProfiles();
+        const pivotProfiles = allProfiles.filter(p => p.id !== profile.id && p.tags?.includes("auto-pivot"));
+        for (const pp of pivotProfiles) {
+          const pivotFindings = await db.getOsintFindings({ profileId: pp.id, limit: 500 });
+          allFindings = allFindings.concat(pivotFindings);
+        }
+        if (pivotProfiles.length > 0) {
+          console.log(`[geoint] Aggregated findings from ${pivotProfiles.length} pivot profiles (${allFindings.length} total findings)`);
+        }
+      } catch (e) {
+        console.error(`[geoint] Failed to aggregate pivot profiles:`, e.message);
+      }
+    }
 
     // Check existing locations to avoid duplicates
     const existingLocs = await db.getOsintLocations({ profile_id: profile.id });
     const existingKeys = new Set(existingLocs.map(l =>
       `${l.source_module}:${(l.location_text || "").toLowerCase().trim()}`
     ));
+    // Also track what we're adding in this run to dedupe across pivots
+    const pendingKeys = new Set();
 
     function isDupe(module, text) {
-      return existingKeys.has(`${module}:${(text || "").toLowerCase().trim()}`);
+      const key = `${module}:${(text || "").toLowerCase().trim()}`;
+      if (existingKeys.has(key) || pendingKeys.has(key)) return true;
+      pendingKeys.add(key);
+      return false;
     }
 
     // ── 1. EXIF GPS (exact coordinates) ──
@@ -313,7 +335,10 @@ module.exports = {
       for (const loc of mentionedLocations) {
         if (isDupe("news-intel", loc)) continue;
         const geo = await rateLimitedGeocode(loc);
-        if (geo && geo.importance > 0.3) { // Only geocode significant places
+        // Only keep results that are actual places (not companies/brands/offices)
+        const nonPlaceTypes = ["company", "office", "shop", "amenity", "building", "yes"];
+        const isPlace = geo && (geo.importance > 0.3) && !nonPlaceTypes.includes(geo.type);
+        if (isPlace) { // Only geocode significant places
           locationsToStore.push({
             latitude: geo.latitude, longitude: geo.longitude,
             location_text: loc,
