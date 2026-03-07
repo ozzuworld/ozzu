@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Dimensions,
   Image,
   Alert,
+  Animated,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
@@ -22,18 +23,11 @@ import {
 import { AddProfileModal } from "../../components/osint/AddProfileModal";
 import { IntelDossier } from "../../components/osint/IntelDossier";
 
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+
 export default function OsintScreen() {
   const { insets } = usePhoneLayout();
-  const screenWidth = Dimensions.get("window").width;
-  const {
-    profiles,
-    findings,
-    loading,
-    refresh,
-    isScanning,
-    setIsScanning,
-  } = useOsint();
-
+  const { profiles, findings, loading, refresh, isScanning, setIsScanning } = useOsint();
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<OsintProfile | null>(null);
@@ -44,10 +38,9 @@ export default function OsintScreen() {
     setRefreshing(false);
   }, [refresh]);
 
-  // Full-screen dossier when a subject is selected
   if (selectedProfile) {
     return (
-      <View style={{ flex: 1, backgroundColor: "#080808" }}>
+      <View style={{ flex: 1, backgroundColor: "#000" }}>
         <StatusBar style="light" />
         <View style={{ flex: 1, paddingTop: insets.top }}>
           <IntelDossier
@@ -62,113 +55,86 @@ export default function OsintScreen() {
   }
 
   const imageProfiles = profiles.filter(p => p.profile_type === "image");
-  const columns = screenWidth > 500 ? 3 : 2;
-  const gap = 14;
-  const cardW = (screenWidth - 40 - gap * (columns - 1)) / columns;
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#080808" }}>
+    <View style={{ flex: 1, backgroundColor: "#000" }}>
       <StatusBar style="light" />
 
+      {/* Subtle grid background effect */}
+      <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: 0.03 }}>
+        {Array.from({ length: 20 }).map((_, i) => (
+          <View key={`h${i}`} style={{ position: "absolute", top: i * 40, left: 0, right: 0, height: 1, backgroundColor: "#fff" }} />
+        ))}
+        {Array.from({ length: 12 }).map((_, i) => (
+          <View key={`v${i}`} style={{ position: "absolute", left: i * 40, top: 0, bottom: 0, width: 1, backgroundColor: "#fff" }} />
+        ))}
+      </View>
+
       {/* Header */}
-      <View style={{ paddingTop: insets.top + 16, paddingBottom: 20, paddingHorizontal: 24 }}>
-        <Text style={{ color: "#f5f5f5", fontSize: 24, fontWeight: "700", letterSpacing: 1 }}>
-          Intelligence
-        </Text>
-        <Text style={{ color: "#2a2a2a", fontSize: 11, marginTop: 4, letterSpacing: 1 }}>
-          {imageProfiles.length > 0
-            ? `${imageProfiles.length} subject${imageProfiles.length !== 1 ? "s" : ""} monitored`
-            : "No subjects yet"}
-        </Text>
+      <View style={{ paddingTop: insets.top + 20, paddingHorizontal: 24, paddingBottom: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View>
+            <Text style={{ color: "#f5f5f5", fontSize: 20, fontWeight: "800", letterSpacing: 2 }}>
+              INTELLIGENCE
+            </Text>
+            {isScanning && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
+                <PulsingDot color="#00b4d8" size={6} />
+                <Text style={{ color: "#00b4d8", fontSize: 10, fontWeight: "600" }}>SCANNING</Text>
+              </View>
+            )}
+          </View>
+          <Pressable onPress={() => setShowAddModal(true)} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#111", justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: "#1a1a1a" }}>
+            <Text style={{ color: "#555", fontSize: 18, fontWeight: "300" }}>+</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#222" />}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#111" />}
       >
-        {/* Scanning banner */}
-        {isScanning && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#0a1218", borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: "#0e2a3a" }}>
-            <ActivityIndicator color="#00b4d8" size="small" />
-            <Text style={{ color: "#00b4d8", fontSize: 12, fontWeight: "600", flex: 1 }}>Scanning...</Text>
-          </View>
-        )}
-
         {loading && profiles.length === 0 && (
-          <View style={{ alignItems: "center", paddingVertical: 80 }}>
+          <View style={{ alignItems: "center", paddingVertical: 100 }}>
             <ActivityIndicator color="#222" size="large" />
           </View>
         )}
 
-        {/* Subject grid */}
+        {/* Subjects — floating target field */}
         {imageProfiles.length > 0 && (
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap }}>
-            {imageProfiles.map(p => (
-              <SubjectCard
+          <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+            {imageProfiles.map((p, idx) => (
+              <SubjectRow
                 key={p.id}
                 profile={p}
                 findings={findings.filter(f => f.profile_id === p.id)}
-                width={cardW}
                 onPress={() => setSelectedProfile(p)}
                 onScan={async () => {
                   setIsScanning(true);
                   try { await triggerOsintScan(p.id); } catch {}
                   setTimeout(refresh, 3000);
                 }}
+                index={idx}
               />
             ))}
-
-            {/* Add subject card */}
-            <Pressable onPress={() => setShowAddModal(true)}>
-              {({ pressed }) => (
-                <View style={{
-                  width: cardW,
-                  aspectRatio: 0.85,
-                  backgroundColor: pressed ? "#0e0e0e" : "transparent",
-                  borderRadius: 20,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderWidth: 1.5,
-                  borderColor: "#1a1a1a",
-                  borderStyle: "dashed",
-                }}>
-                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#111", justifyContent: "center", alignItems: "center", marginBottom: 10 }}>
-                    <Text style={{ color: "#333", fontSize: 22, fontWeight: "300" }}>+</Text>
-                  </View>
-                  <Text style={{ color: "#2a2a2a", fontSize: 10, fontWeight: "600", letterSpacing: 1 }}>
-                    ADD SUBJECT
-                  </Text>
-                </View>
-              )}
-            </Pressable>
           </View>
         )}
 
         {/* Empty state */}
         {!loading && imageProfiles.length === 0 && (
           <View style={{ alignItems: "center", paddingVertical: 100 }}>
-            <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: "#0e0e0e", justifyContent: "center", alignItems: "center", marginBottom: 28 }}>
-              <Text style={{ color: "#1a1a1a", fontSize: 32 }}>+</Text>
+            <View style={{ width: 100, height: 100, borderRadius: 50, borderWidth: 1, borderColor: "#1a1a1a", justifyContent: "center", alignItems: "center", marginBottom: 24 }}>
+              <View style={{ width: 60, height: 60, borderRadius: 30, borderWidth: 1, borderColor: "#1a1a1a", justifyContent: "center", alignItems: "center" }}>
+                <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 1, borderColor: "#1a1a1a" }} />
+              </View>
             </View>
-            <Text style={{ color: "#666", fontSize: 16, fontWeight: "600", marginBottom: 6 }}>
-              No Subjects
+            <Text style={{ color: "#444", fontSize: 14, fontWeight: "700", letterSpacing: 2, marginBottom: 8 }}>NO TARGETS</Text>
+            <Text style={{ color: "#222", fontSize: 11, textAlign: "center", marginBottom: 28 }}>
+              Add a subject to begin surveillance
             </Text>
-            <Text style={{ color: "#2a2a2a", fontSize: 12, textAlign: "center", lineHeight: 18, marginBottom: 28, paddingHorizontal: 40 }}>
-              Upload a photo to begin an intelligence investigation
-            </Text>
-            <Pressable
-              onPress={() => setShowAddModal(true)}
-              style={({ pressed }) => ({
-                backgroundColor: pressed ? "#0e2a3a" : "#0a1a28",
-                borderRadius: 12,
-                paddingHorizontal: 32,
-                paddingVertical: 14,
-              })}
-            >
-              <Text style={{ color: "#00b4d8", fontSize: 13, fontWeight: "700" }}>
-                Start Investigation
-              </Text>
+            <Pressable onPress={() => setShowAddModal(true)} style={({ pressed }) => ({ backgroundColor: pressed ? "#0e2a3a" : "#0a1520", borderRadius: 24, paddingHorizontal: 28, paddingVertical: 12 })}>
+              <Text style={{ color: "#00b4d8", fontSize: 12, fontWeight: "700" }}>NEW INVESTIGATION</Text>
             </Pressable>
           </View>
         )}
@@ -179,105 +145,120 @@ export default function OsintScreen() {
   );
 }
 
-// ─── Subject Card ───
-function SubjectCard({ profile, findings, width, onPress, onScan }: {
-  profile: OsintProfile; findings: any[]; width: number; onPress: () => void; onScan: () => void;
+// ─── Subject Row — profile card with photo, threat glow, stats ───
+function SubjectRow({ profile, findings, onPress, onScan, index }: {
+  profile: OsintProfile; findings: any[]; onPress: () => void; onScan: () => void; index: number;
 }) {
   const [imgErr, setImgErr] = useState(false);
   const imageUrl = `${getBridgeUrl()}/osint/images/${profile.id}/thumbnail`;
 
   const idFinding = findings.find(f => f.module === "identity-resolver" && f.raw_data?.type === "identity_candidates");
-  const name = idFinding?.raw_data?.candidates?.[0]?.name || profile.display_name || "Unknown";
+  const topCandidate = idFinding?.raw_data?.candidates?.[0];
+  const name = topCandidate?.name || profile.display_name || "Unknown";
+  const confidence = topCandidate?.confidence || 0;
 
-  const critical = findings.filter(f => f.severity === "critical").length;
+  const crit = findings.filter(f => f.severity === "critical").length;
   const high = findings.filter(f => f.severity === "high").length;
   const total = findings.length;
   const newCount = findings.filter(f => f.status === "new").length;
+  const faceMatches = findings.filter(f => f.raw_data?.type === "verified_face_matches").reduce((n, f) => n + (f.raw_data?.verifiedMatches?.length || 0), 0);
+  const profiles_found = findings.filter(f => f.raw_data?.type === "discovered_profile").length;
 
-  const ringColor = critical > 0 ? "#dc2626" : high > 0 ? "#ea580c" : total > 5 ? "#ca8a04" : "#16a34a";
-  const statusText = critical > 0 ? "HIGH RISK" : high > 0 ? "MODERATE" : total > 5 ? "LOW RISK" : "CLEAR";
-
-  const photoSize = Math.min(width * 0.48, 72);
+  const threatColor = crit > 0 ? "#dc2626" : high > 0 ? "#ea580c" : total > 5 ? "#ca8a04" : "#16a34a";
+  const threatLabel = crit > 0 ? "HIGH" : high > 0 ? "MED" : total > 5 ? "LOW" : "CLR";
 
   return (
-    <Pressable onPress={onPress} onLongPress={() => {
-      Alert.alert(name, `Subject #${profile.id}`, [
-        { text: "Scan Now", onPress: onScan },
-        { text: "Cancel", style: "cancel" },
-      ]);
-    }}>
+    <Pressable onPress={onPress} onLongPress={() => Alert.alert(name, `#${profile.id}`, [{ text: "Scan", onPress: onScan }, { text: "Cancel", style: "cancel" }])}>
       {({ pressed }) => (
         <View style={{
-          width,
-          aspectRatio: 0.85,
-          backgroundColor: pressed ? "#111" : "#0c0c0c",
-          borderRadius: 20,
+          flexDirection: "row",
           alignItems: "center",
-          justifyContent: "center",
+          backgroundColor: pressed ? "#0a0a0a" : "#050505",
+          borderRadius: 16,
+          padding: 14,
+          marginBottom: 10,
           borderWidth: 1,
-          borderColor: pressed ? ringColor + "55" : "#141414",
-          paddingHorizontal: 8,
+          borderColor: pressed ? threatColor + "33" : "#111",
         }}>
-          {/* Photo */}
-          <View style={{ position: "relative", marginBottom: 14 }}>
+          {/* Photo with glow ring */}
+          <View style={{ position: "relative", marginRight: 16 }}>
+            {/* Glow effect */}
             <View style={{
-              width: photoSize + 8,
-              height: photoSize + 8,
-              borderRadius: (photoSize + 8) / 2,
-              borderWidth: 2.5,
-              borderColor: ringColor,
-              justifyContent: "center",
-              alignItems: "center",
+              position: "absolute", top: -4, left: -4, right: -4, bottom: -4,
+              borderRadius: 34, backgroundColor: threatColor, opacity: 0.08,
+            }} />
+            <View style={{
+              width: 56, height: 56, borderRadius: 28,
+              borderWidth: 2.5, borderColor: threatColor,
+              overflow: "hidden",
             }}>
               {!imgErr ? (
-                <Image
-                  source={{ uri: imageUrl, headers: getAuthHeaders() }}
-                  style={{ width: photoSize, height: photoSize, borderRadius: photoSize / 2 }}
-                  onError={() => setImgErr(true)}
-                />
+                <Image source={{ uri: imageUrl, headers: getAuthHeaders() }} style={{ width: 51, height: 51, borderRadius: 25 }} onError={() => setImgErr(true)} />
               ) : (
-                <View style={{ width: photoSize, height: photoSize, borderRadius: photoSize / 2, backgroundColor: "#141414", justifyContent: "center", alignItems: "center" }}>
-                  <Text style={{ fontSize: 24, color: "#222" }}>?</Text>
+                <View style={{ width: 51, height: 51, borderRadius: 25, backgroundColor: "#111", justifyContent: "center", alignItems: "center" }}>
+                  <Text style={{ color: "#222", fontSize: 20 }}>?</Text>
                 </View>
               )}
             </View>
-
-            {/* New findings badge */}
-            {newCount > 0 && (critical > 0 || high > 0) && (
-              <View style={{
-                position: "absolute", top: -3, right: -3,
-                minWidth: 20, height: 20, borderRadius: 10,
-                backgroundColor: "#dc2626", borderWidth: 2.5, borderColor: "#0c0c0c",
-                justifyContent: "center", alignItems: "center", paddingHorizontal: 4,
-              }}>
-                <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>
-                  {newCount > 9 ? "9+" : newCount}
-                </Text>
+            {/* New badge */}
+            {newCount > 0 && (crit > 0 || high > 0) && (
+              <View style={{ position: "absolute", top: -4, right: -4, width: 18, height: 18, borderRadius: 9, backgroundColor: "#dc2626", borderWidth: 2, borderColor: "#050505", justifyContent: "center", alignItems: "center" }}>
+                <Text style={{ color: "#fff", fontSize: 8, fontWeight: "900" }}>{newCount > 9 ? "!" : newCount}</Text>
               </View>
             )}
           </View>
 
-          {/* Name */}
-          <Text style={{ color: "#ccc", fontSize: 12, fontWeight: "700", textAlign: "center", marginBottom: 6 }} numberOfLines={1}>
-            {name}
-          </Text>
-
-          {/* Status */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: ringColor }} />
-            <Text style={{ color: ringColor, fontSize: 8, fontWeight: "700", letterSpacing: 1 }}>
-              {statusText}
-            </Text>
+          {/* Info */}
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: "#e5e5e5", fontSize: 14, fontWeight: "700", marginBottom: 3 }} numberOfLines={1}>{name}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <MiniStat value={total} label="findings" />
+              {faceMatches > 0 && <MiniStat value={faceMatches} label="faces" color="#a855f7" />}
+              {profiles_found > 0 && <MiniStat value={profiles_found} label="profiles" color="#00b4d8" />}
+            </View>
           </View>
 
-          {/* Finding count */}
-          {total > 0 && (
-            <Text style={{ color: "#222", fontSize: 9, marginTop: 8 }}>
-              {total} finding{total !== 1 ? "s" : ""}
-            </Text>
-          )}
+          {/* Threat indicator */}
+          <View style={{ alignItems: "center", marginLeft: 8 }}>
+            {/* Circular threat badge */}
+            <View style={{
+              width: 38, height: 38, borderRadius: 19,
+              borderWidth: 2, borderColor: threatColor,
+              justifyContent: "center", alignItems: "center",
+              backgroundColor: threatColor + "0a",
+            }}>
+              <Text style={{ color: threatColor, fontSize: 10, fontWeight: "900", letterSpacing: 0.5 }}>{threatLabel}</Text>
+            </View>
+          </View>
+
+          {/* Chevron */}
+          <Text style={{ color: "#1a1a1a", fontSize: 16, marginLeft: 8 }}>{">"}</Text>
         </View>
       )}
     </Pressable>
   );
+}
+
+function MiniStat({ value, label, color }: { value: number; label: string; color?: string }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <Text style={{ color: color || "#555", fontSize: 12, fontWeight: "800" }}>{value}</Text>
+      <Text style={{ color: "#2a2a2a", fontSize: 9 }}>{label}</Text>
+    </View>
+  );
+}
+
+function PulsingDot({ color, size }: { color: string; size: number }) {
+  const anim = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, []);
+  return <Animated.View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color, opacity: anim }} />;
 }
