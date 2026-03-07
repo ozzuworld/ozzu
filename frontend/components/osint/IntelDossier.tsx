@@ -41,25 +41,50 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
     { key: "pivots", label: "PIVOTS", count: pivotRecs.length },
   ];
 
+  const threatColor = criticalCount > 0 ? "#ef4444" : highCount > 0 ? "#f97316" : "#22c55e";
+
   return (
     <View style={{ flex: 1 }}>
+      {/* Classification banner */}
+      <View style={{ backgroundColor: "#1a0000", borderWidth: 1, borderColor: "#8b000033", borderRadius: 4, paddingVertical: 4, alignItems: "center", marginBottom: 8 }}>
+        <Text style={{ color: "#ef4444", fontFamily: "SpaceMono", fontSize: 9, fontWeight: "bold", letterSpacing: 4 }}>
+          CONFIDENTIAL
+        </Text>
+      </View>
+
       {/* Header with back + subject */}
-      <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 8, gap: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 8, gap: 10 }}>
         <Pressable onPress={onBack} style={{ padding: 4 }}>
-          <Text style={{ color: "#00e5ff", fontFamily: "SpaceMono", fontSize: 14 }}>{"< BACK"}</Text>
+          <Text style={{ color: "#00e5ff", fontFamily: "SpaceMono", fontSize: 12 }}>{"<"}</Text>
         </Pressable>
-        <Image
-          source={{ uri: imageUrl, headers: getAuthHeaders() }}
-          style={{ width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: "#444" }}
-        />
+        <View style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: threatColor, padding: 2 }}>
+          <Image
+            source={{ uri: imageUrl, headers: getAuthHeaders() }}
+            style={{ width: "100%", height: "100%", borderRadius: 18 }}
+          />
+        </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: "#fff", fontFamily: "SpaceMono", fontSize: 13, fontWeight: "bold", textTransform: "uppercase" }} numberOfLines={1}>
+          <Text style={{ color: "#e5e5e5", fontFamily: "SpaceMono", fontSize: 14, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1 }} numberOfLines={1}>
             {identityName}
           </Text>
-          <Text style={{ color: "#666", fontFamily: "SpaceMono", fontSize: 9 }}>
+          <Text style={{ color: "#525252", fontFamily: "SpaceMono", fontSize: 9, letterSpacing: 1 }}>
             INTELLIGENCE DOSSIER
           </Text>
         </View>
+        {/* Threat level badge */}
+        <View style={{ backgroundColor: threatColor + "18", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: threatColor + "33" }}>
+          <Text style={{ color: threatColor, fontFamily: "SpaceMono", fontSize: 8, fontWeight: "bold", letterSpacing: 1 }}>
+            {criticalCount > 0 ? "HIGH" : highCount > 0 ? "MED" : "LOW"}
+          </Text>
+        </View>
+      </View>
+
+      {/* Executive summary strip */}
+      <View style={{ flexDirection: "row", gap: 6, marginBottom: 8 }}>
+        <ExecStat value={`${findings.length}`} label="FINDINGS" color="#00e5ff" />
+        <ExecStat value={`${criticalCount + highCount}`} label="THREATS" color={criticalCount > 0 ? "#ef4444" : highCount > 0 ? "#f97316" : "#22c55e"} />
+        <ExecStat value={topCandidate ? `${(topCandidate.confidence * 100).toFixed(0)}%` : "N/A"} label="CONFIDENCE" color={topCandidate?.confidence > 0.7 ? "#22c55e" : "#eab308"} />
+        <ExecStat value={`${discoveredProfiles.length}`} label="PROFILES" color="#00e5ff" />
       </View>
 
       {/* Section tabs */}
@@ -131,27 +156,45 @@ function OverviewSection({ findings, profileId, identityName, topCandidate, face
 
   return (
     <View style={{ gap: 12 }}>
-      {/* Classification banner */}
-      <View style={{ backgroundColor: "#1a0000", borderWidth: 1, borderColor: "#f4433633", borderRadius: 8, padding: 12, alignItems: "center" }}>
-        <Text style={{ color: "#f44336", fontFamily: "SpaceMono", fontSize: 10, fontWeight: "bold", letterSpacing: 3 }}>
-          CLASSIFIED INTELLIGENCE ASSESSMENT
-        </Text>
-      </View>
-
       {/* Subject summary */}
       <Card title="SUBJECT IDENTIFICATION">
-        <Row label="Primary Name" value={identityName.toUpperCase()} color="#fff" />
-        {topCandidate && <Row label="Confidence" value={`${(topCandidate.confidence * 100).toFixed(0)}%`} color={topCandidate.confidence > 0.7 ? "#4caf50" : "#ffab00"} />}
-        {topCandidate && <Row label="Source Count" value={`${topCandidate.sourceCount} independent source(s)`} />}
+        <Row label="Primary Name" value={identityName.toUpperCase()} color="#e5e5e5" />
+        {topCandidate ? (
+          <>
+            <Row label="Confidence" value={`${(topCandidate.confidence * 100).toFixed(0)}%`} color={topCandidate.confidence > 0.7 ? "#22c55e" : "#eab308"} />
+            <Row label="Sources" value={`${topCandidate.sourceCount} independent source(s)`} />
+          </>
+        ) : (
+          <Row label="Confidence" value="" color="#333" />
+        )}
         {guesses.length > 0 && <Row label="Aliases" value={guesses.slice(0, 5).join(", ")} />}
       </Card>
 
-      {/* Threat summary */}
+      {/* Threat assessment with exposure gauge */}
       <Card title="THREAT ASSESSMENT">
-        <Row label="Critical Findings" value={`${criticalCount}`} color={criticalCount > 0 ? "#f44336" : "#4caf50"} />
-        <Row label="High Findings" value={`${highCount}`} color={highCount > 0 ? "#ff9800" : "#4caf50"} />
-        <Row label="Total Findings" value={`${findings.length}`} />
-        <Row label="Discovered Profiles" value={`${discoveredProfiles.length}`} color={discoveredProfiles.length > 0 ? "#00e5ff" : "#666"} />
+        {/* Exposure gauge */}
+        <View style={{ marginBottom: 10 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+            <Text style={{ color: "#525252", fontFamily: "SpaceMono", fontSize: 9 }}>EXPOSURE LEVEL</Text>
+            <Text style={{ color: criticalCount > 0 ? "#ef4444" : highCount > 0 ? "#f97316" : "#22c55e", fontFamily: "SpaceMono", fontSize: 9, fontWeight: "bold" }}>
+              {criticalCount > 0 ? "HIGH" : highCount > 0 ? "MODERATE" : "LOW"}
+            </Text>
+          </View>
+          <View style={{ height: 6, backgroundColor: "#1a1a1a", borderRadius: 3, overflow: "hidden" }}>
+            <View style={{
+              height: "100%",
+              width: `${Math.min(100, Math.max(10, (criticalCount * 25 + highCount * 15 + findings.length * 2)))}%`,
+              backgroundColor: criticalCount > 0 ? "#ef4444" : highCount > 0 ? "#f97316" : "#22c55e",
+              borderRadius: 3,
+            }} />
+          </View>
+        </View>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <ThreatStat value={criticalCount} label="CRITICAL" color="#ef4444" />
+          <ThreatStat value={highCount} label="HIGH" color="#f97316" />
+          <ThreatStat value={findings.filter(f => f.severity === "medium").length} label="MEDIUM" color="#eab308" />
+          <ThreatStat value={findings.filter(f => f.severity === "info").length} label="INFO" color="#6b7280" />
+        </View>
       </Card>
 
       {/* Scene intel */}
@@ -438,8 +481,26 @@ function Card({ title, titleColor, children }: { title: string; titleColor?: str
 function Row({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <View style={{ flexDirection: "row", marginBottom: 4 }}>
-      <Text style={{ color: "#666", fontFamily: "SpaceMono", fontSize: 10, width: 120 }}>{label}</Text>
-      <Text style={{ color: color || "#ccc", fontFamily: "SpaceMono", fontSize: 10, flex: 1 }}>{value}</Text>
+      <Text style={{ color: "#525252", fontFamily: "SpaceMono", fontSize: 10, width: 120 }}>{label}</Text>
+      <Text style={{ color: color || "#a3a3a3", fontFamily: "SpaceMono", fontSize: 10, flex: 1 }}>{value || "\u2588\u2588\u2588\u2588"}</Text>
+    </View>
+  );
+}
+
+function ThreatStat({ value, label, color }: { value: number; label: string; color: string }) {
+  return (
+    <View style={{ flex: 1, alignItems: "center", backgroundColor: value > 0 ? color + "11" : "#0a0a0a", borderRadius: 6, padding: 6, borderWidth: 1, borderColor: value > 0 ? color + "22" : "#1a1a1a" }}>
+      <Text style={{ color: value > 0 ? color : "#404040", fontFamily: "SpaceMono", fontSize: 16, fontWeight: "bold" }}>{value}</Text>
+      <Text style={{ color: "#525252", fontFamily: "SpaceMono", fontSize: 7 }}>{label}</Text>
+    </View>
+  );
+}
+
+function ExecStat({ value, label, color }: { value: string; label: string; color: string }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: "#111", borderRadius: 6, padding: 8, alignItems: "center", borderWidth: 1, borderColor: "#1a1a1a" }}>
+      <Text style={{ color, fontFamily: "SpaceMono", fontSize: 16, fontWeight: "bold" }}>{value}</Text>
+      <Text style={{ color: "#525252", fontFamily: "SpaceMono", fontSize: 7, letterSpacing: 0.5 }}>{label}</Text>
     </View>
   );
 }

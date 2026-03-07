@@ -1284,23 +1284,46 @@ export default function OsintScreen() {
             ) : (
               <>
                 {/* VIP bubbles for image profiles */}
-                {profiles.filter(p => p.profile_type === "image").map(p => (
-                  <VipBubble
-                    key={p.id}
-                    profile={p}
-                    findings={findings}
-                    onPress={() => setIntelDossierProfile(p)}
-                  />
-                ))}
-                {/* If no image profiles, show prompt */}
-                {profiles.filter(p => p.profile_type === "image").length === 0 && (
-                  <View style={{ padding: 40, alignItems: "center" }}>
-                    <Text style={{ fontSize: 48, marginBottom: 12 }}>{"🎯"}</Text>
-                    <Text style={{ color: "#888", fontFamily: "SpaceMono", fontSize: 12, textAlign: "center", lineHeight: 20 }}>
-                      Upload a photo to start an intelligence investigation.{"\n"}
-                      Add an image profile from the profiles panel above.
-                    </Text>
+                {profiles.filter(p => p.profile_type === "image").length > 0 ? (
+                  <View style={{ gap: 12 }}>
+                    {profiles.filter(p => p.profile_type === "image").map(p => (
+                      <VipBubble
+                        key={p.id}
+                        profile={p}
+                        findings={findings}
+                        onPress={() => setIntelDossierProfile(p)}
+                        onScanComplete={onRefresh}
+                      />
+                    ))}
                   </View>
+                ) : (
+                  <Pressable onPress={() => setShowAddModal(true)}>
+                    {({ pressed }) => (
+                      <View style={{
+                        backgroundColor: pressed ? "#1a1a1a" : "#0a0a0a",
+                        borderRadius: 16,
+                        padding: 40,
+                        alignItems: "center",
+                        borderWidth: 1,
+                        borderColor: "#1a1a1a",
+                        borderStyle: "dashed",
+                      }}>
+                        <View style={{
+                          width: 80, height: 80, borderRadius: 40,
+                          borderWidth: 2, borderColor: "#333", borderStyle: "dashed",
+                          justifyContent: "center", alignItems: "center", marginBottom: 16,
+                        }}>
+                          <Text style={{ color: "#525252", fontSize: 28 }}>+</Text>
+                        </View>
+                        <Text style={{ color: "#a3a3a3", fontFamily: "SpaceMono", fontSize: 12, fontWeight: "bold", letterSpacing: 1, marginBottom: 6 }}>
+                          NEW INVESTIGATION
+                        </Text>
+                        <Text style={{ color: "#525252", fontFamily: "SpaceMono", fontSize: 10, textAlign: "center", lineHeight: 16 }}>
+                          Upload a photo to start an{"\n"}intelligence investigation
+                        </Text>
+                      </View>
+                    )}
+                  </Pressable>
                 )}
                 {/* Investigations list */}
                 <InvestigationView />
