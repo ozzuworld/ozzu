@@ -97,40 +97,75 @@ module.exports = function createCipherRoutes(ctx) {
       }
 
       // ── RAW CONVERSATION MEMORY ──
-      // Load last 200 user turns verbatim — this IS the memory.
-      // No summaries, no Gemini extraction, just actual words.
+      // Read directly from JSONL files on disk — Claude Code writes these automatically.
+      // No hooks, no postgres sync needed. The JSONL files ARE the source of truth.
       let conversationMemory = "";
       try {
-        const rawTurns = await db.query(
-          `SELECT ct.content, ct.role, ct.created_at, c.id as convo_id
-           FROM conversation_turns ct
-           JOIN conversations c ON ct.conversation_id = c.id
-           WHERE c.persona = 'cipher' AND ct.role = 'user'
-           ORDER BY ct.created_at DESC LIMIT 200`
-        );
-        if (rawTurns.rows.length > 0) {
-          // Group by conversation, show newest first
-          const byConvo = {};
-          for (const t of rawTurns.rows) {
-            if (!byConvo[t.convo_id]) byConvo[t.convo_id] = [];
-            byConvo[t.convo_id].push(t);
-          }
-          const parts = [];
-          for (const [convoId, turns] of Object.entries(byConvo)) {
-            // Turns came in DESC order, reverse to chronological within each conversation
-            turns.reverse();
-            const firstTs = turns[0]?.created_at;
+        const fs = require("fs");
+        const path = require("path");
+        const sessionDirs = [
+          path.join(process.env.HOME || "/root", ".claude/projects/-home-gcp-ozzu"),
+          path.join(process.env.HOME || "/root", ".claude/projects/-home-gcp-ozzu-scripts"),
+        ];
+
+        // Collect all JSONL session files with their modification times
+        let allFiles = [];
+        for (const dir of sessionDirs) {
+          try {
+            const files = fs.readdirSync(dir).filter(f => f.endsWith(".jsonl"));
+            for (const f of files) {
+              const fp = path.join(dir, f);
+              try {
+                const stat = fs.statSync(fp);
+                if (stat.size > 500) allFiles.push({ path: fp, mtime: stat.mtimeMs, name: f });
+              } catch {}
+            }
+          } catch {}
+        }
+
+        // Sort by modification time, newest first — take last 20 sessions
+        allFiles.sort((a, b) => b.mtime - a.mtime);
+        allFiles = allFiles.slice(0, 20);
+
+        const parts = [];
+        let totalMsgs = 0;
+        const MAX_MSGS = 200;
+
+        for (const file of allFiles) {
+          if (totalMsgs >= MAX_MSGS) break;
+          try {
+            const lines = fs.readFileSync(file.path, "utf8").split("\n").filter(Boolean);
+            const userMsgs = [];
+            let sessionId = "";
+            for (const line of lines) {
+              try {
+                const entry = JSON.parse(line);
+                if (entry.type === "user" && entry.message?.role === "user") {
+                  const content = entry.message.content;
+                  if (typeof content === "string" && content.length > 5) {
+                    userMsgs.push({ content, ts: entry.timestamp || "" });
+                    if (!sessionId) sessionId = entry.sessionId || "";
+                  }
+                }
+              } catch {}
+            }
+            if (userMsgs.length < 2) continue;
+
+            const firstTs = userMsgs[0]?.ts;
             const dateStr = firstTs ? new Date(firstTs).toLocaleString() : "?";
-            let section = `### Session ${convoId} (${dateStr})\n`;
-            for (const t of turns) {
-              const content = t.content && t.content.length > 500
-                ? t.content.substring(0, 500) + "..."
-                : t.content || "";
-              section += `> ${content}\n\n`;
+            const sid = sessionId ? sessionId.substring(0, 8) : file.name.substring(0, 8);
+            let section = `### Session ${sid} (${dateStr})\n`;
+            for (const msg of userMsgs) {
+              if (totalMsgs >= MAX_MSGS) break;
+              const truncated = msg.content.length > 500 ? msg.content.substring(0, 500) + "..." : msg.content;
+              section += `> ${truncated}\n\n`;
+              totalMsgs++;
             }
             parts.push(section);
-          }
-          // Reverse so newest conversations appear first
+          } catch {}
+        }
+
+        if (parts.length > 0) {
           conversationMemory = "\n## Recent Conversations (raw — last 200 messages from King Kazuma)\n" +
             "This is your actual memory. These are the real words King Kazuma said to you.\n\n" +
             parts.join("\n");
