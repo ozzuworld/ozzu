@@ -336,7 +336,7 @@ module.exports = {
         if (isDupe("news-intel", loc)) continue;
         const geo = await rateLimitedGeocode(loc);
         // Only keep results that are actual places (not companies/brands/offices)
-        const nonPlaceTypes = ["company", "office", "shop", "amenity", "building", "yes"];
+        const nonPlaceTypes = ["company", "office", "shop", "amenity", "building", "yes", "car", "industrial", "commercial", "retail"];
         const isPlace = geo && (geo.importance > 0.3) && !nonPlaceTypes.includes(geo.type);
         if (isPlace) { // Only geocode significant places
           locationsToStore.push({
