@@ -1641,6 +1641,56 @@ module.exports = function osintRoutes(ctx) {
       return true;
     }
 
+    // ── Face Crawler Endpoints ──
+
+    // POST /osint/face/crawl — trigger a crawl cycle
+    if (req.method === "POST" && pathname === "/osint/face/crawl") {
+      try {
+        const faceCrawler = require("../face-crawler");
+        const body = await parseBody(req);
+        // Run crawl in background, return immediately
+        const crawlPromise = faceCrawler.runCrawlCycle({
+          wikipedia: body.wikipedia !== false,
+          reddit: body.reddit !== false,
+          wikiLimit: body.wikiLimit || 50,
+          redditLimit: body.redditLimit || 20,
+          subreddits: body.subreddits,
+          names: body.names,
+          twitterUsers: body.twitterUsers,
+          maxPerName: body.maxPerName || 5,
+        });
+        // If async=true, return immediately
+        if (body.async) {
+          crawlPromise.then(r => {
+            log.bridge.info(`[face-crawler] Async crawl done: ${r.totalIndexed} indexed`);
+          }).catch(err => {
+            log.bridge.error(`[face-crawler] Async crawl error: ${err.message}`);
+          });
+          sendJSON(res, 202, { ok: true, message: "Crawl started in background" });
+        } else {
+          const result = await crawlPromise;
+          sendJSON(res, 200, { ok: true, ...result });
+        }
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /osint/face/crawl/status — get crawler status
+    if (req.method === "GET" && pathname === "/osint/face/crawl/status") {
+      try {
+        const faceCrawler = require("../face-crawler");
+        const status = faceCrawler.getStatus();
+        const faceEngine = require("../face-engine");
+        const dbStats = await faceEngine.getStats();
+        sendJSON(res, 200, { ok: true, crawlState: status, dbStats });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     return false;
   };
 };
