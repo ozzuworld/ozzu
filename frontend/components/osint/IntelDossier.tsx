@@ -666,6 +666,116 @@ function GeointScreen({ locations, findings }: { locations: any[], findings: any
         </View>
       </View>
 
+      {/* World Map Visualization */}
+      {(() => {
+        const mappable = sorted.filter(l => l.latitude && l.longitude);
+        if (mappable.length === 0) return null;
+
+        const MAP_W = SW - 64;
+        const MAP_H = MAP_W * 0.5;
+        const [selectedPin, setSelectedPin] = useState<number | null>(null);
+
+        // Mercator projection
+        const toX = (lon: number) => ((lon + 180) / 360) * MAP_W;
+        const toY = (lat: number) => {
+          const latRad = (lat * Math.PI) / 180;
+          const mercN = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+          return (MAP_H / 2) - (MAP_W * mercN) / (2 * Math.PI);
+        };
+
+        // Continent outlines (simplified lat/lon polyline segments for dark bg)
+        const GRID_LATS = [-60, -30, 0, 30, 60];
+        const GRID_LONS = [-120, -60, 0, 60, 120];
+
+        return (
+          <View style={{ backgroundColor: "#050508", borderRadius: 14, padding: 12, borderWidth: 1, borderColor: "#111" }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <Text style={{ color: "#16a34a", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>LOCATION MAP</Text>
+              <Text style={{ color: "#333", fontSize: 9 }}>{mappable.length} plotted</Text>
+            </View>
+            <View style={{ width: MAP_W, height: MAP_H, backgroundColor: "#0a0a10", borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: "#151520" }}>
+              {/* Grid lines */}
+              {GRID_LATS.map(lat => (
+                <View key={`lat${lat}`} style={{ position: "absolute", top: toY(lat), left: 0, width: MAP_W, height: 1, backgroundColor: "#111118" }} />
+              ))}
+              {GRID_LONS.map(lon => (
+                <View key={`lon${lon}`} style={{ position: "absolute", top: 0, left: toX(lon), width: 1, height: MAP_H, backgroundColor: "#111118" }} />
+              ))}
+              {/* Equator */}
+              <View style={{ position: "absolute", top: toY(0), left: 0, width: MAP_W, height: 1, backgroundColor: "#1a1a25" }} />
+              {/* Prime meridian */}
+              <View style={{ position: "absolute", top: 0, left: toX(0), width: 1, height: MAP_H, backgroundColor: "#1a1a25" }} />
+
+              {/* Location dots */}
+              {mappable.map((l, i) => {
+                const x = toX(l.longitude);
+                const y = toY(l.latitude);
+                if (x < 0 || x > MAP_W || y < 0 || y > MAP_H) return null;
+                const color = TYPE_COLORS[l.location_type] || "#555";
+                const size = l.confidence >= 0.8 ? 8 : l.confidence >= 0.5 ? 6 : 4;
+                const isSelected = selectedPin === i;
+                return (
+                  <Pressable
+                    key={i}
+                    onPress={() => setSelectedPin(isSelected ? null : i)}
+                    style={{
+                      position: "absolute",
+                      left: x - size / 2 - 4,
+                      top: y - size / 2 - 4,
+                      padding: 4,
+                      zIndex: isSelected ? 100 : l.confidence >= 0.8 ? 10 : 1,
+                    }}
+                  >
+                    <View style={{
+                      width: size, height: size, borderRadius: size / 2,
+                      backgroundColor: color,
+                      borderWidth: isSelected ? 2 : 0,
+                      borderColor: "#fff",
+                      ...(isSelected ? { width: size + 4, height: size + 4, borderRadius: (size + 4) / 2 } : {}),
+                    }} />
+                  </Pressable>
+                );
+              })}
+
+              {/* Selected pin tooltip */}
+              {selectedPin !== null && mappable[selectedPin] && (() => {
+                const l = mappable[selectedPin];
+                const x = Math.min(Math.max(toX(l.longitude), 60), MAP_W - 60);
+                const y = toY(l.latitude);
+                const above = y > MAP_H / 2;
+                return (
+                  <View style={{
+                    position: "absolute",
+                    left: x - 55,
+                    top: above ? y - 42 : y + 14,
+                    width: 110,
+                    backgroundColor: "#111118",
+                    borderRadius: 6,
+                    padding: 6,
+                    borderWidth: 1,
+                    borderColor: TYPE_COLORS[l.location_type] || "#333",
+                    zIndex: 200,
+                  }}>
+                    <Text style={{ color: "#ccc", fontSize: 8, fontWeight: "700" }} numberOfLines={2}>{l.location_text}</Text>
+                    <Text style={{ color: "#555", fontSize: 7, marginTop: 2 }}>{TYPE_LABELS[l.location_type] || l.location_type} | {((l.confidence || 0) * 100).toFixed(0)}%</Text>
+                  </View>
+                );
+              })()}
+            </View>
+
+            {/* Map legend */}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+              {Object.entries(byType).filter(([t]) => sorted.some(l => l.location_type === t && l.latitude)).map(([type]) => (
+                <View key={type} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                  <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: TYPE_COLORS[type] || "#333" }} />
+                  <Text style={{ color: "#444", fontSize: 7 }}>{TYPE_LABELS[type] || type}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        );
+      })()}
+
       {/* Exact GPS — critical */}
       {exact.length > 0 && (
         <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#dc262630" }}>
