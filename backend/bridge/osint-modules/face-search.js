@@ -1,11 +1,10 @@
-// Face Search Module — in-house PimEyes alternative
-// Submits face to Google Lens, Yandex, Bing → scrapes results → ArcFace verification
+// Face Search Module — biometric face identification via ArcFace + Qdrant
+// Replaces broken reverse-image-search approach with proper embedding-based matching
 const fs = require("fs");
 const db = require("../db");
-const faceSearchScraper = require("../face-search-scraper");
+const faceEngine = require("../face-engine");
 
 const FACE_API = "http://127.0.0.1:5555";
-const MATCH_THRESHOLD = 0.4;
 
 module.exports = {
   name: "face-search",
@@ -30,6 +29,16 @@ module.exports = {
     try {
       const healthRes = await fetch(`${FACE_API}/health`, { signal: AbortSignal.timeout(3000) });
       if (!healthRes.ok) throw new Error("not healthy");
+      const health = await healthRes.json();
+      if (!health.qdrant) {
+        findings.push({
+          category: "identity",
+          severity: "info",
+          title: "Face search: Qdrant vector DB not available",
+          rawData: { reason: "qdrant_down" },
+        });
+        return findings;
+      }
     } catch {
       findings.push({
         category: "identity",
@@ -40,117 +49,61 @@ module.exports = {
       return findings;
     }
 
-    // Extract face embedding from uploaded image
+    // Run the face search pipeline
     const release = await rateLimiter.acquire();
-    let originalEmbedding = null;
+    let result;
     try {
-      const imageBuffer = fs.readFileSync(image.file_path);
-      const form = new FormData();
-      form.append("base64_image", imageBuffer.toString("base64"));
-      const embedRes = await fetch(`${FACE_API}/embed`, {
-        method: "POST",
-        body: form,
-        signal: AbortSignal.timeout(15000),
+      result = await faceEngine.runFaceSearch(image.file_path, profile.id, {
+        label: profile.label || profile.value || "",
       });
-      if (embedRes.ok) {
-        const data = await embedRes.json();
-        if (data.faces?.length > 0) {
-          originalEmbedding = data.faces[0];
-        }
-      }
     } finally {
       release();
     }
 
-    if (!originalEmbedding) {
+    if (result.error) {
       findings.push({
         category: "identity",
         severity: "info",
-        title: "Face search: no face detected in uploaded image",
-        rawData: { reason: "no_face_detected" },
-      });
-      return findings;
-    }
-
-    // Run reverse image search across engines
-    const release2 = await rateLimiter.acquire();
-    let searchResults;
-    try {
-      searchResults = await faceSearchScraper.searchFace(image.file_path, { profileId: profile.id });
-    } finally {
-      release2();
-    }
-
-    if (!searchResults || searchResults.totalResults === 0) {
-      findings.push({
-        category: "identity",
-        severity: "info",
-        title: "Face search: no reverse image results found",
-        description: "Google Lens, Yandex, and Bing returned no matching results.",
-        rawData: { engines: searchResults?.engines || {}, reason: "no_results" },
+        title: `Face search: ${result.error}`,
+        rawData: { reason: "pipeline_error", error: result.error },
       });
       return findings;
     }
 
     // Report identity guesses from search engines
-    if (searchResults.identityGuesses.length > 0) {
+    if (result.identityGuesses?.length > 0) {
       findings.push({
         category: "identity",
         severity: "high",
-        title: `Face search: identity candidates — ${searchResults.identityGuesses.join(", ")}`,
-        description: `Search engines suggest this face belongs to: ${searchResults.identityGuesses.join(", ")}`,
+        title: `Face search: identity candidates — ${result.identityGuesses.join(", ")}`,
+        description: `Search engines suggest this face belongs to: ${result.identityGuesses.join(", ")}`,
         rawData: {
-          identityGuesses: searchResults.identityGuesses,
+          identityGuesses: result.identityGuesses,
           type: "identity_candidates",
         },
       });
     }
 
-    // Verify face matches from result images via ArcFace
-    const verifiedMatches = [];
-    const urlsToVerify = searchResults.results
-      .filter(r => r.imageUrl && r.imageUrl.startsWith("http"))
-      .slice(0, 20); // Limit to 20 verifications
-
-    for (const result of urlsToVerify) {
-      const release3 = await rateLimiter.acquire();
-      try {
-        const matchData = await faceSearchScraper.verifyFaceMatch(image.file_path, result.imageUrl);
-        if (matchData && matchData.similarity >= MATCH_THRESHOLD) {
-          verifiedMatches.push({
-            sourceUrl: result.sourceUrl,
-            imageUrl: result.imageUrl,
-            similarity: matchData.similarity,
-            engine: result.engine,
-            title: result.title,
-          });
-        }
-      } catch (_) {} finally {
-        release3();
-      }
-    }
-
-    // Report verified face matches
-    if (verifiedMatches.length > 0) {
-      verifiedMatches.sort((a, b) => b.similarity - a.similarity);
-
+    // Report verified face matches (biometric, not visual similarity)
+    if (result.matches?.length > 0) {
       findings.push({
         category: "identity",
         severity: "critical",
-        title: `Face search: ${verifiedMatches.length} verified face match(es) found online`,
-        description: verifiedMatches.slice(0, 10).map(m =>
-          `[${(m.similarity * 100).toFixed(1)}%] ${m.title || m.sourceUrl}\n  Source: ${m.sourceUrl}`
+        title: `Face match: ${result.matches.length} biometric match(es) confirmed`,
+        description: result.matches.slice(0, 10).map(m =>
+          `[${(m.similarity * 100).toFixed(1)}% match] ${m.label || m.sourceUrl || m.imageUrl}\n  Source: ${m.sourceUrl || m.imageUrl}\n  Engine: ${m.engine}`
         ).join("\n\n"),
         rawData: {
-          verifiedMatches,
-          totalSearchResults: searchResults.totalResults,
-          engines: searchResults.engines,
-          type: "verified_face_matches",
+          verifiedMatches: result.matches,
+          totalProcessed: result.totalProcessed,
+          totalIndexed: result.totalIndexed,
+          engines: result.engines,
+          type: "biometric_face_matches",
         },
-        remediation: "These URLs contain images matching the uploaded face. Review each source for identity information.",
+        remediation: "These matches are biometric — ArcFace confirmed the same person appears in these images.",
       });
 
-      // Extract social media profiles from verified match URLs
+      // Extract social media profiles from match URLs
       const socialPatterns = [
         { regex: /instagram\.com\/([^\/\?]+)/, platform: "instagram" },
         { regex: /twitter\.com\/([^\/\?]+)/, platform: "twitter" },
@@ -159,56 +112,60 @@ module.exports = {
         { regex: /linkedin\.com\/in\/([^\/\?]+)/, platform: "linkedin" },
         { regex: /tiktok\.com\/@([^\/\?]+)/, platform: "tiktok" },
         { regex: /youtube\.com\/@([^\/\?]+)/, platform: "youtube" },
-        { regex: /youtube\.com\/channel\/([^\/\?]+)/, platform: "youtube" },
         { regex: /reddit\.com\/user\/([^\/\?]+)/, platform: "reddit" },
         { regex: /github\.com\/([^\/\?]+)/, platform: "github" },
         { regex: /t\.me\/([^\/\?]+)/, platform: "telegram" },
+        { regex: /vk\.com\/([^\/\?]+)/, platform: "vk" },
       ];
 
       const discoveredProfiles = new Set();
-      for (const match of verifiedMatches) {
-        for (const pattern of socialPatterns) {
-          const urlMatch = (match.sourceUrl || "").match(pattern.regex);
-          if (urlMatch) {
-            const username = urlMatch[1].toLowerCase();
-            if (!discoveredProfiles.has(`${pattern.platform}:${username}`)) {
-              discoveredProfiles.add(`${pattern.platform}:${username}`);
-              findings.push({
-                category: "identity",
-                severity: "high",
-                title: `Face search: ${pattern.platform} profile discovered — ${username}`,
-                description: `Face match found on ${pattern.platform} profile: ${match.sourceUrl}`,
-                sourceUrl: match.sourceUrl,
-                rawData: {
-                  platform: pattern.platform,
-                  username,
-                  similarity: match.similarity,
-                  type: "discovered_profile",
-                  pivotRecommended: true,
-                },
-              });
+      for (const match of result.matches) {
+        const urls = [match.sourceUrl, match.imageUrl].filter(Boolean);
+        for (const url of urls) {
+          for (const pattern of socialPatterns) {
+            const urlMatch = url.match(pattern.regex);
+            if (urlMatch) {
+              const username = urlMatch[1].toLowerCase();
+              const key = `${pattern.platform}:${username}`;
+              if (!discoveredProfiles.has(key)) {
+                discoveredProfiles.add(key);
+                findings.push({
+                  category: "identity",
+                  severity: "high",
+                  title: `Face match: ${pattern.platform} profile — ${username}`,
+                  description: `Biometric face match found on ${pattern.platform}: ${url} (${(match.similarity * 100).toFixed(1)}% similarity)`,
+                  sourceUrl: url,
+                  rawData: {
+                    platform: pattern.platform,
+                    username,
+                    similarity: match.similarity,
+                    type: "discovered_profile",
+                    pivotRecommended: true,
+                  },
+                });
+              }
             }
           }
         }
       }
     }
 
-    // Report all source URLs (even without face verification)
-    const sourceUrls = searchResults.results.map(r => r.sourceUrl).filter(Boolean);
-    if (sourceUrls.length > 0 && verifiedMatches.length === 0) {
-      findings.push({
-        category: "identity",
-        severity: "medium",
-        title: `Face search: ${sourceUrls.length} potential match pages found`,
-        description: `Reverse image search found ${sourceUrls.length} pages that may contain this face.\n${sourceUrls.slice(0, 10).join("\n")}`,
-        rawData: {
-          sourceUrls: sourceUrls.slice(0, 50),
-          engines: searchResults.engines,
-          type: "unverified_matches",
-          note: "Face verification could not run on these (no direct image URL extracted)",
-        },
-      });
-    }
+    // Report pipeline stats
+    const stats = await faceEngine.getStats();
+    findings.push({
+      category: "identity",
+      severity: "info",
+      title: `Face search stats: ${result.totalProcessed} candidates processed, ${result.matches?.length || 0} confirmed matches`,
+      rawData: {
+        type: "search_stats",
+        totalProcessed: result.totalProcessed,
+        totalScraped: result.totalScraped,
+        totalIndexed: result.totalIndexed,
+        matchCount: result.matches?.length || 0,
+        engines: result.engines,
+        qdrantStats: stats,
+      },
+    });
 
     return findings;
   },

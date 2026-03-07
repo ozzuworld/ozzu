@@ -1577,6 +1577,70 @@ module.exports = function osintRoutes(ctx) {
       return true;
     }
 
+    // ── Face Engine Endpoints ──
+
+    // GET /osint/face/stats — vector DB stats
+    if (req.method === "GET" && pathname === "/osint/face/stats") {
+      try {
+        const faceEngine = require("../face-engine");
+        const stats = await faceEngine.getStats();
+        sendJSON(res, 200, { ok: true, ...stats });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /osint/face/search — search Qdrant for face matches
+    if (req.method === "POST" && pathname === "/osint/face/search") {
+      try {
+        const faceEngine = require("../face-engine");
+        const body = await parseBody(req);
+        const { profileId } = body;
+        if (!profileId) {
+          sendJSON(res, 400, { error: "profileId required" });
+          return true;
+        }
+        const image = await db.getOsintImageByProfile(profileId);
+        if (!image) {
+          sendJSON(res, 404, { error: "No image found for profile" });
+          return true;
+        }
+        const result = await faceEngine.searchFaces(image.file_path, {
+          excludeProfile: String(profileId),
+          topK: body.topK || 50,
+          threshold: body.threshold || 0.4,
+        });
+        sendJSON(res, 200, { ok: true, ...result });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /osint/face/index — index a face from URL into Qdrant
+    if (req.method === "POST" && pathname === "/osint/face/index") {
+      try {
+        const faceEngine = require("../face-engine");
+        const body = await parseBody(req);
+        const { imageUrl, profileId, label, sourcePlatform } = body;
+        if (!imageUrl) {
+          sendJSON(res, 400, { error: "imageUrl required" });
+          return true;
+        }
+        const result = await faceEngine.indexFaceFromUrl(imageUrl, {
+          profile_id: String(profileId || ""),
+          label: label || "",
+          source_url: imageUrl,
+          source_platform: sourcePlatform || "",
+        });
+        sendJSON(res, 200, { ok: true, ...result });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     return false;
   };
 };
