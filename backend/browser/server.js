@@ -22,7 +22,7 @@ async function getBrowser() {
   return browser;
 }
 
-async function getSession(sessionId = "default") {
+async function getSession(sessionId = "default", opts = {}) {
   let session = sessions.get(sessionId);
   if (session) {
     clearTimeout(session.timer);
@@ -37,13 +37,21 @@ async function getSession(sessionId = "default") {
   }
 
   const b = await getBrowser();
-  const context = await b.newContext({
+  const contextOpts = {
     viewport: { width: 1280, height: 900 },
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     locale: "en-US",
     timezoneId: "America/New_York",
-  });
+  };
+
+  // Add proxy if requested (e.g. SOCKS5 through residential IP)
+  if (opts.proxy) {
+    contextOpts.proxy = { server: opts.proxy };
+    console.log(`[browser] Session "${sessionId}" using proxy: ${opts.proxy}`);
+  }
+
+  const context = await b.newContext(contextOpts);
   const page = await context.newPage();
 
   // Stealth: hide automation fingerprints
@@ -112,12 +120,12 @@ app.get("/sessions", (_req, res) => {
 
 app.post("/session/new", async (req, res) => {
   try {
-    const { session_id } = req.body;
+    const { session_id, proxy } = req.body;
     const id = session_id || `session_${Date.now()}`;
     if (sessions.has(id)) {
       return res.json({ ok: true, session_id: id, message: "Session already exists" });
     }
-    await getSession(id);
+    await getSession(id, { proxy });
     res.json({ ok: true, session_id: id });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });

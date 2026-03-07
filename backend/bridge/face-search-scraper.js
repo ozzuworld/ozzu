@@ -5,6 +5,7 @@ const path = require("path");
 
 const BROWSER_API = "http://127.0.0.1:3334";
 const FACE_API = "http://127.0.0.1:5555";
+const RESIDENTIAL_PROXY = process.env.RESIDENTIAL_PROXY || "socks5://127.0.0.1:1080";
 
 async function browserFetch(endpoint, body, timeout = 25000) {
   try {
@@ -77,7 +78,7 @@ async function scrapeGoogleLens(sessionId, imagePath, opts = {}) {
       session_id: sessionId,
     }, 30000);
 
-    if (lensNav?.ok) {
+    if (lensNav?.ok && !lensNav?.url?.includes('/sorry/')) {
       await wait(5000); // Wait for results to load
 
       const extractResult = await browserFetch("/evaluate", {
@@ -118,7 +119,7 @@ async function scrapeGoogleLens(sessionId, imagePath, opts = {}) {
     // Also try Google reverse image search
     const risUrl = `https://www.google.com/searchbyimage?image_url=${encodeURIComponent(imageUrl)}`;
     const risNav = await browserFetch("/navigate", { url: risUrl, session_id: sessionId }, 30000);
-    if (risNav?.ok) {
+    if (risNav?.ok && !risNav?.url?.includes('/sorry/')) {
       await wait(3000);
       const risExtract = await browserFetch("/evaluate", {
         session_id: sessionId,
@@ -215,26 +216,48 @@ async function scrapeBingVisual(sessionId, imagePath, opts = {}) {
     const nav = await browserFetch("/navigate", { url: bingUrl, session_id: sessionId }, 30000);
     if (!nav?.ok) return results;
 
-    await wait(4000);
+    await wait(5000);
 
     const extractResult = await browserFetch("/evaluate", {
       session_id: sessionId,
       script: `(() => {
-        const results = [];
-        // Pages containing this image
-        document.querySelectorAll('.sbi_sp a, .infnmpt a, .b_algo a').forEach(a => {
-          if (a.href && !a.href.includes('bing.com')) {
+        var results = [];
+        // Extract identity from page title (Bing uses "Name - Search" format)
+        var title = document.title || '';
+        if (title.indexOf(' - Search') > 0) {
+          results.push({ bestGuess: title.replace(' - Search', '').trim(), type: 'identity_guess' });
+        }
+        // Entity label from knowledge panel
+        var entity = document.querySelector('.b_entityTitle, .sbi_entityLabel, .b_lBottom .b_factrow');
+        if (entity) results.push({ bestGuess: entity.textContent.trim(), type: 'identity_guess' });
+        // Extract h2 headings as identity signals
+        var h2s = document.querySelectorAll('h2');
+        for (var i = 0; i < Math.min(h2s.length, 5); i++) {
+          var txt = h2s[i].textContent.trim();
+          if (txt.length > 3 && txt.length < 100) {
+            results.push({ bestGuess: txt, type: 'identity_guess' });
+          }
+        }
+        // Pages containing this image + search results
+        var links = document.querySelectorAll('.b_algo h2 a, .b_title a, .sbi_sp a, .infnmpt a');
+        for (var j = 0; j < Math.min(links.length, 20); j++) {
+          var a = links[j];
+          var href = a.href || '';
+          // Decode Bing redirect URLs
+          var realUrl = href;
+          var match = href.match(/[?&]u=a1(.+?)(&|$)/);
+          if (match) {
+            try { realUrl = atob(match[1]); } catch(e) { realUrl = href; }
+          }
+          if (realUrl && realUrl.indexOf('bing.com') === -1 && realUrl.indexOf('microsoft.com') === -1) {
             results.push({
-              sourceUrl: a.href,
-              title: a.textContent?.trim()?.substring(0, 200) || '',
+              sourceUrl: realUrl,
+              title: a.textContent.trim().substring(0, 200),
               type: 'page_match'
             });
           }
-        });
-        // Visual search entity
-        const entity = document.querySelector('.b_entityTitle, .sbi_entityLabel')?.textContent;
-        if (entity) results.unshift({ bestGuess: entity, type: 'identity_guess' });
-        return JSON.stringify(results.slice(0, 20));
+        }
+        return JSON.stringify(results.slice(0, 30));
       })()`,
     }, 15000);
 
@@ -285,7 +308,16 @@ async function searchFace(imagePath, opts = {}) {
   const allResults = [];
   const sessionId = `face-search-${Date.now()}`;
 
-  // Run searches sequentially (same browser session)
+  // Create proxy sessions for Google/Bing (residential IP avoids CAPTCHAs)
+  // Yandex works fine from datacenter IP — no proxy needed
+  const useProxy = opts.useProxy !== false;
+  if (useProxy) {
+    await browserFetch("/session/new", { session_id: sessionId, proxy: RESIDENTIAL_PROXY }, 15000);
+    await browserFetch("/session/new", { session_id: `${sessionId}-bing`, proxy: RESIDENTIAL_PROXY }, 15000);
+    console.log(`[face-search] Created proxy sessions for Google/Bing via ${RESIDENTIAL_PROXY}`);
+  }
+
+  // Run searches sequentially
   const googleResults = await scrapeGoogleLens(sessionId, imagePath, opts);
   allResults.push(...googleResults);
 
@@ -295,10 +327,12 @@ async function searchFace(imagePath, opts = {}) {
   const bingResults = await scrapeBingVisual(`${sessionId}-bing`, imagePath, opts);
   allResults.push(...bingResults);
 
+  console.log(`[face-search] Results: Google=${googleResults.length}, Yandex=${yandexResults.length}, Bing=${bingResults.length}`);
+
   // Clean up sessions
-  await browserFetch("/navigate", { url: "about:blank", session_id: sessionId }).catch(() => {});
-  await browserFetch("/navigate", { url: "about:blank", session_id: `${sessionId}-yx` }).catch(() => {});
-  await browserFetch("/navigate", { url: "about:blank", session_id: `${sessionId}-bing` }).catch(() => {});
+  await browserFetch("/session/close", { session_id: sessionId }).catch(() => {});
+  await browserFetch("/session/close", { session_id: `${sessionId}-yx` }).catch(() => {});
+  await browserFetch("/session/close", { session_id: `${sessionId}-bing` }).catch(() => {});
 
   // De-duplicate by URL
   const seen = new Set();
