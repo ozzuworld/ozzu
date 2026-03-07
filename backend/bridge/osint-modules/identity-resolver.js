@@ -211,10 +211,14 @@ module.exports = {
   },
 };
 
+const GARBAGE_RE = /^\d+[×x]\d+$/; // dimension strings like "2924×3843"
+const GENERIC_WORDS = new Set(["человек", "person", "people", "man", "woman", "photo", "image", "picture"]);
+
 function addCandidate(map, name, source, confidence, module) {
   if (!name || name.length < 2) return;
   const key = name.toLowerCase().trim();
   if (SKIP_USERNAMES.has(key)) return;
+  if (GARBAGE_RE.test(key) || GENERIC_WORDS.has(key)) return;
 
   if (!map.has(key)) {
     map.set(key, { confidence, sources: [] });

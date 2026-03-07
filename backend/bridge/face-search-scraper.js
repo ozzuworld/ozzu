@@ -26,7 +26,7 @@ async function wait(ms) {
 }
 
 // ── Google Lens ──
-async function scrapeGoogleLens(sessionId, imagePath) {
+async function scrapeGoogleLens(sessionId, imagePath, opts = {}) {
   const results = [];
   try {
     // Navigate to Google Lens upload page
@@ -34,7 +34,7 @@ async function scrapeGoogleLens(sessionId, imagePath) {
       url: "https://lens.google.com/",
       session_id: sessionId,
     }, 30000);
-    if (!nav?.success) return results;
+    if (!nav?.ok) return results;
 
     await wait(2000);
 
@@ -46,7 +46,7 @@ async function scrapeGoogleLens(sessionId, imagePath) {
     // Use evaluate to create a file upload via drag-and-drop simulation
     const uploadResult = await browserFetch("/evaluate", {
       session_id: sessionId,
-      code: `(async () => {
+      script: `(async () => {
         // Find the upload input or trigger the upload dialog
         const input = document.querySelector('input[type="file"]');
         if (input) {
@@ -68,7 +68,7 @@ async function scrapeGoogleLens(sessionId, imagePath) {
     // Alternative: use the URL-based search
     // Google Lens can accept a URL parameter if the image is accessible
     const bridgeUrl = process.env.BRIDGE_PUBLIC_URL || "http://10.8.0.1:3333";
-    const imageUrl = `${bridgeUrl}/osint/images/upload/${path.basename(imagePath)}`;
+    const imageUrl = opts?.profileId ? `${bridgeUrl}/osint/images/${opts.profileId}` : `${bridgeUrl}/osint/images/upload/${path.basename(imagePath)}`;
 
     // Try URL-based lens search
     const lensUrl = `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}`;
@@ -77,12 +77,12 @@ async function scrapeGoogleLens(sessionId, imagePath) {
       session_id: sessionId,
     }, 30000);
 
-    if (lensNav?.success) {
+    if (lensNav?.ok) {
       await wait(5000); // Wait for results to load
 
       const extractResult = await browserFetch("/evaluate", {
         session_id: sessionId,
-        code: `(() => {
+        script: `(() => {
           const results = [];
           // Extract visual matches
           document.querySelectorAll('a[href*="imgres"], a[data-action-url], .isv-r a').forEach(a => {
@@ -118,11 +118,11 @@ async function scrapeGoogleLens(sessionId, imagePath) {
     // Also try Google reverse image search
     const risUrl = `https://www.google.com/searchbyimage?image_url=${encodeURIComponent(imageUrl)}`;
     const risNav = await browserFetch("/navigate", { url: risUrl, session_id: sessionId }, 30000);
-    if (risNav?.success) {
+    if (risNav?.ok) {
       await wait(3000);
       const risExtract = await browserFetch("/evaluate", {
         session_id: sessionId,
-        code: `(() => {
+        script: `(() => {
           const results = [];
           document.querySelectorAll('#search .g a, #rso a').forEach(a => {
             if (a.href && !a.href.includes('google.com') && a.href.startsWith('http')) {
@@ -149,22 +149,22 @@ async function scrapeGoogleLens(sessionId, imagePath) {
 }
 
 // ── Yandex Images ──
-async function scrapeYandexImages(sessionId, imagePath) {
+async function scrapeYandexImages(sessionId, imagePath, opts = {}) {
   const results = [];
   try {
     const bridgeUrl = process.env.BRIDGE_PUBLIC_URL || "http://10.8.0.1:3333";
-    const imageUrl = `${bridgeUrl}/osint/images/upload/${path.basename(imagePath)}`;
+    const imageUrl = opts?.profileId ? `${bridgeUrl}/osint/images/${opts.profileId}` : `${bridgeUrl}/osint/images/upload/${path.basename(imagePath)}`;
 
     // Yandex reverse image search URL
     const yandexUrl = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
     const nav = await browserFetch("/navigate", { url: yandexUrl, session_id: sessionId }, 30000);
-    if (!nav?.success) return results;
+    if (!nav?.ok) return results;
 
     await wait(5000);
 
     const extractResult = await browserFetch("/evaluate", {
       session_id: sessionId,
-      code: `(() => {
+      script: `(() => {
         const results = [];
         // "Sites where this image was found"
         document.querySelectorAll('.CbirSites-Item a, .other-sites__item a').forEach(a => {
@@ -184,7 +184,7 @@ async function scrapeYandexImages(sessionId, imagePath) {
           });
         });
         // Text/description from results
-        document.querySelectorAll('.CbirObjectResponse-Title, .Tags-Wrapper .Tags-Item').forEach(el => {
+        document.querySelectorAll('.CbirObjectResponse-Title, .Tags-Wrapper .Tags-Item, .CbirTags-Item').forEach(el => {
           const text = el.textContent?.trim();
           if (text) results.push({ bestGuess: text, type: 'identity_guess' });
         });
@@ -205,21 +205,21 @@ async function scrapeYandexImages(sessionId, imagePath) {
 }
 
 // ── Bing Visual Search ──
-async function scrapeBingVisual(sessionId, imagePath) {
+async function scrapeBingVisual(sessionId, imagePath, opts = {}) {
   const results = [];
   try {
     const bridgeUrl = process.env.BRIDGE_PUBLIC_URL || "http://10.8.0.1:3333";
-    const imageUrl = `${bridgeUrl}/osint/images/upload/${path.basename(imagePath)}`;
+    const imageUrl = opts?.profileId ? `${bridgeUrl}/osint/images/${opts.profileId}` : `${bridgeUrl}/osint/images/upload/${path.basename(imagePath)}`;
 
     const bingUrl = `https://www.bing.com/images/search?view=detailv2&iss=sbi&form=SBIVSP&sbisrc=UrlPaste&q=imgurl:${encodeURIComponent(imageUrl)}`;
     const nav = await browserFetch("/navigate", { url: bingUrl, session_id: sessionId }, 30000);
-    if (!nav?.success) return results;
+    if (!nav?.ok) return results;
 
     await wait(4000);
 
     const extractResult = await browserFetch("/evaluate", {
       session_id: sessionId,
-      code: `(() => {
+      script: `(() => {
         const results = [];
         // Pages containing this image
         document.querySelectorAll('.sbi_sp a, .infnmpt a, .b_algo a').forEach(a => {
@@ -264,7 +264,7 @@ async function verifyFaceMatch(originalImagePath, candidateImageUrl) {
     const candidateBuffer = Buffer.from(await res.arrayBuffer());
 
     // Compare via ArcFace
-    const form = new URLSearchParams();
+    const form = new FormData();
     form.append("base64_image1", originalBuffer.toString("base64"));
     form.append("base64_image2", candidateBuffer.toString("base64"));
     const compareRes = await fetch(`${FACE_API}/compare`, {
@@ -281,18 +281,18 @@ async function verifyFaceMatch(originalImagePath, candidateImageUrl) {
 }
 
 // ── Main Search Function ──
-async function searchFace(imagePath) {
+async function searchFace(imagePath, opts = {}) {
   const allResults = [];
   const sessionId = `face-search-${Date.now()}`;
 
   // Run searches sequentially (same browser session)
-  const googleResults = await scrapeGoogleLens(sessionId, imagePath);
+  const googleResults = await scrapeGoogleLens(sessionId, imagePath, opts);
   allResults.push(...googleResults);
 
-  const yandexResults = await scrapeYandexImages(`${sessionId}-yx`, imagePath);
+  const yandexResults = await scrapeYandexImages(`${sessionId}-yx`, imagePath, opts);
   allResults.push(...yandexResults);
 
-  const bingResults = await scrapeBingVisual(`${sessionId}-bing`, imagePath);
+  const bingResults = await scrapeBingVisual(`${sessionId}-bing`, imagePath, opts);
   allResults.push(...bingResults);
 
   // Clean up sessions
@@ -311,8 +311,13 @@ async function searchFace(imagePath) {
     }
   }
 
-  // Extract identity guesses
-  const identityGuesses = unique.filter(r => r.type === "identity_guess").map(r => r.bestGuess);
+  // Extract identity guesses (filter out dimension strings like "2924×3843" and generic words)
+  const dimensionRe = /^\d+[×x]\d+$/;
+  const genericWords = new Set(["человек", "person", "people", "man", "woman", "photo", "image"]);
+  const identityGuesses = unique
+    .filter(r => r.type === "identity_guess")
+    .map(r => r.bestGuess)
+    .filter(g => g && !dimensionRe.test(g) && !genericWords.has(g.toLowerCase()));
 
   return {
     results: unique.filter(r => r.sourceUrl),

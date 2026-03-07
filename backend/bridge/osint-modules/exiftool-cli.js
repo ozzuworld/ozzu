@@ -2,6 +2,7 @@
 // Falls back to existing exif-extract module if CLI unavailable
 // Uses exiftool via docker exec osint-tools
 const cliRunner = require("../osint-cli-runner");
+const db = require("../db");
 const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -25,12 +26,16 @@ module.exports = {
       return findings;
     }
 
-    // Get the image file path — profile value may be a file path or we need to look up osint_images
-    let imagePath = profile.value;
+    // Look up the actual image file path from osint_images table
+    const image = await db.getOsintImageByProfile(profile.id);
+    let imagePath = image?.file_path;
 
-    // If the value doesn't look like a path, try to construct one from profile metadata
-    if (!imagePath.startsWith("/") && profile.metadata && profile.metadata.file_path) {
-      imagePath = profile.metadata.file_path;
+    // Fallback to profile value/metadata if no image record
+    if (!imagePath) {
+      imagePath = profile.value;
+      if (!imagePath.startsWith("/") && profile.metadata && profile.metadata.file_path) {
+        imagePath = profile.metadata.file_path;
+      }
     }
 
     // Check if file exists on the host and copy to shared volume if needed

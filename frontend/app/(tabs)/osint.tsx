@@ -61,6 +61,8 @@ import { DossierView } from "../../components/osint/DossierView";
 import { InvestigationView } from "../../components/osint/InvestigationView";
 import { FaceSearchResults } from "../../components/osint/FaceSearchResults";
 import { EKFDashboard } from "../../components/osint/EKFDashboard";
+import { VipBubble } from "../../components/osint/VipBubble";
+import { IntelDossier } from "../../components/osint/IntelDossier";
 import CedulaDbManager from "../../components/osint/CedulaDbManager";
 import type { OsintEntity } from "../../lib/bridge-api";
 
@@ -124,6 +126,7 @@ export default function OsintScreen() {
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [profilesExpanded, setProfilesExpanded] = useState(true);
   const [selectedEntity, setSelectedEntity] = useState<OsintEntity | null>(null);
+  const [intelDossierProfile, setIntelDossierProfile] = useState<OsintProfile | null>(null);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1269,18 +1272,40 @@ export default function OsintScreen() {
           </View>
         )}
 
-        {/* ─── INTEL VIEW (Face Search + EKF + Investigations) ─── */}
+        {/* ─── INTEL VIEW (VIP Bubbles → Dossier) ─── */}
         {activeView === "intel" && (
           <View style={{ gap: 12 }}>
-            {/* Face search results for image profiles */}
-            <FaceSearchResults findings={findings} />
-            {/* EKF dashboard for first image profile */}
-            {(() => {
-              const imageProfile = profiles.find(p => p.profile_type === "image");
-              return imageProfile ? <EKFDashboard profileId={imageProfile.id} /> : null;
-            })()}
-            {/* Investigations list */}
-            <InvestigationView />
+            {intelDossierProfile ? (
+              <IntelDossier
+                profile={intelDossierProfile}
+                findings={findings}
+                onBack={() => setIntelDossierProfile(null)}
+              />
+            ) : (
+              <>
+                {/* VIP bubbles for image profiles */}
+                {profiles.filter(p => p.profile_type === "image").map(p => (
+                  <VipBubble
+                    key={p.id}
+                    profile={p}
+                    findings={findings}
+                    onPress={() => setIntelDossierProfile(p)}
+                  />
+                ))}
+                {/* If no image profiles, show prompt */}
+                {profiles.filter(p => p.profile_type === "image").length === 0 && (
+                  <View style={{ padding: 40, alignItems: "center" }}>
+                    <Text style={{ fontSize: 48, marginBottom: 12 }}>{"🎯"}</Text>
+                    <Text style={{ color: "#888", fontFamily: "SpaceMono", fontSize: 12, textAlign: "center", lineHeight: 20 }}>
+                      Upload a photo to start an intelligence investigation.{"\n"}
+                      Add an image profile from the profiles panel above.
+                    </Text>
+                  </View>
+                )}
+                {/* Investigations list */}
+                <InvestigationView />
+              </>
+            )}
           </View>
         )}
 

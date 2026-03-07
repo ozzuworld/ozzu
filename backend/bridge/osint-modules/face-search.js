@@ -45,7 +45,7 @@ module.exports = {
     let originalEmbedding = null;
     try {
       const imageBuffer = fs.readFileSync(image.file_path);
-      const form = new URLSearchParams();
+      const form = new FormData();
       form.append("base64_image", imageBuffer.toString("base64"));
       const embedRes = await fetch(`${FACE_API}/embed`, {
         method: "POST",
@@ -76,7 +76,7 @@ module.exports = {
     const release2 = await rateLimiter.acquire();
     let searchResults;
     try {
-      searchResults = await faceSearchScraper.searchFace(image.file_path);
+      searchResults = await faceSearchScraper.searchFace(image.file_path, { profileId: profile.id });
     } finally {
       release2();
     }
