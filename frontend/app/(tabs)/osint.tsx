@@ -163,7 +163,7 @@ function SubjectRow({ profile, findings, onPress, onScan, index }: {
     return total === 0 || latin / total > 0.5;
   }) || candidates[0];
   const name = bestCandidate?.name || profile.label || "Unknown";
-  const confidence = topCandidate?.confidence || 0;
+  const confidence = bestCandidate?.confidence || 0;
 
   const crit = findings.filter(f => f.severity === "critical").length;
   const high = findings.filter(f => f.severity === "high").length;
