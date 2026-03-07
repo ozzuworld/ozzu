@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
+  Alert,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
@@ -43,10 +44,10 @@ export default function OsintScreen() {
     setRefreshing(false);
   }, [refresh]);
 
-  // If a profile is selected, show the full dossier
+  // Full-screen dossier when a subject is selected
   if (selectedProfile) {
     return (
-      <View style={{ flex: 1, backgroundColor: "#0a0a0a" }}>
+      <View style={{ flex: 1, backgroundColor: "#080808" }}>
         <StatusBar style="light" />
         <View style={{ flex: 1, paddingTop: insets.top }}>
           <IntelDossier
@@ -62,92 +63,53 @@ export default function OsintScreen() {
 
   const imageProfiles = profiles.filter(p => p.profile_type === "image");
   const columns = screenWidth > 500 ? 3 : 2;
-  const gap = 12;
-  const bubbleWidth = (screenWidth - 32 - gap * (columns - 1)) / columns;
+  const gap = 14;
+  const cardW = (screenWidth - 40 - gap * (columns - 1)) / columns;
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#0a0a0a" }}>
+    <View style={{ flex: 1, backgroundColor: "#080808" }}>
       <StatusBar style="light" />
 
       {/* Header */}
-      <View
-        style={{
-          paddingTop: insets.top + 12,
-          paddingBottom: 16,
-          paddingHorizontal: 20,
-          borderBottomWidth: 1,
-          borderBottomColor: "#151515",
-        }}
-      >
-        <Text
-          style={{
-            color: "#e5e5e5",
-            fontSize: 22,
-            fontFamily: "SpaceMono",
-            fontWeight: "bold",
-            letterSpacing: 3,
-          }}
-        >
-          INTELLIGENCE
+      <View style={{ paddingTop: insets.top + 16, paddingBottom: 20, paddingHorizontal: 24 }}>
+        <Text style={{ color: "#f5f5f5", fontSize: 24, fontWeight: "700", letterSpacing: 1 }}>
+          Intelligence
         </Text>
-        <Text
-          style={{
-            color: "#333",
-            fontSize: 10,
-            fontFamily: "SpaceMono",
-            letterSpacing: 2,
-            marginTop: 2,
-          }}
-        >
-          {imageProfiles.length} SUBJECT{imageProfiles.length !== 1 ? "S" : ""} UNDER SURVEILLANCE
+        <Text style={{ color: "#2a2a2a", fontSize: 11, marginTop: 4, letterSpacing: 1 }}>
+          {imageProfiles.length > 0
+            ? `${imageProfiles.length} subject${imageProfiles.length !== 1 ? "s" : ""} monitored`
+            : "No subjects yet"}
         </Text>
       </View>
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#333" />
-        }
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#222" />}
       >
-        {/* Scanning indicator */}
+        {/* Scanning banner */}
         {isScanning && (
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 10,
-              backgroundColor: "#0d1117",
-              borderRadius: 10,
-              padding: 12,
-              marginBottom: 16,
-              borderWidth: 1,
-              borderColor: "#00e5ff18",
-            }}
-          >
-            <ActivityIndicator color="#00e5ff" size="small" />
-            <Text style={{ color: "#00e5ff", fontSize: 11, fontFamily: "SpaceMono", flex: 1 }}>
-              SCANNING IN PROGRESS...
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#0a1218", borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: "#0e2a3a" }}>
+            <ActivityIndicator color="#00b4d8" size="small" />
+            <Text style={{ color: "#00b4d8", fontSize: 12, fontWeight: "600", flex: 1 }}>Scanning...</Text>
           </View>
         )}
 
-        {/* Loading state */}
         {loading && profiles.length === 0 && (
-          <View style={{ alignItems: "center", paddingVertical: 60 }}>
-            <ActivityIndicator color="#333" size="large" />
+          <View style={{ alignItems: "center", paddingVertical: 80 }}>
+            <ActivityIndicator color="#222" size="large" />
           </View>
         )}
 
-        {/* VIP Bubbles Grid */}
+        {/* Subject grid */}
         {imageProfiles.length > 0 && (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap }}>
             {imageProfiles.map(p => (
-              <VipCard
+              <SubjectCard
                 key={p.id}
                 profile={p}
                 findings={findings.filter(f => f.profile_id === p.id)}
-                width={bubbleWidth}
+                width={cardW}
                 onPress={() => setSelectedProfile(p)}
                 onScan={async () => {
                   setIsScanning(true);
@@ -157,49 +119,25 @@ export default function OsintScreen() {
               />
             ))}
 
-            {/* Add new subject */}
+            {/* Add subject card */}
             <Pressable onPress={() => setShowAddModal(true)}>
               {({ pressed }) => (
-                <View
-                  style={{
-                    width: bubbleWidth,
-                    backgroundColor: pressed ? "#111" : "#0a0a0a",
-                    borderRadius: 16,
-                    padding: 20,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderWidth: 1,
-                    borderColor: "#1a1a1a",
-                    borderStyle: "dashed",
-                    minHeight: bubbleWidth * 1.3,
-                  }}
-                >
-                  <View
-                    style={{
-                      width: 64,
-                      height: 64,
-                      borderRadius: 32,
-                      borderWidth: 2,
-                      borderColor: "#222",
-                      borderStyle: "dashed",
-                      justifyContent: "center",
-                      alignItems: "center",
-                      marginBottom: 12,
-                    }}
-                  >
-                    <Text style={{ color: "#333", fontSize: 24 }}>+</Text>
+                <View style={{
+                  width: cardW,
+                  aspectRatio: 0.85,
+                  backgroundColor: pressed ? "#0e0e0e" : "transparent",
+                  borderRadius: 20,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderWidth: 1.5,
+                  borderColor: "#1a1a1a",
+                  borderStyle: "dashed",
+                }}>
+                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#111", justifyContent: "center", alignItems: "center", marginBottom: 10 }}>
+                    <Text style={{ color: "#333", fontSize: 22, fontWeight: "300" }}>+</Text>
                   </View>
-                  <Text
-                    style={{
-                      color: "#444",
-                      fontFamily: "SpaceMono",
-                      fontSize: 9,
-                      fontWeight: "bold",
-                      letterSpacing: 1.5,
-                      textAlign: "center",
-                    }}
-                  >
-                    NEW SUBJECT
+                  <Text style={{ color: "#2a2a2a", fontSize: 10, fontWeight: "600", letterSpacing: 1 }}>
+                    ADD SUBJECT
                   </Text>
                 </View>
               )}
@@ -207,250 +145,135 @@ export default function OsintScreen() {
           </View>
         )}
 
-        {/* Empty state — no profiles at all */}
+        {/* Empty state */}
         {!loading && imageProfiles.length === 0 && (
-          <View style={{ alignItems: "center", paddingVertical: 80 }}>
-            <View
-              style={{
-                width: 100,
-                height: 100,
-                borderRadius: 50,
-                borderWidth: 2,
-                borderColor: "#1a1a1a",
-                justifyContent: "center",
-                alignItems: "center",
-                marginBottom: 24,
-              }}
-            >
-              <Text style={{ color: "#222", fontSize: 40 }}>+</Text>
+          <View style={{ alignItems: "center", paddingVertical: 100 }}>
+            <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: "#0e0e0e", justifyContent: "center", alignItems: "center", marginBottom: 28 }}>
+              <Text style={{ color: "#1a1a1a", fontSize: 32 }}>+</Text>
             </View>
-            <Text
-              style={{
-                color: "#555",
-                fontFamily: "SpaceMono",
-                fontSize: 14,
-                fontWeight: "bold",
-                letterSpacing: 2,
-                marginBottom: 8,
-              }}
-            >
-              NO SUBJECTS
+            <Text style={{ color: "#666", fontSize: 16, fontWeight: "600", marginBottom: 6 }}>
+              No Subjects
             </Text>
-            <Text
-              style={{
-                color: "#333",
-                fontFamily: "SpaceMono",
-                fontSize: 11,
-                textAlign: "center",
-                lineHeight: 18,
-                marginBottom: 24,
-                paddingHorizontal: 40,
-              }}
-            >
+            <Text style={{ color: "#2a2a2a", fontSize: 12, textAlign: "center", lineHeight: 18, marginBottom: 28, paddingHorizontal: 40 }}>
               Upload a photo to begin an intelligence investigation
             </Text>
             <Pressable
               onPress={() => setShowAddModal(true)}
               style={({ pressed }) => ({
-                backgroundColor: pressed ? "#152030" : "#0d1520",
-                borderWidth: 1,
-                borderColor: "#00e5ff33",
-                borderRadius: 10,
-                paddingHorizontal: 28,
-                paddingVertical: 12,
+                backgroundColor: pressed ? "#0e2a3a" : "#0a1a28",
+                borderRadius: 12,
+                paddingHorizontal: 32,
+                paddingVertical: 14,
               })}
             >
-              <Text
-                style={{
-                  color: "#00e5ff",
-                  fontFamily: "SpaceMono",
-                  fontSize: 12,
-                  fontWeight: "bold",
-                  letterSpacing: 1,
-                }}
-              >
-                START INVESTIGATION
+              <Text style={{ color: "#00b4d8", fontSize: 13, fontWeight: "700" }}>
+                Start Investigation
               </Text>
             </Pressable>
           </View>
         )}
       </ScrollView>
 
-      <AddProfileModal
-        visible={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        onCreated={refresh}
-      />
+      <AddProfileModal visible={showAddModal} onClose={() => setShowAddModal(false)} onCreated={refresh} />
     </View>
   );
 }
 
-// ─── VIP Card ───
-function VipCard({
-  profile,
-  findings,
-  width,
-  onPress,
-  onScan,
-}: {
-  profile: OsintProfile;
-  findings: any[];
-  width: number;
-  onPress: () => void;
-  onScan: () => void;
+// ─── Subject Card ───
+function SubjectCard({ profile, findings, width, onPress, onScan }: {
+  profile: OsintProfile; findings: any[]; width: number; onPress: () => void; onScan: () => void;
 }) {
-  const [imageError, setImageError] = useState(false);
+  const [imgErr, setImgErr] = useState(false);
   const imageUrl = `${getBridgeUrl()}/osint/images/${profile.id}/thumbnail`;
 
-  // Extract identity
-  const identityFinding = findings.find(
-    f => f.module === "identity-resolver" && f.raw_data?.type === "identity_candidates"
-  );
-  const topCandidate = identityFinding?.raw_data?.candidates?.[0];
-  const identityName = topCandidate?.name || profile.display_name || "Unknown";
+  const idFinding = findings.find(f => f.module === "identity-resolver" && f.raw_data?.type === "identity_candidates");
+  const name = idFinding?.raw_data?.candidates?.[0]?.name || profile.display_name || "Unknown";
 
-  // Threat stats
-  const criticalCount = findings.filter(f => f.severity === "critical").length;
-  const highCount = findings.filter(f => f.severity === "high").length;
-  const totalFindings = findings.length;
-  const newFindings = findings.filter(f => f.status === "new").length;
+  const critical = findings.filter(f => f.severity === "critical").length;
+  const high = findings.filter(f => f.severity === "high").length;
+  const total = findings.length;
+  const newCount = findings.filter(f => f.status === "new").length;
 
-  const threatColor = criticalCount > 0 ? "#ef4444" : highCount > 0 ? "#f97316" : totalFindings > 5 ? "#eab308" : "#22c55e";
-  const threatLabel = criticalCount > 0 ? "HIGH" : highCount > 0 ? "MED" : totalFindings > 5 ? "LOW" : "CLEAR";
+  const ringColor = critical > 0 ? "#dc2626" : high > 0 ? "#ea580c" : total > 5 ? "#ca8a04" : "#16a34a";
+  const statusText = critical > 0 ? "HIGH RISK" : high > 0 ? "MODERATE" : total > 5 ? "LOW RISK" : "CLEAR";
 
-  const photoSize = Math.min(width * 0.55, 80);
+  const photoSize = Math.min(width * 0.48, 72);
 
   return (
-    <Pressable onPress={onPress} onLongPress={onScan}>
+    <Pressable onPress={onPress} onLongPress={() => {
+      Alert.alert(name, `Subject #${profile.id}`, [
+        { text: "Scan Now", onPress: onScan },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    }}>
       {({ pressed }) => (
-        <View
-          style={{
-            width,
-            backgroundColor: pressed ? "#111" : "#0d0d0d",
-            borderRadius: 16,
-            paddingVertical: 20,
-            paddingHorizontal: 12,
-            alignItems: "center",
-            borderWidth: 1,
-            borderColor: pressed ? threatColor + "44" : "#151515",
-          }}
-        >
-          {/* Photo with threat ring */}
-          <View style={{ marginBottom: 12, position: "relative" }}>
-            <View
-              style={{
-                width: photoSize + 6,
-                height: photoSize + 6,
-                borderRadius: (photoSize + 6) / 2,
-                borderWidth: 2.5,
-                borderColor: threatColor,
-                padding: 3,
-              }}
-            >
-              {!imageError ? (
+        <View style={{
+          width,
+          aspectRatio: 0.85,
+          backgroundColor: pressed ? "#111" : "#0c0c0c",
+          borderRadius: 20,
+          alignItems: "center",
+          justifyContent: "center",
+          borderWidth: 1,
+          borderColor: pressed ? ringColor + "55" : "#141414",
+          paddingHorizontal: 8,
+        }}>
+          {/* Photo */}
+          <View style={{ position: "relative", marginBottom: 14 }}>
+            <View style={{
+              width: photoSize + 8,
+              height: photoSize + 8,
+              borderRadius: (photoSize + 8) / 2,
+              borderWidth: 2.5,
+              borderColor: ringColor,
+              justifyContent: "center",
+              alignItems: "center",
+            }}>
+              {!imgErr ? (
                 <Image
                   source={{ uri: imageUrl, headers: getAuthHeaders() }}
-                  style={{
-                    width: photoSize,
-                    height: photoSize,
-                    borderRadius: photoSize / 2,
-                  }}
-                  onError={() => setImageError(true)}
+                  style={{ width: photoSize, height: photoSize, borderRadius: photoSize / 2 }}
+                  onError={() => setImgErr(true)}
                 />
               ) : (
-                <View
-                  style={{
-                    width: photoSize,
-                    height: photoSize,
-                    borderRadius: photoSize / 2,
-                    backgroundColor: "#151515",
-                    justifyContent: "center",
-                    alignItems: "center",
-                  }}
-                >
-                  <Text style={{ fontSize: 28, color: "#333" }}>?</Text>
+                <View style={{ width: photoSize, height: photoSize, borderRadius: photoSize / 2, backgroundColor: "#141414", justifyContent: "center", alignItems: "center" }}>
+                  <Text style={{ fontSize: 24, color: "#222" }}>?</Text>
                 </View>
               )}
             </View>
 
-            {/* Alert badge */}
-            {newFindings > 0 && (criticalCount > 0 || highCount > 0) && (
-              <View
-                style={{
-                  position: "absolute",
-                  top: -2,
-                  right: -2,
-                  minWidth: 18,
-                  height: 18,
-                  borderRadius: 9,
-                  backgroundColor: "#ef4444",
-                  borderWidth: 2,
-                  borderColor: "#0d0d0d",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  paddingHorizontal: 4,
-                }}
-              >
-                <Text style={{ color: "#fff", fontSize: 8, fontWeight: "bold", fontFamily: "SpaceMono" }}>
-                  {newFindings > 9 ? "9+" : newFindings}
+            {/* New findings badge */}
+            {newCount > 0 && (critical > 0 || high > 0) && (
+              <View style={{
+                position: "absolute", top: -3, right: -3,
+                minWidth: 20, height: 20, borderRadius: 10,
+                backgroundColor: "#dc2626", borderWidth: 2.5, borderColor: "#0c0c0c",
+                justifyContent: "center", alignItems: "center", paddingHorizontal: 4,
+              }}>
+                <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>
+                  {newCount > 9 ? "9+" : newCount}
                 </Text>
               </View>
             )}
           </View>
 
           {/* Name */}
-          <Text
-            style={{
-              color: "#d4d4d4",
-              fontFamily: "SpaceMono",
-              fontSize: 11,
-              fontWeight: "bold",
-              textTransform: "uppercase",
-              letterSpacing: 1,
-              textAlign: "center",
-              marginBottom: 4,
-            }}
-            numberOfLines={1}
-          >
-            {identityName}
+          <Text style={{ color: "#ccc", fontSize: 12, fontWeight: "700", textAlign: "center", marginBottom: 6 }} numberOfLines={1}>
+            {name}
           </Text>
 
-          {/* Threat badge */}
-          <View
-            style={{
-              backgroundColor: threatColor + "15",
-              borderRadius: 4,
-              paddingHorizontal: 10,
-              paddingVertical: 3,
-              borderWidth: 1,
-              borderColor: threatColor + "30",
-            }}
-          >
-            <Text
-              style={{
-                color: threatColor,
-                fontFamily: "SpaceMono",
-                fontSize: 8,
-                fontWeight: "bold",
-                letterSpacing: 2,
-              }}
-            >
-              {threatLabel}
+          {/* Status */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: ringColor }} />
+            <Text style={{ color: ringColor, fontSize: 8, fontWeight: "700", letterSpacing: 1 }}>
+              {statusText}
             </Text>
           </View>
 
-          {/* Stats */}
-          {totalFindings > 0 && (
-            <Text
-              style={{
-                color: "#333",
-                fontFamily: "SpaceMono",
-                fontSize: 8,
-                marginTop: 8,
-                letterSpacing: 0.5,
-              }}
-            >
-              {totalFindings} FINDING{totalFindings !== 1 ? "S" : ""}
+          {/* Finding count */}
+          {total > 0 && (
+            <Text style={{ color: "#222", fontSize: 9, marginTop: 8 }}>
+              {total} finding{total !== 1 ? "s" : ""}
             </Text>
           )}
         </View>
