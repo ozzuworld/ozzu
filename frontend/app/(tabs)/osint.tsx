@@ -153,8 +153,16 @@ function SubjectRow({ profile, findings, onPress, onScan, index }: {
   const imageUrl = `${getBridgeUrl()}/osint/images/${profile.id}/thumbnail`;
 
   const idFinding = findings.find(f => f.module === "identity-resolver" && f.raw_data?.type === "identity_candidates");
-  const topCandidate = idFinding?.raw_data?.candidates?.[0];
-  const name = topCandidate?.name || profile.display_name || "Unknown";
+  const candidates = idFinding?.raw_data?.candidates || [];
+  // Pick first Latin-text candidate, skip Russian/Cyrillic and dimension strings
+  const bestCandidate = candidates.find((c: any) => {
+    const n = c.name || "";
+    if (!n || /^[0-9×x]+$/.test(n)) return false;
+    const latin = n.replace(/[\s\d\W]/g, "").split("").filter((ch: string) => /[a-zA-Z\u00C0-\u024F]/.test(ch)).length;
+    const total = n.replace(/[\s\d\W]/g, "").length;
+    return total === 0 || latin / total > 0.5;
+  }) || candidates[0];
+  const name = bestCandidate?.name || profile.label || "Unknown";
   const confidence = topCandidate?.confidence || 0;
 
   const crit = findings.filter(f => f.severity === "critical").length;

@@ -18,7 +18,7 @@ export function VipBubble({ profile, findings, onPress, onScanComplete }: Props)
     (f) => f.module === "identity-resolver" && f.raw_data?.type === "identity_candidates"
   );
   const topCandidate = identityFinding?.raw_data?.candidates?.[0];
-  const identityName = topCandidate?.name || profile.display_name || "Unknown Subject";
+  const identityName = topCandidate?.name || profile.label || "Unknown Subject";
   const confidence = topCandidate?.confidence || 0;
 
   // Count key stats

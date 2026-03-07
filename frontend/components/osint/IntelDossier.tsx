@@ -30,10 +30,15 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
 
   const imgUrl = `${getBridgeUrl()}/osint/images/${profile.id}/thumbnail`;
 
-  // Parse
+  // Parse — pick first Latin candidate, skip Russian/dimensions
   const idCand = findings.find(f => f.module === "identity-resolver" && f.raw_data?.type === "identity_candidates");
-  const top = idCand?.raw_data?.candidates?.[0];
-  const name = top?.name || profile.display_name || "Unknown";
+  const allCandidates = idCand?.raw_data?.candidates || [];
+  const top = allCandidates.find((c: any) => {
+    const n = c.name || "";
+    if (!n || /^[0-9×x]+$/.test(n)) return false;
+    return isLatin(n);
+  }) || allCandidates[0];
+  const name = (top?.name && isLatin(top.name) ? top.name : null) || profile.label || "Unknown";
   const conf = top?.confidence || 0;
 
   const faceGuess = findings.find(f => f.module === "face-search" && f.raw_data?.type === "identity_candidates");
