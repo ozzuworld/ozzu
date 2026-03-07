@@ -2,7 +2,7 @@ FROM node:22-slim
 
 # System packages: Docker CLI, curl, git, Python 3, ExifTool
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl git unzip ca-certificates \
+    curl git git-crypt unzip ca-certificates \
     python3 python3-pip python3-venv libimage-exiftool-perl && \
     rm -rf /var/lib/apt/lists/*
 
