@@ -97,6 +97,7 @@ osintEngine.registerModule(require("./osint-modules/fullcontact-lookup"));
 osintEngine.registerModule(require("./osint-modules/hunter-lookup"));
 osintEngine.registerModule(require("./osint-modules/pimeyes-search"));
 // GEOINT — runs last to harvest location signals from all other modules
+osintEngine.registerModule(require("./osint-modules/photo-forensics"));
 osintEngine.registerModule(require("./osint-modules/geoint-collector"));
 // OSINT monitoring + CLI runner
 const osintMonitor = require("./osint-monitor");

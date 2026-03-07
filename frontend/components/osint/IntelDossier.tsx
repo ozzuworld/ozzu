@@ -161,7 +161,7 @@ export function IntelDossier({ profile, findings, onBack }: Props) {
         {tab === "overview" && <OverviewScreen findings={findings} crit={crit} high={high} med={med} totalFaces={totalFaces} scenes={scenes} ekf={ekf} discovered={discovered} dossier={dossier} dossierLoading={dossierLoading} conf={conf} />}
         {tab === "identity" && <IdentityScreen candidates={idCand?.raw_data?.candidates || []} dossier={dossier} />}
         {tab === "faces" && <FacesScreen verified={verified} discovered={discovered} profileId={profile.id} />}
-        {tab === "geoint" && <GeointScreen locations={locations} />}
+        {tab === "geoint" && <GeointScreen locations={locations} findings={findings} />}
         {tab === "sources" && <SourcesScreen assessment={assessment} findings={findings} />}
       </ScrollView>
     </View>
@@ -600,8 +600,9 @@ function FacesScreen({ verified, discovered, profileId }: any) {
 // =============================================
 // GEOINT — geospatial intelligence
 // =============================================
-function GeointScreen({ locations }: { locations: any[] }) {
-  if (!locations.length) return <Empty text="No geospatial data collected" />;
+function GeointScreen({ locations, findings }: { locations: any[], findings: any[] }) {
+  const forensicFindings = (findings || []).filter((f: any) => f.module === "photo-forensics");
+  if (!locations.length && !forensicFindings.length) return <Empty text="No geospatial data collected" />;
 
   const TYPE_COLORS: Record<string, string> = {
     exact_gps: "#dc2626",
@@ -616,6 +617,7 @@ function GeointScreen({ locations }: { locations: any[] }) {
     news_mention: "#6366f1",
     whois_registrant: "#8b5cf6",
     timezone_inferred: "#333",
+    visual_heuristic: "#f59e0b",
   };
 
   const TYPE_LABELS: Record<string, string> = {
@@ -630,6 +632,7 @@ function GeointScreen({ locations }: { locations: any[] }) {
     news_mention: "NEWS",
     whois_registrant: "WHOIS",
     timezone_inferred: "TIMEZONE",
+    visual_heuristic: "VISUAL",
   };
 
   // Sort by confidence
@@ -696,16 +699,40 @@ function GeointScreen({ locations }: { locations: any[] }) {
       )}
 
       {/* All locations — compact list */}
-      <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
-        <Text style={{ color: "#555", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>ALL LOCATION SIGNALS ({sorted.length})</Text>
-        {sorted.slice(0, 30).map((l, i) => (
-          <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: TYPE_COLORS[l.location_type] || "#333" }} />
-            <Text style={{ color: "#888", fontSize: 10, flex: 1 }} numberOfLines={1}>{l.location_text}</Text>
-            <Text style={{ color: "#333", fontSize: 9 }}>{((l.confidence || 0) * 100).toFixed(0)}%</Text>
-          </View>
-        ))}
-      </View>
+      {sorted.length > 0 && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#555", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>ALL LOCATION SIGNALS ({sorted.length})</Text>
+          {sorted.slice(0, 30).map((l, i) => (
+            <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: TYPE_COLORS[l.location_type] || "#333" }} />
+              <Text style={{ color: "#888", fontSize: 10, flex: 1 }} numberOfLines={1}>{l.location_text}</Text>
+              <Text style={{ color: "#333", fontSize: 9 }}>{((l.confidence || 0) * 100).toFixed(0)}%</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Photo Forensics */}
+      {forensicFindings.length > 0 && (
+        <View style={{ backgroundColor: "#080808", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#111" }}>
+          <Text style={{ color: "#f59e0b", fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 10 }}>PHOTO FORENSICS</Text>
+          {forensicFindings.map((f: any, i: number) => {
+            const sev = f.severity;
+            const sevColor = sev === "critical" ? "#dc2626" : sev === "high" ? "#ea580c" : sev === "medium" ? "#ca8a04" : "#555";
+            return (
+              <View key={i} style={{ marginBottom: 10, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: sevColor + "40" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                  <View style={{ backgroundColor: sevColor + "20", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                    <Text style={{ color: sevColor, fontSize: 8, fontWeight: "800" }}>{(sev || "info").toUpperCase()}</Text>
+                  </View>
+                  <Text style={{ color: "#ccc", fontSize: 11, fontWeight: "600", flex: 1 }} numberOfLines={2}>{f.title?.replace("Photo forensics: ", "").replace("Shadow analysis: ", "").replace("Camera fingerprint: ", "")}</Text>
+                </View>
+                {f.description && <Text style={{ color: "#555", fontSize: 9, marginTop: 2 }} numberOfLines={4}>{f.description}</Text>}
+              </View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }

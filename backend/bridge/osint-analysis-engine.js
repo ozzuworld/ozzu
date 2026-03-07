@@ -70,6 +70,7 @@ const MODULE_GRADES = {
 
   // C-tier (continued): geoint collector inherits source confidence
   "geoint-collector": "C",
+  "photo-forensics": "C",
   "ip-geolocation": "C",
   "timezone-inference": "D",
 
