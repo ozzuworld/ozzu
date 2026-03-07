@@ -125,9 +125,9 @@ async function gradeAllFindings(profileId) {
 // ── Phase 2: LLM Synthesis via Gemini ──
 
 const GEMINI_MODELS = [
+  "gemini-2.5-flash",
   "gemini-2.0-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b",
+  "gemini-2.0-flash-lite",
 ];
 
 async function callGemini(prompt, maxTokens = 4096) {
@@ -164,7 +164,9 @@ async function callGemini(prompt, maxTokens = 4096) {
       }
 
       const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      // Gemini 2.5 thinking models may return multiple parts — get the last text part (skip thinking)
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      const text = parts.filter(p => p.text).map(p => p.text).pop() || "";
       if (text) {
         console.log(`[analysis] Used model: ${model}`);
         return text;
@@ -374,17 +376,28 @@ async function generateAssessment(profileId) {
     profile.label, allGraded, wikiData, newsData, githubData, relationships, locations
   );
 
-  const rawResponse = await callGemini(prompt, 4096);
+  const rawResponse = await callGemini(prompt, 16384);
 
   // Parse JSON response
   let assessment;
   try {
     // Strip markdown code blocks if present
-    const cleaned = rawResponse.replace(/^```json?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
-    assessment = JSON.parse(cleaned);
+    let cleaned = rawResponse.replace(/^```json?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+    // If still not valid JSON, try to extract the outermost JSON object
+    try {
+      assessment = JSON.parse(cleaned);
+    } catch {
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        assessment = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("No JSON object found in response");
+      }
+    }
   } catch (parseErr) {
     console.error("[analysis] Failed to parse Gemini response:", parseErr.message);
-    console.error("[analysis] Raw response:", rawResponse.substring(0, 500));
+    console.error("[analysis] Raw response (first 2000):", rawResponse.substring(0, 2000));
+    console.error("[analysis] Raw response (last 500):", rawResponse.substring(rawResponse.length - 500));
     throw new Error("LLM returned invalid JSON");
   }
 
