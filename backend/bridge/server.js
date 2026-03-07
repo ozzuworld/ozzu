@@ -84,6 +84,10 @@ osintEngine.registerModule(require("./osint-modules/tiktok-intel"));
 osintEngine.registerModule(require("./osint-modules/facebook-intel"));
 osintEngine.registerModule(require("./osint-modules/linkedin-intel"));
 osintEngine.registerModule(require("./osint-modules/twitter-intel"));
+// Deep intelligence modules (name-based + username)
+osintEngine.registerModule(require("./osint-modules/wikipedia-intel"));
+osintEngine.registerModule(require("./osint-modules/news-intel"));
+osintEngine.registerModule(require("./osint-modules/github-intel"));
 // Photo intelligence pipeline modules
 osintEngine.registerModule(require("./osint-modules/face-search"));
 osintEngine.registerModule(require("./osint-modules/scene-analysis"));

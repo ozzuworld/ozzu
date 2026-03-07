@@ -141,6 +141,23 @@ module.exports = {
     });
 
     // 5. Generate pivot recommendations
+    // Only pivot on names that look like actual person names (not page titles, headings, etc.)
+    const isPersonName = (name) => {
+      if (!name || name.length < 3 || name.length > 60) return false;
+      // Skip page titles and headings (contain separators or meta words)
+      if (/[-–—|:@#]/.test(name)) return false;
+      if (/\b(wikipedia|forbes|news|about|deep dive|highlights|search|wiki)\b/i.test(name)) return false;
+      // Skip dimension strings, URLs, technical strings
+      if (/^\d|https?:|www\.|\.com|\.org/.test(name)) return false;
+      // Must have 2-4 words (typical for person names)
+      const words = name.split(/\s+/).filter(w => w.length > 1);
+      if (words.length < 2 || words.length > 5) return false;
+      return true;
+    };
+
+    // Deduplicate name pivots — only pivot on the best Latin name
+    const pivotedNames = new Set();
+
     for (const candidate of topCandidates.filter(c => c.confidence >= 0.5)) {
       // Recommend username search if looks like a username (no spaces, reasonable length)
       if (!candidate.name.includes(" ") && candidate.name.length <= 30) {
@@ -159,34 +176,56 @@ module.exports = {
         });
       }
 
-      // If it looks like a full name, generate username variants
-      if (candidate.name.includes(" ")) {
+      // If it looks like a full name, create name profile + generate username variants
+      if (candidate.name.includes(" ") && isPersonName(candidate.name)) {
         const parts = candidate.name.split(/\s+/).filter(p => p.length > 1);
-        if (parts.length >= 2) {
-          const first = parts[0].toLowerCase();
-          const last = parts[parts.length - 1].toLowerCase();
-          const variants = [
-            `${first}${last}`,
-            `${first}.${last}`,
-            `${first}_${last}`,
-            `${first}${last[0]}`,
-            `${first[0]}${last}`,
-          ];
+        const nameKey = candidate.name.toLowerCase().trim();
+        if (parts.length >= 2 && !pivotedNames.has(nameKey)) {
+          pivotedNames.add(nameKey);
 
+          // First: create a "name" profile pivot for Wikipedia, news, social search
           findings.push({
             category: "identity",
-            severity: "info",
-            title: `Pivot recommended: scan name variants for "${candidate.name}"`,
-            description: `Username variants to try: ${variants.join(", ")}`,
+            severity: "medium",
+            title: `Pivot recommended: deep intel scan for "${candidate.name}"`,
+            description: `Full name identified with ${(candidate.confidence * 100).toFixed(0)}% confidence. Will trigger Wikipedia, news, and social media intelligence gathering.`,
             rawData: {
               type: "pivot_recommendation",
-              pivotType: "name_variants",
-              fullName: candidate.name,
-              variants,
+              pivotType: "name",
+              pivotValue: candidate.name,
               confidence: candidate.confidence,
-              autoExecute: candidate.confidence >= 0.8,
+              autoExecute: candidate.confidence >= 0.5, // Low threshold — names are high-value pivots
             },
           });
+
+          // Then: username variants — only for Latin names (Cyrillic usernames are useless)
+          const isLatin = /^[a-zA-Z\s\u00C0-\u024F]+$/.test(candidate.name);
+          if (isLatin) {
+            const first = parts[0].toLowerCase();
+            const last = parts[parts.length - 1].toLowerCase();
+            const variants = [
+              `${first}${last}`,
+              `${first}.${last}`,
+              `${first}_${last}`,
+              `${first}${last[0]}`,
+              `${first[0]}${last}`,
+            ];
+
+            findings.push({
+              category: "identity",
+              severity: "info",
+              title: `Pivot recommended: scan name variants for "${candidate.name}"`,
+              description: `Username variants to try: ${variants.join(", ")}`,
+              rawData: {
+                type: "pivot_recommendation",
+                pivotType: "name_variants",
+                fullName: candidate.name,
+                variants,
+                confidence: candidate.confidence,
+                autoExecute: candidate.confidence >= 0.7,
+              },
+            });
+          }
 
           // Email patterns
           const emailDomains = getOrgDomains(allFindings);

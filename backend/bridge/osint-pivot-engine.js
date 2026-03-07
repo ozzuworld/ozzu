@@ -73,6 +73,16 @@ async function executePivots(profileId, scanId, osintEngine) {
     if (rd.type === "pivot_recommendation" && !rd.autoExecute) continue;
 
     // Handle different pivot types
+    if (rd.pivotType === "name" && rd.pivotValue) {
+      // Full name pivot — triggers Wikipedia, news, social search modules
+      const result = await createPivotProfile(
+        rd.pivotValue, "name", rd.pivotValue,
+        profileId, currentDepth + 1, investigationId,
+        `identity_resolver:name:${rd.confidence}`, osintEngine
+      );
+      if (result) { pivotCount++; pivotedProfiles.push(result); }
+    }
+
     if (rd.pivotType === "username" && rd.pivotValue) {
       const result = await createPivotProfile(
         rd.pivotValue, "username", rd.pivotValue,
