@@ -1537,6 +1537,82 @@ async function handleRequest(req, res) {
   if (await r.business(req, res, pathname, url)) return;
   if (await r.backup(req, res, pathname, url)) return;
 
+  // GET /api/training-stats — Face DB training pipeline stats
+  if (req.method === "GET" && pathname === "/api/training-stats") {
+    try {
+      const http = require("http");
+      const fetchJSON = (url) => new Promise((resolve, reject) => {
+        const req = http.get(url, { timeout: 5000 }, (res) => {
+          let data = "";
+          res.on("data", (c) => data += c);
+          res.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+        });
+        req.on("error", () => resolve(null));
+        req.on("timeout", () => { req.destroy(); resolve(null); });
+      });
+
+      const [qdrant, vastInstances] = await Promise.all([
+        fetchJSON("http://localhost:6333/collections/faces"),
+        fetchJSON("https://console.vast.ai/api/v0/instances/?owner=me").catch(() => null),
+      ]);
+
+      // Try to get Vast.ai instance info via API key from env
+      let vastData = null;
+      const vastKey = process.env.VAST_API_KEY || "";
+      if (vastKey) {
+        try {
+          const https = require("https");
+          vastData = await new Promise((resolve, reject) => {
+            const req = https.get("https://console.vast.ai/api/v0/instances/?owner=me", {
+              headers: { "Authorization": `Bearer ${vastKey}` },
+              timeout: 5000,
+            }, (res) => {
+              let data = "";
+              res.on("data", (c) => data += c);
+              res.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+            });
+            req.on("error", () => resolve(null));
+            req.on("timeout", () => { req.destroy(); resolve(null); });
+          });
+        } catch {}
+      }
+
+      const qdrantResult = qdrant?.result || {};
+      const vastInstance = vastData?.instances?.[0] || null;
+
+      // Calculate instance uptime from start_date (epoch seconds)
+      let instanceUptimeHrs = null;
+      let estCost = null;
+      if (vastInstance?.start_date) {
+        const uptimeSec = (Date.now() / 1000) - vastInstance.start_date;
+        instanceUptimeHrs = (uptimeSec / 3600).toFixed(1);
+        estCost = (uptimeSec / 3600) * (vastInstance.dph_total || 0);
+      }
+
+      sendJSON(res, 200, {
+        qdrant: {
+          status: qdrantResult.status || "unknown",
+          points_count: qdrantResult.points_count || 0,
+          indexed_vectors_count: qdrantResult.indexed_vectors_count || 0,
+          segments_count: qdrantResult.segments_count || 0,
+        },
+        vast: vastInstance ? {
+          id: vastInstance.id,
+          status: vastInstance.actual_status,
+          gpu: vastInstance.gpu_name,
+          cost_per_hr: vastInstance.dph_total,
+          uptime_hrs: instanceUptimeHrs,
+          est_cost: estCost,
+          ssh: `ssh -p ${vastInstance.ssh_port} root@${vastInstance.ssh_host}`,
+        } : null,
+        timestamp: Date.now(),
+      });
+    } catch (e) {
+      sendJSON(res, 500, { error: e.message });
+    }
+    return;
+  }
+
   // GET /tmp-file/:filename — serve temp files (for iOS pairing etc)
   if (req.method === "GET" && pathname.startsWith("/tmp-file/")) {
     const fs = require("fs");
