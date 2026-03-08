@@ -127,36 +127,17 @@ async function runFaceSearch(imagePath, profileId, opts = {}) {
   }
   const targetEmbedding = embedResult.faces[0].embedding;
 
-  // Step 3: Collect candidates from ALL sources (Yandex, Bing, Google, SerpApi, FaceCheck, Search4Faces)
-  const { candidates: browserCandidates, sources } = await faceSources.collectAllCandidates(imagePath, profileId, []);
+  // Step 3: Collect candidates from ALL sources (two-phase: reverse image + name-based + social)
+  const { candidates: allCandidates, sources } = await faceSources.collectAllCandidates(imagePath, profileId, []);
 
-  // Extract identity guesses from scrapers
+  // Extract identity guesses
   const dimRe = /^\d+[×x]\d+$/;
   const genericWords = new Set(["человек", "person", "people", "man", "woman", "photo", "image", "picture"]);
-  const identityGuesses = [];
-  for (const c of browserCandidates) {
-    if (c.type === "identity_guess" && c.label) {
-      identityGuesses.push(c.label);
-    }
-  }
-  const filteredGuesses = [...new Set(identityGuesses)]
-    .filter(g => g && !dimRe.test(g) && !genericWords.has(g.toLowerCase()));
+  const filteredGuesses = [...new Set(
+    allCandidates.filter(c => c.type === "identity_guess" && c.label).map(c => c.label)
+  )].filter(g => g && !dimRe.test(g) && !genericWords.has(g.toLowerCase()) && g.length > 2);
 
-  // Step 3b: Enrichment pass — use identity guesses to find more images (Wikipedia, News)
-  let enrichmentCandidates = [];
-  if (filteredGuesses.length > 0) {
-    console.log(`[face-engine] Identity guesses: ${filteredGuesses.join(", ")} — running enrichment`);
-    const [wikiR, newsR] = await Promise.allSettled([
-      faceSources.searchWikipedia(filteredGuesses),
-      faceSources.searchGoogleNews(filteredGuesses),
-    ]);
-    if (wikiR.status === "fulfilled") enrichmentCandidates.push(...(wikiR.value || []));
-    if (newsR.status === "fulfilled") enrichmentCandidates.push(...(newsR.value || []));
-    console.log(`[face-engine] Enrichment: ${enrichmentCandidates.length} candidates (Wikipedia + News)`);
-  }
-
-  // Merge + deduplicate all candidates
-  const allCandidates = [...browserCandidates, ...enrichmentCandidates];
+  // Deduplicate candidates
   const seen = new Set();
   const uniqueCandidates = allCandidates
     .filter(c => c.imageUrl && c.imageUrl.startsWith("http"))
@@ -168,7 +149,7 @@ async function runFaceSearch(imagePath, profileId, opts = {}) {
   const matches = [];
   let indexed = 1;
   let processed = 0;
-  const BATCH_SIZE = 5;
+  const BATCH_SIZE = 10;
 
   for (let i = 0; i < uniqueCandidates.length; i += BATCH_SIZE) {
     const batch = uniqueCandidates.slice(i, i + BATCH_SIZE);
@@ -222,11 +203,6 @@ async function runFaceSearch(imagePath, profileId, opts = {}) {
 
   matches.sort((a, b) => b.similarity - a.similarity);
 
-  // Build source breakdown
-  const sourceBreakdown = { ...sources };
-  sourceBreakdown.wikipedia = enrichmentCandidates.filter(c => c.engine === "wikipedia").length;
-  sourceBreakdown.google_news = enrichmentCandidates.filter(c => c.engine === "google_news").length;
-
   console.log(`[face-engine] Complete: ${matches.length} verified matches from ${processed} candidates (${indexed} indexed)`);
 
   return {
@@ -235,7 +211,7 @@ async function runFaceSearch(imagePath, profileId, opts = {}) {
     totalProcessed: processed,
     totalIndexed: indexed,
     totalScraped: allCandidates.length,
-    sources: sourceBreakdown,
+    sources,
   };
 }
 
