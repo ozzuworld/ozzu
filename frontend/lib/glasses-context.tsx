@@ -177,13 +177,19 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
   const startStream = useCallback(async () => {
     try {
       await Glasses.startVideoStream({ quality: "medium", frameRate: 15 });
-      // Initialize hand detection for gesture commands
+    } catch (e: any) {
+      setError(`Stream: ${e.message || "Failed to start stream"}`);
+      return;
+    }
+    // Initialize hand detection for gesture commands (non-blocking)
+    try {
       if (MediaPipe.isAvailable() && !mediapipeReady.current) {
         const ok = await MediaPipe.initialize();
         if (ok) mediapipeReady.current = true;
       }
     } catch (e: any) {
-      setError(e.message || "Failed to start stream");
+      // MediaPipe init failure is non-fatal — gestures won't work but photos still will
+      console.warn("MediaPipe init failed:", e.message);
     }
   }, []);
 
@@ -200,7 +206,7 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
     try {
       if (mediapipeReady.current) {
         mediapipeReady.current = false;
-        await MediaPipe.disposeHands();
+        await MediaPipe.dispose();
       }
       await Glasses.stopVideoStream();
       await Glasses.unregisterDevice();
