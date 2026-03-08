@@ -226,34 +226,28 @@ def api_call(path, data=None, timeout=30, base_url=None):
         return None
 
 
-def local_face_index(image_url, label="", source_platform=""):
-    """Send image URL to local face API for embedding + Qdrant insert."""
+def local_face_batch(items):
+    """Send batch of URLs to local face API for pipeline processing.
+    items: list of {url, label, source_platform}
+    Returns {indexed, failed, skipped, total}"""
     try:
-        # Use multipart form data (what the face API expects)
-        import urllib.parse as up
-        boundary = "----CrawlerBoundary"
-        fields = {
-            "image_url": image_url,
-            "label": label,
-            "source_platform": source_platform,
-        }
-        body = b""
-        for key, val in fields.items():
-            body += f"--{boundary}\r\n".encode()
-            body += f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode()
-            body += f"{val}\r\n".encode()
+        batch_json = json.dumps(items)
+        boundary = "----CrawlerBatch"
+        body = f"--{boundary}\r\n".encode()
+        body += b'Content-Disposition: form-data; name="batch"\r\n\r\n'
+        body += batch_json.encode() + b"\r\n"
         body += f"--{boundary}--\r\n".encode()
 
         req = urllib.request.Request(
-            f"{LOCAL_FACE_API}/index",
+            f"{LOCAL_FACE_API}/batch",
             data=body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
-        resp = urllib.request.urlopen(req, timeout=30)
-        result = json.loads(resp.read())
-        return result and result.get("ok")
-    except Exception:
-        return False
+        resp = urllib.request.urlopen(req, timeout=120)
+        return json.loads(resp.read())
+    except Exception as e:
+        log(f"  [batch] error: {e}")
+        return {"indexed": 0, "failed": len(items), "total": len(items)}
 
 
 def check_local_face_api():
@@ -451,36 +445,47 @@ def discover_names_from_wikipedia():
 # ── Parallel indexing ──
 
 def index_batch(urls_with_meta):
-    """Index a batch of images in parallel using ThreadPoolExecutor.
-    Uses local face API if available, otherwise falls back to bridge."""
-    indexed = 0
-    processed = 0
+    """Index a batch of images. Uses local face API batch endpoint if available,
+    otherwise falls back to individual bridge calls."""
     local = use_local_api()
 
-    def index_one(item):
-        img_url, label, source = item
-        if local:
-            ok = local_face_index(img_url, label, f"satellite_{source}")
-        else:
+    if local:
+        # Send entire batch to local face API pipeline (download + embed + batch Qdrant)
+        CHUNK = 100  # Process 100 URLs per batch call
+        total_indexed = 0
+        total_processed = len(urls_with_meta)
+
+        for i in range(0, len(urls_with_meta), CHUNK):
+            chunk = urls_with_meta[i:i + CHUNK]
+            items = [{"url": url, "label": label, "source_platform": f"satellite_{source}"}
+                     for url, label, source in chunk]
+            result = local_face_batch(items)
+            total_indexed += result.get("indexed", 0)
+
+        return total_indexed, total_processed
+    else:
+        # Fallback: individual bridge calls
+        indexed = 0
+        processed = 0
+        def index_one(item):
+            img_url, label, source = item
             result = api_call("/osint/face/index", {
                 "imageUrl": img_url,
                 "label": label,
                 "sourcePlatform": f"satellite_{source}",
             }, timeout=30)
-            ok = result and result.get("ok")
-        time.sleep(INDEX_DELAY)
-        return 1 if ok else 0
+            time.sleep(INDEX_DELAY)
+            return 1 if (result and result.get("ok")) else 0
 
-    with ThreadPoolExecutor(max_workers=INDEX_WORKERS) as executor:
-        futures = {executor.submit(index_one, item): item for item in urls_with_meta}
-        for future in as_completed(futures):
-            processed += 1
-            try:
-                indexed += future.result()
-            except Exception:
-                pass
-
-    return indexed, processed
+        with ThreadPoolExecutor(max_workers=INDEX_WORKERS) as executor:
+            futures = {executor.submit(index_one, item): item for item in urls_with_meta}
+            for future in as_completed(futures):
+                processed += 1
+                try:
+                    indexed += future.result()
+                except Exception:
+                    pass
+        return indexed, processed
 
 
 # ── Process a single name (runs in parallel) ──
