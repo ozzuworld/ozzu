@@ -19,7 +19,7 @@ interface GestureState {
   fingerCount?: number;
 }
 
-const HOLD_MS = 300; // hold gesture for 300ms to trigger
+const HOLD_MS = 150; // hold gesture for 150ms to trigger (fast palm response)
 const COOLDOWN_MS = 1000; // 1s cooldown after trigger before same gesture can re-trigger
 const COMPOUND_WINDOW_MS = 600; // two gestures within 600ms = compound
 

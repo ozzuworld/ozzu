@@ -58,7 +58,8 @@ export default function GlassesScreen() {
   const [streamState, setStreamState] = useState<string>("stopped");
   const [quality, setQuality] = useState<Quality>("medium");
   const [frameData, setFrameData] = useState<string | null>(null);
-  const [frameCount, setFrameCount] = useState(0);
+  const frameDataRef = useRef<string | null>(null);
+  const frameUpdatePending = useRef(false);
   const [capturedPhoto, setCapturedPhoto] = useState<CapturedPhoto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(false);
@@ -69,9 +70,11 @@ export default function GlassesScreen() {
   // AR mode state
   const [arMode, setArMode] = useState(false);
   const [hands, setHands] = useState<HandResult[]>([]);
+  const handsRef = useRef<HandResult[]>([]);
   const [currentGesture, setCurrentGesture] = useState<GestureResult | null>(
     null
   );
+  const gestureRef = useRef<GestureResult | null>(null);
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
   const mediapipeReady = useRef(false);
   const processingFrame = useRef(false);
@@ -79,6 +82,7 @@ export default function GlassesScreen() {
   // Face detection state
   const [faceMode, setFaceMode] = useState(false);
   const [faces, setFaces] = useState<FaceResult[]>([]);
+  const facesRef = useRef<FaceResult[]>([]);
   const [expressions, setExpressions] = useState<ExpressionResult[]>([]);
   const faceReady = useRef(false);
   const processingFace = useRef(false);
@@ -87,6 +91,7 @@ export default function GlassesScreen() {
   // Pose detection state
   const [poseMode, setPoseMode] = useState(false);
   const [poses, setPoses] = useState<PoseResult[]>([]);
+  const posesRef = useRef<PoseResult[]>([]);
   const [exerciseState, setExerciseState] = useState<ExerciseState | null>(null);
   const poseReady = useRef(false);
   const processingPose = useRef(false);
@@ -118,6 +123,7 @@ export default function GlassesScreen() {
   const [visionMode, setVisionMode] = useState<VisionMode>("describe");
   const [visionResult, setVisionResult] = useState<VisionResult | null>(null);
   const [visionLoading, setVisionLoading] = useState(false);
+  const visionLoadingRef = useRef(false);
   const latestFrameRef = useRef<{ data: string; width: number; height: number } | null>(null);
 
   // Settings sheet
@@ -162,6 +168,7 @@ export default function GlassesScreen() {
       onListeningReady: noop,
       onVisionResult: (mode: string, text: string) => {
         setVisionLoading(false);
+        visionLoadingRef.current = false;
         setVisionResult({
           mode: mode as VisionMode,
           text,
@@ -405,12 +412,20 @@ export default function GlassesScreen() {
         }
       }),
       Glasses.onVideoFrame((event) => {
-        setFrameData(event.data);
+        // Store frame in ref (no re-render) and throttle UI updates to ~10fps
+        frameDataRef.current = event.data;
         latestFrameRef.current = { data: event.data, width: event.width, height: event.height };
         frameCountRef.current++;
-        setFrameCount(frameCountRef.current);
 
-        // Calculate FPS
+        if (!frameUpdatePending.current) {
+          frameUpdatePending.current = true;
+          requestAnimationFrame(() => {
+            setFrameData(frameDataRef.current);
+            frameUpdatePending.current = false;
+          });
+        }
+
+        // Calculate FPS (once per second, no state churn)
         const now = Date.now();
         if (now - lastFrameTimeRef.current >= 1000) {
           setFps(frameCountRef.current);
@@ -418,8 +433,8 @@ export default function GlassesScreen() {
           lastFrameTimeRef.current = now;
         }
 
-        // Forward frame to bridge for Gemini vision (throttled to ~2fps)
-        if (connectedRef.current && frameCountRef.current % 8 === 0) {
+        // Forward frame to bridge only when vision mode is active (not every 8th frame)
+        if (connectedRef.current && visionLoadingRef.current && frameCountRef.current % 8 === 0) {
           bridgeRef.current.sendGlassesFrame(
             event.data,
             event.width,
@@ -439,9 +454,12 @@ export default function GlassesScreen() {
           processingFrame.current = true;
           MediaPipe.detectHands(event.data)
             .then((results) => {
-              setHands(results);
+              // Only update overlay state if results changed (avoid re-renders on empty)
+              if (results.length > 0 || handsRef.current.length > 0) setHands(results);
+              handsRef.current = results;
               if (results.length > 0) {
                 const gesture = detectGesture(results[0].landmarks);
+                gestureRef.current = gesture;
                 setCurrentGesture(gesture);
                 gestureManager.current.update(gesture);
 
@@ -503,8 +521,12 @@ export default function GlassesScreen() {
           const capturedFrame = event.data; // capture for OSINT search closure
           MediaPipe.detectFaces(capturedFrame)
             .then((results) => {
-              setFaces(results);
-              setExpressions(results.map((f) => detectExpression(f.blendshapes)));
+              // Skip state update when going from empty → empty
+              if (results.length > 0 || facesRef.current.length > 0) {
+                setFaces(results);
+                setExpressions(results.map((f) => detectExpression(f.blendshapes)));
+              }
+              facesRef.current = results;
               // OSINT scan mode: when face detected, search cédula DB (debounced 5s)
               if (osintModeRef.current && results.length > 0 && !searchingFace.current) {
                 const now = Date.now();
@@ -541,7 +563,8 @@ export default function GlassesScreen() {
           processingPose.current = true;
           MediaPipe.detectPose(event.data)
             .then((results) => {
-              setPoses(results);
+              if (results.length > 0 || posesRef.current.length > 0) setPoses(results);
+              posesRef.current = results;
               if (results.length > 0 && results[0].landmarks) {
                 setExerciseState(exerciseTracker.current.update(results[0].landmarks));
               }
@@ -776,7 +799,7 @@ export default function GlassesScreen() {
       }
       await Glasses.unregisterDevice();
       setFrameData(null);
-      setFrameCount(0);
+      frameCountRef.current = 0;
       setFps(0);
     } catch (e: any) {
       setError(e.message || "Failed to disconnect");
@@ -785,7 +808,7 @@ export default function GlassesScreen() {
 
   const handleStartStream = useCallback(async () => {
     setError(null);
-    setFrameCount(0);
+    frameCountRef.current = 0;
     frameCountRef.current = 0;
     lastFrameTimeRef.current = Date.now();
     try {
@@ -903,6 +926,7 @@ export default function GlassesScreen() {
     if (!latestFrameRef.current || !connectedRef.current) return;
     if (mode) setVisionMode(m);
     setVisionLoading(true);
+    visionLoadingRef.current = true;
     setVisionResult(null);
     const { data, width, height } = latestFrameRef.current;
     bridgeRef.current.sendVisionRequest(m, data, width, height);
