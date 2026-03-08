@@ -357,9 +357,30 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       await Glasses.initialize();
+
+      // Check if already registered from a previous session
+      const diag = Glasses.getDiagnostics();
+      const regState = diag?.registrationState || "";
+      if (regState.toLowerCase().includes("registered") && !regState.toLowerCase().includes("un")) {
+        // Stale registration — unregister first, then re-register
+        try { await Glasses.unregisterDevice(); } catch {}
+      }
+
       await Glasses.registerDevice();
     } catch (e: any) {
-      setError(e.message || "Failed to connect");
+      const msg = e.message || "Failed to connect";
+      // If "already registered", try unregister + re-register once
+      if (msg.toLowerCase().includes("already registered")) {
+        try {
+          await Glasses.unregisterDevice();
+          await Glasses.registerDevice();
+          return; // success on retry
+        } catch (retryErr: any) {
+          setError(retryErr.message || "Failed to reconnect");
+          return;
+        }
+      }
+      setError(msg);
     }
   }, []);
 
