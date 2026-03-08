@@ -595,7 +595,61 @@ async function init() {
     await pool.query(`ALTER TABLE osint_profiles ADD COLUMN IF NOT EXISTS pivot_depth INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE osint_profiles ADD COLUMN IF NOT EXISTS pivot_source TEXT`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf)");
+    // ── Identity Resolution Engine ──
+
+    // Face clusters — groups of same-face vectors
+    await pool.query(`CREATE TABLE IF NOT EXISTS face_clusters (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      cluster_size INTEGER DEFAULT 0,
+      representative_point_id TEXT,
+      representative_label TEXT,
+      avg_det_score FLOAT DEFAULT 0,
+      sources JSONB DEFAULT '[]',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // Face identities — resolved person profiles from clusters
+    await pool.query(`CREATE TABLE IF NOT EXISTS face_identities (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      cluster_id UUID REFERENCES face_clusters(id) ON DELETE SET NULL,
+      primary_name TEXT,
+      alternate_names TEXT[] DEFAULT '{}',
+      organizations TEXT[] DEFAULT '{}',
+      locations TEXT[] DEFAULT '{}',
+      occupations TEXT[] DEFAULT '{}',
+      confidence FLOAT DEFAULT 0,
+      source_count INTEGER DEFAULT 0,
+      domain_count INTEGER DEFAULT 0,
+      first_seen TIMESTAMPTZ,
+      last_seen TIMESTAMPTZ,
+      metadata JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // Face relationships — co-occurrence edges between identities
+    await pool.query(`CREATE TABLE IF NOT EXISTS face_relationships (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      identity_a UUID REFERENCES face_identities(id) ON DELETE CASCADE,
+      identity_b UUID REFERENCES face_identities(id) ON DELETE CASCADE,
+      relationship_type TEXT,
+      weight FLOAT DEFAULT 0,
+      evidence_count INTEGER DEFAULT 0,
+      evidence JSONB DEFAULT '[]',
+      first_seen TIMESTAMPTZ,
+      last_seen TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(identity_a, identity_b)
+    )`);
+
+    // Indexes for identity resolution queries
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_identities_cluster ON face_identities(cluster_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_identities_name ON face_identities(primary_name)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_relationships_a ON face_relationships(identity_a)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_relationships_b ON face_relationships(identity_b)`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
