@@ -56,6 +56,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="files"
+        options={{
+          title: "FILES",
+          tabBarIcon: () => <TabIcon emoji="📦" />,
+        }}
+      />
+      <Tabs.Screen
         name="music"
         options={{
           title: "MUSIC",
