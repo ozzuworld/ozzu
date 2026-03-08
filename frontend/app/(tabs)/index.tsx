@@ -1,8 +1,8 @@
 // Home Dashboard — Premium glassmorphic smart home control
 // Room cards, quick actions, live device status, scheduling
 
-import { useState, useCallback, useMemo } from "react";
-import { View, Text, ScrollView, Pressable, Dimensions, Modal } from "react-native";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { View, Text, ScrollView, Pressable, Dimensions, Modal, Switch } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,6 +18,7 @@ import { VacuumWidget } from "../../components/devices/VacuumWidget";
 import { FloorPlanMap } from "../../components/home/FloorPlanMap";
 import { DeviceSheet } from "../../components/home/DeviceSheet";
 import type { MapPin } from "../../lib/map-config";
+import { fetchSchedules, updateSchedule, type DeviceSchedule } from "../../lib/bridge-api";
 
 const ACCENT = "#06B6D4";
 const DIM = "#525252";
@@ -423,6 +424,69 @@ function RoomDetailModal({
   );
 }
 
+// ── Schedule Row ──
+const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+
+function ScheduleRow({
+  schedule,
+  onToggle,
+}: {
+  schedule: DeviceSchedule;
+  onToggle: (id: number, enabled: boolean) => void;
+}) {
+  const timeStr = `${String(schedule.cron_hour).padStart(2, "0")}:${String(schedule.cron_minute).padStart(2, "0")}`;
+  const daysStr = schedule.cron_days.length === 7
+    ? "Every day"
+    : schedule.cron_days.map((d) => DAY_LABELS[d]).join(" ");
+
+  const nextRun = schedule.next_run_at ? new Date(schedule.next_run_at) : null;
+  const now = new Date();
+  let nextLabel = "";
+  if (nextRun) {
+    const diff = nextRun.getTime() - now.getTime();
+    if (diff < 3600000) nextLabel = `in ${Math.max(1, Math.round(diff / 60000))}m`;
+    else if (diff < 86400000) nextLabel = `in ${Math.round(diff / 3600000)}h`;
+    else nextLabel = nextRun.toLocaleDateString([], { weekday: "short" });
+  }
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: GLASS,
+        borderRadius: 14,
+        padding: 12,
+        borderWidth: 1,
+        borderColor: schedule.enabled ? "rgba(6,182,212,0.15)" : GLASS_BORDER,
+      }}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: schedule.enabled ? "#ddd" : "#555", fontSize: 13, fontWeight: "600" }}>
+          {schedule.name}
+        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 3 }}>
+          <Text style={{ color: schedule.enabled ? ACCENT : "#444", fontSize: 16, fontWeight: "700", fontFamily: "monospace" }}>
+            {timeStr}
+          </Text>
+          <Text style={{ color: "#555", fontSize: 10, fontFamily: "monospace" }}>{daysStr}</Text>
+        </View>
+        {nextLabel && schedule.enabled && (
+          <Text style={{ color: "#444", fontSize: 9, fontFamily: "monospace", marginTop: 2 }}>
+            Next: {nextLabel}
+          </Text>
+        )}
+      </View>
+      <Switch
+        value={schedule.enabled}
+        onValueChange={(val) => onToggle(schedule.id, val)}
+        trackColor={{ false: "#333", true: "rgba(6,182,212,0.35)" }}
+        thumbColor={schedule.enabled ? ACCENT : "#666"}
+      />
+    </View>
+  );
+}
+
 // ── Home Screen ──
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -432,6 +496,20 @@ export default function HomeScreen() {
   const [expandedRoom, setExpandedRoom] = useState<Room | null>(null);
   const [activePin, setActivePin] = useState<MapPin | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [schedules, setSchedules] = useState<DeviceSchedule[]>([]);
+
+  useEffect(() => {
+    fetchSchedules().then((r) => setSchedules(r.schedules)).catch(() => {});
+  }, []);
+
+  const handleScheduleToggle = useCallback(async (id: number, enabled: boolean) => {
+    setSchedules((prev) => prev.map((s) => s.id === id ? { ...s, enabled } : s));
+    try {
+      await updateSchedule(id, { enabled });
+    } catch {
+      setSchedules((prev) => prev.map((s) => s.id === id ? { ...s, enabled: !enabled } : s));
+    }
+  }, []);
 
   // Count active devices
   const activeDeviceCount = useMemo(() => {
@@ -581,6 +659,20 @@ export default function HomeScreen() {
               ))}
             </View>
           </View>
+
+          {/* ── Schedules ── */}
+          {schedules.length > 0 && (
+            <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
+              <Text style={{ color: DIM, fontSize: 10, fontFamily: "monospace", fontWeight: "700", letterSpacing: 2, marginBottom: 12 }}>
+                AUTOMATIONS
+              </Text>
+              <View style={{ gap: 8 }}>
+                {schedules.map((sched) => (
+                  <ScheduleRow key={sched.id} schedule={sched} onToggle={handleScheduleToggle} />
+                ))}
+              </View>
+            </View>
+          )}
         </ScrollView>
       )}
 

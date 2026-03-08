@@ -122,6 +122,7 @@ const businessInvoiceRoutes = require("./routes/business-invoices");
 const businessInvestmentRoutes = require("./routes/business-investments");
 const backupRoutes = require("./routes/backup");
 const fileRoutes = require("./routes/files");
+const scheduleRoutes = require("./routes/schedules");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -1121,6 +1122,36 @@ async function initStorage() {
     } catch (err) { log.directive.error("stale branch cleanup (startup):", err.message); }
   }, 3 * 60 * 1000);
 
+  // ── Device Schedule Executor — every 60 seconds ──
+  _intervals.push(setInterval(async () => {
+    try {
+      const now = new Date();
+      const due = await db.query(
+        `SELECT * FROM device_schedules WHERE enabled = true AND next_run_at <= $1`, [now]
+      );
+      for (const sched of due.rows) {
+        try {
+          await haFetch(`/api/services/${sched.domain}/${sched.service}`, {
+            method: "POST",
+            body: JSON.stringify({
+              ...sched.service_data,
+              entity_id: sched.entity_id,
+            }),
+          });
+          const { computeNextRun } = require("./routes/schedules");
+          const nextRun = computeNextRun(sched.cron_days, sched.cron_hour, sched.cron_minute);
+          await db.query(
+            `UPDATE device_schedules SET last_run_at = NOW(), next_run_at = $1, run_count = run_count + 1 WHERE id = $2`,
+            [nextRun, sched.id]
+          );
+          log.bridge.info(`Schedule executed: ${sched.name} (${sched.domain}.${sched.service} → ${sched.entity_id})`);
+        } catch (err) {
+          log.bridge.error(`Schedule ${sched.name} failed:`, err.message);
+        }
+      }
+    } catch (err) { log.bridge.error("schedule executor:", err.message); }
+  }, 60 * 1000));
+
   // ── Face Crawler 24/7 Service — start after 1 minute ──
   setTimeout(() => {
     try {
@@ -1502,6 +1533,7 @@ function getRouteHandlers() {
       businessInvestments: businessInvestmentRoutes(routeCtx),
       backup: backupRoutes(routeCtx),
       files: fileRoutes(routeCtx),
+      schedules: scheduleRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1538,6 +1570,7 @@ async function handleRequest(req, res) {
   if (await r.businessInvestments(req, res, pathname, url)) return;
   if (await r.business(req, res, pathname, url)) return;
   if (await r.files(req, res, pathname, url)) return;
+  if (await r.schedules(req, res, pathname, url)) return;
   if (await r.backup(req, res, pathname, url)) return;
 
   // GET /api/training-stats — Face DB training pipeline stats

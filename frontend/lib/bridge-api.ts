@@ -2178,6 +2178,71 @@ export async function sendToIntel(data: string, label?: string): Promise<{
   return res.json();
 }
 
+// ── Device Schedules ──
+
+export interface DeviceSchedule {
+  id: number;
+  name: string;
+  entity_id: string;
+  domain: string;
+  service: string;
+  service_data: Record<string, any>;
+  cron_days: number[];
+  cron_hour: number;
+  cron_minute: number;
+  enabled: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  run_count: number;
+  created_at: string;
+}
+
+export async function fetchSchedules(): Promise<{ schedules: DeviceSchedule[] }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/schedules`);
+  if (!res.ok) throw new Error(`Fetch schedules: ${res.status}`);
+  return res.json();
+}
+
+export async function createSchedule(schedule: {
+  name: string;
+  entity_id: string;
+  domain: string;
+  service: string;
+  service_data?: Record<string, any>;
+  cron_days?: number[];
+  cron_hour?: number;
+  cron_minute?: number;
+}): Promise<DeviceSchedule> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/schedules`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(schedule),
+  });
+  if (!res.ok) throw new Error(`Create schedule: ${res.status}`);
+  return res.json();
+}
+
+export async function updateSchedule(
+  id: number,
+  updates: Partial<Omit<DeviceSchedule, "id" | "created_at" | "run_count">>
+): Promise<DeviceSchedule> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/schedules/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error(`Update schedule: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteSchedule(id: number): Promise<{ deleted: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/schedules/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Delete schedule: ${res.status}`);
+  return res.json();
+}
+
 // Multi-currency formatting
 export function formatCurrency(amount: number | null | undefined, currency: string = "COP"): string {
   if (amount == null || isNaN(amount)) return currency === "JPY" ? "\u00a50" : "$0";

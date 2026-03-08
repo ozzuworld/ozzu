@@ -548,6 +548,25 @@ async function init() {
       payment_context JSONB DEFAULT '{}'
     )`);
 
+    // Device Schedules (home automation scheduling)
+    await pool.query(`CREATE TABLE IF NOT EXISTS device_schedules (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      service TEXT NOT NULL,
+      service_data JSONB DEFAULT '{}',
+      cron_days INTEGER[] DEFAULT '{0,1,2,3,4,5,6}',
+      cron_hour INTEGER NOT NULL DEFAULT 22,
+      cron_minute INTEGER NOT NULL DEFAULT 0,
+      enabled BOOLEAN DEFAULT true,
+      last_run_at TIMESTAMPTZ,
+      next_run_at TIMESTAMPTZ,
+      run_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
     // OSINT Investigations (Photo Intelligence Pipeline)
     await pool.query(`CREATE TABLE IF NOT EXISTS osint_investigations (
       id SERIAL PRIMARY KEY,
