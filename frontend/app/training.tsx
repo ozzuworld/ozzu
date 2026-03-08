@@ -37,6 +37,7 @@ import Animated, {
   SlideInRight,
   runOnJS,
 } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { getBridgeUrl } from "../lib/bridge-api";
 
@@ -603,6 +604,7 @@ function formatCost(n: number): string {
 export default function TrainingScreen() {
   const router = useRouter();
   const isPhone = usePhoneLayout();
+  const insets = useSafeAreaInsets();
   const [stats, setStats] = useState<TrainingStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -735,9 +737,9 @@ export default function TrainingScreen() {
       <SkiaScanline width={SCREEN_W} height={SCREEN_H} />
 
       {/* ── Top command bar ────────────────────────────────────────── */}
-      <View style={[s.topBar, { paddingHorizontal: pad }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Text style={{ color: "#333", fontSize: 18, fontFamily: "monospace" }}>{"◁"}</Text>
+      <View style={[s.topBar, { paddingTop: insets.top, paddingHorizontal: pad }]}>
+        <Pressable onPress={() => router.back()} hitSlop={20} style={{ padding: 8 }}>
+          <Text style={{ color: "#525252", fontSize: 22, fontFamily: "monospace" }}>{"◁"}</Text>
         </Pressable>
 
         <View style={{ flex: 1, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
@@ -944,9 +946,10 @@ export default function TrainingScreen() {
 // ═══════════════════════════════════════════════════════════════════════════════
 const s = StyleSheet.create({
   topBar: {
-    height: TOP_BAR_HEIGHT,
+    minHeight: TOP_BAR_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: CYAN + "15",
     backgroundColor: "#030303F0",
