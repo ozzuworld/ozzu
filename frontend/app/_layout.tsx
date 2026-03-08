@@ -4,6 +4,7 @@ import { AppState, LogBox, View, Text, Platform, Dimensions } from "react-native
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { HAProvider } from "../lib/ha-context";
+import { GlassesProvider } from "../lib/glasses-context";
 import { setImmersiveCallback } from "../lib/immersive-events";
 import { probeBridgeUrl, resetBridgeUrl } from "../lib/bridge-api";
 
@@ -131,13 +132,15 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ErrorBoundary>
         <HAProvider>
-          <ImmersiveListener />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: "#111111" },
-            }}
-          />
+          <GlassesProvider>
+            <ImmersiveListener />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: "#111111" },
+              }}
+            />
+          </GlassesProvider>
         </HAProvider>
       </ErrorBoundary>
     </SafeAreaProvider>
