@@ -1643,28 +1643,44 @@ module.exports = function osintRoutes(ctx) {
 
     // ── Face Crawler Endpoints ──
 
-    // POST /osint/face/crawl — trigger a crawl cycle
+    // POST /osint/face/crawl — trigger a manual crawl or manage service
     if (req.method === "POST" && pathname === "/osint/face/crawl") {
       try {
         const faceCrawler = require("../face-crawler");
         const body = await parseBody(req);
-        // Run crawl in background, return immediately
-        const crawlPromise = faceCrawler.runCrawlCycle({
+
+        // Start/stop the 24/7 service
+        if (body.action === "start") {
+          faceCrawler.start();
+          sendJSON(res, 200, { ok: true, message: "Crawler service started" });
+          return true;
+        }
+        if (body.action === "stop") {
+          faceCrawler.stop();
+          sendJSON(res, 200, { ok: true, message: "Crawler service stopped" });
+          return true;
+        }
+        if (body.action === "add_names" && body.names?.length) {
+          const result = faceCrawler.addNames(body.names);
+          sendJSON(res, 200, { ok: true, ...result });
+          return true;
+        }
+
+        // Manual one-time crawl
+        const crawlPromise = faceCrawler.runManualCycle({
           wikipedia: body.wikipedia !== false,
+          commons: body.commons !== false,
           reddit: body.reddit !== false,
-          wikiLimit: body.wikiLimit || 50,
-          redditLimit: body.redditLimit || 20,
-          subreddits: body.subreddits,
+          news: body.news !== false,
+          named: body.named !== false,
           names: body.names,
-          twitterUsers: body.twitterUsers,
-          maxPerName: body.maxPerName || 5,
         });
-        // If async=true, return immediately
+
         if (body.async) {
           crawlPromise.then(r => {
-            log.bridge.info(`[face-crawler] Async crawl done: ${r.totalIndexed} indexed`);
+            log.bridge.info(`[face-crawler] Manual crawl done: ${r.totalIndexed} indexed`);
           }).catch(err => {
-            log.bridge.error(`[face-crawler] Async crawl error: ${err.message}`);
+            log.bridge.error(`[face-crawler] Manual crawl error: ${err.message}`);
           });
           sendJSON(res, 202, { ok: true, message: "Crawl started in background" });
         } else {
@@ -1677,14 +1693,14 @@ module.exports = function osintRoutes(ctx) {
       return true;
     }
 
-    // GET /osint/face/crawl/status — get crawler status
+    // GET /osint/face/crawl/status — get crawler service status
     if (req.method === "GET" && pathname === "/osint/face/crawl/status") {
       try {
         const faceCrawler = require("../face-crawler");
         const status = faceCrawler.getStatus();
         const faceEngine = require("../face-engine");
         const dbStats = await faceEngine.getStats();
-        sendJSON(res, 200, { ok: true, crawlState: status, dbStats });
+        sendJSON(res, 200, { ok: true, ...status, dbStats });
       } catch (err) {
         sendJSON(res, 500, { error: err.message });
       }

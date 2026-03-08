@@ -1119,6 +1119,15 @@ async function initStorage() {
       agentSpawner.cleanupStaleBranches(getDirectives);
     } catch (err) { log.directive.error("stale branch cleanup (startup):", err.message); }
   }, 3 * 60 * 1000);
+
+  // ── Face Crawler 24/7 Service — start after 1 minute ──
+  setTimeout(() => {
+    try {
+      const faceCrawler = require("./face-crawler");
+      faceCrawler.start();
+      log.bridge.info("Face crawler 24/7 service auto-started");
+    } catch (err) { log.bridge.error("Face crawler auto-start failed:", err.message); }
+  }, 60 * 1000);
 }
 
 async function migrateRedisToPostgres() {

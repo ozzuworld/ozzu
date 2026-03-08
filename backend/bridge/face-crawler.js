@@ -1,66 +1,88 @@
-// Face Crawler — background service that scrapes social media profile photos
-// and indexes face embeddings into Qdrant for future face searches.
+// Face Crawler — 24/7 background service that builds a face database
 //
-// Sources:
-//   1. Wikipedia "People" categories — high-quality, public domain photos
-//   2. Reddit user avatars (via public JSON API)
-//   3. Twitter/X profile photos (via browser automation)
-//   4. VK public profiles (relatively open API)
-//   5. Web crawl: given a list of names, fetch images from search + social
+// Runs continuously, crawling public sources for face images,
+// embedding them via ArcFace, and indexing into Qdrant.
 //
-// Each crawled image: detect face → generate ArcFace embedding → store in Qdrant
-// The face DB grows over time, making searches more effective for non-celebrities.
+// Sources (in priority order):
+//   1. Wikipedia Living People (1.5M+ bios with photos)
+//   2. Wikimedia Commons People categories (deep photo archives)
+//   3. Reddit face subreddits (public posts)
+//   4. News sites (OG images from RSS feeds)
+//   5. Named people lists (curated from crawl discoveries)
+//
+// The crawler runs as a loop with configurable intervals.
+// It persists state so it resumes where it left off after restarts.
+// Rate-limited to be polite to source APIs.
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const FACE_API = "http://127.0.0.1:5555";
-const BROWSER_API = "http://127.0.0.1:3334";
 const CRAWL_STATE_FILE = "/tmp/osint-data/crawl-state.json";
-const BATCH_SIZE = 10;
-const DELAY_BETWEEN_ITEMS = 1000; // 1s between requests (be polite)
+const CRAWL_NAMES_FILE = "/tmp/osint-data/crawl-names.json";
 
-let _crawlState = null;
+// Tuning — be aggressive but not abusive
+const WIKI_BATCH = 100;        // pages per Wikipedia API call
+const COMMONS_BATCH = 200;     // files per Commons category
+const REDDIT_BATCH = 50;       // posts per subreddit
+const NEWS_ARTICLES = 20;      // articles per RSS feed
+const DELAY_MS = 500;          // between individual image indexing
+const CYCLE_INTERVAL = 5 * 60 * 1000;  // 5 min between crawl cycles
+const CYCLE_ITEMS = 200;       // target items per cycle (prevents runaway)
 
-function getCrawlState() {
-  if (_crawlState) return _crawlState;
+let _state = null;
+let _running = false;
+let _stopRequested = false;
+let _cycleTimer = null;
+let _stats = { cyclesCompleted: 0, totalIndexed: 0, totalProcessed: 0, startedAt: null, lastCycleAt: null, errors: 0 };
+
+// ── State persistence ──────────────────────────
+
+function getState() {
+  if (_state) return _state;
   try {
     if (fs.existsSync(CRAWL_STATE_FILE)) {
-      _crawlState = JSON.parse(fs.readFileSync(CRAWL_STATE_FILE, "utf8"));
+      _state = JSON.parse(fs.readFileSync(CRAWL_STATE_FILE, "utf8"));
     }
   } catch {}
-  if (!_crawlState) {
-    _crawlState = {
-      wikipedia: { lastContinue: "", totalIndexed: 0, lastRun: null },
-      reddit: { subreddits: [], offset: 0, totalIndexed: 0, lastRun: null },
-      twitter: { totalIndexed: 0, lastRun: null },
-      web: { totalIndexed: 0, lastRun: null },
-      totalFacesIndexed: 0,
-    };
+  // Ensure all fields exist (handles old state format)
+  const defaults = {
+    wikipedia: { lastContinue: "", pagesProcessed: 0, facesIndexed: 0 },
+    commons: { categoriesProcessed: [], facesIndexed: 0 },
+    reddit: { lastAfter: {}, facesIndexed: 0 },
+    news: { sourcesProcessed: 0, facesIndexed: 0 },
+    named: { queue: [], processed: [], facesIndexed: 0 },
+    totalFacesIndexed: 0,
+  };
+  if (!_state) {
+    _state = defaults;
+  } else {
+    // Merge defaults into existing state
+    for (const [key, val] of Object.entries(defaults)) {
+      if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+        _state[key] = { ...val, ...(_state[key] || {}) };
+        // Ensure arrays exist
+        for (const [k, v] of Object.entries(val)) {
+          if (Array.isArray(v) && !Array.isArray(_state[key][k])) _state[key][k] = v;
+          if (typeof v === "object" && v !== null && !Array.isArray(v) && typeof _state[key][k] !== "object") _state[key][k] = v;
+        }
+      } else if (_state[key] === undefined) {
+        _state[key] = val;
+      }
+    }
   }
-  return _crawlState;
+  return _state;
 }
 
-function saveCrawlState() {
+function saveState() {
   try {
     fs.mkdirSync(path.dirname(CRAWL_STATE_FILE), { recursive: true });
-    fs.writeFileSync(CRAWL_STATE_FILE, JSON.stringify(_crawlState, null, 2));
+    fs.writeFileSync(CRAWL_STATE_FILE, JSON.stringify(_state, null, 2));
   } catch {}
 }
 
-async function faceFetch(endpoint, formData, timeout = 20000) {
-  try {
-    const res = await fetch(`${FACE_API}${endpoint}`, {
-      method: "POST",
-      body: formData,
-      signal: AbortSignal.timeout(timeout),
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
+// ── Face API helpers ───────────────────────────
 
 async function indexImageUrl(imageUrl, metadata = {}) {
   try {
@@ -70,394 +92,625 @@ async function indexImageUrl(imageUrl, metadata = {}) {
     });
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 2000) return null; // too small
+    if (buf.length < 2000) return null;
 
     const form = new FormData();
     form.append("base64_image", buf.toString("base64"));
-    if (metadata.profile_id) form.append("profile_id", metadata.profile_id);
     if (metadata.source_url) form.append("source_url", metadata.source_url);
     if (metadata.source_platform) form.append("source_platform", metadata.source_platform);
     if (metadata.label) form.append("label", metadata.label);
-    return await faceFetch("/index", form);
+
+    const apiRes = await fetch(`${FACE_API}/index`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!apiRes.ok) return null;
+    return await apiRes.json();
   } catch {
     return null;
   }
 }
 
+function md5(str) {
+  return crypto.createHash("md5").update(str).digest("hex");
+}
+
+function commonsUrl(filename) {
+  const fn = filename.replace(/ /g, "_");
+  const hash = md5(fn);
+  return `https://upload.wikimedia.org/wikipedia/commons/${hash[0]}/${hash.slice(0, 2)}/${encodeURIComponent(fn)}`;
+}
+
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ═══════════════════════════════════════════════
-// CRAWLER 1: Wikipedia People (high quality, public domain)
-// ═══════════════════════════════════════════════
+// ── Source 1: Wikipedia Living People ──────────
+// 1.5M+ articles, each potentially with a photo.
+// We page through the category 100 at a time.
 
-async function crawlWikipediaPeople(limit = 50) {
-  const state = getCrawlState();
+async function crawlWikipedia() {
+  const state = getState();
   let indexed = 0;
   let processed = 0;
 
-  console.log(`[face-crawler] Wikipedia: starting (last indexed: ${state.wikipedia.totalIndexed})`);
-
   try {
-    // Get members of "Living people" category (largest people category)
-    let continueParam = state.wikipedia.lastContinue || "";
-    const categoryUrl = `https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=Category:Living_people&cmlimit=${limit}&cmtype=page&format=json${continueParam ? `&cmcontinue=${continueParam}` : ""}`;
+    const cont = state.wikipedia.lastContinue || "";
+    const url = `https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=Category:Living_people&cmlimit=${WIKI_BATCH}&cmtype=page&format=json${cont ? `&cmcontinue=${cont}` : ""}`;
 
-    const catRes = await fetch(categoryUrl, { signal: AbortSignal.timeout(15000) });
-    if (!catRes.ok) return { indexed: 0, error: "Wikipedia API error" };
-    const catData = await catRes.json();
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return { indexed: 0, processed: 0 };
+    const data = await res.json();
 
-    const pages = catData.query?.categorymembers || [];
-    state.wikipedia.lastContinue = catData.continue?.cmcontinue || "";
+    const pages = data.query?.categorymembers || [];
+    state.wikipedia.lastContinue = data.continue?.cmcontinue || "";
 
-    // For each person, get their main image
-    for (const page of pages) {
-      processed++;
+    // Batch fetch page images (50 at a time — MediaWiki limit)
+    for (let i = 0; i < pages.length; i += 50) {
+      if (_stopRequested) break;
+      const batch = pages.slice(i, i + 50);
+      const titles = batch.map(p => p.title).join("|");
+      const imgUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(titles)}&prop=pageimages&piprop=original&format=json`;
+
       try {
-        const imgUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(page.title)}&prop=pageimages&piprop=original&format=json`;
-        const imgRes = await fetch(imgUrl, { signal: AbortSignal.timeout(8000) });
+        const imgRes = await fetch(imgUrl, { signal: AbortSignal.timeout(15000) });
         if (!imgRes.ok) continue;
         const imgData = await imgRes.json();
 
-        const pageData = Object.values(imgData.query?.pages || {})[0];
-        const imageUrl = pageData?.original?.source;
-        if (!imageUrl) continue;
+        for (const page of Object.values(imgData.query?.pages || {})) {
+          if (_stopRequested) break;
+          const imageUrl = page.original?.source;
+          if (!imageUrl) continue;
+          if (imageUrl.match(/\.(svg|gif)$/i)) continue;
 
-        // Skip SVGs and non-photo images
-        if (imageUrl.match(/\.(svg|gif|png)$/i) && !imageUrl.match(/photo|portrait|headshot/i)) continue;
+          processed++;
+          const result = await indexImageUrl(imageUrl, {
+            source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
+            source_platform: "wikipedia",
+            label: page.title,
+          });
 
+          if (result?.indexed > 0) {
+            indexed++;
+            state.wikipedia.facesIndexed++;
+            state.totalFacesIndexed++;
+            // Add to named people queue for deeper crawling later
+            _addToNameQueue(page.title);
+          }
+          await wait(DELAY_MS);
+        }
+      } catch {}
+    }
+
+    state.wikipedia.pagesProcessed += pages.length;
+  } catch (err) {
+    console.error("[crawler] Wikipedia error:", err.message);
+    _stats.errors++;
+  }
+
+  saveState();
+  return { indexed, processed };
+}
+
+// ── Source 2: Wikimedia Commons People Categories ──
+// Deep dive into Commons categories for known people.
+// Each category can have 100+ photos of the same person.
+
+async function crawlCommons() {
+  const state = getState();
+  let indexed = 0;
+  let processed = 0;
+
+  // Get people categories we haven't processed yet
+  try {
+    // Search for people categories
+    const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=incategory:"People by name"&srnamespace=14&srlimit=20&sroffset=${state.commons.categoriesProcessed.length}&format=json`;
+    const searchRes = await fetch(searchUrl, { signal: AbortSignal.timeout(10000) });
+    if (!searchRes.ok) return { indexed: 0, processed: 0 };
+    const searchData = await searchRes.json();
+
+    for (const cat of (searchData.query?.search || [])) {
+      if (_stopRequested) break;
+      if (!Array.isArray(state.commons.categoriesProcessed)) state.commons.categoriesProcessed = [];
+      if (state.commons.categoriesProcessed.includes(cat.title)) continue;
+
+      // Get files in this category
+      const filesUrl = `https://commons.wikimedia.org/w/api.php?action=query&list=categorymembers&cmtitle=${encodeURIComponent(cat.title)}&cmtype=file&cmlimit=${COMMONS_BATCH}&format=json`;
+      const filesRes = await fetch(filesUrl, { signal: AbortSignal.timeout(10000) });
+      if (!filesRes.ok) continue;
+      const filesData = await filesRes.json();
+
+      const personName = cat.title.replace("Category:", "");
+
+      for (const file of (filesData.query?.categorymembers || [])) {
+        if (_stopRequested) break;
+        if (!file.title.match(/\.(jpg|jpeg|png)$/i)) continue;
+
+        const imgName = file.title.replace("File:", "");
+        const imageUrl = commonsUrl(imgName);
+
+        processed++;
         const result = await indexImageUrl(imageUrl, {
-          source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
-          source_platform: "wikipedia",
-          label: page.title,
+          source_url: `https://commons.wikimedia.org/wiki/${encodeURIComponent(file.title)}`,
+          source_platform: "wikimedia_commons",
+          label: personName,
         });
 
         if (result?.indexed > 0) {
           indexed++;
-          state.wikipedia.totalIndexed++;
+          state.commons.facesIndexed++;
           state.totalFacesIndexed++;
         }
+        await wait(DELAY_MS);
+      }
 
-        await wait(DELAY_BETWEEN_ITEMS);
-      } catch {}
+      state.commons.categoriesProcessed.push(cat.title);
+      // Keep processed list manageable
+      if (state.commons.categoriesProcessed.length > 10000) {
+        state.commons.categoriesProcessed = state.commons.categoriesProcessed.slice(-5000);
+      }
     }
   } catch (err) {
-    console.error("[face-crawler] Wikipedia error:", err.message);
+    console.error("[crawler] Commons error:", err.message);
+    _stats.errors++;
   }
 
-  state.wikipedia.lastRun = new Date().toISOString();
-  saveCrawlState();
-  console.log(`[face-crawler] Wikipedia: indexed ${indexed}/${processed} faces`);
+  saveState();
   return { indexed, processed };
 }
 
-// ═══════════════════════════════════════════════
-// CRAWLER 2: Reddit User Avatars
-// ═══════════════════════════════════════════════
+// ── Source 3: Reddit Face Subreddits ───────────
+// Cycle through subreddits with face photos.
 
-async function crawlRedditAvatars(subreddits = ["pics", "selfies", "amiugly", "roastme", "rateme"], limit = 30) {
-  const state = getCrawlState();
+const REDDIT_SUBS = [
+  "pics", "selfies", "HumanPorn", "portraits", "headshots",
+  "OldSchoolCool", "MakeupAddiction", "FreeCompliments",
+  "Faces", "redditgetsdrawn", "RoastMe",
+];
+
+async function crawlReddit() {
+  const state = getState();
   let indexed = 0;
   let processed = 0;
 
-  console.log(`[face-crawler] Reddit: starting (subs: ${subreddits.join(", ")})`);
-
-  for (const sub of subreddits) {
+  for (const sub of REDDIT_SUBS) {
+    if (_stopRequested) break;
     try {
-      // Get posts with images (Reddit JSON API — no auth needed)
-      const url = `https://www.reddit.com/r/${sub}/hot.json?limit=${limit}`;
+      if (!state.reddit.lastAfter) state.reddit.lastAfter = {};
+      const after = state.reddit.lastAfter[sub] || "";
+      const url = `https://www.reddit.com/r/${sub}/hot.json?limit=${REDDIT_BATCH}${after ? `&after=${after}` : ""}`;
       const res = await fetch(url, {
-        headers: { "User-Agent": "OzzuIntel/1.0 (face indexing)" },
+        headers: { "User-Agent": "OzzuIntel/1.0 (face indexing research)" },
         signal: AbortSignal.timeout(10000),
       });
       if (!res.ok) continue;
       const data = await res.json();
 
+      // Save pagination cursor
+      if (!state.reddit.lastAfter) state.reddit.lastAfter = {};
+      state.reddit.lastAfter[sub] = data.data?.after || "";
+
       for (const post of (data.data?.children || [])) {
+        if (_stopRequested) break;
         const d = post.data;
         if (!d) continue;
 
-        // Get direct image URLs
         const imageUrl = d.url_overridden_by_dest || d.url || "";
-        if (!imageUrl.match(/\.(jpg|jpeg|png)($|\?)/i) && !imageUrl.includes("i.redd.it")) continue;
+        if (!imageUrl.match(/\.(jpg|jpeg|png)($|\?)/i) && !imageUrl.includes("i.redd.it") && !imageUrl.includes("i.imgur.com")) continue;
 
         processed++;
         const result = await indexImageUrl(imageUrl, {
           source_url: `https://reddit.com${d.permalink}`,
           source_platform: "reddit",
-          label: d.author || "",
+          label: d.title?.substring(0, 100) || d.author || "",
         });
 
         if (result?.indexed > 0) {
           indexed++;
-          state.reddit.totalIndexed++;
+          state.reddit.facesIndexed++;
           state.totalFacesIndexed++;
         }
-
-        await wait(DELAY_BETWEEN_ITEMS);
+        await wait(DELAY_MS);
       }
     } catch (err) {
-      console.error(`[face-crawler] Reddit r/${sub} error:`, err.message);
+      console.error(`[crawler] Reddit r/${sub} error:`, err.message);
+      _stats.errors++;
     }
   }
 
-  state.reddit.lastRun = new Date().toISOString();
-  saveCrawlState();
-  console.log(`[face-crawler] Reddit: indexed ${indexed}/${processed} faces`);
+  saveState();
   return { indexed, processed };
 }
 
-// ═══════════════════════════════════════════════
-// CRAWLER 3: Name-based web image search
-// Given a list of names, search for their photos and index faces
-// ═══════════════════════════════════════════════
+// ── Source 4: News Sites ──────────────────────
+// Crawl news RSS feeds for article images.
+// Many news photos are of public figures.
 
-async function crawlNamedPeople(names, maxPerName = 5) {
+const NEWS_FEEDS = [
+  "https://news.google.com/rss/search?q=celebrity+OR+politician+OR+CEO&hl=en-US&gl=US&ceid=US:en",
+  "https://news.google.com/rss/search?q=actor+OR+actress+OR+musician&hl=en-US&gl=US&ceid=US:en",
+  "https://news.google.com/rss/search?q=athlete+OR+sports+star&hl=en-US&gl=US&ceid=US:en",
+  "https://news.google.com/rss/search?q=business+leader+OR+entrepreneur&hl=en-US&gl=US&ceid=US:en",
+  "https://news.google.com/rss/search?q=world+leader+OR+president+OR+prime+minister&hl=en-US&gl=US&ceid=US:en",
+];
+
+async function crawlNews() {
+  const state = getState();
   let indexed = 0;
   let processed = 0;
-  const state = getCrawlState();
 
-  console.log(`[face-crawler] Named people: ${names.length} names, max ${maxPerName} images each`);
+  if (typeof state.news.sourcesProcessed !== "number") state.news.sourcesProcessed = 0;
+  const feedIndex = state.news.sourcesProcessed % NEWS_FEEDS.length;
+  const feedUrl = NEWS_FEEDS[feedIndex];
 
-  for (const name of names) {
+  try {
+    const res = await fetch(feedUrl, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return { indexed: 0, processed: 0 };
+    const xml = await res.text();
+
+    // Extract article URLs and titles
+    const items = [];
+    const itemRegex = /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<\/item>/g;
+    let match;
+    while ((match = itemRegex.exec(xml)) !== null) {
+      const title = match[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+      const url = match[2].trim();
+      if (url.startsWith("http") && !url.includes("news.google.com")) {
+        items.push({ title, url });
+      }
+    }
+
+    for (const item of items.slice(0, NEWS_ARTICLES)) {
+      if (_stopRequested) break;
+      try {
+        const pageRes = await fetch(item.url, {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)" },
+          signal: AbortSignal.timeout(8000),
+          redirect: "follow",
+        });
+        if (!pageRes.ok) continue;
+        const html = await pageRes.text();
+
+        // Extract og:image
+        const ogMatch = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]+)"/i) ||
+                        html.match(/<meta[^>]*content="([^"]+)"[^>]*property="og:image"/i);
+        if (!ogMatch?.[1]) continue;
+
+        // Try to extract the person's name from the title
+        const label = item.title.substring(0, 100);
+
+        processed++;
+        const result = await indexImageUrl(ogMatch[1], {
+          source_url: item.url,
+          source_platform: "news",
+          label,
+        });
+
+        if (result?.indexed > 0) {
+          indexed++;
+          state.news.facesIndexed++;
+          state.totalFacesIndexed++;
+          // Extract potential names from the title for the queue
+          _extractNamesFromTitle(item.title);
+        }
+        await wait(DELAY_MS);
+      } catch {}
+    }
+
+    state.news.sourcesProcessed++;
+  } catch (err) {
+    console.error("[crawler] News error:", err.message);
+    _stats.errors++;
+  }
+
+  saveState();
+  return { indexed, processed };
+}
+
+// ── Source 5: Named People Deep Crawl ─────────
+// For people discovered during crawling, do a deeper search
+// via Wikipedia + Wikidata + Commons categories.
+
+async function crawlNamedPeople() {
+  const state = getState();
+  let indexed = 0;
+  let processed = 0;
+
+  // Get next batch of names from queue
+  const queue = state.named.queue || [];
+  const batch = queue.splice(0, 10);
+  if (batch.length === 0) return { indexed: 0, processed: 0 };
+
+  for (const name of batch) {
+    if (_stopRequested) break;
+    if (state.named.processed.includes(name)) continue;
+
     try {
-      // Use Wikipedia to find images for this person
-      const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(name)}&gsrlimit=3&prop=pageimages&piprop=original&format=json`;
+      // Search Wikipedia for this person
+      const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(name)}&gsrlimit=2&prop=pageimages|images&piprop=original&imlimit=20&format=json`;
       const res = await fetch(searchUrl, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) continue;
       const data = await res.json();
 
-      let nameIndexed = 0;
       for (const page of Object.values(data.query?.pages || {})) {
-        if (nameIndexed >= maxPerName) break;
-        const imageUrl = page.original?.source;
-        if (!imageUrl) continue;
-
-        processed++;
-        const result = await indexImageUrl(imageUrl, {
-          source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title || name)}`,
-          source_platform: "wikipedia",
-          label: page.title || name,
-        });
-
-        if (result?.indexed > 0) {
-          indexed++;
-          nameIndexed++;
-          state.web.totalIndexed++;
-          state.totalFacesIndexed++;
+        // Main page image
+        if (page.original?.source) {
+          processed++;
+          const result = await indexImageUrl(page.original.source, {
+            source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
+            source_platform: "wikipedia",
+            label: page.title || name,
+          });
+          if (result?.indexed > 0) {
+            indexed++;
+            state.named.facesIndexed++;
+            state.totalFacesIndexed++;
+          }
+          await wait(DELAY_MS);
         }
-        await wait(500);
+
+        // Article images
+        for (const img of (page.images || [])) {
+          if (_stopRequested) break;
+          if (!img.title.match(/\.(jpg|jpeg|png)$/i)) continue;
+          if (img.title.match(/Commons-logo|Flag_of|Icon|Map_of|Coat_of|Seal_of|Logo/i)) continue;
+
+          const imgName = img.title.replace("File:", "");
+          const imageUrl = commonsUrl(imgName);
+
+          processed++;
+          const result = await indexImageUrl(imageUrl, {
+            source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title || name)}`,
+            source_platform: "wikipedia",
+            label: page.title || name,
+          });
+          if (result?.indexed > 0) {
+            indexed++;
+            state.named.facesIndexed++;
+            state.totalFacesIndexed++;
+          }
+          await wait(DELAY_MS);
+        }
       }
 
-      // Also try Wikidata for additional images
+      // Search Commons categories for this person
       try {
-        const wdSearch = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name)}&language=en&format=json&limit=2`;
-        const wdRes = await fetch(wdSearch, { signal: AbortSignal.timeout(8000) });
-        if (wdRes.ok) {
-          const wdData = await wdRes.json();
-          for (const entity of (wdData.search || []).slice(0, 1)) {
-            if (nameIndexed >= maxPerName) break;
-            const entUrl = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${entity.id}&props=claims&format=json`;
-            const entRes = await fetch(entUrl, { signal: AbortSignal.timeout(8000) });
-            if (!entRes.ok) continue;
-            const entData = await entRes.json();
-            const claims = entData.entities?.[entity.id]?.claims || {};
+        const catUrl = `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(name)}&srnamespace=14&srlimit=2&format=json`;
+        const catRes = await fetch(catUrl, { signal: AbortSignal.timeout(8000) });
+        if (catRes.ok) {
+          const catData = await catRes.json();
+          for (const cat of (catData.query?.search || [])) {
+            const filesUrl = `https://commons.wikimedia.org/w/api.php?action=query&list=categorymembers&cmtitle=${encodeURIComponent(cat.title)}&cmtype=file&cmlimit=50&format=json`;
+            const filesRes = await fetch(filesUrl, { signal: AbortSignal.timeout(8000) });
+            if (!filesRes.ok) continue;
+            const filesData = await filesRes.json();
 
-            // P18 = image, P154 = logo
-            for (const prop of ["P18"]) {
-              for (const claim of (claims[prop] || []).slice(0, 2)) {
-                if (nameIndexed >= maxPerName) break;
-                const filename = claim.mainsnak?.datavalue?.value;
-                if (!filename) continue;
-                const fn = filename.replace(/ /g, "_");
-                const crypto = require("crypto");
-                const md5 = crypto.createHash("md5").update(fn).digest("hex");
-                const commonsUrl = `https://upload.wikimedia.org/wikipedia/commons/${md5[0]}/${md5.slice(0, 2)}/${encodeURIComponent(fn)}`;
+            for (const file of (filesData.query?.categorymembers || [])) {
+              if (_stopRequested) break;
+              if (!file.title.match(/\.(jpg|jpeg|png)$/i)) continue;
+              const imgName = file.title.replace("File:", "");
 
-                processed++;
-                const result = await indexImageUrl(commonsUrl, {
-                  source_url: `https://www.wikidata.org/wiki/${entity.id}`,
-                  source_platform: "wikidata",
-                  label: entity.label || name,
-                });
-                if (result?.indexed > 0) {
-                  indexed++;
-                  nameIndexed++;
-                  state.web.totalIndexed++;
-                  state.totalFacesIndexed++;
-                }
-                await wait(500);
+              processed++;
+              const result = await indexImageUrl(commonsUrl(imgName), {
+                source_url: `https://commons.wikimedia.org/wiki/${encodeURIComponent(file.title)}`,
+                source_platform: "wikimedia_commons",
+                label: name,
+              });
+              if (result?.indexed > 0) {
+                indexed++;
+                state.named.facesIndexed++;
+                state.totalFacesIndexed++;
               }
+              await wait(DELAY_MS);
             }
           }
         }
       } catch {}
 
-      await wait(DELAY_BETWEEN_ITEMS);
+      state.named.processed.push(name);
+      // Keep processed list manageable
+      if (state.named.processed.length > 50000) {
+        state.named.processed = state.named.processed.slice(-25000);
+      }
     } catch (err) {
-      console.error(`[face-crawler] Named "${name}" error:`, err.message);
+      console.error(`[crawler] Named "${name}" error:`, err.message);
+      _stats.errors++;
     }
   }
 
-  state.web.lastRun = new Date().toISOString();
-  saveCrawlState();
-  console.log(`[face-crawler] Named people: indexed ${indexed}/${processed} faces`);
+  saveState();
   return { indexed, processed };
 }
 
-// ═══════════════════════════════════════════════
-// CRAWLER 4: Twitter/X profile photos via browser
-// ═══════════════════════════════════════════════
+// ── Helper: add names to the crawl queue ──────
 
-async function crawlTwitterProfiles(usernames, sessionId = null) {
-  let indexed = 0;
-  let processed = 0;
-  const state = getCrawlState();
-  const ownSession = !sessionId;
-
-  if (ownSession) {
-    sessionId = `crawl-tw-${Date.now()}`;
-    await fetch(`${BROWSER_API}/session/new`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId }),
-    }).catch(() => {});
+function _addToNameQueue(name) {
+  const state = getState();
+  if (!state.named.queue) state.named.queue = [];
+  if (!state.named.processed) state.named.processed = [];
+  if (!state.named.queue.includes(name) && !state.named.processed.includes(name)) {
+    state.named.queue.push(name);
   }
+}
 
-  console.log(`[face-crawler] Twitter: ${usernames.length} profiles`);
+function _extractNamesFromTitle(title) {
+  // Simple heuristic: capitalized words that look like names
+  const words = title.replace(/[^a-zA-Z\s'-]/g, "").split(/\s+/);
+  for (let i = 0; i < words.length - 1; i++) {
+    if (words[i].length > 1 && words[i][0] === words[i][0].toUpperCase() &&
+        words[i + 1].length > 1 && words[i + 1][0] === words[i + 1][0].toUpperCase()) {
+      const name = `${words[i]} ${words[i + 1]}`;
+      if (name.length > 4 && name.length < 40) {
+        _addToNameQueue(name);
+      }
+    }
+  }
+}
 
+// ══════════════════════════════════════════════
+// CRAWLER SERVICE — runs continuously
+// ══════════════════════════════════════════════
+
+async function runCycle() {
+  if (_stopRequested) return;
+
+  const cycleStart = Date.now();
+  console.log(`[crawler] ═══ Cycle ${_stats.cyclesCompleted + 1} starting ═══`);
+
+  // Check if face API is healthy
   try {
-    for (const username of usernames) {
-      try {
-        // Navigate to profile
-        const nav = await fetch(`${BROWSER_API}/navigate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: `https://x.com/${username}`, session_id: sessionId }),
-          signal: AbortSignal.timeout(20000),
-        });
-        if (!nav.ok) continue;
-        await wait(3000);
-
-        // Extract profile photo URL
-        const extract = await fetch(`${BROWSER_API}/evaluate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_id: sessionId,
-            script: `(() => {
-              // Profile photo is the large avatar
-              const img = document.querySelector('img[src*="profile_images"][src*="400x400"], img[src*="profile_images"][src*="200x200"], a[href$="/photo"] img');
-              if (img) {
-                // Get highest resolution
-                return img.src.replace(/_normal|_bigger|_mini|_200x200|_reasonably_small/g, '_400x400');
-              }
-              return null;
-            })()`,
-          }),
-          signal: AbortSignal.timeout(10000),
-        });
-        const extractData = await extract.json();
-        const profilePhotoUrl = extractData?.result;
-
-        if (profilePhotoUrl && profilePhotoUrl.startsWith("http")) {
-          processed++;
-          const result = await indexImageUrl(profilePhotoUrl, {
-            source_url: `https://x.com/${username}`,
-            source_platform: "twitter",
-            label: username,
-          });
-          if (result?.indexed > 0) {
-            indexed++;
-            state.twitter.totalIndexed++;
-            state.totalFacesIndexed++;
-          }
-        }
-
-        await wait(2000);
-      } catch {}
+    const health = await fetch(`${FACE_API}/health`, { signal: AbortSignal.timeout(5000) });
+    if (!health.ok) {
+      console.log("[crawler] Face API not healthy, skipping cycle");
+      return;
     }
-  } finally {
-    if (ownSession) {
-      await fetch(`${BROWSER_API}/session/close`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId }),
-      }).catch(() => {});
-    }
+  } catch {
+    console.log("[crawler] Face API unreachable, skipping cycle");
+    return;
   }
 
-  state.twitter.lastRun = new Date().toISOString();
-  saveCrawlState();
-  console.log(`[face-crawler] Twitter: indexed ${indexed}/${processed} faces`);
-  return { indexed, processed };
-}
-
-// ═══════════════════════════════════════════════
-// ORCHESTRATOR: Run a full crawl cycle
-// ═══════════════════════════════════════════════
-
-async function runCrawlCycle(opts = {}) {
-  const startTime = Date.now();
+  // Run sources in sequence (to control resource usage)
   const results = {};
 
-  console.log("[face-crawler] === Starting crawl cycle ===");
+  // Wikipedia — biggest source, always run
+  results.wikipedia = await crawlWikipedia();
+  if (_stopRequested) return;
 
-  // 1. Wikipedia people (most reliable, highest quality)
-  if (opts.wikipedia !== false) {
-    results.wikipedia = await crawlWikipediaPeople(opts.wikiLimit || 50);
+  // Commons — deep photos for known people
+  results.commons = await crawlCommons();
+  if (_stopRequested) return;
+
+  // Reddit — diverse face photos
+  results.reddit = await crawlReddit();
+  if (_stopRequested) return;
+
+  // News — public figures in current events
+  results.news = await crawlNews();
+  if (_stopRequested) return;
+
+  // Named people — deep crawl for discovered names
+  results.named = await crawlNamedPeople();
+
+  // Update stats
+  const cycleIndexed = Object.values(results).reduce((s, r) => s + (r?.indexed || 0), 0);
+  const cycleProcessed = Object.values(results).reduce((s, r) => s + (r?.processed || 0), 0);
+  _stats.cyclesCompleted++;
+  _stats.totalIndexed += cycleIndexed;
+  _stats.totalProcessed += cycleProcessed;
+  _stats.lastCycleAt = new Date().toISOString();
+
+  const elapsed = ((Date.now() - cycleStart) / 1000).toFixed(1);
+
+  // Get DB size
+  let dbSize = "?";
+  try {
+    const statsRes = await fetch(`${FACE_API}/stats`, { signal: AbortSignal.timeout(5000) });
+    if (statsRes.ok) {
+      const s = await statsRes.json();
+      dbSize = s.points_count;
+    }
+  } catch {}
+
+  console.log(`[crawler] ═══ Cycle ${_stats.cyclesCompleted} complete: ${cycleIndexed}/${cycleProcessed} indexed in ${elapsed}s | DB: ${dbSize} faces | Queue: ${getState().named.queue?.length || 0} names ═══`);
+
+  // Log per-source breakdown
+  for (const [name, r] of Object.entries(results)) {
+    if (r && (r.indexed > 0 || r.processed > 0)) {
+      console.log(`[crawler]   ${name}: ${r.indexed}/${r.processed}`);
+    }
+  }
+}
+
+// Start the background service
+function start() {
+  if (_running) {
+    console.log("[crawler] Already running");
+    return;
   }
 
-  // 2. Reddit (public posts with face photos)
-  if (opts.reddit !== false) {
-    results.reddit = await crawlRedditAvatars(
-      opts.subreddits || ["pics", "selfies", "HumanPorn", "portraits"],
-      opts.redditLimit || 20
-    );
-  }
+  _running = true;
+  _stopRequested = false;
+  _stats.startedAt = new Date().toISOString();
+  console.log("[crawler] ══════════════════════════════════════");
+  console.log("[crawler] 24/7 Face Crawler Service STARTED");
+  console.log(`[crawler] Cycle interval: ${CYCLE_INTERVAL / 1000}s`);
+  console.log("[crawler] ══════════════════════════════════════");
 
-  // 3. Named people (if provided)
+  // Run first cycle immediately
+  runCycle().then(() => {
+    if (!_stopRequested) {
+      _cycleTimer = setInterval(() => {
+        runCycle().catch(err => {
+          console.error("[crawler] Cycle error:", err.message);
+          _stats.errors++;
+        });
+      }, CYCLE_INTERVAL);
+    }
+  }).catch(err => {
+    console.error("[crawler] First cycle error:", err.message);
+    _stats.errors++;
+  });
+}
+
+// Stop the background service
+function stop() {
+  if (!_running) return;
+  _stopRequested = true;
+  if (_cycleTimer) {
+    clearInterval(_cycleTimer);
+    _cycleTimer = null;
+  }
+  _running = false;
+  console.log("[crawler] Service STOPPED");
+}
+
+// Get service status
+function getStatus() {
+  return {
+    running: _running,
+    stats: _stats,
+    crawlState: getState(),
+    nameQueueSize: getState().named?.queue?.length || 0,
+  };
+}
+
+// Manual crawl (one-time, for API endpoint)
+async function runManualCycle(opts = {}) {
+  const results = {};
+  if (opts.wikipedia !== false) results.wikipedia = await crawlWikipedia();
+  if (opts.commons !== false) results.commons = await crawlCommons();
+  if (opts.reddit !== false) results.reddit = await crawlReddit();
+  if (opts.news !== false) results.news = await crawlNews();
+  if (opts.named !== false) results.named = await crawlNamedPeople();
+
+  // Inject names into queue if provided
   if (opts.names?.length) {
-    results.named = await crawlNamedPeople(opts.names, opts.maxPerName || 5);
+    for (const name of opts.names) _addToNameQueue(name);
+    saveState();
   }
 
-  // 4. Twitter profiles (if provided)
-  if (opts.twitterUsers?.length) {
-    results.twitter = await crawlTwitterProfiles(opts.twitterUsers);
-  }
+  const totalIndexed = Object.values(results).reduce((s, r) => s + (r?.indexed || 0), 0);
+  const totalProcessed = Object.values(results).reduce((s, r) => s + (r?.processed || 0), 0);
 
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  const totalIndexed = Object.values(results).reduce((sum, r) => sum + (r?.indexed || 0), 0);
-  const totalProcessed = Object.values(results).reduce((sum, r) => sum + (r?.processed || 0), 0);
-
-  console.log(`[face-crawler] === Crawl cycle complete: ${totalIndexed}/${totalProcessed} faces indexed in ${elapsed}s ===`);
-
-  // Get current DB size
   let dbStats = null;
   try {
     const statsRes = await fetch(`${FACE_API}/stats`, { signal: AbortSignal.timeout(5000) });
     if (statsRes.ok) dbStats = await statsRes.json();
   } catch {}
 
-  return {
-    results,
-    totalIndexed,
-    totalProcessed,
-    elapsed: parseFloat(elapsed),
-    dbStats,
-    crawlState: getCrawlState(),
-  };
+  return { results, totalIndexed, totalProcessed, dbStats, crawlState: getState() };
 }
 
-// Get crawl status
-function getStatus() {
-  return getCrawlState();
+// Add names to the crawl queue
+function addNames(names) {
+  for (const name of names) _addToNameQueue(name);
+  saveState();
+  return { queued: names.length, queueSize: getState().named.queue.length };
 }
 
 module.exports = {
-  crawlWikipediaPeople,
-  crawlRedditAvatars,
-  crawlNamedPeople,
-  crawlTwitterProfiles,
-  runCrawlCycle,
+  start,
+  stop,
   getStatus,
+  runManualCycle,
+  addNames,
 };
