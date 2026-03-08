@@ -5,7 +5,7 @@ Satellite Face Crawler v2 — SCALED for mass indexing on dev-01
 Architecture:
   - 4 parallel NAME workers (process different people simultaneously)
   - 5 search engines per name (Google, Bing, Yandex, DuckDuckGo, Flickr) run concurrently
-  - 8 parallel INDEX workers (send images to bridge simultaneously)
+  - 8 parallel INDEX workers (local ArcFace → direct Qdrant insert)
   - 500+ seed names from Wikipedia notable people lists
   - Auto-discovers new names from Wikipedia category pages
   - Minimal delays — just enough to avoid IP bans
@@ -30,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 BRIDGE_URL = "http://10.8.0.1:3333"
+LOCAL_FACE_API = "http://127.0.0.1:5555"  # Local ArcFace on dev-01
 STATE_FILE = os.path.expanduser("~/.ozzu-crawler-state.json")
 CYCLE_INTERVAL = 120  # 2 minutes between cycles
 NAMES_PER_CYCLE = 20  # 20 names per cycle (4 workers × 5 names each)
@@ -37,7 +38,7 @@ NAME_WORKERS = 4      # parallel name processing
 INDEX_WORKERS = 8     # parallel image indexing
 ENGINE_WORKERS = 5    # parallel search engines per name
 SEARCH_DELAY = 0.3    # delay between search engine calls (per engine)
-INDEX_DELAY = 0.1     # delay between index calls
+INDEX_DELAY = 0.05    # delay between index calls (faster with local processing)
 
 state_lock = Lock()
 
@@ -211,8 +212,8 @@ def save_state(state):
         pass
 
 
-def api_call(path, data=None, timeout=30):
-    url = f"{BRIDGE_URL}{path}"
+def api_call(path, data=None, timeout=30, base_url=None):
+    url = f"{base_url or BRIDGE_URL}{path}"
     if data:
         body = json.dumps(data).encode()
         req = urllib.request.Request(url, body, {"Content-Type": "application/json"})
@@ -223,6 +224,61 @@ def api_call(path, data=None, timeout=30):
         return json.loads(resp.read())
     except Exception:
         return None
+
+
+def local_face_index(image_url, label="", source_platform=""):
+    """Send image URL to local face API for embedding + Qdrant insert."""
+    try:
+        # Use multipart form data (what the face API expects)
+        import urllib.parse as up
+        boundary = "----CrawlerBoundary"
+        fields = {
+            "image_url": image_url,
+            "label": label,
+            "source_platform": source_platform,
+        }
+        body = b""
+        for key, val in fields.items():
+            body += f"--{boundary}\r\n".encode()
+            body += f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode()
+            body += f"{val}\r\n".encode()
+        body += f"--{boundary}--\r\n".encode()
+
+        req = urllib.request.Request(
+            f"{LOCAL_FACE_API}/index",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        resp = urllib.request.urlopen(req, timeout=30)
+        result = json.loads(resp.read())
+        return result and result.get("ok")
+    except Exception:
+        return False
+
+
+def check_local_face_api():
+    """Check if local face API is running."""
+    try:
+        req = urllib.request.Request(f"{LOCAL_FACE_API}/health")
+        resp = urllib.request.urlopen(req, timeout=5)
+        data = json.loads(resp.read())
+        return data.get("status") == "ok"
+    except Exception:
+        return False
+
+
+_use_local = None
+
+def use_local_api():
+    """Check once if local face API is available, cache result."""
+    global _use_local
+    if _use_local is None:
+        _use_local = check_local_face_api()
+        if _use_local:
+            log("[config] Using LOCAL face API (dev-01 ArcFace → Qdrant direct)")
+        else:
+            log("[config] Local face API not available, falling back to BRIDGE")
+    return _use_local
 
 
 def make_request(url, headers=None, timeout=15):
@@ -395,21 +451,25 @@ def discover_names_from_wikipedia():
 # ── Parallel indexing ──
 
 def index_batch(urls_with_meta):
-    """Index a batch of images in parallel using ThreadPoolExecutor"""
+    """Index a batch of images in parallel using ThreadPoolExecutor.
+    Uses local face API if available, otherwise falls back to bridge."""
     indexed = 0
     processed = 0
+    local = use_local_api()
 
     def index_one(item):
         img_url, label, source = item
-        result = api_call("/osint/face/index", {
-            "imageUrl": img_url,
-            "label": label,
-            "sourcePlatform": f"satellite_{source}",
-        }, timeout=30)
+        if local:
+            ok = local_face_index(img_url, label, f"satellite_{source}")
+        else:
+            result = api_call("/osint/face/index", {
+                "imageUrl": img_url,
+                "label": label,
+                "sourcePlatform": f"satellite_{source}",
+            }, timeout=30)
+            ok = result and result.get("ok")
         time.sleep(INDEX_DELAY)
-        if result and result.get("ok"):
-            return 1
-        return 0
+        return 1 if ok else 0
 
     with ThreadPoolExecutor(max_workers=INDEX_WORKERS) as executor:
         futures = {executor.submit(index_one, item): item for item in urls_with_meta}
@@ -584,12 +644,21 @@ def main():
     log(f"Seed names: {len(SEED_NAMES)}")
     log("=" * 60)
 
-    # Verify bridge
+    # Verify connectivity
     stats = api_call("/osint/face/stats")
     if not stats:
         log(f"ERROR: Cannot reach bridge API at {BRIDGE_URL}")
         sys.exit(1)
     log(f"Bridge OK — Qdrant: {stats.get('points_count', '?')} faces")
+
+    # Check local face API
+    if check_local_face_api():
+        local_stats = api_call("/stats", base_url=LOCAL_FACE_API)
+        log(f"Local Face API OK — processing on dev-01 CPU")
+        if local_stats:
+            log(f"Qdrant (direct): {local_stats.get('points_count', '?')} faces")
+    else:
+        log(f"Local Face API not running — using bridge (slower)")
 
     # Auto-discover names on first run
     if not state.get("discovered_names") and not once:
