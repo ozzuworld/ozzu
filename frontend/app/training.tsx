@@ -5,28 +5,59 @@ import {
   ScrollView,
   RefreshControl,
   Pressable,
-  Animated,
   Dimensions,
-  Easing,
+  StyleSheet,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import Svg, { Polyline, Line, Circle, Rect, Defs, LinearGradient, Stop } from "react-native-svg";
+import {
+  Canvas,
+  Circle,
+  Line as SkLine,
+  LinearGradient as SkGrad,
+  Path,
+  Rect as SkRect,
+  vec,
+  Group,
+  Blur,
+  Paint,
+  Skia,
+  useClockValue,
+  useDerivedValue,
+  useComputedValue,
+  RoundedRect,
+  Text as SkText,
+  useFont,
+  Shadow,
+} from "@shopify/react-native-skia";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withRepeat,
+  withSequence,
+  Easing as REasing,
+  interpolate,
+  withDelay,
+  FadeIn,
+  FadeInDown,
+  SlideInRight,
+  runOnJS,
+} from "react-native-reanimated";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { getBridgeUrl } from "../lib/bridge-api";
 
-const { width: SCREEN_W } = Dimensions.get("window");
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const TOP_BAR_HEIGHT = 52;
 const CYAN = "#06B6D4";
-const CYAN_DIM = "#06B6D420";
-const CYAN_MED = "#06B6D460";
 const GREEN = "#22C55E";
 const AMBER = "#F59E0B";
 const RED = "#EF4444";
 const PURPLE = "#A855F7";
-const CARD_BG = "#0D0D0D";
-const BORDER = "#1A1A1A";
+const MAGENTA = "#EC4899";
+const CARD_BG = "#0A0A0A";
+const BORDER = "#151515";
 const AUTO_REFRESH_MS = 10000;
 const TARGET_FACES = 1_000_000;
 const EPIC_TARGET = 100_000_000;
@@ -50,96 +81,81 @@ interface TrainingStats {
   timestamp: number;
 }
 
-// ── Animated rolling odometer digit ──────────────────────────────────────────
-function OdometerDigit({ digit, color, size }: { digit: string; color: string; size: number }) {
-  const animVal = useRef(new Animated.Value(0)).current;
-  const prevDigit = useRef(digit);
-
-  useEffect(() => {
-    if (digit !== prevDigit.current) {
-      animVal.setValue(0);
-      Animated.timing(animVal, {
-        toValue: 1,
-        duration: 600,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
-      prevDigit.current = digit;
+// ═══════════════════════════════════════════════════════════════════════════════
+// SKIA PARTICLE FIELD — flowing data particles
+// ═══════════════════════════════════════════════════════════════════════════════
+function ParticleField({ width: w, height: h }: { width: number; height: number }) {
+  const particles = useMemo(() => {
+    const pts = [];
+    for (let i = 0; i < 40; i++) {
+      pts.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        speed: 0.2 + Math.random() * 0.6,
+        size: 0.8 + Math.random() * 1.5,
+        opacity: 0.1 + Math.random() * 0.3,
+        drift: (Math.random() - 0.5) * 0.3,
+      });
     }
-  }, [digit]);
+    return pts;
+  }, [w, h]);
 
-  const isNum = /\d/.test(digit);
-
-  if (!isNum) {
-    return (
-      <View style={{ height: size * 1.2, justifyContent: "center" }}>
-        <Text
-          style={{
-            color,
-            fontSize: size,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-            includeFontPadding: false,
-          }}
-        >
-          {digit}
-        </Text>
-      </View>
-    );
-  }
-
-  const translateY = animVal.interpolate({
-    inputRange: [0, 1],
-    outputRange: [size * 0.6, 0],
-  });
-  const opacity = animVal.interpolate({
-    inputRange: [0, 0.3, 1],
-    outputRange: [0, 1, 1],
-  });
+  const clock = useClockValue();
 
   return (
-    <View style={{ height: size * 1.2, overflow: "hidden", justifyContent: "center" }}>
-      <Animated.Text
-        style={{
-          color,
-          fontSize: size,
-          fontFamily: "monospace",
-          fontWeight: "bold",
-          includeFontPadding: false,
-          transform: [{ translateY }],
-          opacity,
-        }}
-      >
-        {digit}
-      </Animated.Text>
-    </View>
+    <Canvas style={{ width: w, height: h, position: "absolute", top: 0, left: 0 }}>
+      {particles.map((p, i) => {
+        const cy = useDerivedValue(() => {
+          const t = clock.current / 16;
+          return (p.y + t * p.speed) % h;
+        }, [clock]);
+        const cx = useDerivedValue(() => {
+          const t = clock.current / 16;
+          return p.x + Math.sin(t * 0.01 + i) * 20 * p.drift;
+        }, [clock]);
+        const opacity = useDerivedValue(() => {
+          const y = (p.y + clock.current / 16 * p.speed) % h;
+          const fade = y < 40 ? y / 40 : y > h - 40 ? (h - y) / 40 : 1;
+          return p.opacity * fade;
+        }, [clock]);
+
+        return (
+          <Circle key={i} cx={cx} cy={cy} r={p.size} opacity={opacity} color={CYAN} />
+        );
+      })}
+    </Canvas>
   );
 }
 
-function OdometerNumber({
-  value,
-  color = CYAN,
-  size = 42,
-}: {
-  value: string;
-  color?: string;
-  size?: number;
-}) {
-  const chars = value.split("");
+// ═══════════════════════════════════════════════════════════════════════════════
+// SKIA SCANLINE — CRT sweep effect
+// ═══════════════════════════════════════════════════════════════════════════════
+function SkiaScanline({ width: w, height: h }: { width: number; height: number }) {
+  const clock = useClockValue();
+
+  const y = useDerivedValue(() => {
+    return (clock.current / 8) % (h + 100) - 50;
+  }, [clock]);
+
   return (
-    <View style={{ flexDirection: "row", alignItems: "center" }}>
-      {chars.map((ch, i) => (
-        <OdometerDigit key={`${i}-${ch}`} digit={ch} color={color} size={size} />
-      ))}
-    </View>
+    <Canvas
+      style={{ width: w, height: h, position: "absolute", top: 0, left: 0 }}
+      pointerEvents="none"
+    >
+      <SkRect x={0} y={y} width={w} height={60} opacity={0.025}>
+        <SkGrad start={vec(0, 0)} end={vec(0, 60)} colors={["transparent", CYAN, "transparent"]} />
+      </SkRect>
+    </Canvas>
   );
 }
 
-// ── Sparkline chart (SVG) ────────────────────────────────────────────────────
-function SparklineChart({
+// ═══════════════════════════════════════════════════════════════════════════════
+// SKIA SPARKLINE — smooth GPU-rendered chart
+// ═══════════════════════════════════════════════════════════════════════════════
+function SkiaSparkline({
   data,
-  width,
-  height,
+  width: w,
+  height: h,
   color = CYAN,
 }: {
   data: number[];
@@ -147,291 +163,221 @@ function SparklineChart({
   height: number;
   color?: string;
 }) {
-  if (data.length < 2) {
+  const pathStr = useMemo(() => {
+    if (data.length < 2) return null;
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+    const range = max - min || 1;
+    const pad = 6;
+    const cw = w - pad * 2;
+    const ch = h - pad * 2;
+    const step = cw / (data.length - 1);
+
+    let d = "";
+    data.forEach((v, i) => {
+      const x = pad + i * step;
+      const y = pad + ch - ((v - min) / range) * ch;
+      d += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
+    });
+    return d;
+  }, [data, w, h]);
+
+  const fillPathStr = useMemo(() => {
+    if (data.length < 2) return null;
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+    const range = max - min || 1;
+    const pad = 6;
+    const cw = w - pad * 2;
+    const ch = h - pad * 2;
+    const step = cw / (data.length - 1);
+
+    let d = `M ${pad} ${pad + ch}`;
+    data.forEach((v, i) => {
+      const x = pad + i * step;
+      const y = pad + ch - ((v - min) / range) * ch;
+      d += ` L ${x} ${y}`;
+    });
+    d += ` L ${pad + cw} ${pad + ch} Z`;
+    return d;
+  }, [data, w, h]);
+
+  const lastPoint = useMemo(() => {
+    if (data.length < 2) return null;
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+    const range = max - min || 1;
+    const pad = 6;
+    const cw = w - pad * 2;
+    const ch = h - pad * 2;
+    const step = cw / (data.length - 1);
+    const x = pad + (data.length - 1) * step;
+    const y = pad + ch - ((data[data.length - 1] - min) / range) * ch;
+    return { x, y };
+  }, [data, w, h]);
+
+  if (!pathStr || !fillPathStr) {
     return (
-      <View style={{ width, height, justifyContent: "center", alignItems: "center" }}>
-        <Text style={{ color: "#333", fontSize: 10, fontFamily: "monospace" }}>
-          Collecting data...
+      <View style={{ width: w, height: h, justifyContent: "center", alignItems: "center" }}>
+        <Text style={{ color: "#1A1A1A", fontSize: 10, fontFamily: "monospace" }}>
+          Collecting telemetry...
         </Text>
       </View>
     );
   }
 
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const pad = 4;
-  const chartW = width - pad * 2;
-  const chartH = height - pad * 2;
-  const step = chartW / (data.length - 1);
-
-  const points = data
-    .map((v, i) => {
-      const x = pad + i * step;
-      const y = pad + chartH - ((v - min) / range) * chartH;
-      return `${x},${y}`;
-    })
-    .join(" ");
-
-  const lastX = pad + (data.length - 1) * step;
-  const lastY = pad + chartH - ((data[data.length - 1] - min) / range) * chartH;
-
-  // Grid lines
+  // Grid
   const gridLines = [];
-  for (let i = 0; i < 4; i++) {
-    const y = pad + (chartH / 3) * i;
+  const pad = 6;
+  const ch = h - pad * 2;
+  for (let i = 0; i <= 3; i++) {
+    const gy = pad + (ch / 3) * i;
     gridLines.push(
-      <Line
-        key={`g${i}`}
-        x1={pad}
-        y1={y}
-        x2={width - pad}
-        y2={y}
-        stroke="#1A1A1A"
-        strokeWidth={0.5}
-      />
+      <SkLine key={i} p1={vec(pad, gy)} p2={vec(w - pad, gy)} color="#111" strokeWidth={0.5} />
     );
   }
 
   return (
-    <Svg width={width} height={height}>
-      <Defs>
-        <LinearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={color} stopOpacity="0.3" />
-          <Stop offset="1" stopColor={color} stopOpacity="0" />
-        </LinearGradient>
-      </Defs>
+    <Canvas style={{ width: w, height: h }}>
       {gridLines}
-      <Polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      <Circle cx={lastX} cy={lastY} r={3} fill={color} />
-    </Svg>
+      {/* Fill gradient */}
+      <Path path={fillPathStr} opacity={0.15}>
+        <SkGrad start={vec(0, pad)} end={vec(0, h)} colors={[color, "transparent"]} />
+      </Path>
+      {/* Line */}
+      <Path path={pathStr} style="stroke" strokeWidth={2} strokeCap="round" strokeJoin="round" color={color} />
+      {/* Glow line */}
+      <Path path={pathStr} style="stroke" strokeWidth={4} strokeCap="round" strokeJoin="round" color={color} opacity={0.2}>
+        <Blur blur={4} />
+      </Path>
+      {/* Endpoint dot with glow */}
+      {lastPoint && (
+        <>
+          <Circle cx={lastPoint.x} cy={lastPoint.y} r={6} color={color} opacity={0.2}>
+            <Blur blur={4} />
+          </Circle>
+          <Circle cx={lastPoint.x} cy={lastPoint.y} r={3} color={color} />
+        </>
+      )}
+    </Canvas>
   );
 }
 
-// ── Animated scanline overlay ────────────────────────────────────────────────
-function ScanlineOverlay() {
-  const anim = useRef(new Animated.Value(0)).current;
+// ═══════════════════════════════════════════════════════════════════════════════
+// REANIMATED ODOMETER — silky smooth rolling digits
+// ═══════════════════════════════════════════════════════════════════════════════
+function ReanimatedDigit({ digit, color, size }: { digit: string; color: string; size: number }) {
+  const translateY = useSharedValue(size * 0.5);
+  const opacity = useSharedValue(0);
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(anim, {
-        toValue: 1,
-        duration: 4000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
+    translateY.value = size * 0.5;
+    opacity.value = 0;
+    translateY.value = withTiming(0, { duration: 600, easing: REasing.out(REasing.cubic) });
+    opacity.value = withTiming(1, { duration: 400 });
+  }, [digit]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    opacity: opacity.value,
+  }));
+
+  const isNum = /\d/.test(digit);
+  if (!isNum) {
+    return (
+      <View style={{ height: size * 1.2, justifyContent: "center" }}>
+        <Text style={{ color, fontSize: size, fontFamily: "monospace", fontWeight: "bold" }}>
+          {digit}
+        </Text>
+      </View>
     );
-    loop.start();
-    return () => loop.stop();
-  }, []);
-
-  const translateY = anim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-100, 600],
-  });
+  }
 
   return (
-    <Animated.View
-      pointerEvents="none"
-      style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        top: 0,
-        height: 100,
-        transform: [{ translateY }],
-        opacity: 0.03,
-        backgroundColor: CYAN,
-      }}
-    />
-  );
-}
-
-// ── Pulsing glow ring ────────────────────────────────────────────────────────
-function PulsingGlow({ active, color }: { active: boolean; color: string }) {
-  const pulse = useRef(new Animated.Value(0.4)).current;
-  useEffect(() => {
-    if (!active) return;
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1200, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0.4, duration: 1200, useNativeDriver: true }),
-      ])
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [active]);
-
-  return (
-    <Animated.View
-      style={{
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        backgroundColor: active ? color : "#333",
-        opacity: active ? pulse : 0.3,
-        shadowColor: color,
-        shadowOpacity: active ? 0.8 : 0,
-        shadowRadius: 6,
-        shadowOffset: { width: 0, height: 0 },
-        elevation: active ? 4 : 0,
-      }}
-    />
-  );
-}
-
-// ── Hex grid background ──────────────────────────────────────────────────────
-function HexGridBG({ width: w, height: h }: { width: number; height: number }) {
-  const dots = useMemo(() => {
-    const result = [];
-    const spacing = 32;
-    for (let y = 0; y < h; y += spacing) {
-      const offset = Math.floor(y / spacing) % 2 === 0 ? 0 : spacing / 2;
-      for (let x = offset; x < w; x += spacing) {
-        result.push(
-          <Circle key={`${x}-${y}`} cx={x} cy={y} r={0.6} fill="#1A1A1A" opacity={0.5} />
-        );
-      }
-    }
-    return result;
-  }, [w, h]);
-
-  return (
-    <Svg
-      width={w}
-      height={h}
-      style={{ position: "absolute", top: 0, left: 0 }}
-    >
-      {dots}
-    </Svg>
-  );
-}
-
-// ── Activity ticker ──────────────────────────────────────────────────────────
-function ActivityTicker({ events }: { events: string[] }) {
-  const scrollAnim = useRef(new Animated.Value(0)).current;
-  const [idx, setIdx] = useState(0);
-
-  useEffect(() => {
-    if (events.length === 0) return;
-    const interval = setInterval(() => {
-      Animated.sequence([
-        Animated.timing(scrollAnim, {
-          toValue: -20,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scrollAnim, {
-          toValue: 0,
-          duration: 0,
-          useNativeDriver: true,
-        }),
-      ]).start();
-      setIdx((prev) => (prev + 1) % events.length);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [events.length]);
-
-  if (events.length === 0) return null;
-
-  return (
-    <View
-      style={{
-        height: 28,
-        overflow: "hidden",
-        backgroundColor: "#0A0A0A",
-        borderWidth: 1,
-        borderColor: BORDER,
-        borderRadius: 6,
-        paddingHorizontal: 10,
-        justifyContent: "center",
-      }}
-    >
+    <View style={{ height: size * 1.2, overflow: "hidden", justifyContent: "center" }}>
       <Animated.Text
-        style={{
-          color: "#525252",
-          fontSize: 9,
-          fontFamily: "monospace",
-          transform: [{ translateY: scrollAnim }],
-        }}
+        style={[
+          {
+            color,
+            fontSize: size,
+            fontFamily: "monospace",
+            fontWeight: "bold",
+            includeFontPadding: false,
+          },
+          animStyle,
+        ]}
       >
-        {">"} {events[idx]}
+        {digit}
       </Animated.Text>
     </View>
   );
 }
 
-// ── Neon stat card with glow border ──────────────────────────────────────────
-function GlowCard({
-  value,
-  label,
-  sublabel,
-  color = CYAN,
-  large,
-}: {
-  value: string;
-  label: string;
-  sublabel?: string;
-  color?: string;
-  large?: boolean;
-}) {
+function OdometerNumber({ value, color = CYAN, size = 38 }: { value: string; color?: string; size?: number }) {
   return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: CARD_BG,
-        borderWidth: 1,
-        borderColor: color + "30",
-        borderRadius: 10,
-        paddingVertical: large ? 18 : 14,
-        paddingHorizontal: 10,
-        alignItems: "center",
-        shadowColor: color,
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
-        shadowOffset: { width: 0, height: 0 },
-        elevation: 3,
-      }}
-    >
-      <Text
-        style={{
-          color,
-          fontSize: large ? 26 : 20,
-          fontFamily: "monospace",
-          fontWeight: "bold",
-        }}
-      >
-        {value}
-      </Text>
-      <Text
-        style={{
-          color: "#525252",
-          fontSize: 9,
-          fontFamily: "monospace",
-          fontWeight: "bold",
-          letterSpacing: 1.5,
-          marginTop: 4,
-        }}
-      >
-        {label}
-      </Text>
-      {sublabel ? (
-        <Text style={{ color: "#333", fontSize: 8, fontFamily: "monospace", marginTop: 2 }}>
-          {sublabel}
-        </Text>
-      ) : null}
+    <View style={{ flexDirection: "row", alignItems: "center" }}>
+      {value.split("").map((ch, i) => (
+        <ReanimatedDigit key={`${i}-${ch}`} digit={ch} color={color} size={size} />
+      ))}
     </View>
   );
 }
 
-// ── Progress arc (horizontal bar with animated fill) ─────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// PULSING GLOW INDICATOR
+// ═══════════════════════════════════════════════════════════════════════════════
+function PulsingGlow({ active, color }: { active: boolean; color: string }) {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    if (active) {
+      scale.value = withRepeat(
+        withSequence(
+          withTiming(1.4, { duration: 1000 }),
+          withTiming(1, { duration: 1000 })
+        ),
+        -1,
+        true
+      );
+    } else {
+      scale.value = withTiming(1);
+    }
+  }, [active]);
+
+  const outerStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: interpolate(scale.value, [1, 1.4], [0.3, 0.8]),
+  }));
+
+  return (
+    <View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center" }}>
+      <Animated.View
+        style={[
+          {
+            position: "absolute",
+            width: 16,
+            height: 16,
+            borderRadius: 8,
+            backgroundColor: active ? color + "40" : "transparent",
+          },
+          outerStyle,
+        ]}
+      />
+      <View
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: active ? color : "#333",
+        }}
+      />
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEON PROGRESS BAR
+// ═══════════════════════════════════════════════════════════════════════════════
 function NeonProgressBar({
   current,
   target,
@@ -444,127 +390,190 @@ function NeonProgressBar({
   label?: string;
 }) {
   const pct = Math.min((current / target) * 100, 100);
-  const fillAnim = useRef(new Animated.Value(0)).current;
+  const width = useSharedValue(0);
 
   useEffect(() => {
-    Animated.timing(fillAnim, {
-      toValue: pct,
-      duration: 800,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
+    width.value = withTiming(pct, { duration: 800, easing: REasing.out(REasing.cubic) });
   }, [pct]);
 
-  const widthInterp = fillAnim.interpolate({
-    inputRange: [0, 100],
-    outputRange: ["0%", "100%"],
-  });
+  const barStyle = useAnimatedStyle(() => ({
+    width: `${width.value}%`,
+  }));
 
   return (
     <View style={{ marginVertical: 6 }}>
       {label && (
         <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-          <Text style={{ color: "#404040", fontSize: 9, fontFamily: "monospace" }}>{label}</Text>
+          <Text style={{ color: "#333", fontSize: 9, fontFamily: "monospace" }}>{label}</Text>
           <Text style={{ color: color + "80", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>
             {pct.toFixed(2)}%
           </Text>
         </View>
       )}
-      <View
-        style={{
-          height: 4,
-          backgroundColor: "#111",
-          borderRadius: 2,
-          overflow: "hidden",
-        }}
-      >
+      <View style={{ height: 3, backgroundColor: "#0D0D0D", borderRadius: 2, overflow: "hidden" }}>
         <Animated.View
-          style={{
-            height: "100%",
-            width: widthInterp,
-            backgroundColor: color,
-            borderRadius: 2,
-            shadowColor: color,
-            shadowOpacity: 0.5,
-            shadowRadius: 4,
-            shadowOffset: { width: 0, height: 0 },
-          }}
+          style={[
+            {
+              height: "100%",
+              backgroundColor: color,
+              borderRadius: 2,
+              shadowColor: color,
+              shadowOpacity: 0.6,
+              shadowRadius: 6,
+              shadowOffset: { width: 0, height: 0 },
+            },
+            barStyle,
+          ]}
         />
       </View>
     </View>
   );
 }
 
-// ── Info row with separator ──────────────────────────────────────────────────
-function InfoRow({
-  label,
+// ═══════════════════════════════════════════════════════════════════════════════
+// ACTIVITY TICKER — scrolling intel feed
+// ═══════════════════════════════════════════════════════════════════════════════
+function ActivityTicker({ events }: { events: string[] }) {
+  const [idx, setIdx] = useState(0);
+  const translateY = useSharedValue(0);
+  const opacityVal = useSharedValue(1);
+
+  useEffect(() => {
+    if (events.length === 0) return;
+    const interval = setInterval(() => {
+      translateY.value = withTiming(-18, { duration: 200 }, () => {
+        runOnJS(setIdx)((idx + 1) % events.length);
+        translateY.value = 18;
+        translateY.value = withTiming(0, { duration: 200 });
+      });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [events.length, idx]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  if (events.length === 0) return null;
+
+  return (
+    <View
+      style={{
+        height: 28,
+        overflow: "hidden",
+        backgroundColor: "#060606",
+        borderWidth: 1,
+        borderColor: BORDER,
+        borderRadius: 6,
+        paddingHorizontal: 12,
+        justifyContent: "center",
+        marginBottom: 8,
+      }}
+    >
+      <Animated.Text
+        style={[
+          { color: "#333", fontSize: 9, fontFamily: "monospace" },
+          animStyle,
+        ]}
+      >
+        {">"} {events[idx]}
+      </Animated.Text>
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GLOW STAT CARD
+// ═══════════════════════════════════════════════════════════════════════════════
+function GlowCard({
   value,
-  color = "#A3A3A3",
+  label,
+  sublabel,
+  color = CYAN,
+  delay = 0,
 }: {
-  label: string;
   value: string;
+  label: string;
+  sublabel?: string;
   color?: string;
+  delay?: number;
 }) {
   return (
-    <View
+    <Animated.View
+      entering={FadeInDown.delay(delay).duration(500)}
       style={{
-        flexDirection: "row",
-        justifyContent: "space-between",
-        paddingVertical: 7,
-        paddingHorizontal: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: "#111",
+        flex: 1,
+        backgroundColor: CARD_BG,
+        borderWidth: 1,
+        borderColor: color + "20",
+        borderRadius: 10,
+        paddingVertical: 14,
+        paddingHorizontal: 8,
+        alignItems: "center",
+        shadowColor: color,
+        shadowOpacity: 0.12,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 3,
       }}
     >
-      <Text style={{ color: "#404040", fontSize: 10, fontFamily: "monospace" }}>{label}</Text>
-      <Text style={{ color, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+      <Text style={{ color, fontSize: 20, fontFamily: "monospace", fontWeight: "bold" }}>
         {value}
       </Text>
-    </View>
-  );
-}
-
-// ── Section divider ──────────────────────────────────────────────────────────
-function SectionDivider({ title, icon }: { title: string; icon: string }) {
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        marginTop: 24,
-        marginBottom: 12,
-        paddingHorizontal: 2,
-      }}
-    >
-      <Text style={{ fontSize: 12 }}>{icon}</Text>
       <Text
         style={{
-          color: "#333",
-          fontSize: 10,
+          color: "#404040",
+          fontSize: 8,
           fontFamily: "monospace",
           fontWeight: "bold",
-          letterSpacing: 3,
+          letterSpacing: 1.5,
+          marginTop: 4,
         }}
       >
-        {title}
+        {label}
       </Text>
-      <View style={{ flex: 1, height: 1, backgroundColor: BORDER, marginLeft: 8 }} />
+      {sublabel ? (
+        <Text style={{ color: "#262626", fontSize: 7, fontFamily: "monospace", marginTop: 2 }}>
+          {sublabel}
+        </Text>
+      ) : null}
+    </Animated.View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INFO ROW + SECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+function InfoRow({ label, value, color = "#737373" }: { label: string; value: string; color?: string }) {
+  return (
+    <View style={s.infoRow}>
+      <Text style={s.infoLabel}>{label}</Text>
+      <Text style={[s.infoValue, { color }]}>{value}</Text>
     </View>
   );
 }
 
-// ── Number formatting ────────────────────────────────────────────────────────
+function SectionDivider({ title, icon }: { title: string; icon: string }) {
+  return (
+    <View style={s.sectionDiv}>
+      <Text style={{ fontSize: 12 }}>{icon}</Text>
+      <Text style={s.sectionTitle}>{title}</Text>
+      <View style={s.sectionLine} />
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
 function formatFull(n: number): string {
   return n.toLocaleString("en-US");
 }
-
 function formatCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
-
 function formatCost(n: number): string {
   return `$${n.toFixed(2)}`;
 }
@@ -583,19 +592,23 @@ export default function TrainingScreen() {
   const [startPoints, setStartPoints] = useState<number | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [activityLog, setActivityLog] = useState<string[]>([]);
-  const headerPulse = useRef(new Animated.Value(0.6)).current;
 
-  // Header title glow pulse
+  // Header glow pulse
+  const headerGlow = useSharedValue(0.5);
   useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(headerPulse, { toValue: 1, duration: 2000, useNativeDriver: true }),
-        Animated.timing(headerPulse, { toValue: 0.6, duration: 2000, useNativeDriver: true }),
-      ])
+    headerGlow.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 2500 }),
+        withTiming(0.5, { duration: 2500 })
+      ),
+      -1,
+      true
     );
-    anim.start();
-    return () => anim.stop();
   }, []);
+
+  const headerStyle = useAnimatedStyle(() => ({
+    opacity: headerGlow.value,
+  }));
 
   const fetchStats = useCallback(async () => {
     try {
@@ -609,25 +622,18 @@ export default function TrainingScreen() {
       setError(null);
       setLastRefresh(new Date());
 
-      setHistory((prev) => {
-        const next = [...prev, data.qdrant.points_count].slice(-30);
-        return next;
-      });
+      setHistory((prev) => [...prev, data.qdrant.points_count].slice(-30));
 
       if (startPoints === null) {
         setStartPoints(data.qdrant.points_count);
         setStartTime(Date.now());
       }
 
-      // Generate activity events
       const prev = history.length > 0 ? history[history.length - 1] : 0;
       const diff = data.qdrant.points_count - prev;
       if (diff > 0 && prev > 0) {
         setActivityLog((log) =>
-          [
-            `+${diff.toLocaleString()} faces indexed [${new Date().toLocaleTimeString()}]`,
-            ...log,
-          ].slice(0, 20)
+          [`+${diff.toLocaleString()} faces indexed [${new Date().toLocaleTimeString()}]`, ...log].slice(0, 20)
         );
       }
     } catch (e: any) {
@@ -649,7 +655,7 @@ export default function TrainingScreen() {
     setRefreshing(false);
   }, [fetchStats]);
 
-  // ── Computed values ──────────────────────────────────────────────────────
+  // ── Computed ────────────────────────────────────────────────────────────
   const points = stats?.qdrant?.points_count || 0;
   const indexed = stats?.qdrant?.indexed_vectors_count || 0;
 
@@ -687,12 +693,11 @@ export default function TrainingScreen() {
   const pad = isPhone ? 14 : 22;
   const chartW = SCREEN_W - pad * 2 - 2;
 
-  // Activity feed with defaults
   const tickerEvents = activityLog.length > 0
     ? activityLog
     : [
-        "Pipeline active — monitoring face ingestion...",
-        `Qdrant: ${formatCompact(points)} embeddings indexed`,
+        "Pipeline active — monitoring ingestion...",
+        `Qdrant: ${formatCompact(points)} embeddings`,
         vastRunning ? `GPU: ${stats?.vast?.gpu} @ ${formatCost(costPerHr)}/hr` : "No GPU instance",
       ];
 
@@ -701,124 +706,65 @@ export default function TrainingScreen() {
     : "——:——:——";
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#050505" }}>
+    <View style={{ flex: 1, backgroundColor: "#030303" }}>
       <StatusBar style="light" />
 
-      {/* ── Hex grid background ────────────────────────────────────── */}
-      <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: 0.4 }}>
-        <HexGridBG width={SCREEN_W} height={900} />
-      </View>
+      {/* ── Skia particle field ──────────────────────────────────── */}
+      <ParticleField width={SCREEN_W} height={SCREEN_H} />
 
-      {/* ── Scanline effect ────────────────────────────────────────── */}
-      <ScanlineOverlay />
+      {/* ── Skia scanline ────────────────────────────────────────── */}
+      <SkiaScanline width={SCREEN_W} height={SCREEN_H} />
 
       {/* ── Top command bar ────────────────────────────────────────── */}
-      <View
-        style={{
-          height: TOP_BAR_HEIGHT,
-          flexDirection: "row",
-          alignItems: "center",
-          paddingHorizontal: pad,
-          borderBottomWidth: 1,
-          borderBottomColor: CYAN_DIM,
-          backgroundColor: "#080808F0",
-          zIndex: 10,
-        }}
-      >
+      <View style={[s.topBar, { paddingHorizontal: pad }]}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Text style={{ color: "#404040", fontSize: 18, fontFamily: "monospace" }}>{"◁"}</Text>
+          <Text style={{ color: "#333", fontSize: 18, fontFamily: "monospace" }}>{"◁"}</Text>
         </Pressable>
 
         <View style={{ flex: 1, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
-          <PulsingGlow active={vastRunning} color={vastRunning ? GREEN : "#525252"} />
+          <PulsingGlow active={vastRunning} color={vastRunning ? GREEN : "#333"} />
           <Animated.Text
-            style={{
-              color: CYAN,
-              fontSize: 13,
-              fontFamily: "monospace",
-              fontWeight: "bold",
-              letterSpacing: 4,
-              opacity: headerPulse,
-              textShadowColor: CYAN,
-              textShadowRadius: 8,
-            }}
+            style={[
+              {
+                color: CYAN,
+                fontSize: 13,
+                fontFamily: "monospace",
+                fontWeight: "bold",
+                letterSpacing: 5,
+                textShadowColor: CYAN,
+                textShadowRadius: 10,
+              },
+              headerStyle,
+            ]}
           >
             OPS CENTER
           </Animated.Text>
           <PulsingGlow active={qdrantOnline} color={qdrantOnline ? CYAN : RED} />
         </View>
 
-        <Text style={{ color: "#262626", fontSize: 9, fontFamily: "monospace" }}>{timeStr}</Text>
+        <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>{timeStr}</Text>
       </View>
 
       {/* ── Main content ───────────────────────────────────────────── */}
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: pad, paddingBottom: 60 }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={CYAN} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={CYAN} />}
       >
-        {/* Error banner */}
+        {/* Error */}
         {error && (
-          <View
-            style={{
-              backgroundColor: "#1A0505",
-              borderWidth: 1,
-              borderColor: RED + "40",
-              borderRadius: 8,
-              padding: 10,
-              marginBottom: 12,
-            }}
-          >
+          <Animated.View entering={FadeIn.duration(300)} style={s.errorBanner}>
             <Text style={{ color: RED, fontSize: 10, fontFamily: "monospace" }}>
               ⚠ LINK DEGRADED: {error}
             </Text>
-          </View>
+          </Animated.View>
         )}
 
-        {/* ── HERO: Face count odometer ────────────────────────────── */}
-        <View
-          style={{
-            backgroundColor: CARD_BG,
-            borderWidth: 1,
-            borderColor: CYAN + "25",
-            borderRadius: 14,
-            padding: 24,
-            alignItems: "center",
-            marginBottom: 14,
-            shadowColor: CYAN,
-            shadowOpacity: 0.1,
-            shadowRadius: 20,
-            shadowOffset: { width: 0, height: 0 },
-            elevation: 5,
-          }}
-        >
-          <Text
-            style={{
-              color: "#262626",
-              fontSize: 9,
-              fontFamily: "monospace",
-              letterSpacing: 4,
-              marginBottom: 8,
-            }}
-          >
-            FACE DATABASE
-          </Text>
-
-          <OdometerNumber value={formatFull(points)} color={CYAN} size={38} />
-
-          <Text
-            style={{
-              color: "#1A1A1A",
-              fontSize: 9,
-              fontFamily: "monospace",
-              marginTop: 6,
-              letterSpacing: 1,
-            }}
-          >
-            EMBEDDINGS IN QDRANT
-          </Text>
+        {/* ── HERO: Odometer ──────────────────────────────────────── */}
+        <Animated.View entering={FadeInDown.duration(600)} style={s.heroCard}>
+          <Text style={s.heroLabel}>FACE DATABASE</Text>
+          <OdometerNumber value={formatFull(points)} color={CYAN} size={36} />
+          <Text style={s.heroSub}>EMBEDDINGS IN QDRANT</Text>
 
           <NeonProgressBar
             current={points}
@@ -832,86 +778,48 @@ export default function TrainingScreen() {
             color={PURPLE}
             label={`EPIC: ${formatCompact(points)} / ${formatCompact(EPIC_TARGET)}`}
           />
-        </View>
+        </Animated.View>
 
-        {/* ── Live rate cards ──────────────────────────────────────── */}
+        {/* ── Rate cards ──────────────────────────────────────────── */}
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
           <GlowCard
             value={recentRate > 0 ? `${Math.round(recentRate)}` : "—"}
             label="FACES/MIN"
             sublabel="current"
             color={GREEN}
+            delay={100}
           />
           <GlowCard
             value={sessionRate > 0 ? `${Math.round(sessionRate)}` : "—"}
             label="AVG/MIN"
             sublabel="session"
             color={AMBER}
+            delay={200}
           />
           <GlowCard
             value={etaStr}
             label="ETA 1M"
             sublabel="phase 1"
             color={PURPLE}
+            delay={300}
           />
         </View>
 
-        {/* ── Sparkline chart ──────────────────────────────────────── */}
-        <View
-          style={{
-            backgroundColor: CARD_BG,
-            borderWidth: 1,
-            borderColor: BORDER,
-            borderRadius: 10,
-            padding: 12,
-            marginBottom: 10,
-          }}
-        >
-          <Text
-            style={{
-              color: "#262626",
-              fontSize: 9,
-              fontFamily: "monospace",
-              letterSpacing: 2,
-              marginBottom: 8,
-            }}
-          >
-            INGESTION RATE
-          </Text>
-          <SparklineChart data={history} width={chartW - 24} height={80} color={CYAN} />
-        </View>
+        {/* ── Sparkline ───────────────────────────────────────────── */}
+        <Animated.View entering={FadeInDown.delay(400).duration(500)} style={s.chartCard}>
+          <Text style={s.chartLabel}>INGESTION TELEMETRY</Text>
+          <SkiaSparkline data={history} width={chartW - 24} height={90} color={CYAN} />
+        </Animated.View>
 
-        {/* ── Activity ticker ──────────────────────────────────────── */}
+        {/* ── Ticker ──────────────────────────────────────────────── */}
         <ActivityTicker events={tickerEvents} />
 
-        {/* ── GPU Instance ─────────────────────────────────────────── */}
+        {/* ── GPU ─────────────────────────────────────────────────── */}
         <SectionDivider title="GPU COMPUTE" icon="⚡" />
-        <View
-          style={{
-            backgroundColor: CARD_BG,
-            borderWidth: 1,
-            borderColor: vastRunning ? GREEN + "20" : BORDER,
-            borderRadius: 10,
-            overflow: "hidden",
-            shadowColor: vastRunning ? GREEN : "transparent",
-            shadowOpacity: 0.08,
-            shadowRadius: 12,
-            elevation: 2,
-          }}
-        >
+        <View style={[s.panel, vastRunning && { borderColor: GREEN + "15" }]}>
           {stats?.vast ? (
             <>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                  borderBottomWidth: 1,
-                  borderBottomColor: "#111",
-                }}
-              >
+              <View style={s.panelHeader}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <PulsingGlow active={vastRunning} color={vastRunning ? GREEN : AMBER} />
                   <Text
@@ -928,60 +836,35 @@ export default function TrainingScreen() {
                     {stats.vast.status}
                   </Text>
                 </View>
-                <Text style={{ color: "#262626", fontSize: 9, fontFamily: "monospace" }}>
+                <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>
                   #{stats.vast.id}
                 </Text>
               </View>
               <InfoRow label="GPU" value={stats.vast.gpu} color={CYAN} />
               <InfoRow label="Cost/hr" value={formatCost(costPerHr)} />
-              <InfoRow
-                label="Uptime"
-                value={uptimeHrs > 0 ? `${uptimeHrs.toFixed(1)}h` : "—"}
-              />
+              <InfoRow label="Uptime" value={uptimeHrs > 0 ? `${uptimeHrs.toFixed(1)}h` : "—"} />
               <InfoRow
                 label="Spent"
                 value={formatCost(estCost)}
                 color={estCost > 8 ? RED : estCost > 4 ? AMBER : GREEN}
               />
               {costPerFace > 0 && (
-                <InfoRow
-                  label="Cost/Face"
-                  value={`$${costPerFace.toFixed(6)}`}
-                  color="#737373"
-                />
+                <InfoRow label="Cost/Face" value={`$${costPerFace.toFixed(6)}`} />
               )}
             </>
           ) : (
             <View style={{ padding: 24, alignItems: "center" }}>
-              <Text style={{ color: "#262626", fontSize: 10, fontFamily: "monospace" }}>
+              <Text style={{ color: "#1A1A1A", fontSize: 10, fontFamily: "monospace" }}>
                 NO ACTIVE GPU INSTANCE
               </Text>
             </View>
           )}
         </View>
 
-        {/* ── Vector Database ──────────────────────────────────────── */}
+        {/* ── Qdrant ──────────────────────────────────────────────── */}
         <SectionDivider title="VECTOR DATABASE" icon="◆" />
-        <View
-          style={{
-            backgroundColor: CARD_BG,
-            borderWidth: 1,
-            borderColor: qdrantOnline ? CYAN + "15" : RED + "20",
-            borderRadius: 10,
-            overflow: "hidden",
-          }}
-        >
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              paddingHorizontal: 14,
-              paddingVertical: 10,
-              borderBottomWidth: 1,
-              borderBottomColor: "#111",
-            }}
-          >
+        <View style={[s.panel, qdrantOnline && { borderColor: CYAN + "10" }]}>
+          <View style={s.panelHeader}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <PulsingGlow active={qdrantOnline} color={qdrantOnline ? CYAN : RED} />
               <Text
@@ -996,9 +879,7 @@ export default function TrainingScreen() {
                 {stats?.qdrant?.status || "OFFLINE"}
               </Text>
             </View>
-            <Text style={{ color: "#262626", fontSize: 9, fontFamily: "monospace" }}>
-              QDRANT
-            </Text>
+            <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>QDRANT</Text>
           </View>
           <InfoRow label="Total Vectors" value={formatFull(points)} color={CYAN} />
           <InfoRow label="Indexed" value={formatFull(indexed)} color={GREEN} />
@@ -1007,45 +888,22 @@ export default function TrainingScreen() {
           <InfoRow label="Distance" value="Cosine" />
         </View>
 
-        {/* ── Pipeline Specs ───────────────────────────────────────── */}
+        {/* ── Pipeline ────────────────────────────────────────────── */}
         <SectionDivider title="PIPELINE" icon="▶" />
-        <View
-          style={{
-            backgroundColor: CARD_BG,
-            borderWidth: 1,
-            borderColor: BORDER,
-            borderRadius: 10,
-            overflow: "hidden",
-          }}
-        >
+        <View style={s.panel}>
           <InfoRow label="Source" value="LAION-Face (50M)" color={CYAN} />
-          <InfoRow label="Extracted URLs" value="2.4M (16/128)" />
-          <InfoRow label="URL Yield" value="~29%" color={AMBER} />
+          <InfoRow label="Extracted" value="2.4M (16/128)" />
+          <InfoRow label="Yield" value="~29%" color={AMBER} />
           <InfoRow label="Model" value="ArcFace buffalo_l" />
-          <InfoRow label="Embedding" value="512-dim GPU" />
-          <InfoRow label="Downloaders" value="128 parallel" />
+          <InfoRow label="Embed" value="512-dim GPU" />
+          <InfoRow label="Workers" value="128 parallel" />
           <InfoRow label="Refresh" value={`${AUTO_REFRESH_MS / 1000}s`} />
         </View>
 
-        {/* ── Architecture diagram ─────────────────────────────────── */}
+        {/* ── Topology ────────────────────────────────────────────── */}
         <SectionDivider title="TOPOLOGY" icon="◎" />
-        <View
-          style={{
-            backgroundColor: CARD_BG,
-            borderWidth: 1,
-            borderColor: BORDER,
-            borderRadius: 10,
-            padding: 14,
-          }}
-        >
-          <Text
-            style={{
-              color: "#262626",
-              fontSize: 9,
-              fontFamily: "monospace",
-              lineHeight: 15,
-            }}
-          >
+        <View style={[s.panel, { padding: 14 }]}>
+          <Text style={s.topoText}>
             {`┌─ Vast.ai RTX 3090 ───────┐    ┌─ GCP VM ──────┐\n`}
             {`│  Download LAION URLs      │───▶│  Qdrant :6333  │\n`}
             {`│  ArcFace GPU embed        │    │  (SSH tunnel)  │\n`}
@@ -1061,3 +919,130 @@ export default function TrainingScreen() {
     </View>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STYLES
+// ═══════════════════════════════════════════════════════════════════════════════
+const s = StyleSheet.create({
+  topBar: {
+    height: TOP_BAR_HEIGHT,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: CYAN + "15",
+    backgroundColor: "#030303F0",
+    zIndex: 10,
+  },
+  errorBanner: {
+    backgroundColor: "#0D0505",
+    borderWidth: 1,
+    borderColor: RED + "30",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  heroCard: {
+    backgroundColor: CARD_BG,
+    borderWidth: 1,
+    borderColor: CYAN + "18",
+    borderRadius: 14,
+    padding: 24,
+    alignItems: "center",
+    marginBottom: 14,
+    shadowColor: CYAN,
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 5,
+  },
+  heroLabel: {
+    color: "#1A1A1A",
+    fontSize: 9,
+    fontFamily: "monospace",
+    letterSpacing: 4,
+    marginBottom: 8,
+  },
+  heroSub: {
+    color: "#111",
+    fontSize: 9,
+    fontFamily: "monospace",
+    marginTop: 6,
+    letterSpacing: 1,
+  },
+  chartCard: {
+    backgroundColor: CARD_BG,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+  },
+  chartLabel: {
+    color: "#1A1A1A",
+    fontSize: 9,
+    fontFamily: "monospace",
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  panel: {
+    backgroundColor: CARD_BG,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  panelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#0D0D0D",
+  },
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#0A0A0A",
+  },
+  infoLabel: {
+    color: "#333",
+    fontSize: 10,
+    fontFamily: "monospace",
+  },
+  infoValue: {
+    fontSize: 10,
+    fontFamily: "monospace",
+    fontWeight: "bold",
+  },
+  sectionDiv: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 24,
+    marginBottom: 12,
+    paddingHorizontal: 2,
+  },
+  sectionTitle: {
+    color: "#262626",
+    fontSize: 10,
+    fontFamily: "monospace",
+    fontWeight: "bold",
+    letterSpacing: 3,
+  },
+  sectionLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: BORDER,
+    marginLeft: 8,
+  },
+  topoText: {
+    color: "#1A1A1A",
+    fontSize: 9,
+    fontFamily: "monospace",
+    lineHeight: 15,
+  },
+});
