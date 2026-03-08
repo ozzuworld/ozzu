@@ -19,21 +19,13 @@ import {
   Path,
   Rect as SkRect,
   vec,
-  Group,
   Blur,
-  Paint,
-  Skia,
-  useClockValue,
-  useDerivedValue,
-  useComputedValue,
-  RoundedRect,
-  Text as SkText,
-  useFont,
-  Shadow,
 } from "@shopify/react-native-skia";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useDerivedValue,
+  useFrameCallback,
   withTiming,
   withRepeat,
   withSequence,
@@ -84,9 +76,46 @@ interface TrainingStats {
 // ═══════════════════════════════════════════════════════════════════════════════
 // SKIA PARTICLE FIELD — flowing data particles
 // ═══════════════════════════════════════════════════════════════════════════════
+interface ParticleData {
+  x: number;
+  y: number;
+  speed: number;
+  size: number;
+  opacity: number;
+  drift: number;
+}
+
+function Particle({
+  p,
+  i,
+  clock,
+  h,
+}: {
+  p: ParticleData;
+  i: number;
+  clock: Animated.SharedValue<number>;
+  h: number;
+}) {
+  const cy = useDerivedValue(() => {
+    const t = clock.value / 16;
+    return (p.y + t * p.speed) % h;
+  });
+  const cx = useDerivedValue(() => {
+    const t = clock.value / 16;
+    return p.x + Math.sin(t * 0.01 + i) * 20 * p.drift;
+  });
+  const opacity = useDerivedValue(() => {
+    const y = (p.y + (clock.value / 16) * p.speed) % h;
+    const fade = y < 40 ? y / 40 : y > h - 40 ? (h - y) / 40 : 1;
+    return p.opacity * fade;
+  });
+
+  return <Circle cx={cx} cy={cy} r={p.size} opacity={opacity} color={CYAN} />;
+}
+
 function ParticleField({ width: w, height: h }: { width: number; height: number }) {
   const particles = useMemo(() => {
-    const pts = [];
+    const pts: ParticleData[] = [];
     for (let i = 0; i < 40; i++) {
       pts.push({
         x: Math.random() * w,
@@ -100,29 +129,16 @@ function ParticleField({ width: w, height: h }: { width: number; height: number 
     return pts;
   }, [w, h]);
 
-  const clock = useClockValue();
+  const clock = useSharedValue(0);
+  useFrameCallback((info) => {
+    clock.value = info.timeSinceFirstFrame;
+  });
 
   return (
     <Canvas style={{ width: w, height: h, position: "absolute", top: 0, left: 0 }}>
-      {particles.map((p, i) => {
-        const cy = useDerivedValue(() => {
-          const t = clock.current / 16;
-          return (p.y + t * p.speed) % h;
-        }, [clock]);
-        const cx = useDerivedValue(() => {
-          const t = clock.current / 16;
-          return p.x + Math.sin(t * 0.01 + i) * 20 * p.drift;
-        }, [clock]);
-        const opacity = useDerivedValue(() => {
-          const y = (p.y + clock.current / 16 * p.speed) % h;
-          const fade = y < 40 ? y / 40 : y > h - 40 ? (h - y) / 40 : 1;
-          return p.opacity * fade;
-        }, [clock]);
-
-        return (
-          <Circle key={i} cx={cx} cy={cy} r={p.size} opacity={opacity} color={CYAN} />
-        );
-      })}
+      {particles.map((p, i) => (
+        <Particle key={i} p={p} i={i} clock={clock} h={h} />
+      ))}
     </Canvas>
   );
 }
@@ -131,11 +147,14 @@ function ParticleField({ width: w, height: h }: { width: number; height: number 
 // SKIA SCANLINE — CRT sweep effect
 // ═══════════════════════════════════════════════════════════════════════════════
 function SkiaScanline({ width: w, height: h }: { width: number; height: number }) {
-  const clock = useClockValue();
+  const clock = useSharedValue(0);
+  useFrameCallback((info) => {
+    clock.value = info.timeSinceFirstFrame;
+  });
 
   const y = useDerivedValue(() => {
-    return (clock.current / 8) % (h + 100) - 50;
-  }, [clock]);
+    return (clock.value / 8) % (h + 100) - 50;
+  });
 
   return (
     <Canvas
