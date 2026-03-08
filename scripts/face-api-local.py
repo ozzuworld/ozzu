@@ -88,17 +88,29 @@ def queue_for_insert(embedding, metadata):
     from qdrant_client.models import PointStruct
     face_id = metadata.get("face_id") or f"sat-{uuid.uuid4().hex[:8]}"
     fid = str(uuid.uuid5(uuid.NAMESPACE_URL, face_id))
+    payload = {
+        "profile_id": metadata.get("profile_id", ""),
+        "source_url": metadata.get("source_url", ""),
+        "source_platform": metadata.get("source_platform", ""),
+        "label": metadata.get("label", ""),
+        "bbox": metadata.get("bbox", []),
+        "det_score": metadata.get("det_score", 0),
+    }
+    # Context fields (Phase 1: Identity Resolution)
+    for ctx_field in ("page_title", "alt_text", "nearby_text", "meta_description", "domain", "page_url"):
+        val = metadata.get(ctx_field)
+        if val:
+            payload[ctx_field] = val[:500]  # cap at 500 chars
+    if metadata.get("source_url") and not payload.get("domain"):
+        try:
+            from urllib.parse import urlparse
+            payload["domain"] = urlparse(metadata["source_url"]).netloc
+        except Exception:
+            pass
     point = PointStruct(
         id=fid,
         vector=embedding,
-        payload={
-            "profile_id": metadata.get("profile_id", ""),
-            "source_url": metadata.get("source_url", ""),
-            "source_platform": metadata.get("source_platform", ""),
-            "label": metadata.get("label", ""),
-            "bbox": metadata.get("bbox", []),
-            "det_score": metadata.get("det_score", 0),
-        },
+        payload=payload,
     )
     with _queue_lock:
         _insert_queue.append(point)
@@ -256,14 +268,19 @@ def pipeline_process_urls(items):
             if not faces:
                 return "failed"
             face = faces[0]
-            queue_for_insert(face["embedding"], {
+            meta = {
                 "label": item.get("label", ""),
                 "source_platform": item.get("source_platform", ""),
                 "source_url": url,
                 "face_id": f"sat-{uuid.uuid4().hex[:8]}",
                 "bbox": face["bbox"],
                 "det_score": face["det_score"],
-            })
+            }
+            # Pass through context fields if provided
+            for ctx_field in ("page_title", "alt_text", "nearby_text", "meta_description", "domain", "page_url"):
+                if item.get(ctx_field):
+                    meta[ctx_field] = item[ctx_field]
+            queue_for_insert(face["embedding"], meta)
             return "indexed"
         except Exception:
             return "failed"
@@ -358,6 +375,11 @@ def create_app():
         source_url: str = Form(""),
         profile_id: str = Form(""),
         face_id: str = Form(None),
+        page_title: str = Form(""),
+        alt_text: str = Form(""),
+        nearby_text: str = Form(""),
+        meta_description: str = Form(""),
+        page_url: str = Form(""),
     ):
         face = None
         if base64_image:
@@ -375,7 +397,7 @@ def create_app():
         if not face:
             return {"ok": False, "indexed": 0, "error": "No face detected"}
 
-        fid = queue_for_insert(face["embedding"], {
+        meta = {
             "label": label,
             "source_platform": source_platform,
             "source_url": source_url or image_url or "",
@@ -383,7 +405,13 @@ def create_app():
             "face_id": face_id or f"sat-{uuid.uuid4().hex[:8]}",
             "bbox": face["bbox"],
             "det_score": face["det_score"],
-        })
+        }
+        if page_title: meta["page_title"] = page_title
+        if alt_text: meta["alt_text"] = alt_text
+        if nearby_text: meta["nearby_text"] = nearby_text
+        if meta_description: meta["meta_description"] = meta_description
+        if page_url: meta["page_url"] = page_url
+        fid = queue_for_insert(face["embedding"], meta)
         return {"ok": True, "indexed": 1, "face_id": fid, "det_score": face["det_score"]}
 
     @app.post("/batch")
@@ -393,6 +421,37 @@ def create_app():
         items = json.loads(batch)
         results = pipeline_process_urls(items)
         return results
+
+    @app.post("/enrich")
+    async def enrich_endpoint(batch: str = Form(...)):
+        """Enrich existing Qdrant vectors with context metadata.
+        batch: JSON array of {point_id, page_title, alt_text, nearby_text, meta_description, domain, page_url}
+        Updates payload fields without re-embedding."""
+        items = json.loads(batch)
+        if not items:
+            return {"enriched": 0}
+        try:
+            from qdrant_client.models import SetPayloadOperation, SetPayload, PointIdsList
+            client = get_qdrant()
+            enriched = 0
+            for item in items:
+                pid = item.get("point_id")
+                if not pid:
+                    continue
+                payload_update = {}
+                for field in ("page_title", "alt_text", "nearby_text", "meta_description", "domain", "page_url"):
+                    if item.get(field):
+                        payload_update[field] = item[field][:500]
+                if payload_update:
+                    client.set_payload(
+                        collection_name=COLLECTION,
+                        payload=payload_update,
+                        points=[pid],
+                    )
+                    enriched += 1
+            return {"enriched": enriched, "total": len(items)}
+        except Exception as e:
+            return {"error": str(e), "enriched": 0}
 
     @app.post("/flush")
     async def flush_endpoint():

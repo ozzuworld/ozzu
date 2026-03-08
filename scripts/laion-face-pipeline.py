@@ -108,7 +108,21 @@ async def send_batch_to_face_api(session, urls, batch_num):
     """Send a batch of image URLs to dev-01 face API for processing.
     Uses the /batch endpoint which expects Form data with JSON batch string."""
     try:
-        items = [{'url': u['url'], 'label': u.get('caption', '')[:100], 'source_platform': 'laion'} for u in urls]
+        items = []
+        for u in urls:
+            entry = {
+                'url': u['url'],
+                'label': u.get('caption', '')[:100],
+                'source_platform': 'laion',
+                'nearby_text': u.get('caption', '')[:500],
+            }
+            # Extract domain from URL for context
+            try:
+                from urllib.parse import urlparse
+                entry['domain'] = urlparse(u['url']).netloc
+            except Exception:
+                pass
+            items.append(entry)
         form_data = aiohttp.FormData()
         form_data.add_field('batch', json.dumps(items))
 

@@ -289,6 +289,45 @@ def make_request(url, headers=None, timeout=15):
 
 # ── Search Engines (all return list of image URLs) ──
 
+def extract_page_context(url, timeout=6):
+    """Fetch a page and extract context around images: title, meta description, nearby text.
+    Returns dict with context fields or empty dict on failure."""
+    try:
+        resp = make_request(url, timeout=timeout)
+        html = resp.read().decode("utf-8", errors="ignore")
+        ctx = {}
+        # Page title
+        title_m = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
+        if title_m:
+            ctx["page_title"] = title_m.group(1).strip()[:300]
+        # Meta description
+        desc_m = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)', html, re.IGNORECASE)
+        if not desc_m:
+            desc_m = re.search(r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']description', html, re.IGNORECASE)
+        if desc_m:
+            ctx["meta_description"] = desc_m.group(1).strip()[:500]
+        # OG description fallback
+        if not ctx.get("meta_description"):
+            og_m = re.search(r'<meta[^>]*property=["\']og:description["\'][^>]*content=["\']([^"\']+)', html, re.IGNORECASE)
+            if og_m:
+                ctx["meta_description"] = og_m.group(1).strip()[:500]
+        # Extract text content (strip tags, first 1000 chars)
+        text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()[:1000]
+        if text:
+            ctx["nearby_text"] = text[:500]
+        ctx["page_url"] = url
+        try:
+            ctx["domain"] = urllib.parse.urlparse(url).netloc
+        except Exception:
+            pass
+        return ctx
+    except Exception:
+        return {}
+
+
 def scrape_google_images(name):
     """Google Images — residential IP advantage"""
     results = []
@@ -446,7 +485,8 @@ def discover_names_from_wikipedia():
 
 def index_batch(urls_with_meta):
     """Index a batch of images. Uses local face API batch endpoint if available,
-    otherwise falls back to individual bridge calls."""
+    otherwise falls back to individual bridge calls.
+    Each item is (url, label, source) or (url, label, source, context_dict)."""
     local = use_local_api()
 
     if local:
@@ -457,8 +497,16 @@ def index_batch(urls_with_meta):
 
         for i in range(0, len(urls_with_meta), CHUNK):
             chunk = urls_with_meta[i:i + CHUNK]
-            items = [{"url": url, "label": label, "source_platform": f"satellite_{source}"}
-                     for url, label, source in chunk]
+            items = []
+            for item in chunk:
+                url, label, source = item[0], item[1], item[2]
+                entry = {"url": url, "label": label, "source_platform": f"satellite_{source}"}
+                # Attach context fields if present (4th element)
+                if len(item) > 3 and isinstance(item[3], dict):
+                    for k, v in item[3].items():
+                        if v:
+                            entry[k] = v
+                items.append(entry)
             result = local_face_batch(items)
             total_indexed += result.get("indexed", 0)
 
@@ -519,11 +567,25 @@ def process_name(name):
 
     log(f"  [total] {len(unique)} unique — {name}")
 
+    # Derive context from image URL domain + label (lightweight, no extra HTTP)
+    # For images from known domains, infer context without fetching
+    enriched = []
+    for url, label, source in unique:
+        ctx = {}
+        try:
+            domain = urllib.parse.urlparse(url).netloc
+            ctx["domain"] = domain
+        except Exception:
+            pass
+        # The label IS the name we searched for — that's context
+        ctx["page_title"] = f"{label} — {source} image search"
+        enriched.append((url, label, source, ctx))
+
     # Index in parallel
-    if unique:
-        indexed, processed = index_batch(unique)
+    if enriched:
+        indexed, processed = index_batch(enriched)
         log(f"  [indexed] {indexed}/{processed} — {name}")
-        return indexed, processed, len(unique)
+        return indexed, processed, len(enriched)
 
     return 0, 0, 0
 

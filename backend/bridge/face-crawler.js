@@ -99,6 +99,12 @@ async function indexImageUrl(imageUrl, metadata = {}) {
     if (metadata.source_url) form.append("source_url", metadata.source_url);
     if (metadata.source_platform) form.append("source_platform", metadata.source_platform);
     if (metadata.label) form.append("label", metadata.label);
+    // Context fields for Identity Resolution
+    if (metadata.page_title) form.append("page_title", metadata.page_title);
+    if (metadata.alt_text) form.append("alt_text", metadata.alt_text);
+    if (metadata.nearby_text) form.append("nearby_text", metadata.nearby_text);
+    if (metadata.meta_description) form.append("meta_description", metadata.meta_description);
+    if (metadata.page_url) form.append("page_url", metadata.page_url);
 
     const apiRes = await fetch(`${FACE_API}/index`, {
       method: "POST",
@@ -163,10 +169,14 @@ async function crawlWikipedia() {
           if (imageUrl.match(/\.(svg|gif)$/i)) continue;
 
           processed++;
+          const wikiUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`;
           const result = await indexImageUrl(imageUrl, {
-            source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
+            source_url: wikiUrl,
             source_platform: "wikipedia",
             label: page.title,
+            page_title: `${page.title} - Wikipedia`,
+            page_url: wikiUrl,
+            nearby_text: `Wikipedia biography of ${page.title}`,
           });
 
           if (result?.indexed > 0) {
@@ -229,10 +239,14 @@ async function crawlCommons() {
         const imageUrl = commonsUrl(imgName);
 
         processed++;
+        const commonsPageUrl = `https://commons.wikimedia.org/wiki/${encodeURIComponent(file.title)}`;
         const result = await indexImageUrl(imageUrl, {
-          source_url: `https://commons.wikimedia.org/wiki/${encodeURIComponent(file.title)}`,
+          source_url: commonsPageUrl,
           source_platform: "wikimedia_commons",
           label: personName,
+          page_title: `${personName} - Wikimedia Commons`,
+          page_url: commonsPageUrl,
+          alt_text: file.title.replace("File:", "").replace(/\.[^.]+$/, "").replace(/_/g, " "),
         });
 
         if (result?.indexed > 0) {
@@ -298,10 +312,14 @@ async function crawlReddit() {
         if (!imageUrl.match(/\.(jpg|jpeg|png)($|\?)/i) && !imageUrl.includes("i.redd.it") && !imageUrl.includes("i.imgur.com")) continue;
 
         processed++;
+        const redditUrl = `https://reddit.com${d.permalink}`;
         const result = await indexImageUrl(imageUrl, {
-          source_url: `https://reddit.com${d.permalink}`,
+          source_url: redditUrl,
           source_platform: "reddit",
           label: d.title?.substring(0, 100) || d.author || "",
+          page_title: d.title?.substring(0, 200) || "",
+          page_url: redditUrl,
+          nearby_text: `r/${sub} — ${d.title || ""} — posted by u/${d.author || "unknown"}`.substring(0, 500),
         });
 
         if (result?.indexed > 0) {
@@ -378,11 +396,21 @@ async function crawlNews() {
         // Try to extract the person's name from the title
         const label = item.title.substring(0, 100);
 
+        // Extract page context for identity resolution
+        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+        const descMatch = html.match(/<meta[^>]*name="description"[^>]*content="([^"]+)"/i) ||
+                          html.match(/<meta[^>]*content="([^"]+)"[^>]*name="description"/i);
+        const ogTitleMatch = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]+)"/i);
+
         processed++;
         const result = await indexImageUrl(ogMatch[1], {
           source_url: item.url,
           source_platform: "news",
           label,
+          page_title: (ogTitleMatch?.[1] || titleMatch?.[1] || item.title).substring(0, 300),
+          page_url: item.url,
+          meta_description: descMatch?.[1]?.substring(0, 500) || "",
+          alt_text: ogMatch[1].split("/").pop()?.replace(/[-_]/g, " ")?.substring(0, 200) || "",
         });
 
         if (result?.indexed > 0) {
@@ -432,13 +460,22 @@ async function crawlNamedPeople() {
       const data = await res.json();
 
       for (const page of Object.values(data.query?.pages || {})) {
+        const pageTitle = page.title || name;
+        const wikiUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(pageTitle)}`;
+        const ctx = {
+          page_title: `${pageTitle} - Wikipedia`,
+          page_url: wikiUrl,
+          nearby_text: `Wikipedia article about ${pageTitle}`,
+        };
+
         // Main page image
         if (page.original?.source) {
           processed++;
           const result = await indexImageUrl(page.original.source, {
-            source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
+            source_url: wikiUrl,
             source_platform: "wikipedia",
-            label: page.title || name,
+            label: pageTitle,
+            ...ctx,
           });
           if (result?.indexed > 0) {
             indexed++;
@@ -459,9 +496,11 @@ async function crawlNamedPeople() {
 
           processed++;
           const result = await indexImageUrl(imageUrl, {
-            source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title || name)}`,
+            source_url: wikiUrl,
             source_platform: "wikipedia",
-            label: page.title || name,
+            label: pageTitle,
+            ...ctx,
+            alt_text: imgName.replace(/\.[^.]+$/, "").replace(/_/g, " "),
           });
           if (result?.indexed > 0) {
             indexed++;
@@ -488,12 +527,16 @@ async function crawlNamedPeople() {
               if (_stopRequested) break;
               if (!file.title.match(/\.(jpg|jpeg|png)$/i)) continue;
               const imgName = file.title.replace("File:", "");
+              const commonsPageUrl = `https://commons.wikimedia.org/wiki/${encodeURIComponent(file.title)}`;
 
               processed++;
               const result = await indexImageUrl(commonsUrl(imgName), {
-                source_url: `https://commons.wikimedia.org/wiki/${encodeURIComponent(file.title)}`,
+                source_url: commonsPageUrl,
                 source_platform: "wikimedia_commons",
                 label: name,
+                page_title: `${name} - Wikimedia Commons`,
+                page_url: commonsPageUrl,
+                alt_text: imgName.replace(/\.[^.]+$/, "").replace(/_/g, " "),
               });
               if (result?.indexed > 0) {
                 indexed++;
