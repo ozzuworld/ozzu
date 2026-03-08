@@ -15,7 +15,7 @@ export interface GestureAction {
 const GESTURE_ACTIONS: Record<string, GestureAction> = {
   pinch: { label: "TOGGLE", icon: "\u{1F4A1}" },
   grab: { label: "DIM", icon: "\u{1F506}" },
-  open_palm: { label: "STOP", icon: "\u{1F6D1}" },
+  open_palm: { label: "CAPTURE", icon: "\u{1F4F8}" },
   thumbs_up: { label: "OK", icon: "\u{2705}" },
   peace: { label: "CAPTURE", icon: "\u{1F4F8}" },
   ok_sign: { label: "CONFIRM", icon: "\u{1F44C}" },

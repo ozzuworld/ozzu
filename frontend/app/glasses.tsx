@@ -35,6 +35,7 @@ import { loadCalibration } from "../lib/device-map";
 import SettingsSheet from "../components/glasses/SettingsSheet";
 import FaceMatchOverlay, { type FaceMatch } from "../components/glasses/FaceMatchOverlay";
 import { searchCedulaFace, scanMatchCedula } from "../lib/bridge-api";
+import PhotoCaptureOverlay, { type CapturedPhoto } from "../components/glasses/PhotoCaptureOverlay";
 
 type Quality = "low" | "medium" | "high";
 
@@ -58,7 +59,7 @@ export default function GlassesScreen() {
   const [quality, setQuality] = useState<Quality>("medium");
   const [frameData, setFrameData] = useState<string | null>(null);
   const [frameCount, setFrameCount] = useState(0);
-  const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
+  const [capturedPhoto, setCapturedPhoto] = useState<CapturedPhoto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(false);
   const [diagnostics, setDiagnostics] = useState<Record<string, any> | null>(null);
@@ -204,6 +205,14 @@ export default function GlassesScreen() {
   // Gesture command handler
   useEffect(() => {
     gestureManager.current.setCallback((command: GestureCommand) => {
+      // Palm gesture → capture photo (always, regardless of target mode)
+      if (command.gesture === "open_palm") {
+        handleCapture();
+        setLastAction({ label: "CAPTURE", icon: "\u{1F4F8}" });
+        if (lastActionTimer.current) clearTimeout(lastActionTimer.current);
+        lastActionTimer.current = setTimeout(() => setLastAction(null), 1500);
+        return;
+      }
       // Targeted mode: send to specific HA entity
       const lock = targetEngine.current.getLockedTarget();
       if (targetMode && lock) {
@@ -567,7 +576,10 @@ export default function GlassesScreen() {
         }
       }),
       Glasses.onPhotoCaptured((event) => {
-        setCapturedPhoto(event.data);
+        const photo: CapturedPhoto = { data: event.data, timestamp: Date.now() };
+        setCapturedPhoto(photo);
+        // Audio feedback through glasses speakers
+        Glasses.speakFeedback("Photo captured");
         // Forward photo to bridge
         if (connectedRef.current) {
           bridgeRef.current.sendGlassesPhoto(event.data);
@@ -1199,27 +1211,11 @@ export default function GlassesScreen() {
           </TVPressable>
         )}
 
-        {/* Captured photo toast */}
-        {capturedPhoto && (
-          <TVPressable
-            onPress={() => setCapturedPhoto(null)}
-            style={{
-              position: "absolute",
-              top: insets.top + 28,
-              right: 12,
-              borderRadius: 8,
-              borderWidth: 1,
-              borderColor: "#A855F7",
-              overflow: "hidden",
-            }}
-          >
-            <Image
-              source={{ uri: `data:image/jpeg;base64,${capturedPhoto}` }}
-              style={{ width: 80, height: 60 }}
-              resizeMode="cover"
-            />
-          </TVPressable>
-        )}
+        {/* Full-screen photo capture overlay */}
+        <PhotoCaptureOverlay
+          photo={capturedPhoto}
+          onDismiss={() => setCapturedPhoto(null)}
+        />
       </View>
 
       {/* === Bottom: stop button only (like iOS camera shutter) === */}
