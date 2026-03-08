@@ -1,6 +1,7 @@
 // GlassesProvider — background glasses engine
-// Runs connection, streaming, and gesture detection without taking over the screen.
+// Runs connection, streaming, gesture detection, and device control.
 // Photo capture overlay renders globally on top of whatever screen is active.
+// Gesture → Home Control: thumbs_up=ON, grab=OFF, pinch=toggle, swipe=analog
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { AppState } from "react-native";
@@ -10,8 +11,16 @@ import { detectGesture, resetSwipeTracking, type GestureResult } from "./gesture
 import { GestureCommandManager, type GestureCommand } from "./gesture-commands";
 import { BridgeSession, type BridgeCallbacks } from "./bridge-session";
 import PhotoCaptureOverlay, { type CapturedPhoto } from "../components/glasses/PhotoCaptureOverlay";
+import { useHA } from "./ha-context";
 
 type ConnectionState = Glasses.ConnectionState;
+
+// Focused device — set by any screen to indicate what device gestures should target
+export interface FocusedDevice {
+  entityId: string;
+  domain: string; // "switch", "climate", "vacuum", "media_player", etc.
+  name: string; // human-readable for audio feedback
+}
 
 interface GlassesContextValue {
   connectionState: ConnectionState;
@@ -20,9 +29,12 @@ interface GlassesContextValue {
   isStreaming: boolean;
   fps: number;
   error: string | null;
+  focusedDevice: FocusedDevice | null;
+  lastGestureAction: string | null; // e.g. "AC → ON" for UI feedback
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   capturePhoto: () => Promise<void>;
+  setFocusedDevice: (device: FocusedDevice | null) => void;
 }
 
 const GlassesContext = createContext<GlassesContextValue>({
@@ -32,9 +44,12 @@ const GlassesContext = createContext<GlassesContextValue>({
   isStreaming: false,
   fps: 0,
   error: null,
+  focusedDevice: null,
+  lastGestureAction: null,
   connect: async () => {},
   disconnect: async () => {},
   capturePhoto: async () => {},
+  setFocusedDevice: () => {},
 });
 
 export function useGlasses() {
@@ -47,6 +62,18 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
   const [capturedPhoto, setCapturedPhoto] = useState<CapturedPhoto | null>(null);
+  const [focusedDevice, setFocusedDevice] = useState<FocusedDevice | null>(null);
+  const [lastGestureAction, setLastGestureAction] = useState<string | null>(null);
+
+  const { callService, entities } = useHA();
+  const callServiceRef = useRef(callService);
+  const entitiesRef = useRef(entities);
+  const focusedDeviceRef = useRef<FocusedDevice | null>(null);
+
+  // Keep refs in sync to avoid stale closures in gesture callback
+  useEffect(() => { callServiceRef.current = callService; }, [callService]);
+  useEffect(() => { entitiesRef.current = entities; }, [entities]);
+  useEffect(() => { focusedDeviceRef.current = focusedDevice; }, [focusedDevice]);
 
   const bridgeRef = useRef(new BridgeSession());
   const connectedRef = useRef(false);
@@ -55,7 +82,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
   const processingFrame = useRef(false);
   const frameCountRef = useRef(0);
   const lastFrameTimeRef = useRef(0);
-  const frameUpdatePending = useRef(false);
   const connectionStateRef = useRef<ConnectionState>("disconnected");
   const streamingRef = useRef(false);
 
@@ -65,6 +91,131 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
   // Keep refs in sync
   useEffect(() => { connectionStateRef.current = connectionState; }, [connectionState]);
   useEffect(() => { streamingRef.current = isStreaming; }, [isStreaming]);
+
+  // Clear gesture action feedback after 2s
+  useEffect(() => {
+    if (!lastGestureAction) return;
+    const t = setTimeout(() => setLastGestureAction(null), 2000);
+    return () => clearTimeout(t);
+  }, [lastGestureAction]);
+
+  // ── Execute gesture on focused device ──
+  const executeGestureAction = useCallback((command: GestureCommand) => {
+    const device = focusedDeviceRef.current;
+    if (!device) return;
+
+    const e = entitiesRef.current[device.entityId];
+    if (!e) return;
+
+    const isOn = e.state === "on" || e.state === "playing" || e.state === "cleaning"
+      || e.state === "cool" || e.state === "heat" || e.state === "auto";
+
+    let action: string | null = null;
+    let feedbackText = "";
+
+    switch (command.gesture) {
+      case "thumbs_up": {
+        // Turn ON
+        if (isOn) {
+          feedbackText = `${device.name} already on`;
+        } else {
+          if (device.domain === "climate") {
+            callServiceRef.current("climate", "turn_on", {}, { entity_id: device.entityId });
+          } else if (device.domain === "vacuum") {
+            callServiceRef.current("vacuum", "start", {}, { entity_id: device.entityId });
+          } else if (device.domain === "media_player") {
+            callServiceRef.current("media_player", "turn_on", {}, { entity_id: device.entityId });
+          } else {
+            callServiceRef.current("switch", "turn_on", {}, { entity_id: device.entityId });
+          }
+          action = `${device.name} ON`;
+          feedbackText = `${device.name} on`;
+        }
+        break;
+      }
+      case "grab": {
+        // Turn OFF (fist)
+        if (!isOn) {
+          feedbackText = `${device.name} already off`;
+        } else {
+          if (device.domain === "climate") {
+            callServiceRef.current("climate", "turn_off", {}, { entity_id: device.entityId });
+          } else if (device.domain === "vacuum") {
+            callServiceRef.current("vacuum", "return_to_base", {}, { entity_id: device.entityId });
+          } else if (device.domain === "media_player") {
+            callServiceRef.current("media_player", "turn_off", {}, { entity_id: device.entityId });
+          } else {
+            callServiceRef.current("switch", "turn_off", {}, { entity_id: device.entityId });
+          }
+          action = `${device.name} OFF`;
+          feedbackText = `${device.name} off`;
+        }
+        break;
+      }
+      case "pinch": {
+        // Toggle
+        if (device.domain === "climate") {
+          callServiceRef.current("climate", isOn ? "turn_off" : "turn_on", {}, { entity_id: device.entityId });
+        } else if (device.domain === "vacuum") {
+          callServiceRef.current("vacuum", isOn ? "return_to_base" : "start", {}, { entity_id: device.entityId });
+        } else if (device.domain === "media_player") {
+          callServiceRef.current("media_player", "toggle", {}, { entity_id: device.entityId });
+        } else {
+          callServiceRef.current("switch", "toggle", {}, { entity_id: device.entityId });
+        }
+        action = `${device.name} ${isOn ? "OFF" : "ON"}`;
+        feedbackText = `${device.name} ${isOn ? "off" : "on"}`;
+        break;
+      }
+      case "peace": {
+        // AC specific: toggle cool/heat mode
+        if (device.domain === "climate" && isOn) {
+          const currentMode = e.attributes?.hvac_action || e.state;
+          const newMode = currentMode === "cooling" ? "heat" : "cool";
+          callServiceRef.current("climate", "set_hvac_mode", { hvac_mode: newMode }, { entity_id: device.entityId });
+          action = `${device.name} → ${newMode}`;
+          feedbackText = `${device.name} ${newMode} mode`;
+        }
+        break;
+      }
+      case "swipe_right": {
+        // Increase (temp up / volume up)
+        if (device.domain === "climate") {
+          const currentTemp = e.attributes?.temperature || 24;
+          callServiceRef.current("climate", "set_temperature", { temperature: currentTemp + 1 }, { entity_id: device.entityId });
+          action = `${device.name} → ${currentTemp + 1}°`;
+          feedbackText = `${currentTemp + 1} degrees`;
+        } else if (device.domain === "media_player") {
+          callServiceRef.current("media_player", "volume_up", {}, { entity_id: device.entityId });
+          action = `${device.name} volume up`;
+          feedbackText = "Volume up";
+        }
+        break;
+      }
+      case "swipe_left": {
+        // Decrease (temp down / volume down)
+        if (device.domain === "climate") {
+          const currentTemp = e.attributes?.temperature || 24;
+          callServiceRef.current("climate", "set_temperature", { temperature: currentTemp - 1 }, { entity_id: device.entityId });
+          action = `${device.name} → ${currentTemp - 1}°`;
+          feedbackText = `${currentTemp - 1} degrees`;
+        } else if (device.domain === "media_player") {
+          callServiceRef.current("media_player", "volume_down", {}, { entity_id: device.entityId });
+          action = `${device.name} volume down`;
+          feedbackText = "Volume down";
+        }
+        break;
+      }
+    }
+
+    if (action) {
+      setLastGestureAction(action);
+      // Audio feedback through glasses speaker
+      try { Glasses.speakFeedback(feedbackText); } catch {}
+    } else if (feedbackText) {
+      try { Glasses.speakFeedback(feedbackText); } catch {}
+    }
+  }, []);
 
   // Bridge connection (for sending photos + gesture commands)
   useEffect(() => {
@@ -93,14 +244,23 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
     return () => bridgeRef.current.close();
   }, []);
 
-  // Gesture command handler — palm = capture photo
+  // Gesture command handler
   useEffect(() => {
     gestureManager.current.setCallback((command: GestureCommand) => {
       if (command.gesture === "open_palm") {
         handleCapture();
+        return;
       }
+
+      // Home device control gestures
+      const controlGestures = new Set(["thumbs_up", "grab", "pinch", "peace", "swipe_left", "swipe_right"]);
+      if (controlGestures.has(command.gesture) && focusedDeviceRef.current) {
+        executeGestureAction(command);
+        return;
+      }
+
       // Forward other gestures to bridge
-      if (connectedRef.current && command.gesture !== "open_palm") {
+      if (connectedRef.current) {
         bridgeRef.current.sendGestureCommand({
           gesture: command.compound || command.gesture,
           action: command.gesture,
@@ -110,7 +270,7 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
       }
     });
     gestureManager.current.setEnabled(true);
-  }, []);
+  }, [executeGestureAction]);
 
   // Native event listeners
   useEffect(() => {
@@ -196,6 +356,7 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
   const handleConnect = useCallback(async () => {
     setError(null);
     try {
+      await Glasses.initialize();
       await Glasses.registerDevice();
     } catch (e: any) {
       setError(e.message || "Failed to connect");
@@ -243,9 +404,12 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
     isStreaming,
     fps,
     error,
+    focusedDevice,
+    lastGestureAction,
     connect: handleConnect,
     disconnect: handleDisconnect,
     capturePhoto: handleCapture,
+    setFocusedDevice,
   };
 
   return (

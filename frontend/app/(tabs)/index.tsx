@@ -19,6 +19,7 @@ import { FloorPlanMap } from "../../components/home/FloorPlanMap";
 import { DeviceSheet } from "../../components/home/DeviceSheet";
 import type { MapPin } from "../../lib/map-config";
 import { fetchSchedules, updateSchedule, type DeviceSchedule } from "../../lib/bridge-api";
+import { useGlasses, type FocusedDevice } from "../../lib/glasses-context";
 
 const ACCENT = "#06B6D4";
 const DIM = "#525252";
@@ -76,6 +77,7 @@ function QuickAction({
 function DeviceMini({ item }: { item: InventoryItem }) {
   const entity = useEntity(item.primaryEntityId);
   const { callService } = useHA();
+  const { setFocusedDevice } = useGlasses();
   const state = entity?.state ?? "unavailable";
   const isOn = state === "on" || state === "playing" || state === "home" || state === "cleaning";
   const isUnavailable = state === "unavailable";
@@ -94,12 +96,14 @@ function DeviceMini({ item }: { item: InventoryItem }) {
   const handlePress = useCallback(() => {
     if (isUnavailable) return;
     const domain = item.primaryEntityId.split(".")[0];
+    // Set as focused device for glasses gesture control
+    setFocusedDevice({ entityId: item.primaryEntityId, domain, name: item.name });
     if (domain === "switch") {
       callService("switch", "toggle", {}, { entity_id: item.primaryEntityId });
     } else if (domain === "media_player") {
       callService("media_player", "toggle", {}, { entity_id: item.primaryEntityId });
     }
-  }, [item.primaryEntityId, callService, isUnavailable]);
+  }, [item.primaryEntityId, item.name, callService, isUnavailable, setFocusedDevice]);
 
   return (
     <Pressable
@@ -491,6 +495,7 @@ function ScheduleRow({
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { entities, callService } = useHA();
+  const { setFocusedDevice, lastGestureAction, isConnected: glassesConnected } = useGlasses();
   const acEntity = useEntity("climate.living_room_ac");
   const [viewMode, setViewMode] = useState<"cards" | "map">("cards");
   const [expandedRoom, setExpandedRoom] = useState<Room | null>(null);
@@ -540,6 +545,8 @@ export default function HomeScreen() {
   const handleQuickAction = useCallback((action: typeof quickActions[0]) => {
     const e = entities[action.entityId];
     if (!e) return;
+    // Set as focused device for glasses gesture control
+    setFocusedDevice({ entityId: action.entityId, domain: action.domain, name: action.label });
     if (action.domain === "switch") {
       callService("switch", "toggle", {}, { entity_id: action.entityId });
     } else if (action.domain === "media_player") {
@@ -548,7 +555,7 @@ export default function HomeScreen() {
       const isActive = e.state === "cleaning" || e.state === "returning";
       callService("vacuum", isActive ? "return_to_base" : "start", {}, { entity_id: action.entityId });
     }
-  }, [entities, callService]);
+  }, [entities, callService, setFocusedDevice]);
 
   const toggleView = useCallback(() => setViewMode((v) => v === "cards" ? "map" : "cards"), []);
   const handlePinPress = useCallback((pin: MapPin) => { setActivePin(pin); setSheetVisible(true); }, []);
@@ -685,6 +692,30 @@ export default function HomeScreen() {
 
       {/* Map Pin Detail Sheet */}
       <DeviceSheet visible={sheetVisible} pin={activePin} onDismiss={closeSheet} />
+
+      {/* Gesture action feedback banner */}
+      {lastGestureAction && (
+        <View
+          style={{
+            position: "absolute",
+            top: insets.top + 56,
+            left: 40,
+            right: 40,
+            backgroundColor: "rgba(6,182,212,0.2)",
+            borderWidth: 1,
+            borderColor: "rgba(6,182,212,0.4)",
+            borderRadius: 12,
+            paddingVertical: 8,
+            paddingHorizontal: 16,
+            alignItems: "center",
+            zIndex: 100,
+          }}
+        >
+          <Text style={{ color: ACCENT, fontSize: 13, fontFamily: "monospace", fontWeight: "700" }}>
+            {"\uD83E\uDD0C"} {lastGestureAction}
+          </Text>
+        </View>
+      )}
 
       <StatusBar style="light" />
     </View>

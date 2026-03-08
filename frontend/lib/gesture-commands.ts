@@ -1,5 +1,6 @@
 // Gesture Command System — debounce, cooldown, compound gesture detection
 // Turns raw per-frame gestures into discrete triggered commands
+// v2: consecutive-frame confirmation for reliability (GECO-inspired)
 
 import type { GestureResult, GestureType } from "./gestures";
 
@@ -19,9 +20,11 @@ interface GestureState {
   fingerCount?: number;
 }
 
-const HOLD_MS = 150; // hold gesture for 150ms to trigger (fast palm response)
-const COOLDOWN_MS = 1000; // 1s cooldown after trigger before same gesture can re-trigger
+const HOLD_MS = 200; // hold gesture for 200ms to trigger
+const COOLDOWN_MS = 1200; // 1.2s cooldown after trigger
 const COMPOUND_WINDOW_MS = 600; // two gestures within 600ms = compound
+const CONFIRM_WINDOW = 7; // sliding window size
+const CONFIRM_THRESHOLD = 5; // need 5 of 7 frames matching
 
 export class GestureCommandManager {
   private state: GestureState = {
@@ -33,6 +36,9 @@ export class GestureCommandManager {
   private lastTriggered: GestureCommand | null = null;
   private callback: GestureCommandCallback | null = null;
   private enabled = true;
+
+  // Consecutive-frame confirmation buffer
+  private frameBuffer: GestureType[] = [];
 
   setCallback(cb: GestureCommandCallback): void {
     this.callback = cb;
@@ -52,6 +58,12 @@ export class GestureCommandManager {
 
     const now = Date.now();
     const gesture = result.gesture;
+
+    // Push to frame buffer for consecutive-frame confirmation
+    this.frameBuffer.push(gesture);
+    if (this.frameBuffer.length > CONFIRM_WINDOW) {
+      this.frameBuffer.shift();
+    }
 
     // Swipes trigger immediately (motion-based, no hold needed)
     if (gesture === "swipe_left" || gesture === "swipe_right") {
@@ -78,8 +90,12 @@ export class GestureCommandManager {
       return;
     }
 
-    // Same gesture held — check if hold duration met
+    // Same gesture held — check if hold duration met AND frame confirmation passes
     if (!this.state.triggered && now - this.state.startTime >= HOLD_MS) {
+      // Consecutive-frame confirmation: need CONFIRM_THRESHOLD of CONFIRM_WINDOW frames
+      const matchCount = this.frameBuffer.filter((g) => g === gesture).length;
+      if (matchCount < CONFIRM_THRESHOLD) return; // not enough confidence
+
       if (!this.isOnCooldown(gesture, now)) {
         // Check for compound gesture (e.g. point then pinch in quick succession)
         const compound = this.detectCompound(gesture, now);
@@ -112,6 +128,7 @@ export class GestureCommandManager {
   private trigger(command: GestureCommand): void {
     this.cooldowns.set(command.gesture, command.timestamp);
     this.lastTriggered = command;
+    this.frameBuffer = []; // clear buffer after trigger to avoid re-trigger
     this.callback?.(command);
   }
 
@@ -119,5 +136,6 @@ export class GestureCommandManager {
     this.state = { currentGesture: "none", startTime: 0, triggered: false };
     this.cooldowns.clear();
     this.lastTriggered = null;
+    this.frameBuffer = [];
   }
 }
