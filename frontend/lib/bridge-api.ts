@@ -2091,6 +2091,93 @@ export async function deleteBackup(filename: string): Promise<{ ok: boolean }> {
   return res.json();
 }
 
+// ── Personal File Storage (Dropbox-style) ──
+
+export interface StoredFile {
+  id: number;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  source: string;
+  category: string;
+  metadata: Record<string, any>;
+  is_temp: boolean;
+  created_at: string;
+}
+
+export async function uploadFile(data: string, opts?: {
+  filename?: string;
+  mime_type?: string;
+  source?: string;
+  category?: string;
+  metadata?: Record<string, any>;
+}): Promise<{ ok: boolean; file: StoredFile }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/files`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data, ...opts }),
+  });
+  if (!res.ok) throw new Error(`Upload file error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchFiles(filters?: {
+  category?: string;
+  source?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ files: StoredFile[]; total: number }> {
+  const params = new URLSearchParams();
+  if (filters?.category) params.set("category", filters.category);
+  if (filters?.source) params.set("source", filters.source);
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  if (filters?.offset) params.set("offset", String(filters.offset));
+  const qs = params.toString() ? `?${params}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/files${qs}`);
+  if (!res.ok) throw new Error(`Fetch files error: ${res.status}`);
+  return res.json();
+}
+
+export function getFileDataUrl(fileId: number): string {
+  return `${BRIDGE_URL}/files/${fileId}/data`;
+}
+
+export async function deleteFile(fileId: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/files/${fileId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete file error: ${res.status}`);
+  return res.json();
+}
+
+export async function bridgeShare(data: string, filename?: string): Promise<{
+  ok: boolean;
+  shareUrl: string;
+  fileId: number;
+  expiresAt: string;
+}> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/files/bridge-share`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data, filename }),
+  });
+  if (!res.ok) throw new Error(`Bridge share error: ${res.status}`);
+  return res.json();
+}
+
+export async function sendToIntel(data: string, label?: string): Promise<{
+  ok: boolean;
+  matches: Array<{ name?: string; score?: number; source_url?: string }>;
+  osintScan: any;
+  message: string;
+}> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/files/send-to-intel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data, label }),
+  });
+  if (!res.ok) throw new Error(`Send to intel error: ${res.status}`);
+  return res.json();
+}
+
 // Multi-currency formatting
 export function formatCurrency(amount: number | null | undefined, currency: string = "COP"): string {
   if (amount == null || isNaN(amount)) return currency === "JPY" ? "\u00a50" : "$0";

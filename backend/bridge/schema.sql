@@ -148,3 +148,24 @@ CREATE TABLE usage_metrics (
   UNIQUE(date, metric_name)
 );
 CREATE INDEX idx_usage_metrics_date ON usage_metrics(date DESC);
+
+-- Personal file storage (Dropbox-style)
+CREATE TABLE files (
+  id              SERIAL PRIMARY KEY,
+  filename        TEXT NOT NULL,
+  mime_type       TEXT NOT NULL DEFAULT 'application/octet-stream',
+  size_bytes      INTEGER NOT NULL DEFAULT 0,
+  source          TEXT DEFAULT 'upload',   -- 'glasses', 'upload', 'intel', 'bridge'
+  category        TEXT DEFAULT 'general',  -- 'photos', 'documents', 'intel', 'temp'
+  storage_path    TEXT NOT NULL,           -- path on disk
+  thumbnail_path  TEXT,                    -- optional thumbnail
+  metadata        JSONB DEFAULT '{}',
+  is_temp         BOOLEAN DEFAULT false,   -- temp files auto-expire
+  expires_at      TIMESTAMPTZ,             -- null = permanent
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_files_category ON files(category);
+CREATE INDEX idx_files_source ON files(source);
+CREATE INDEX idx_files_created ON files(created_at DESC);
+CREATE INDEX idx_files_temp ON files(is_temp) WHERE is_temp = true;

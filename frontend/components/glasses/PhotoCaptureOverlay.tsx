@@ -11,6 +11,7 @@ import {
   Alert,
   Dimensions,
   PanResponder,
+  ActivityIndicator,
 } from "react-native";
 import Animated, {
   useSharedValue,
@@ -24,6 +25,7 @@ import Animated, {
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { uploadFile, bridgeShare, sendToIntel } from "../../lib/bridge-api";
 
 export interface CapturedPhoto {
   data: string; // base64 JPEG
@@ -48,11 +50,19 @@ export default function PhotoCaptureOverlay({
   const translateY = useSharedValue(0);
   const flashOpacity = useSharedValue(0);
   const [saved, setSaved] = useState(false);
+  const [intelLoading, setIntelLoading] = useState(false);
+  const [intelResult, setIntelResult] = useState<string | null>(null);
+  const [bridgeLoading, setBridgeLoading] = useState(false);
+  const [bridgeDone, setBridgeDone] = useState(false);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (photo) {
       setSaved(false);
+      setIntelLoading(false);
+      setIntelResult(null);
+      setBridgeLoading(false);
+      setBridgeDone(false);
       // Flash effect then fade in
       flashOpacity.value = withSequence(
         withTiming(1, { duration: 80 }),
@@ -105,6 +115,12 @@ export default function PhotoCaptureOverlay({
     if (!photo || saved) return;
     try {
       await getPhotoUri();
+      // Also upload to personal file storage
+      uploadFile(photo.data, {
+        filename: `glasses_${photo.timestamp}.jpg`,
+        source: "glasses",
+        category: "photos",
+      }).catch(() => {}); // fire-and-forget
       setSaved(true);
     } catch (e: any) {
       Alert.alert("Save failed", e.message || "Could not save photo");
@@ -119,6 +135,38 @@ export default function PhotoCaptureOverlay({
         await Sharing.shareAsync(fileUri, { mimeType: "image/jpeg" });
       }
     } catch {}
+  };
+
+  const handleSendToIntel = async () => {
+    if (!photo || intelLoading) return;
+    setIntelLoading(true);
+    try {
+      // Also save to personal storage under intel category
+      await uploadFile(photo.data, {
+        filename: `glasses_${photo.timestamp}.jpg`,
+        source: "glasses",
+        category: "intel",
+      });
+      const result = await sendToIntel(photo.data, `Glasses capture ${new Date(photo.timestamp).toISOString()}`);
+      setIntelResult(result.message);
+    } catch (e: any) {
+      setIntelResult("Failed: " + (e.message || "Unknown error"));
+    } finally {
+      setIntelLoading(false);
+    }
+  };
+
+  const handleBridgeShare = async () => {
+    if (!photo || bridgeLoading || bridgeDone) return;
+    setBridgeLoading(true);
+    try {
+      await bridgeShare(photo.data, `glasses_${photo.timestamp}.jpg`);
+      setBridgeDone(true);
+    } catch (e: any) {
+      Alert.alert("Share failed", e.message || "Could not share via bridge");
+    } finally {
+      setBridgeLoading(false);
+    }
   };
 
   // Swipe down to dismiss via PanResponder
@@ -284,23 +332,52 @@ export default function PhotoCaptureOverlay({
           }}
         />
 
-        {/* Bottom controls */}
+        {/* Intel result banner */}
+        {intelResult && (
+          <View
+            style={{
+              marginTop: 12,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 8,
+              backgroundColor: intelResult.startsWith("Failed")
+                ? "rgba(239,68,68,0.2)"
+                : "rgba(168,85,247,0.2)",
+              maxWidth: SCREEN_W - 48,
+            }}
+          >
+            <Text
+              style={{
+                color: intelResult.startsWith("Failed") ? "#EF4444" : "#A855F7",
+                fontSize: 11,
+                fontFamily: "monospace",
+                textAlign: "center",
+              }}
+            >
+              {intelResult}
+            </Text>
+          </View>
+        )}
+
+        {/* Bottom controls — 2x2 grid */}
         <View
           style={{
             position: "absolute",
             bottom: Math.max(insets.bottom + 16, 32),
             flexDirection: "row",
-            gap: 24,
-            alignItems: "center",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            gap: 12,
+            paddingHorizontal: 24,
           }}
         >
           {/* Save */}
           <Pressable
             onPress={handleSave}
             style={{
-              paddingHorizontal: 20,
-              paddingVertical: 12,
-              borderRadius: 24,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 20,
               backgroundColor: saved
                 ? "rgba(16,185,129,0.25)"
                 : "rgba(255,255,255,0.12)",
@@ -308,14 +385,14 @@ export default function PhotoCaptureOverlay({
               borderColor: saved ? "#10B981" : "rgba(255,255,255,0.2)",
               flexDirection: "row",
               alignItems: "center",
-              gap: 8,
+              gap: 6,
             }}
           >
-            <Text style={{ fontSize: 18 }}>{saved ? "\u2713" : "\u{1F4BE}"}</Text>
+            <Text style={{ fontSize: 16 }}>{saved ? "\u2713" : "\u{1F4BE}"}</Text>
             <Text
               style={{
                 color: saved ? "#10B981" : "#fff",
-                fontSize: 13,
+                fontSize: 11,
                 fontFamily: "monospace",
                 fontWeight: "600",
               }}
@@ -324,31 +401,103 @@ export default function PhotoCaptureOverlay({
             </Text>
           </Pressable>
 
-          {/* Share */}
+          {/* Share (iOS native) */}
           <Pressable
             onPress={handleShare}
             style={{
-              paddingHorizontal: 20,
-              paddingVertical: 12,
-              borderRadius: 24,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 20,
               backgroundColor: "rgba(255,255,255,0.12)",
               borderWidth: 1,
               borderColor: "rgba(255,255,255,0.2)",
               flexDirection: "row",
               alignItems: "center",
-              gap: 8,
+              gap: 6,
             }}
           >
-            <Text style={{ fontSize: 18 }}>{"\u{1F4E4}"}</Text>
+            <Text style={{ fontSize: 16 }}>{"\u{1F4E4}"}</Text>
             <Text
               style={{
                 color: "#fff",
-                fontSize: 13,
+                fontSize: 11,
                 fontFamily: "monospace",
                 fontWeight: "600",
               }}
             >
               SHARE
+            </Text>
+          </Pressable>
+
+          {/* Intel VIP */}
+          <Pressable
+            onPress={handleSendToIntel}
+            disabled={intelLoading}
+            style={{
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 20,
+              backgroundColor: intelResult && !intelResult.startsWith("Failed")
+                ? "rgba(168,85,247,0.25)"
+                : "rgba(168,85,247,0.12)",
+              borderWidth: 1,
+              borderColor: "#A855F7",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              opacity: intelLoading ? 0.6 : 1,
+            }}
+          >
+            {intelLoading ? (
+              <ActivityIndicator size="small" color="#A855F7" />
+            ) : (
+              <Text style={{ fontSize: 16 }}>{"\u{1F50D}"}</Text>
+            )}
+            <Text
+              style={{
+                color: "#A855F7",
+                fontSize: 11,
+                fontFamily: "monospace",
+                fontWeight: "600",
+              }}
+            >
+              INTEL
+            </Text>
+          </Pressable>
+
+          {/* Bridge Share (temp 24h link) */}
+          <Pressable
+            onPress={handleBridgeShare}
+            disabled={bridgeLoading || bridgeDone}
+            style={{
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 20,
+              backgroundColor: bridgeDone
+                ? "rgba(6,182,212,0.25)"
+                : "rgba(6,182,212,0.12)",
+              borderWidth: 1,
+              borderColor: "#06B6D4",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              opacity: bridgeLoading ? 0.6 : 1,
+            }}
+          >
+            {bridgeLoading ? (
+              <ActivityIndicator size="small" color="#06B6D4" />
+            ) : (
+              <Text style={{ fontSize: 16 }}>{bridgeDone ? "\u2713" : "\u{1F517}"}</Text>
+            )}
+            <Text
+              style={{
+                color: "#06B6D4",
+                fontSize: 11,
+                fontFamily: "monospace",
+                fontWeight: "600",
+              }}
+            >
+              {bridgeDone ? "SHARED" : "BRIDGE"}
             </Text>
           </Pressable>
         </View>
