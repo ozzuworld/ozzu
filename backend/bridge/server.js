@@ -123,6 +123,7 @@ const businessInvestmentRoutes = require("./routes/business-investments");
 const backupRoutes = require("./routes/backup");
 const fileRoutes = require("./routes/files");
 const scheduleRoutes = require("./routes/schedules");
+const identityRoutes = require("./routes/identity");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -1534,6 +1535,7 @@ function getRouteHandlers() {
       backup: backupRoutes(routeCtx),
       files: fileRoutes(routeCtx),
       schedules: scheduleRoutes(routeCtx),
+      identity: identityRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1571,6 +1573,7 @@ async function handleRequest(req, res) {
   if (await r.business(req, res, pathname, url)) return;
   if (await r.files(req, res, pathname, url)) return;
   if (await r.schedules(req, res, pathname, url)) return;
+  if (await r.identity(req, res, pathname, url)) return;
   if (await r.backup(req, res, pathname, url)) return;
 
   // GET /api/training-stats — Face DB training pipeline stats
