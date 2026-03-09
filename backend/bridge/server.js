@@ -123,6 +123,7 @@ const businessInvestmentRoutes = require("./routes/business-investments");
 const backupRoutes = require("./routes/backup");
 const fileRoutes = require("./routes/files");
 const scheduleRoutes = require("./routes/schedules");
+const profileRoutes = require("./routes/profile");
 const identityRoutes = require("./routes/identity");
 
 const log = {
@@ -1140,7 +1141,7 @@ async function initStorage() {
             }),
           });
           const { computeNextRun } = require("./routes/schedules");
-          const nextRun = computeNextRun(sched.cron_days, sched.cron_hour, sched.cron_minute);
+          const nextRun = computeNextRun(sched.cron_days, sched.cron_hour, sched.cron_minute, sched.timezone);
           await db.query(
             `UPDATE device_schedules SET last_run_at = NOW(), next_run_at = $1, run_count = run_count + 1 WHERE id = $2`,
             [nextRun, sched.id]
@@ -1535,6 +1536,7 @@ function getRouteHandlers() {
       backup: backupRoutes(routeCtx),
       files: fileRoutes(routeCtx),
       schedules: scheduleRoutes(routeCtx),
+      profile: profileRoutes(routeCtx),
       identity: identityRoutes(routeCtx),
     };
   }
@@ -1573,6 +1575,7 @@ async function handleRequest(req, res) {
   if (await r.business(req, res, pathname, url)) return;
   if (await r.files(req, res, pathname, url)) return;
   if (await r.schedules(req, res, pathname, url)) return;
+  if (await r.profile(req, res, pathname, url)) return;
   if (await r.identity(req, res, pathname, url)) return;
   if (await r.backup(req, res, pathname, url)) return;
 

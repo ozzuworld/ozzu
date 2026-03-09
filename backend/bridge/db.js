@@ -643,13 +643,41 @@ async function init() {
       UNIQUE(identity_a, identity_b)
     )`);
 
+    // Owner profile — personal details, address, timezone (single-row)
+    await pool.query(`CREATE TABLE IF NOT EXISTS owner_profile (
+      id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      full_name TEXT,
+      phone TEXT,
+      email TEXT,
+      timezone TEXT DEFAULT 'America/New_York',
+      address_line1 TEXT,
+      address_line2 TEXT,
+      city TEXT,
+      state TEXT,
+      country TEXT,
+      postal_code TEXT,
+      shipping_same_as_billing BOOLEAN DEFAULT true,
+      shipping_address_line1 TEXT,
+      shipping_address_line2 TEXT,
+      shipping_city TEXT,
+      shipping_state TEXT,
+      shipping_country TEXT,
+      shipping_postal_code TEXT,
+      extra JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // Add timezone column to device_schedules if missing
+    await pool.query(`ALTER TABLE device_schedules ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'America/New_York'`);
+
     // Indexes for identity resolution queries
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_identities_cluster ON face_identities(cluster_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_identities_name ON face_identities(primary_name)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_relationships_a ON face_relationships(identity_a)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_relationships_b ON face_relationships(identity_b)`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution)");
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
