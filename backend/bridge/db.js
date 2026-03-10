@@ -677,7 +677,28 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_relationships_a ON face_relationships(identity_a)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_relationships_b ON face_relationships(identity_b)`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile)");
+    // Migration: service health monitoring tables (watchdog)
+    await pool.query(`CREATE TABLE IF NOT EXISTS service_health_log (
+      id SERIAL PRIMARY KEY,
+      service VARCHAR(30) NOT NULL,
+      status VARCHAR(10) NOT NULL,
+      latency_ms INTEGER,
+      details JSONB DEFAULT '{}',
+      checked_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_health_log_service ON service_health_log(service, checked_at DESC)`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS service_incidents (
+      id SERIAL PRIMARY KEY,
+      service VARCHAR(30) NOT NULL,
+      from_status VARCHAR(10),
+      to_status VARCHAR(10) NOT NULL,
+      details JSONB DEFAULT '{}',
+      started_at TIMESTAMPTZ DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_incidents_service ON service_incidents(service, started_at DESC)`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;

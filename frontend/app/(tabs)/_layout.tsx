@@ -69,6 +69,13 @@ export default function TabLayout() {
           tabBarIcon: () => <TabIcon emoji="🎵" />,
         }}
       />
+      <Tabs.Screen
+        name="ops"
+        options={{
+          title: "OPS",
+          tabBarIcon: () => <TabIcon emoji="📡" />,
+        }}
+      />
     </Tabs>
   );
 }

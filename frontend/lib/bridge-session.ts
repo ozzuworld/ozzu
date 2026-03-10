@@ -56,6 +56,7 @@ export interface BridgeCallbacks {
   onVisionResult?: (mode: string, text: string) => void; // Glasses vision analysis result
   onGestureControlFeedback?: (data: { entityId: string; deviceName: string; action: string; state?: any; error?: string }) => void;
   onGlassesImmersiveRequest?: (data: { enable: boolean }) => void;
+  onOpsAlert?: (data: { service: string; status: string; previousStatus: string; severity: string; ts: string; details: any }) => void;
   onError: (message: string) => void;
 }
 
@@ -281,6 +282,9 @@ export class BridgeSession {
           break;
         case "glassesImmersiveRequest":
           this.callbacks?.onGlassesImmersiveRequest?.(msg);
+          break;
+        case "opsAlert":
+          this.callbacks?.onOpsAlert?.(msg);
           break;
         case "error":
           this.callbacks?.onError(msg.message);

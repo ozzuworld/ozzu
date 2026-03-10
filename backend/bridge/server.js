@@ -125,6 +125,8 @@ const fileRoutes = require("./routes/files");
 const scheduleRoutes = require("./routes/schedules");
 const profileRoutes = require("./routes/profile");
 const identityRoutes = require("./routes/identity");
+const opsRoutes = require("./routes/ops");
+const watchdog = require("./watchdog");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -1538,6 +1540,7 @@ function getRouteHandlers() {
       schedules: scheduleRoutes(routeCtx),
       profile: profileRoutes(routeCtx),
       identity: identityRoutes(routeCtx),
+      ops: opsRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1578,6 +1581,7 @@ async function handleRequest(req, res) {
   if (await r.profile(req, res, pathname, url)) return;
   if (await r.identity(req, res, pathname, url)) return;
   if (await r.backup(req, res, pathname, url)) return;
+  if (await r.ops(req, res, pathname, url)) return;
 
   // GET /api/training-stats — Face DB training pipeline stats
   if (req.method === "GET" && pathname === "/api/training-stats") {
@@ -6332,6 +6336,7 @@ wss.on("connection", (ws, req) => {
     log.bridge.info(`HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
     startWatchdog();
+    watchdog.start({ db, redis, broadcastToAll, sendNotification });
     metrics.startFlushTimer();
     // Initialize OSINT persistent scheduler + alert broadcast + monitoring
     osintEngine.setAlertBroadcast(broadcastToAll);
