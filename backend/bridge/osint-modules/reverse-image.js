@@ -22,7 +22,7 @@ module.exports = {
     }
 
     // Bridge URL for serving the image (accessible on VPN)
-    const bridgeUrl = process.env.BRIDGE_PUBLIC_URL || "http://10.8.0.1:3333";
+    const bridgeUrl = process.env.BRIDGE_PUBLIC_URL || "https://home.ozzu.world/bridge";
     const imageUrl = `${bridgeUrl}/osint/images/${profile.id}`;
 
     // 1. Generate manual search URLs (always available, no API key needed)

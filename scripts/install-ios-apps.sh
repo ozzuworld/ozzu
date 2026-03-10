@@ -10,7 +10,7 @@
 set -e
 
 DEV01="dev-01"
-ANISETTE_URL="http://10.8.0.1:6969"
+ANISETTE_URL="${ANISETTE_URL:-http://10.8.0.1:6969}"
 SIDELOADER_BIN="\$HOME/bin/sideloader"
 
 SKIP_SIDESTORE=false

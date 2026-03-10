@@ -26,7 +26,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://10.8.0.1:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 COLLECTION = "faces"
 BATCH_SIZE = 50          # vectors to process per batch
 FETCH_WORKERS = 8        # parallel page fetchers

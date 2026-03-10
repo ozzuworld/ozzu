@@ -36,7 +36,7 @@ function withAndroidUpdates(config) {
 function withIosUpdates(config) {
   return withInfoPlist(config, (config) => {
     config.modResults.EXUpdatesEnabled = true;
-    config.modResults.EXUpdatesURL = "http://10.8.0.1:3333/api/manifest";
+    config.modResults.EXUpdatesURL = "https://home.ozzu.world/bridge/api/manifest";
     config.modResults.EXUpdatesLaunchWaitMs = 5000;
     return config;
   });

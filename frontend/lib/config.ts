@@ -9,7 +9,7 @@ function getHAUrl(): string {
       return loc.origin;
     }
   }
-  return process.env.EXPO_PUBLIC_HA_URL ?? "http://localhost:8123";
+  return process.env.EXPO_PUBLIC_HA_URL ?? "https://home.ozzu.world";
 }
 
 const HA_URL = getHAUrl();

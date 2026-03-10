@@ -1359,7 +1359,7 @@ function escapeJsString(str) {
 
 const CORS_ALLOWED_ORIGINS = [
   "https://home.ozzu.world",
-  "http://10.8.0.1:3333",
+  "https://ozzu.world",
   "http://localhost:3333",
 ];
 

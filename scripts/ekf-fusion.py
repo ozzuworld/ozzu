@@ -21,7 +21,7 @@ import json
 import time
 import math
 
-PG_CONNSTR = os.environ.get("PG_CONNSTR", "host=10.8.0.1 port=5432 dbname=ozzu user=ozzu password=ozzu")
+PG_CONNSTR = os.environ.get("PG_CONNSTR", "host=localhost port=5432 dbname=ozzu user=ozzu password=ozzu")
 
 # Source reliability scores (0-1, higher = more reliable)
 SOURCE_RELIABILITY = {

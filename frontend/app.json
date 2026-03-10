@@ -39,7 +39,7 @@
     },
     "runtimeVersion": "1.0.0",
     "updates": {
-      "url": "http://10.8.0.1:3333/api/manifest",
+      "url": "https://home.ozzu.world/bridge/api/manifest",
       "enabled": true,
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 5000

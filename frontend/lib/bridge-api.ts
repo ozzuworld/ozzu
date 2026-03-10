@@ -1,7 +1,7 @@
 // HTTP client for the Command Bridge server
 
 const LAN_URL =
-  process.env.EXPO_PUBLIC_BRIDGE_URL || "http://localhost:3333";
+  process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
 const PUBLIC_URL =
   process.env.EXPO_PUBLIC_BRIDGE_PUBLIC_URL || "";
 const BRIDGE_API_KEY =

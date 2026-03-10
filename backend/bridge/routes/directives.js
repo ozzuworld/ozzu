@@ -98,6 +98,9 @@ module.exports = function directiveRoutes(ctx) {
         epicId: data.epicId || null,
         phaseOrder: data.phaseOrder || null,
         createdBy: data.createdBy || "King Kazuma",
+        working_state: null,   // Structured current state: progress, blockers, numbers, next steps
+        work_summary: null,    // What was actually done, decisions made, failures encountered
+        handoff_context: null, // Session handoff: last thing worked on, exact state for next session
         activity_log: [{ timestamp: Date.now(), type: "status_change", actor: data.createdBy || "King Kazuma", message: "Directive created with status: pending" }],
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -245,6 +248,31 @@ module.exports = function directiveRoutes(ctx) {
       return true;
     }
 
+    // GET /directives/active-context — Returns working_state + handoff_context for all non-terminal directives
+    // This is what Cipher should read FIRST on session start to know where everything stands
+    if (req.method === "GET" && pathname === "/directives/active-context") {
+      const directives = getDirectives();
+      const activeStatuses = new Set(["pending", "planning", "planned", "approved", "in_progress", "blocked", "deploy_failed"]);
+      const active = directives
+        .filter(d => activeStatuses.has(d.status))
+        .map(d => ({
+          id: d.id,
+          title: d.title,
+          emoji: d.emoji,
+          status: d.status,
+          type: d.type,
+          working_state: d.working_state || null,
+          work_summary: d.work_summary || null,
+          handoff_context: d.handoff_context || null,
+          failureReason: d.failureReason || null,
+          lastActivity: d.lastActivity || d.updatedAt,
+          recent_activity: (d.activity_log || []).slice(-3)
+        }))
+        .sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+      sendJSON(res, 200, { count: active.length, directives: active });
+      return true;
+    }
+
     // GET /directives/:id — Single directive with full plan text
     const directiveGetMatch = pathname.match(/^\/directives\/([^/]+)$/);
     if (req.method === "GET" && directiveGetMatch) {
@@ -360,6 +388,9 @@ module.exports = function directiveRoutes(ctx) {
       if (data.emoji !== undefined) directive.emoji = data.emoji;
       if (data.epicId !== undefined) directive.epicId = data.epicId;
       if (data.phaseOrder !== undefined) directive.phaseOrder = data.phaseOrder;
+      if (data.working_state !== undefined) directive.working_state = data.working_state;
+      if (data.work_summary !== undefined) directive.work_summary = data.work_summary;
+      if (data.handoff_context !== undefined) directive.handoff_context = data.handoff_context;
       directive.updatedAt = Date.now();
       directive.lastActivity = Date.now(); // Track when agent last touched this directive
 
@@ -577,6 +608,97 @@ module.exports = function directiveRoutes(ctx) {
       directive.updatedAt = Date.now();
       saveDirectives(directives, directive, null, "King Kazuma");
       sendJSON(res, 200, { ok: true, entry });
+      return true;
+    }
+
+    // POST /directives/:id/work-update — Rich work context update from Cipher
+    // Updates working_state, work_summary, and/or handoff_context in one call
+    // Also adds a structured activity_log entry with the update
+    const workUpdateMatch = pathname.match(/^\/directives\/([^/]+)\/work-update$/);
+    if (req.method === "POST" && workUpdateMatch) {
+      if (!requireAuth(req, res)) return true;
+      const id = workUpdateMatch[1];
+      const data = await parseBody(req);
+      const directives = getDirectives();
+      const directive = directives.find((d) => d.id === id);
+      if (!directive) {
+        sendJSON(res, 404, { error: "Directive not found" });
+        return true;
+      }
+      if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+
+      // Update structured fields
+      if (data.working_state !== undefined) {
+        directive.working_state = data.working_state;
+      }
+      if (data.work_summary !== undefined) {
+        // Append to existing summary instead of replacing
+        if (directive.work_summary && data.append_summary) {
+          directive.work_summary += "\n" + data.work_summary;
+        } else {
+          directive.work_summary = data.work_summary;
+        }
+      }
+      if (data.handoff_context !== undefined) {
+        directive.handoff_context = data.handoff_context;
+      }
+
+      // Add activity log entry
+      const logType = data.log_type || "work_update";
+      const logMessage = data.message || "Work context updated";
+      directive.activity_log.push({
+        timestamp: Date.now(),
+        type: logType,
+        actor: data.actor || "Cipher",
+        message: logMessage,
+        // Store structured data in the log entry too
+        ...(data.details ? { details: data.details } : {})
+      });
+
+      directive.updatedAt = Date.now();
+      directive.lastActivity = Date.now();
+      saveDirectives(directives, directive, null, data.actor || "Cipher");
+      sendJSON(res, 200, { ok: true, directive });
+      return true;
+    }
+
+    // POST /directives/:id/session-handoff — Called when a Cipher session ends
+    // Captures the exact state so the next session can pick up without reading transcripts
+    const sessionHandoffMatch = pathname.match(/^\/directives\/([^/]+)\/session-handoff$/);
+    if (req.method === "POST" && sessionHandoffMatch) {
+      if (!requireAuth(req, res)) return true;
+      const id = sessionHandoffMatch[1];
+      const data = await parseBody(req);
+      const directives = getDirectives();
+      const directive = directives.find((d) => d.id === id);
+      if (!directive) {
+        sendJSON(res, 404, { error: "Directive not found" });
+        return true;
+      }
+      if (!Array.isArray(directive.activity_log)) directive.activity_log = [];
+
+      // Require handoff context
+      if (!data.handoff_context) {
+        sendJSON(res, 400, { error: "handoff_context is required — describe exactly where things stand" });
+        return true;
+      }
+
+      directive.handoff_context = data.handoff_context;
+      if (data.working_state !== undefined) directive.working_state = data.working_state;
+      if (data.work_summary !== undefined) directive.work_summary = data.work_summary;
+      if (data.blockers !== undefined) directive.working_state = { ...(directive.working_state || {}), blockers: data.blockers };
+
+      directive.activity_log.push({
+        timestamp: Date.now(),
+        type: "session_handoff",
+        actor: "Cipher",
+        message: `Session handoff: ${typeof data.handoff_context === 'string' ? data.handoff_context.substring(0, 200) : JSON.stringify(data.handoff_context).substring(0, 200)}`
+      });
+
+      directive.updatedAt = Date.now();
+      directive.lastActivity = Date.now();
+      saveDirectives(directives, directive, null, "Cipher");
+      sendJSON(res, 200, { ok: true, message: "Session handoff saved", directive });
       return true;
     }
 

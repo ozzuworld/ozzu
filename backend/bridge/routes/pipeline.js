@@ -629,7 +629,7 @@ module.exports = function createPipelineRoutes(ctx) {
     const bundleHash = crypto.createHash("sha256").update(bundleData).digest("base64url");
     const bundleKey = crypto.createHash("md5").update(bundleData).digest("hex");
 
-    const baseUrl = `http://10.8.0.1:${PORT}/api/assets?runtimeVersion=${runtimeVersion}&platform=${platform}`;
+    const baseUrl = `${process.env.BRIDGE_PUBLIC_URL || "https://home.ozzu.world/bridge"}/api/assets?runtimeVersion=${runtimeVersion}&platform=${platform}`;
 
     const launchAsset = {
       hash: bundleHash,

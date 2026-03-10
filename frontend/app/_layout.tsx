@@ -14,7 +14,7 @@ if (!__DEV__) {
 
 // ── Crash Reporter ──
 // Sends crash reports to bridge via HTTP (works even when WS is down)
-const BRIDGE_URL = process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333";
+const BRIDGE_URL = process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
 
 function reportCrash(error: string, stack?: string | null, componentStack?: string | null, context?: string | null) {
   fetch(`${BRIDGE_URL}/api/crash-reports`, {

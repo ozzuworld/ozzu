@@ -23,8 +23,8 @@ import uuid
 import urllib.request
 from collections import defaultdict
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://10.8.0.1:6333")
-PG_CONNSTR = os.environ.get("PG_CONNSTR", "host=10.8.0.1 port=5432 dbname=ozzu user=ozzu password=ozzu")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
+PG_CONNSTR = os.environ.get("PG_CONNSTR", "host=localhost port=5432 dbname=ozzu user=ozzu password=ozzu")
 COLLECTION = "faces"
 
 CO_PHOTO_WEIGHT = 0.8

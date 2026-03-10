@@ -17,7 +17,7 @@ DEV01="dev-01"  # SSH alias (hadmin@172.168.0.61)
 IPA_DIR="/tmp/ozzu-ios"
 REMOTE_IPA_DIR="/tmp/ozzu-ios"
 STAGED_IPA_DIR="/tmp/ozzu-ios-staged"
-ANISETTE_URL="http://10.8.0.1:6969"  # Anisette runs on GCP VM, reachable via VPN
+ANISETTE_URL="${ANISETTE_URL:-http://10.8.0.1:6969}"  # Anisette runs on GCP VM, reachable via VPN
 
 # Load credentials from .env if not already set
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

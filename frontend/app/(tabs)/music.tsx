@@ -22,7 +22,7 @@ import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { HA_URL, HA_TOKEN } from "../../lib/config";
 
 const BRIDGE_URL =
-  process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333";
+  process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
 
 const ACCENT = "#1DB954";
 const BAR_COLOR = "#FFFFFF";

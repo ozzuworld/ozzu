@@ -10,7 +10,10 @@ import { getBridgeMode } from "./bridge-api";
 let cachedDeviceId: string | null = null;
 
 const LAN_WS_URL =
-  (process.env.EXPO_PUBLIC_BRIDGE_URL || "http://10.8.0.1:3333").replace(
+  (process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge").replace(
+    /^https/,
+    "wss"
+  ).replace(
     /^http/,
     "ws"
   ) + "/ws";
