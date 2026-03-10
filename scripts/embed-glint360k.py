@@ -287,6 +287,8 @@ def push_pipeline_state(rate, shard_num=None, total_shards=None):
     """Push pipeline state to bridge for dashboard display."""
     try:
         import json
+        with stats_lock:
+            indexed = stats["indexed"]
         state = {
             "dataset": "glint360k",
             "datasetLabel": "Glint360K (17.1M)",
@@ -297,6 +299,7 @@ def push_pipeline_state(rate, shard_num=None, total_shards=None):
             "qdrantBatch": QDRANT_BATCH,
             "qdrantWorkers": QDRANT_WORKERS,
             "rate": round(rate),
+            "indexed": indexed,
             "shardProgress": shard_num,
             "totalShards": total_shards or NUM_SHARDS,
             "updatedAt": int(time.time() * 1000),

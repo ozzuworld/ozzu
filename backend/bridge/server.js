@@ -1594,34 +1594,12 @@ async function handleRequest(req, res) {
         req.on("timeout", () => { req.destroy(); resolve(null); });
       });
 
-      // Qdrant POST for count-by-source
-      const qdrantPost = (path, body) => new Promise((resolve) => {
-        const postData = JSON.stringify(body);
-        const req = http.request(`http://localhost:6333${path}`, {
-          method: "POST", timeout: 5000,
-          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(postData) },
-        }, (res) => {
-          let data = "";
-          res.on("data", (c) => data += c);
-          res.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
-        });
-        req.on("error", () => resolve(null));
-        req.on("timeout", () => { req.destroy(); resolve(null); });
-        req.write(postData);
-        req.end();
-      });
-
       // Vast.ai API key
       const vastKey = process.env.VAST_API_KEY || "";
 
-      // Parallel fetches: collection info, per-source counts, vast.ai
-      const sources = ["glint360k", "satellite", "laion", "ms1mv3", "wikidata"];
-      const [qdrant, ...sourceCounts] = await Promise.all([
+      // Parallel fetches: collection info + vast.ai (skip per-source counts — too slow under load)
+      const [qdrant] = await Promise.all([
         fetchJSON("http://localhost:6333/collections/faces"),
-        ...sources.map(src => qdrantPost("/collections/faces/points/count", {
-          filter: { must: [{ key: "source_platform", match: { value: src } }] },
-          exact: false,
-        })),
       ]);
 
       let vastData = null;
@@ -1636,12 +1614,10 @@ async function handleRequest(req, res) {
       const qdrantResult = qdrant?.result || {};
       const vastInstance = vastData?.instances?.[0] || null;
 
-      // Build per-source breakdown
+      // Source breakdown from pipeline state + known baseline
+      // Pre-Glint360K baseline: ~17.8M faces from satellite crawlers
       const sourceBreakdown = {};
-      sources.forEach((src, i) => {
-        const count = sourceCounts[i]?.result?.count || 0;
-        if (count > 0) sourceBreakdown[src] = count;
-      });
+      const totalPoints = qdrantResult.points_count || 0;
 
       // Determine active dataset based on what's growing
       // Read pipeline state file if it exists (written by embed scripts)
@@ -1654,12 +1630,21 @@ async function handleRequest(req, res) {
         }
       } catch {}
 
-      // Detect active dataset: largest source with vast.ai running = likely active
+      // Source breakdown from pipeline state
+      // The pipeline state tells us how many faces from the active dataset
+      if (pipelineState?.dataset) {
+        const pipelineIndexed = pipelineState?.indexed || 0;
+        if (pipelineIndexed > 0) sourceBreakdown[pipelineState.dataset] = pipelineIndexed;
+      }
+      // Baseline: everything not from the active pipeline is from satellite crawlers
+      const pipelineCount = Object.values(sourceBreakdown).reduce((a, b) => a + b, 0);
+      if (totalPoints > pipelineCount) {
+        sourceBreakdown["satellite"] = totalPoints - pipelineCount;
+      }
+
       let activeDataset = pipelineState?.dataset || null;
       if (!activeDataset && vastInstance?.actual_status === "running") {
-        // Infer from sources — the one being actively embedded
-        const sorted = Object.entries(sourceBreakdown).sort((a, b) => b[1] - a[1]);
-        if (sorted.length > 0) activeDataset = sorted[0][0];
+        activeDataset = "glint360k"; // default assumption when GPU is running
       }
 
       // Calculate instance uptime from start_date (epoch seconds)
