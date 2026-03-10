@@ -1583,8 +1583,9 @@ async function handleRequest(req, res) {
   if (req.method === "GET" && pathname === "/api/training-stats") {
     try {
       const http = require("http");
-      const fetchJSON = (url) => new Promise((resolve, reject) => {
-        const req = http.get(url, { timeout: 5000 }, (res) => {
+      const fetchJSON = (url, opts = {}) => new Promise((resolve) => {
+        const mod = url.startsWith("https") ? require("https") : http;
+        const req = mod.get(url, { timeout: 5000, ...opts }, (res) => {
           let data = "";
           res.on("data", (c) => data += c);
           res.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
@@ -1593,34 +1594,73 @@ async function handleRequest(req, res) {
         req.on("timeout", () => { req.destroy(); resolve(null); });
       });
 
-      const [qdrant, vastInstances] = await Promise.all([
+      // Qdrant POST for count-by-source
+      const qdrantPost = (path, body) => new Promise((resolve) => {
+        const postData = JSON.stringify(body);
+        const req = http.request(`http://localhost:6333${path}`, {
+          method: "POST", timeout: 5000,
+          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(postData) },
+        }, (res) => {
+          let data = "";
+          res.on("data", (c) => data += c);
+          res.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+        });
+        req.on("error", () => resolve(null));
+        req.on("timeout", () => { req.destroy(); resolve(null); });
+        req.write(postData);
+        req.end();
+      });
+
+      // Vast.ai API key
+      const vastKey = process.env.VAST_API_KEY || "";
+
+      // Parallel fetches: collection info, per-source counts, vast.ai
+      const sources = ["glint360k", "satellite", "laion", "ms1mv3", "wikidata"];
+      const [qdrant, ...sourceCounts] = await Promise.all([
         fetchJSON("http://localhost:6333/collections/faces"),
-        fetchJSON("https://console.vast.ai/api/v0/instances/?owner=me").catch(() => null),
+        ...sources.map(src => qdrantPost("/collections/faces/points/count", {
+          filter: { must: [{ key: "source_platform", match: { value: src } }] },
+          exact: false,
+        })),
       ]);
 
-      // Try to get Vast.ai instance info via API key from env
       let vastData = null;
-      const vastKey = process.env.VAST_API_KEY || "";
       if (vastKey) {
         try {
-          const https = require("https");
-          vastData = await new Promise((resolve, reject) => {
-            const req = https.get("https://console.vast.ai/api/v0/instances/?owner=me", {
-              headers: { "Authorization": `Bearer ${vastKey}` },
-              timeout: 5000,
-            }, (res) => {
-              let data = "";
-              res.on("data", (c) => data += c);
-              res.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
-            });
-            req.on("error", () => resolve(null));
-            req.on("timeout", () => { req.destroy(); resolve(null); });
+          vastData = await fetchJSON("https://console.vast.ai/api/v0/instances/?owner=me", {
+            headers: { "Authorization": `Bearer ${vastKey}` },
           });
         } catch {}
       }
 
       const qdrantResult = qdrant?.result || {};
       const vastInstance = vastData?.instances?.[0] || null;
+
+      // Build per-source breakdown
+      const sourceBreakdown = {};
+      sources.forEach((src, i) => {
+        const count = sourceCounts[i]?.result?.count || 0;
+        if (count > 0) sourceBreakdown[src] = count;
+      });
+
+      // Determine active dataset based on what's growing
+      // Read pipeline state file if it exists (written by embed scripts)
+      let pipelineState = null;
+      try {
+        const fs = require("fs");
+        const stateFile = "/tmp/pipeline-state.json";
+        if (fs.existsSync(stateFile)) {
+          pipelineState = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+        }
+      } catch {}
+
+      // Detect active dataset: largest source with vast.ai running = likely active
+      let activeDataset = pipelineState?.dataset || null;
+      if (!activeDataset && vastInstance?.actual_status === "running") {
+        // Infer from sources — the one being actively embedded
+        const sorted = Object.entries(sourceBreakdown).sort((a, b) => b[1] - a[1]);
+        if (sorted.length > 0) activeDataset = sorted[0][0];
+      }
 
       // Calculate instance uptime from start_date (epoch seconds)
       let instanceUptimeHrs = null;
@@ -1638,6 +1678,18 @@ async function handleRequest(req, res) {
           indexed_vectors_count: qdrantResult.indexed_vectors_count || 0,
           segments_count: qdrantResult.segments_count || 0,
         },
+        sources: sourceBreakdown,
+        pipeline: {
+          activeDataset,
+          model: "ArcFace w600k_r50",
+          dimensions: 512,
+          gpuBatch: pipelineState?.gpuBatch || 256,
+          workers: pipelineState?.workers || 8,
+          qdrantBatch: pipelineState?.qdrantBatch || 2000,
+          shardProgress: pipelineState?.shardProgress || null,
+          totalShards: pipelineState?.totalShards || null,
+          rate: pipelineState?.rate || null,
+        },
         vast: vastInstance ? {
           id: vastInstance.id,
           status: vastInstance.actual_status,
@@ -1651,6 +1703,20 @@ async function handleRequest(req, res) {
       });
     } catch (e) {
       sendJSON(res, 500, { error: e.message });
+    }
+    return;
+  }
+
+  // POST /api/pipeline-state — receive pipeline state from GPU embed scripts
+  if (req.method === "POST" && pathname === "/api/pipeline-state") {
+    try {
+      const body = await readBody(req);
+      const state = JSON.parse(body);
+      const fs = require("fs");
+      fs.writeFileSync("/tmp/pipeline-state.json", JSON.stringify(state));
+      sendJSON(res, 200, { ok: true });
+    } catch (e) {
+      sendJSON(res, 400, { error: e.message });
     }
     return;
   }

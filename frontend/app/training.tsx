@@ -52,8 +52,17 @@ const MAGENTA = "#EC4899";
 const CARD_BG = "#0A0A0A";
 const BORDER = "#151515";
 const AUTO_REFRESH_MS = 10000;
-const TARGET_FACES = 1_000_000;
 const EPIC_TARGET = 100_000_000;
+
+// Dataset metadata for labels and targets
+const DATASET_INFO: Record<string, { label: string; total: number; color: string }> = {
+  glint360k: { label: "Glint360K", total: 17_100_000, color: CYAN },
+  satellite: { label: "Satellite Crawl", total: 50_000_000, color: AMBER },
+  laion: { label: "LAION-Face", total: 50_000_000, color: PURPLE },
+  ms1mv3: { label: "MS1MV3", total: 5_200_000, color: GREEN },
+  ms1mv2: { label: "MS1MV2", total: 5_800_000, color: MAGENTA },
+  wikidata: { label: "Wikidata", total: 1_000_000, color: "#3B82F6" },
+};
 
 interface TrainingStats {
   qdrant: {
@@ -61,6 +70,20 @@ interface TrainingStats {
     points_count: number;
     indexed_vectors_count: number;
     segments_count: number;
+  };
+  sources?: Record<string, number>;
+  pipeline?: {
+    activeDataset: string | null;
+    model: string;
+    dimensions: number;
+    gpuBatch: number;
+    workers: number;
+    qdrantBatch: number;
+    qdrantWorkers?: number;
+    shardProgress: number | null;
+    totalShards: number | null;
+    rate: number | null;
+    datasetLabel?: string;
   };
   vast: {
     id: number;
@@ -260,17 +283,13 @@ function SkiaSparkline({
   return (
     <Canvas style={{ width: w, height: h }}>
       {gridLines}
-      {/* Fill gradient */}
       <Path path={fillPathStr} opacity={0.15}>
         <SkGrad start={vec(0, pad)} end={vec(0, h)} colors={[color, "transparent"]} />
       </Path>
-      {/* Line */}
       <Path path={pathStr} style="stroke" strokeWidth={2} strokeCap="round" strokeJoin="round" color={color} />
-      {/* Glow line */}
       <Path path={pathStr} style="stroke" strokeWidth={4} strokeCap="round" strokeJoin="round" color={color} opacity={0.2}>
         <Blur blur={4} />
       </Path>
-      {/* Endpoint dot with glow */}
       {lastPoint && (
         <>
           <Circle cx={lastPoint.x} cy={lastPoint.y} r={6} color={color} opacity={0.2}>
@@ -456,7 +475,6 @@ function NeonProgressBar({
 function ActivityTicker({ events }: { events: string[] }) {
   const [idx, setIdx] = useState(0);
   const translateY = useSharedValue(0);
-  const opacityVal = useSharedValue(1);
 
   useEffect(() => {
     if (events.length === 0) return;
@@ -558,6 +576,51 @@ function GlowCard({
         </Text>
       ) : null}
     </Animated.View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SOURCE BAR — mini horizontal bar for per-source breakdown
+// ═══════════════════════════════════════════════════════════════════════════════
+function SourceBar({
+  label,
+  count,
+  total,
+  color,
+  active,
+}: {
+  label: string;
+  count: number;
+  total: number;
+  color: string;
+  active: boolean;
+}) {
+  const pct = total > 0 ? Math.min((count / total) * 100, 100) : 0;
+  return (
+    <View style={{ marginVertical: 4 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {active && <PulsingGlow active={true} color={color} />}
+          <Text style={{ color: active ? color : "#404040", fontSize: 9, fontFamily: "monospace", fontWeight: active ? "bold" : "normal" }}>
+            {label}
+          </Text>
+        </View>
+        <Text style={{ color: active ? color : "#333", fontSize: 9, fontFamily: "monospace" }}>
+          {formatCompact(count)}
+        </Text>
+      </View>
+      <View style={{ height: 2, backgroundColor: "#0D0D0D", borderRadius: 1, overflow: "hidden" }}>
+        <View
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            backgroundColor: color,
+            borderRadius: 1,
+            opacity: active ? 1 : 0.4,
+          }}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -679,11 +742,20 @@ export default function TrainingScreen() {
   // ── Computed ────────────────────────────────────────────────────────────
   const points = stats?.qdrant?.points_count || 0;
   const indexed = stats?.qdrant?.indexed_vectors_count || 0;
+  const sources = stats?.sources || {};
+  const pipeline = stats?.pipeline;
+  const activeDataset = pipeline?.activeDataset || null;
+  const activeInfo = activeDataset ? DATASET_INFO[activeDataset] : null;
+
+  // Pipeline rate: prefer server-side rate from GPU script, fall back to client-side
+  const serverRate = pipeline?.rate || 0;
 
   const sessionRate =
     startPoints !== null && startTime !== null && stats
       ? (points - startPoints) / ((Date.now() - startTime) / 60000)
       : 0;
+
+  const displayRate = serverRate > 0 ? serverRate : sessionRate;
 
   const recentRate =
     history.length >= 2
@@ -694,10 +766,14 @@ export default function TrainingScreen() {
   const uptimeHrs = parseFloat(stats?.vast?.uptime_hrs || "0");
   const estCost = stats?.vast?.est_cost || costPerHr * uptimeHrs;
 
-  const etaMinutes = sessionRate > 0 ? (TARGET_FACES - points) / sessionRate : 0;
+  // ETA: remaining faces in active dataset / current rate
+  const activeTotal = activeInfo?.total || EPIC_TARGET;
+  const activeCount = activeDataset ? (sources[activeDataset] || 0) : points;
+  const remaining = activeTotal - activeCount;
+  const etaMinutes = displayRate > 0 && remaining > 0 ? remaining / displayRate : 0;
   const etaStr =
     etaMinutes <= 0
-      ? "—"
+      ? "DONE"
       : etaMinutes < 60
       ? `${Math.round(etaMinutes)}m`
       : etaMinutes < 1440
@@ -710,21 +786,30 @@ export default function TrainingScreen() {
       : 0;
 
   const vastRunning = stats?.vast?.status === "running";
-  const qdrantOnline = stats?.qdrant?.status === "green";
+  // Qdrant is operational when green OR yellow (yellow = HNSW indexing disabled during bulk upload)
+  const qdrantOnline = stats?.qdrant?.status === "green" || stats?.qdrant?.status === "yellow";
+  const qdrantColor = stats?.qdrant?.status === "green" ? GREEN : stats?.qdrant?.status === "yellow" ? AMBER : RED;
   const pad = isPhone ? 14 : 22;
   const chartW = SCREEN_W - pad * 2 - 2;
 
   const tickerEvents = activityLog.length > 0
     ? activityLog
     : [
-        "Pipeline active — monitoring ingestion...",
-        `Qdrant: ${formatCompact(points)} embeddings`,
+        activeDataset
+          ? `Embedding ${activeInfo?.label || activeDataset} @ ${formatCompact(displayRate)}/min`
+          : "Pipeline idle — no active dataset",
+        `Qdrant: ${formatCompact(points)} total embeddings`,
         vastRunning ? `GPU: ${stats?.vast?.gpu} @ ${formatCost(costPerHr)}/hr` : "No GPU instance",
       ];
 
   const timeStr = lastRefresh
     ? `${lastRefresh.getHours().toString().padStart(2, "0")}:${lastRefresh.getMinutes().toString().padStart(2, "0")}:${lastRefresh.getSeconds().toString().padStart(2, "0")}`
     : "——:——:——";
+
+  // Shard progress text
+  const shardText = pipeline?.shardProgress && pipeline?.totalShards
+    ? `${pipeline.shardProgress} / ${pipeline.totalShards}`
+    : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#030303" }}>
@@ -760,7 +845,7 @@ export default function TrainingScreen() {
           >
             OPS CENTER
           </Animated.Text>
-          <PulsingGlow active={qdrantOnline} color={qdrantOnline ? CYAN : RED} />
+          <PulsingGlow active={qdrantOnline} color={qdrantColor} />
         </View>
 
         <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>{timeStr}</Text>
@@ -776,7 +861,7 @@ export default function TrainingScreen() {
         {error && (
           <Animated.View entering={FadeIn.duration(300)} style={s.errorBanner}>
             <Text style={{ color: RED, fontSize: 10, fontFamily: "monospace" }}>
-              ⚠ LINK DEGRADED: {error}
+              LINK DEGRADED: {error}
             </Text>
           </Animated.View>
         )}
@@ -787,12 +872,15 @@ export default function TrainingScreen() {
           <OdometerNumber value={formatFull(points)} color={CYAN} size={36} />
           <Text style={s.heroSub}>EMBEDDINGS IN QDRANT</Text>
 
-          <NeonProgressBar
-            current={points}
-            target={TARGET_FACES}
-            color={CYAN}
-            label={`PHASE 1: ${formatCompact(points)} / ${formatCompact(TARGET_FACES)}`}
-          />
+          {/* Active dataset progress */}
+          {activeDataset && activeInfo && (
+            <NeonProgressBar
+              current={activeCount}
+              target={activeTotal}
+              color={activeInfo.color}
+              label={`ACTIVE: ${activeInfo.label} — ${formatCompact(activeCount)} / ${formatCompact(activeTotal)}`}
+            />
+          )}
           <NeonProgressBar
             current={points}
             target={EPIC_TARGET}
@@ -804,23 +892,23 @@ export default function TrainingScreen() {
         {/* ── Rate cards ──────────────────────────────────────────── */}
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
           <GlowCard
-            value={recentRate > 0 ? `${Math.round(recentRate)}` : "—"}
+            value={displayRate > 0 ? `${Math.round(displayRate).toLocaleString()}` : "—"}
             label="FACES/MIN"
-            sublabel="current"
+            sublabel={serverRate > 0 ? "gpu pipeline" : "client est."}
             color={GREEN}
             delay={100}
           />
           <GlowCard
-            value={sessionRate > 0 ? `${Math.round(sessionRate)}` : "—"}
-            label="AVG/MIN"
-            sublabel="session"
+            value={recentRate > 0 ? `${Math.round(recentRate).toLocaleString()}` : "—"}
+            label="DELTA/MIN"
+            sublabel="last interval"
             color={AMBER}
             delay={200}
           />
           <GlowCard
             value={etaStr}
-            label="ETA 1M"
-            sublabel="phase 1"
+            label={activeInfo ? `ETA ${activeInfo.label.split(" ")[0].toUpperCase()}` : "ETA"}
+            sublabel={shardText ? `shard ${shardText}` : activeDataset || "epic"}
             color={PURPLE}
             delay={300}
           />
@@ -834,6 +922,30 @@ export default function TrainingScreen() {
 
         {/* ── Ticker ──────────────────────────────────────────────── */}
         <ActivityTicker events={tickerEvents} />
+
+        {/* ── Sources breakdown ────────────────────────────────────── */}
+        {Object.keys(sources).length > 0 && (
+          <>
+            <SectionDivider title="SOURCES" icon="◈" />
+            <View style={[s.panel, { padding: 14 }]}>
+              {Object.entries(sources)
+                .sort((a, b) => b[1] - a[1])
+                .map(([src, count]) => {
+                  const info = DATASET_INFO[src] || { label: src, total: count, color: "#666" };
+                  return (
+                    <SourceBar
+                      key={src}
+                      label={info.label}
+                      count={count}
+                      total={info.total}
+                      color={info.color}
+                      active={src === activeDataset}
+                    />
+                  );
+                })}
+            </View>
+          </>
+        )}
 
         {/* ── GPU ─────────────────────────────────────────────────── */}
         <SectionDivider title="GPU COMPUTE" icon="⚡" />
@@ -884,13 +996,13 @@ export default function TrainingScreen() {
 
         {/* ── Qdrant ──────────────────────────────────────────────── */}
         <SectionDivider title="VECTOR DATABASE" icon="◆" />
-        <View style={[s.panel, qdrantOnline && { borderColor: CYAN + "10" }]}>
+        <View style={[s.panel, qdrantOnline && { borderColor: qdrantColor + "10" }]}>
           <View style={s.panelHeader}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <PulsingGlow active={qdrantOnline} color={qdrantOnline ? CYAN : RED} />
+              <PulsingGlow active={qdrantOnline} color={qdrantColor} />
               <Text
                 style={{
-                  color: qdrantOnline ? CYAN : RED,
+                  color: qdrantColor,
                   fontSize: 11,
                   fontFamily: "monospace",
                   fontWeight: "bold",
@@ -899,25 +1011,34 @@ export default function TrainingScreen() {
               >
                 {stats?.qdrant?.status || "OFFLINE"}
               </Text>
+              {stats?.qdrant?.status === "yellow" && (
+                <Text style={{ color: "#333", fontSize: 8, fontFamily: "monospace" }}>
+                  (HNSW disabled)
+                </Text>
+              )}
             </View>
             <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>QDRANT</Text>
           </View>
           <InfoRow label="Total Vectors" value={formatFull(points)} color={CYAN} />
-          <InfoRow label="Indexed" value={formatFull(indexed)} color={GREEN} />
+          <InfoRow label="Indexed (HNSW)" value={indexed > 0 ? formatFull(indexed) : "disabled"} color={indexed > 0 ? GREEN : "#333"} />
           <InfoRow label="Segments" value={String(stats?.qdrant?.segments_count || 0)} />
-          <InfoRow label="Dimensions" value="512" />
+          <InfoRow label="Dimensions" value={String(pipeline?.dimensions || 512)} />
           <InfoRow label="Distance" value="Cosine" />
         </View>
 
         {/* ── Pipeline ────────────────────────────────────────────── */}
         <SectionDivider title="PIPELINE" icon="▶" />
         <View style={s.panel}>
-          <InfoRow label="Source" value="LAION-Face (50M)" color={CYAN} />
-          <InfoRow label="Extracted" value="2.4M (16/128)" />
-          <InfoRow label="Yield" value="~29%" color={AMBER} />
-          <InfoRow label="Model" value="ArcFace buffalo_l" />
-          <InfoRow label="Embed" value="512-dim GPU" />
-          <InfoRow label="Workers" value="128 parallel" />
+          <InfoRow
+            label="Active Source"
+            value={activeInfo?.label || pipeline?.datasetLabel || (activeDataset || "None")}
+            color={activeInfo?.color || CYAN}
+          />
+          <InfoRow label="Model" value={pipeline?.model || "ArcFace w600k_r50"} />
+          <InfoRow label="GPU Batch" value={String(pipeline?.gpuBatch || 256)} />
+          <InfoRow label="Decode Workers" value={String(pipeline?.workers || "—")} />
+          <InfoRow label="Qdrant Batch" value={String(pipeline?.qdrantBatch || 2000)} />
+          {shardText && <InfoRow label="Shard Progress" value={shardText} color={AMBER} />}
           <InfoRow label="Refresh" value={`${AUTO_REFRESH_MS / 1000}s`} />
         </View>
 
@@ -926,10 +1047,11 @@ export default function TrainingScreen() {
         <View style={[s.panel, { padding: 14 }]}>
           <Text style={s.topoText}>
             {`┌─ Vast.ai RTX 3090 ───────┐    ┌─ GCP VM ──────┐\n`}
-            {`│  Download LAION URLs      │───▶│  Qdrant :6333  │\n`}
-            {`│  ArcFace GPU embed        │    │  (SSH tunnel)  │\n`}
-            {`│  Batch insert to Qdrant   │    └────────────────┘\n`}
-            {`└──────────────────────────-┘           ▲\n`}
+            {`│  Stream Glint360K shards  │───▶│  Qdrant :6333  │\n`}
+            {`│  Decompress + Decode (8T) │    │  512-dim HNSW  │\n`}
+            {`│  ArcFace GPU (batch 256)  │    └────────────────┘\n`}
+            {`│  4x Qdrant insert pool    │           ▲\n`}
+            {`└──────────────────────────-┘           │\n`}
             {`┌─ dev-01 (satellite) ─────┐           │\n`}
             {`│  4 crawlers × 5 engines  │───────────┘\n`}
             {`│  ArcFace CPU embed       │  (VPN direct)\n`}
