@@ -8,9 +8,12 @@ Architecture: 4-stage async pipeline
   [Prefetch Downloads] → [Decompress+Decode Workers] → [GPU Batch Inference] → [Qdrant Insert Pool]
   Each stage runs independently via queues, GPU never waits.
 
+Resilience: corrupted shards are re-downloaded + retried, then skipped.
+Observability: heartbeat POST to bridge every 10s with live stats.
+
 Usage: python3 embed-glint360k.py [start_shard] [end_shard]
 """
-import os, sys, uuid, time, io, tarfile, traceback, subprocess
+import os, sys, uuid, time, io, tarfile, traceback, subprocess, json
 import numpy as np
 import cv2
 import onnxruntime as ort
@@ -22,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.request import urlopen, Request
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://34.135.158.92:6333")
+BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://34.135.158.92:3333")
 COLLECTION = "faces"
 QDRANT_BATCH = 2000
 GPU_BATCH = 256
@@ -30,12 +34,17 @@ HF_BASE = "https://huggingface.co/datasets/gaunernst/glint360k-wds-gz/resolve/ma
 PREFETCH_SHARDS = 4
 DECODE_WORKERS = 8  # CPU threads for image decode + preprocess
 QDRANT_WORKERS = 4  # Parallel insert threads
+HEARTBEAT_INTERVAL = 10  # seconds
 
 import warnings
 warnings.filterwarnings("ignore")
 os.environ["ONNXRUNTIME_LOG_LEVEL"] = "3"
 
-stats = {"indexed": 0, "processed": 0, "failed": 0, "skipped": 0}
+stats = {
+    "indexed": 0, "processed": 0, "failed": 0, "skipped": 0,
+    "current_shard": 0, "shards_done": 0, "shards_skipped": 0,
+    "errors": [],  # last 10 errors
+}
 stats_lock = Lock()
 start_time = time.time()
 running = Event()
@@ -48,6 +57,12 @@ _qdrant = None
 
 def log(msg):
     print(msg, flush=True)
+
+def add_error(msg):
+    """Track recent errors for observability."""
+    with stats_lock:
+        stats["errors"].append({"time": time.time(), "msg": str(msg)[:200]})
+        stats["errors"] = stats["errors"][-10:]  # keep last 10
 
 def get_qdrant():
     global _qdrant
@@ -90,15 +105,40 @@ def preprocess(img_bytes):
     img = (img.astype(np.float32) - 127.5) / 127.5
     return np.transpose(img, (2, 0, 1))
 
+def get_gpu_stats():
+    """Read GPU utilization and memory from nvidia-smi."""
+    try:
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
+             "--format=csv,noheader,nounits"],
+            timeout=5
+        ).decode().strip()
+        parts = [p.strip() for p in out.split(",")]
+        return {
+            "gpu_util": int(parts[0]),
+            "gpu_mem_used": int(parts[1]),
+            "gpu_mem_total": int(parts[2]),
+            "gpu_temp": int(parts[3]),
+        }
+    except Exception:
+        return None
+
 # ── Stage 1: Download shards ──
 
-def download_shard(shard_num):
+def download_shard(shard_num, force=False):
+    """Download a shard. If force=True, delete existing file first."""
     fname = f"glint360k-{shard_num:04d}.tar.gz"
     url = f"{HF_BASE}/{fname}"
     out_path = f"/root/glint360k/{fname}"
     os.makedirs("/root/glint360k", exist_ok=True)
-    if os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
+
+    if force and os.path.exists(out_path):
+        os.remove(out_path)
+        log(f"[download] Deleted corrupted shard {shard_num:04d} for re-download")
+
+    if not force and os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
         return out_path
+
     for attempt in range(3):
         try:
             req = Request(url, headers={"User-Agent": "ozzu-embedder/1.0"})
@@ -128,6 +168,7 @@ def prefetch_worker(shard_queue, ready_queue, stop_event):
                 log(f"[prefetch] Shard {shard_num:04d} ready ({os.path.getsize(gz_path)/1e6:.1f}MB)")
             except Exception as e:
                 log(f"[prefetch] Shard {shard_num} failed: {e}")
+                add_error(f"Prefetch shard {shard_num} failed: {e}")
                 ready_queue.put((shard_num, None))
                 continue
         ready_queue.put((shard_num, gz_path))
@@ -145,7 +186,8 @@ def decode_image(args):
     return (tensor, label, img_name)
 
 def shard_reader(gz_path, shard_num):
-    """Read a shard, decode images in parallel, push tensors to queue."""
+    """Read a shard, decode images in parallel, push tensors to queue.
+    Raises on corrupted archive so caller can handle retry."""
     # Decompress with pigz if available
     tar_path = gz_path.replace(".tar.gz", ".tar")
     use_plain_tar = False
@@ -210,6 +252,28 @@ def shard_reader(gz_path, shard_num):
 
     return count
 
+def safe_shard_reader(gz_path, shard_num):
+    """Read a shard with corruption recovery. Re-downloads once if corrupted."""
+    try:
+        return shard_reader(gz_path, shard_num)
+    except (EOFError, tarfile.ReadError, OSError) as e:
+        err_msg = f"Shard {shard_num:04d} corrupted: {type(e).__name__}: {e}"
+        log(f"[corrupt] {err_msg}")
+        add_error(err_msg)
+        log(f"[recover] Re-downloading shard {shard_num:04d}...")
+        try:
+            new_path = download_shard(shard_num, force=True)
+            count = shard_reader(new_path, shard_num)
+            log(f"[recover] Shard {shard_num:04d} recovered after re-download ({count} decoded)")
+            return count
+        except Exception as e2:
+            err_msg2 = f"Shard {shard_num:04d} still bad after re-download: {e2}"
+            log(f"[skip] {err_msg2}")
+            add_error(err_msg2)
+            with stats_lock:
+                stats["shards_skipped"] += 1
+            return 0
+
 # ── Stage 3: GPU inference (batches from tensor_queue → embed_queue) ──
 
 def gpu_worker(sess, inp_name, stop_event):
@@ -241,6 +305,7 @@ def gpu_worker(sess, inp_name, stop_event):
                 embed_queue.put((emb, label, name))
         except Exception as e:
             log(f"[gpu] Batch error: {e}")
+            add_error(f"GPU batch error: {e}")
             with stats_lock:
                 stats["failed"] += len(batch_tensors)
 
@@ -271,6 +336,7 @@ def qdrant_worker(stop_event):
                     buffer = []
                 except Exception as e:
                     log(f"[qdrant] Insert failed ({len(buffer)}): {e}")
+                    add_error(f"Qdrant insert failed: {e}")
                     time.sleep(2)
         except Empty:
             # Flush partial buffer on timeout
@@ -282,41 +348,64 @@ def qdrant_worker(stop_event):
                     buffer = []
                 except Exception as e:
                     log(f"[qdrant] Partial flush failed: {e}")
+                    add_error(f"Qdrant flush failed: {e}")
 
-def push_pipeline_state(rate, shard_num=None, total_shards=None):
-    """Push pipeline state to bridge for dashboard display."""
-    try:
-        import json
-        with stats_lock:
-            indexed = stats["indexed"]
-        state = {
-            "dataset": "glint360k",
-            "datasetLabel": "Glint360K (17.1M)",
-            "model": "ArcFace w600k_r50",
-            "dimensions": 512,
-            "gpuBatch": GPU_BATCH,
-            "workers": DECODE_WORKERS,
-            "qdrantBatch": QDRANT_BATCH,
-            "qdrantWorkers": QDRANT_WORKERS,
-            "rate": round(rate),
-            "indexed": indexed,
-            "shardProgress": shard_num,
-            "totalShards": total_shards or NUM_SHARDS,
-            "updatedAt": int(time.time() * 1000),
-        }
-        # Write to /tmp for bridge to read
-        with open("/tmp/pipeline-state.json", "w") as f:
-            json.dump(state, f)
-        # Also try to POST to bridge (fire-and-forget)
+# ── Heartbeat: POST stats to bridge every HEARTBEAT_INTERVAL seconds ──
+
+def heartbeat_worker(stop_event, start_shard, end_shard):
+    """Send pipeline stats to bridge for observability."""
+    import urllib.request
+    import urllib.error
+
+    while not stop_event.is_set():
+        time.sleep(HEARTBEAT_INTERVAL)
         try:
-            data = json.dumps(state).encode()
-            req = Request(f"{QDRANT_URL.rsplit(':', 1)[0]}:3333/api/pipeline-state",
-                          data=data, headers={"Content-Type": "application/json"}, method="POST")
-            urlopen(req, timeout=3)
+            elapsed = time.time() - start_time
+            gpu = get_gpu_stats()
+            with stats_lock:
+                idx = stats["indexed"]
+                proc = stats["processed"]
+                fail = stats["failed"]
+                cur = stats["current_shard"]
+                done = stats["shards_done"]
+                skipped = stats["shards_skipped"]
+                errors = list(stats["errors"])
+
+            rate = idx / (elapsed / 60) if elapsed > 0 else 0
+
+            payload = json.dumps({
+                "dataset": "glint360k",
+                "indexed": idx,
+                "processed": proc,
+                "failed": fail,
+                "skipped": skipped,
+                "rate": round(rate),
+                "gpuBatch": GPU_BATCH,
+                "workers": DECODE_WORKERS,
+                "qdrantBatch": QDRANT_BATCH,
+                "qdrantWorkers": QDRANT_WORKERS,
+                "shardProgress": cur,
+                "shardsCompleted": done,
+                "totalShards": end_shard - start_shard,
+                "startShard": start_shard,
+                "endShard": end_shard,
+                "elapsedSec": round(elapsed),
+                "gpu": gpu,
+                "errors": errors[-5:],
+                "tensorQueueSize": tensor_queue.qsize(),
+                "embedQueueSize": embed_queue.qsize(),
+                "timestamp": time.time(),
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                f"{BRIDGE_URL}/api/pipeline-state",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=5)
         except Exception:
-            pass
-    except Exception:
-        pass
+            pass  # Non-blocking — don't crash the pipeline over reporting
 
 def stats_reporter(stop_event):
     while not stop_event.is_set():
@@ -333,7 +422,6 @@ def stats_reporter(stop_event):
             log(f"[stats] indexed:{idx:,} processed:{proc:,} "
                 f"fail:{fail:,} tq:{tq} eq:{eq} "
                 f"rate:{rate:,.0f}/min {elapsed:.0f}s")
-            push_pipeline_state(rate)
 
 if __name__ == "__main__":
     start_shard = int(sys.argv[1]) if len(sys.argv) > 1 else 0
@@ -343,6 +431,7 @@ if __name__ == "__main__":
     log(f"[glint360k] GPU batch={GPU_BATCH}, Qdrant batch={QDRANT_BATCH}")
     log(f"[glint360k] Decode workers={DECODE_WORKERS}, Qdrant workers={QDRANT_WORKERS}")
     log(f"[glint360k] Qdrant: {QDRANT_URL}")
+    log(f"[glint360k] Bridge: {BRIDGE_URL} (heartbeat every {HEARTBEAT_INTERVAL}s)")
 
     sess, inp_name = load_rec_model()
 
@@ -363,6 +452,10 @@ if __name__ == "__main__":
     stats_thread = Thread(target=stats_reporter, args=(stop_event,), daemon=True)
     stats_thread.start()
 
+    # Start heartbeat reporter
+    hb_thread = Thread(target=heartbeat_worker, args=(stop_event, start_shard, end_shard), daemon=True)
+    hb_thread.start()
+
     # Start prefetch workers
     shard_queue = Queue()
     ready_queue = Queue()
@@ -381,6 +474,10 @@ if __name__ == "__main__":
         shard_num, gz_path = ready_queue.get()
         if gz_path is None:
             log(f"[skip] Shard {shard_num} download failed")
+            add_error(f"Shard {shard_num} download failed entirely")
+            with stats_lock:
+                stats["shards_skipped"] += 1
+                stats["shards_done"] += 1
             if next_to_queue < end_shard:
                 shard_queue.put(next_to_queue)
                 next_to_queue += 1
@@ -390,11 +487,16 @@ if __name__ == "__main__":
             shard_queue.put(next_to_queue)
             next_to_queue += 1
 
+        with stats_lock:
+            stats["current_shard"] = shard_num
+
         shard_start = time.time()
-        count = shard_reader(gz_path, shard_num)
+        count = safe_shard_reader(gz_path, shard_num)
         elapsed = time.time() - shard_start
+
         with stats_lock:
             idx = stats["indexed"]
+            stats["shards_done"] += 1
         log(f"[shard {shard_num:04d}] {count:,} decoded in {elapsed:.0f}s | total indexed:{idx:,}")
 
         # Cleanup old shards
@@ -420,12 +522,14 @@ if __name__ == "__main__":
         idx = stats["indexed"]
         proc = stats["processed"]
         fail = stats["failed"]
+        skipped = stats["shards_skipped"]
     rate = idx / (elapsed / 60) if elapsed > 0 else 0
     log(f"\n{'='*60}")
     log(f"GLINT360K COMPLETE (shards {start_shard}-{end_shard-1})")
     log(f"  Indexed:    {idx:,}")
     log(f"  Processed:  {proc:,}")
     log(f"  Failed:     {fail:,}")
+    log(f"  Shards skipped: {skipped}")
     log(f"  Rate:       {rate:,.0f} faces/min")
     log(f"  Time:       {elapsed/3600:.1f}h")
     log(f"{'='*60}")

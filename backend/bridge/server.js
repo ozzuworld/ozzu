@@ -1619,8 +1619,7 @@ async function handleRequest(req, res) {
       const sourceBreakdown = {};
       const totalPoints = qdrantResult.points_count || 0;
 
-      // Determine active dataset based on what's growing
-      // Read pipeline state file if it exists (written by embed scripts)
+      // Read pipeline state file if it exists (written by embed script heartbeat)
       let pipelineState = null;
       try {
         const fs = require("fs");
@@ -1631,7 +1630,6 @@ async function handleRequest(req, res) {
       } catch {}
 
       // Source breakdown from pipeline state
-      // The pipeline state tells us how many faces from the active dataset
       if (pipelineState?.dataset) {
         const pipelineIndexed = pipelineState?.indexed || 0;
         if (pipelineIndexed > 0) sourceBreakdown[pipelineState.dataset] = pipelineIndexed;
@@ -1656,6 +1654,12 @@ async function handleRequest(req, res) {
         estCost = (uptimeSec / 3600) * (vastInstance.dph_total || 0);
       }
 
+      // Heartbeat staleness: if last heartbeat > 30s ago, pipeline may be dead
+      const heartbeatAge = pipelineState?.timestamp
+        ? Math.round((Date.now() / 1000) - pipelineState.timestamp)
+        : null;
+      const heartbeatAlive = heartbeatAge !== null && heartbeatAge < 30;
+
       sendJSON(res, 200, {
         qdrant: {
           status: qdrantResult.status || "unknown",
@@ -1671,18 +1675,39 @@ async function handleRequest(req, res) {
           gpuBatch: pipelineState?.gpuBatch || 256,
           workers: pipelineState?.workers || 8,
           qdrantBatch: pipelineState?.qdrantBatch || 2000,
+          qdrantWorkers: pipelineState?.qdrantWorkers || 4,
           shardProgress: pipelineState?.shardProgress || null,
+          shardsCompleted: pipelineState?.shardsCompleted || null,
           totalShards: pipelineState?.totalShards || null,
+          startShard: pipelineState?.startShard || null,
+          endShard: pipelineState?.endShard || null,
           rate: pipelineState?.rate || null,
+          indexed: pipelineState?.indexed || null,
+          processed: pipelineState?.processed || null,
+          failed: pipelineState?.failed || null,
+          skipped: pipelineState?.skipped || null,
+          elapsedSec: pipelineState?.elapsedSec || null,
+          tensorQueueSize: pipelineState?.tensorQueueSize || null,
+          embedQueueSize: pipelineState?.embedQueueSize || null,
+          errors: pipelineState?.errors || [],
+          heartbeatAge,
+          heartbeatAlive,
         },
+        gpu: pipelineState?.gpu || null,
         vast: vastInstance ? {
           id: vastInstance.id,
           status: vastInstance.actual_status,
           gpu: vastInstance.gpu_name,
+          gpu_util: vastInstance.gpu_util,
+          gpu_temp: vastInstance.gpu_temp,
           cost_per_hr: vastInstance.dph_total,
           uptime_hrs: instanceUptimeHrs,
           est_cost: estCost,
           ssh: `ssh -p ${vastInstance.ssh_port} root@${vastInstance.ssh_host}`,
+          mem_usage_gb: vastInstance.mem_usage ? (vastInstance.mem_usage / 1073741824).toFixed(1) : null,
+          disk_usage_gb: vastInstance.disk_usage || null,
+          disk_space_gb: vastInstance.disk_space || null,
+          geolocation: vastInstance.geolocation || null,
         } : null,
         timestamp: Date.now(),
       });
@@ -1695,7 +1720,9 @@ async function handleRequest(req, res) {
   // POST /api/pipeline-state — receive pipeline state from GPU embed scripts
   if (req.method === "POST" && pathname === "/api/pipeline-state") {
     try {
-      const body = await readBody(req);
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = Buffer.concat(chunks).toString();
       const state = JSON.parse(body);
       const fs = require("fs");
       fs.writeFileSync("/tmp/pipeline-state.json", JSON.stringify(state));

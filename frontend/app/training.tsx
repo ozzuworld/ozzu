@@ -81,18 +81,43 @@ interface TrainingStats {
     qdrantBatch: number;
     qdrantWorkers?: number;
     shardProgress: number | null;
+    shardsCompleted: number | null;
     totalShards: number | null;
+    startShard: number | null;
+    endShard: number | null;
     rate: number | null;
+    indexed: number | null;
+    processed: number | null;
+    failed: number | null;
+    skipped: number | null;
+    elapsedSec: number | null;
+    tensorQueueSize: number | null;
+    embedQueueSize: number | null;
+    errors: Array<{ time: number; msg: string }>;
+    heartbeatAge: number | null;
+    heartbeatAlive: boolean;
     datasetLabel?: string;
   };
+  gpu?: {
+    gpu_util: number;
+    gpu_mem_used: number;
+    gpu_mem_total: number;
+    gpu_temp: number;
+  } | null;
   vast: {
     id: number;
     status: string;
     gpu: string;
+    gpu_util: number;
+    gpu_temp: number;
     cost_per_hr: number;
     uptime_hrs: string | null;
     est_cost: number | null;
     ssh: string;
+    mem_usage_gb: string | null;
+    disk_usage_gb: number | null;
+    disk_space_gb: number | null;
+    geolocation: string | null;
   } | null;
   timestamp: number;
 }
@@ -785,6 +810,19 @@ export default function TrainingScreen() {
       ? estCost / (points - startPoints)
       : 0;
 
+  // GPU stats from heartbeat (real-time from nvidia-smi on the instance)
+  const gpuUtil = stats?.gpu?.gpu_util ?? null;
+  const gpuTemp = stats?.gpu?.gpu_temp ?? null;
+  const gpuMemUsed = stats?.gpu?.gpu_mem_used ?? null;
+  const gpuMemTotal = stats?.gpu?.gpu_mem_total ?? null;
+
+  // Heartbeat status
+  const heartbeatAge = pipeline?.heartbeatAge ?? null;
+  const heartbeatAlive = pipeline?.heartbeatAlive ?? false;
+
+  // Pipeline errors
+  const pipelineErrors = pipeline?.errors ?? [];
+
   const vastRunning = stats?.vast?.status === "running";
   // Qdrant is operational when green OR yellow (yellow = HNSW indexing disabled during bulk upload)
   const qdrantOnline = stats?.qdrant?.status === "green" || stats?.qdrant?.status === "yellow";
@@ -806,9 +844,11 @@ export default function TrainingScreen() {
     ? `${lastRefresh.getHours().toString().padStart(2, "0")}:${lastRefresh.getMinutes().toString().padStart(2, "0")}:${lastRefresh.getSeconds().toString().padStart(2, "0")}`
     : "——:——:——";
 
-  // Shard progress text
-  const shardText = pipeline?.shardProgress && pipeline?.totalShards
-    ? `${pipeline.shardProgress} / ${pipeline.totalShards}`
+  // Shard progress text — show current shard number
+  const shardText = pipeline?.shardProgress != null
+    ? pipeline?.startShard != null && pipeline?.endShard != null
+      ? `${pipeline.shardProgress} (${pipeline.startShard}→${pipeline.endShard - 1})`
+      : `${pipeline.shardProgress}`
     : null;
 
   return (
@@ -974,6 +1014,30 @@ export default function TrainingScreen() {
                 </Text>
               </View>
               <InfoRow label="GPU" value={stats.vast.gpu} color={CYAN} />
+              {gpuUtil !== null && (
+                <InfoRow
+                  label="GPU Util"
+                  value={`${gpuUtil}%`}
+                  color={gpuUtil > 80 ? GREEN : gpuUtil > 0 ? AMBER : RED}
+                />
+              )}
+              {gpuTemp !== null && (
+                <InfoRow
+                  label="GPU Temp"
+                  value={`${gpuTemp}°C`}
+                  color={gpuTemp > 80 ? RED : gpuTemp > 65 ? AMBER : GREEN}
+                />
+              )}
+              {gpuMemUsed !== null && gpuMemTotal !== null && (
+                <InfoRow
+                  label="VRAM"
+                  value={`${(gpuMemUsed / 1024).toFixed(1)}G / ${(gpuMemTotal / 1024).toFixed(0)}G`}
+                  color={CYAN}
+                />
+              )}
+              {stats.vast.geolocation && (
+                <InfoRow label="Location" value={stats.vast.geolocation} />
+              )}
               <InfoRow label="Cost/hr" value={formatCost(costPerHr)} />
               <InfoRow label="Uptime" value={uptimeHrs > 0 ? `${uptimeHrs.toFixed(1)}h` : "—"} />
               <InfoRow
@@ -1028,7 +1092,27 @@ export default function TrainingScreen() {
 
         {/* ── Pipeline ────────────────────────────────────────────── */}
         <SectionDivider title="PIPELINE" icon="▶" />
-        <View style={s.panel}>
+        <View style={[s.panel, heartbeatAlive && { borderColor: GREEN + "10" }]}>
+          <View style={s.panelHeader}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <PulsingGlow active={heartbeatAlive} color={heartbeatAlive ? GREEN : RED} />
+              <Text
+                style={{
+                  color: heartbeatAlive ? GREEN : heartbeatAge !== null ? RED : "#333",
+                  fontSize: 10,
+                  fontFamily: "monospace",
+                  fontWeight: "bold",
+                }}
+              >
+                {heartbeatAlive ? "HEARTBEAT LIVE" : heartbeatAge !== null ? `STALE (${heartbeatAge}s ago)` : "NO HEARTBEAT"}
+              </Text>
+            </View>
+            {pipeline?.elapsedSec ? (
+              <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>
+                {pipeline.elapsedSec > 3600 ? `${(pipeline.elapsedSec / 3600).toFixed(1)}h` : `${Math.round(pipeline.elapsedSec / 60)}m`} elapsed
+              </Text>
+            ) : null}
+          </View>
           <InfoRow
             label="Active Source"
             value={activeInfo?.label || pipeline?.datasetLabel || (activeDataset || "None")}
@@ -1038,9 +1122,48 @@ export default function TrainingScreen() {
           <InfoRow label="GPU Batch" value={String(pipeline?.gpuBatch || 256)} />
           <InfoRow label="Decode Workers" value={String(pipeline?.workers || "—")} />
           <InfoRow label="Qdrant Batch" value={String(pipeline?.qdrantBatch || 2000)} />
-          {shardText && <InfoRow label="Shard Progress" value={shardText} color={AMBER} />}
+          <InfoRow label="Qdrant Workers" value={String(pipeline?.qdrantWorkers || 4)} />
+          {shardText && <InfoRow label="Current Shard" value={shardText} color={AMBER} />}
+          {pipeline?.shardsCompleted != null && pipeline?.totalShards != null && (
+            <InfoRow
+              label="Shards Done"
+              value={`${pipeline.shardsCompleted} / ${pipeline.totalShards}`}
+              color={pipeline.shardsCompleted === pipeline.totalShards ? GREEN : CYAN}
+            />
+          )}
+          {(pipeline?.tensorQueueSize != null || pipeline?.embedQueueSize != null) && (
+            <InfoRow
+              label="Queues"
+              value={`T:${pipeline?.tensorQueueSize ?? 0} E:${pipeline?.embedQueueSize ?? 0}`}
+              color={AMBER}
+            />
+          )}
+          {pipeline?.failed != null && pipeline.failed > 0 && (
+            <InfoRow label="Failed" value={String(pipeline.failed)} color={RED} />
+          )}
+          {pipeline?.skipped != null && pipeline.skipped > 0 && (
+            <InfoRow label="Shards Skipped" value={String(pipeline.skipped)} color={AMBER} />
+          )}
           <InfoRow label="Refresh" value={`${AUTO_REFRESH_MS / 1000}s`} />
         </View>
+
+        {/* ── Errors ──────────────────────────────────────────────── */}
+        {pipelineErrors.length > 0 && (
+          <>
+            <SectionDivider title="ERRORS" icon="⚠" />
+            <View style={[s.panel, { borderColor: RED + "20", padding: 12 }]}>
+              {pipelineErrors.map((err, i) => (
+                <Text
+                  key={i}
+                  style={{ color: RED + "90", fontSize: 8, fontFamily: "monospace", marginBottom: 4 }}
+                  numberOfLines={2}
+                >
+                  {new Date(err.time * 1000).toLocaleTimeString()} — {err.msg}
+                </Text>
+              ))}
+            </View>
+          </>
+        )}
 
         {/* ── Topology ────────────────────────────────────────────── */}
         <SectionDivider title="TOPOLOGY" icon="◎" />
