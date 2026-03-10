@@ -1,7 +1,8 @@
 // routes/backup.js — Backup management: create, list, download, schedule
 
 module.exports = function createBackupRoutes(ctx) {
-  const { log, sendJSON, parseBody, requireAuth, fs, path } = ctx;
+  const { log: logObj, sendJSON, parseBody, requireAuth, fs, path } = ctx;
+  const log = typeof logObj === 'function' ? logObj : (...args) => (logObj.bridge ? logObj.bridge.info(...args) : console.log(...args));
 
   const BACKUP_DIR = "/home/gcp/ozzu/backups";
   const BACKUP_SCRIPT = "/home/gcp/ozzu/scripts/backup.sh";

@@ -3,7 +3,7 @@
 
 import { getDeviceType } from "../modules/pcm-player";
 import { Dimensions, Platform } from "react-native";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { getBridgeMode } from "./bridge-api";
 
 // Module-level cache: survives reconnects even if FileSystem persistence fails (e.g. iOS sideloaded apps)

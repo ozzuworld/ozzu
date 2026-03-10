@@ -1,7 +1,7 @@
 // Device Map — maps COCO object detection labels to Home Assistant entities
 // Supports calibration overrides stored via expo-file-system
 
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 
 const STORAGE_FILE = `${FileSystem.documentDirectory}gesture-device-map.json`;
 
