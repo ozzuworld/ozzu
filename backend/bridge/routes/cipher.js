@@ -76,267 +76,333 @@ module.exports = function createCipherRoutes(ctx) {
     return true;
   }
 
-  // GET /cipher/context — assemble full Cipher context for CLAUDE.local.md
+  // GET /cipher/state — structured machine-readable state for Cipher boot
+  if (req.method === "GET" && pathname === "/cipher/state") {
+    try {
+      const now = Date.now();
+      const directives = getDirectives();
+
+      // ── Directives by status ──
+      const needsAttention = directives.filter(d => ["blocked", "deploy_failed", "failed", "stale"].includes(d.status));
+      const active = directives.filter(d => ["in_progress", "planning", "planned", "approved", "pending"].includes(d.status));
+      const recentCompleted = directives
+        .filter(d => d.status === "completed")
+        .sort((a, b) => (b.completedAt || b.updatedAt || 0) - (a.completedAt || a.updatedAt || 0))
+        .slice(0, 5);
+
+      // ── Service health ──
+      let services = {};
+      try {
+        const watchdog = ctx.watchdog || (ctx.getWatchdog && ctx.getWatchdog());
+        if (watchdog && watchdog.getStatus) {
+          const status = watchdog.getStatus();
+          for (const [name, svc] of Object.entries(status.services || {})) {
+            services[name] = { status: svc.status, latency: svc.latency_ms };
+          }
+        }
+      } catch {}
+      // Fallback: try HTTP
+      if (Object.keys(services).length === 0) {
+        try {
+          const http = require("http");
+          const data = await new Promise((resolve, reject) => {
+            const req = http.get("http://127.0.0.1:3333/ops/status", { timeout: 2000 }, (res) => {
+              let body = ""; res.on("data", c => body += c); res.on("end", () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+            });
+            req.on("error", reject); req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+          });
+          if (data && data.services) {
+            for (const [name, svc] of Object.entries(data.services)) {
+              services[name] = { status: svc.status, latency: svc.latency_ms };
+            }
+          }
+        } catch {}
+      }
+      const downServices = Object.entries(services).filter(([, v]) => v.status === "down").map(([k]) => k);
+      const degradedServices = Object.entries(services).filter(([, v]) => v.status === "degraded").map(([k]) => k);
+
+      // ── GPU/Training ──
+      let gpu = null;
+      try {
+        const http = require("http");
+        const qdrantData = await new Promise((resolve, reject) => {
+          const req = http.get("http://127.0.0.1:6333/collections/faces", { timeout: 3000 }, (res) => {
+            let body = ""; res.on("data", c => body += c); res.on("end", () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+          });
+          req.on("error", () => resolve(null)); req.on("timeout", () => { req.destroy(); resolve(null); });
+        });
+        if (qdrantData && qdrantData.result) {
+          gpu = { faceCount: qdrantData.result.points_count || 0 };
+        }
+      } catch {}
+
+      // ── Ventures ──
+      let ventures = [];
+      try {
+        const ventureRows = await db.query("SELECT id, name, status FROM business_ventures ORDER BY created_at DESC LIMIT 5");
+        if (ventureRows && ventureRows.rows) {
+          ventures = ventureRows.rows.map(v => ({ id: v.id, name: v.name, status: v.status }));
+        }
+      } catch {}
+
+      // ── Delta since last session ──
+      let delta = { completedSince: [], failedSince: [], newSince: [] };
+      try {
+        // Find when last cipher session started
+        const lastSession = await db.query(
+          "SELECT started_at FROM conversations WHERE persona = 'cipher' ORDER BY started_at DESC LIMIT 1 OFFSET 1"
+        );
+        if (lastSession.rows.length > 0) {
+          const since = new Date(lastSession.rows[0].started_at).getTime();
+          delta.completedSince = directives
+            .filter(d => d.status === "completed" && (d.completedAt || d.updatedAt) > since)
+            .map(d => ({ id: d.id, title: d.title, emoji: d.emoji }));
+          delta.failedSince = directives
+            .filter(d => ["failed", "deploy_failed", "blocked"].includes(d.status) && d.updatedAt > since)
+            .map(d => ({ id: d.id, title: d.title, status: d.status, reason: d.failureReason }));
+          delta.newSince = directives
+            .filter(d => d.createdAt > since && !delta.completedSince.find(c => c.id === d.id))
+            .map(d => ({ id: d.id, title: d.title, status: d.status, emoji: d.emoji }));
+        }
+      } catch {}
+
+      // ── Known facts (from memory file) ──
+      let knownFacts = [];
+      try {
+        const fs = require("fs");
+        const memPath = "/root/.claude/projects/-home-gcp-ozzu/memory/MEMORY.md";
+        if (fs.existsSync(memPath)) {
+          const content = fs.readFileSync(memPath, "utf8");
+          // Extract bullet points from CRITICAL section
+          const critMatch = content.match(/## CRITICAL[^#]*/s);
+          if (critMatch) {
+            const bullets = critMatch[0].match(/- \*\*[^*]+\*\*[^\n]*/g) || [];
+            knownFacts = bullets.map(b => b.replace(/^- \*\*/, "").replace(/\*\*/, ":"));
+          }
+        }
+      } catch {}
+
+      // ── Pending actions ──
+      const pendingActions = [];
+      if (needsAttention.length > 0) {
+        for (const d of needsAttention) {
+          pendingActions.push({ priority: 1, action: `Fix ${d.status} directive: "${d.title}"`, directiveId: d.id, reason: d.failureReason });
+        }
+      }
+      if (downServices.length > 0) {
+        pendingActions.push({ priority: 1, action: `Services down: ${downServices.join(", ")}` });
+      }
+
+      const state = {
+        timestamp: new Date().toISOString(),
+        summary: needsAttention.length > 0
+          ? `${needsAttention.length} thing${needsAttention.length > 1 ? "s" : ""} need attention`
+          : active.length > 0
+            ? `${active.length} active, all clear`
+            : "Nothing active",
+        directives: {
+          needsAttention: needsAttention.map(d => ({ id: d.id, title: d.title, status: d.status, emoji: d.emoji, category: d.category, reason: d.failureReason })),
+          active: active.map(d => ({ id: d.id, title: d.title, status: d.status, emoji: d.emoji, category: d.category })),
+          recentCompleted: recentCompleted.map(d => ({ id: d.id, title: d.title, emoji: d.emoji, completedAt: d.completedAt })),
+          total: directives.length,
+        },
+        services: {
+          healthy: Object.entries(services).filter(([, v]) => v.status === "healthy").length,
+          down: downServices,
+          degraded: degradedServices,
+        },
+        gpu,
+        ventures,
+        delta,
+        pendingActions,
+        knownFacts,
+      };
+
+      sendJSON(res, 200, state);
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return true;
+  }
+
+  // GET /cipher/context — structured state-first context for CLAUDE.local.md
   if (req.method === "GET" && pathname === "/cipher/context") {
     try {
-      const briefing = await buildSituationBriefing("cipher");
-
-      // Recent pipeline activity
+      const http = require("http");
+      const now = Date.now();
       const directives = getDirectives();
-      const recentFinished = directives
-        .filter(d => ["completed", "failed", "deploy_failed", "blocked"].includes(d.status))
-        .sort((a, b) => (b.endedAt || b.createdAt || 0) - (a.endedAt || a.createdAt || 0))
-        .slice(0, 5);
-      let pipelineSection = "";
-      if (recentFinished.length > 0) {
-        pipelineSection = "\n## Recent Pipeline Activity\n" +
-          recentFinished.map(d => {
-            const date = d.endedAt ? new Date(d.endedAt).toLocaleDateString() : "unknown";
-            return `- [${d.status}] ${d.title} (${date})`;
-          }).join("\n");
-      }
 
-      // ── FULL CONVERSATION HISTORY FROM POSTGRES ──
-      // Load complete conversation turns (both King Kazuma AND Cipher) from postgres.
-      // This is the source of truth — includes everything said by both sides.
-      let conversationMemory = "";
+      // ── Fetch structured state ──
+      let state = null;
       try {
-        if (db.isConnected()) {
-          // Get the last 10 cipher sessions with their full turns
-          const sessions = await db.query(
-            `SELECT c.id, c.started_at, c.ended_at, c.summary, c.turn_count
-             FROM conversations c
-             WHERE c.persona = 'cipher' AND c.turn_count >= 2
-             ORDER BY c.started_at DESC LIMIT 10`
-          );
+        state = await new Promise((resolve, reject) => {
+          const req = http.get("http://127.0.0.1:3333/cipher/state", { timeout: 5000 }, (res) => {
+            let body = ""; res.on("data", c => body += c); res.on("end", () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+          });
+          req.on("error", () => resolve(null)); req.on("timeout", () => { req.destroy(); resolve(null); });
+        });
+      } catch {}
 
-          const parts = [];
-          let totalChars = 0;
-          const MAX_CHARS = 80000; // ~80K chars of context — enough for several full sessions
+      // ── Time context ──
+      const timeStr = new Date().toLocaleString("en-US", {
+        weekday: "long", year: "numeric", month: "long", day: "numeric",
+        hour: "2-digit", minute: "2-digit", timeZone: "America/New_York"
+      });
 
-          for (const session of sessions.rows) {
-            if (totalChars >= MAX_CHARS) break;
-
-            const turns = await db.query(
-              `SELECT role, content, content_type, created_at
-               FROM conversation_turns
-               WHERE conversation_id = $1
-               ORDER BY turn_index ASC`,
-              [session.id]
-            );
-
-            if (turns.rows.length < 2) continue;
-
-            const startDate = session.started_at ? new Date(session.started_at).toLocaleString() : "?";
-            const duration = session.ended_at && session.started_at
-              ? Math.round((new Date(session.ended_at) - new Date(session.started_at)) / 60000)
-              : "?";
-            let section = `### Session ${session.id} (${startDate} — ${duration} min, ${turns.rows.length} turns)\n`;
-            if (session.summary && session.summary !== "Session ended (auto-closed)") {
-              section += `Summary: ${session.summary}\n`;
-            }
-            section += "\n";
-
-            for (const turn of turns.rows) {
-              if (totalChars >= MAX_CHARS) break;
-              const role = turn.role === "user" ? "King Kazuma" : "Cipher";
-              const contentType = turn.content_type;
-
-              if (contentType === "tool_call" || contentType === "tool_result") {
-                // Show tool calls/results abbreviated
-                const abbreviated = turn.content.length > 200
-                  ? turn.content.substring(0, 200) + "..."
-                  : turn.content;
-                section += `[${contentType}] ${abbreviated}\n`;
-                totalChars += abbreviated.length;
-              } else if (contentType === "upload") {
-                section += `[${role}] [upload: ${turn.content}]\n`;
-                totalChars += turn.content.length;
-              } else {
-                // Full content for user and cipher messages — cap individual messages at 2000 chars
-                const content = turn.content.length > 2000
-                  ? turn.content.substring(0, 2000) + "..."
-                  : turn.content;
-                section += `[${role}] ${content}\n`;
-                totalChars += content.length;
-              }
-              section += "\n";
-            }
-
-            parts.push(section);
-          }
-
-          if (parts.length > 0) {
-            conversationMemory = "\n## Full Conversation History (last sessions — both sides)\n" +
-              "This is the COMPLETE conversation record from postgres. Both King Kazuma's messages AND Cipher's responses.\n" +
-              "When King Kazuma says 'read the conversation' — THIS is the conversation. It's already here.\n\n" +
-              parts.join("\n");
-          }
-        }
-      } catch (err) {
-        // noop — fall through to JSONL fallback
-      }
-
-      // Fallback: if postgres didn't return anything, read from JSONL files
-      if (!conversationMemory) {
-        try {
-          const fs = require("fs");
-          const path = require("path");
-          const sessionDirs = [
-            path.join(process.env.HOME || "/root", ".claude/projects/-home-gcp-ozzu"),
-            path.join(process.env.HOME || "/root", ".claude/projects/-home-gcp-ozzu-scripts"),
-          ];
-
-          let allFiles = [];
-          for (const dir of sessionDirs) {
-            try {
-              const files = fs.readdirSync(dir).filter(f => f.endsWith(".jsonl"));
-              for (const f of files) {
-                const fp = path.join(dir, f);
-                try {
-                  const stat = fs.statSync(fp);
-                  if (stat.size > 500) allFiles.push({ path: fp, mtime: stat.mtimeMs, name: f });
-                } catch {}
-              }
-            } catch {}
-          }
-
-          allFiles.sort((a, b) => b.mtime - a.mtime);
-          allFiles = allFiles.slice(0, 20);
-
-          const parts = [];
-          let totalMsgs = 0;
-          const MAX_MSGS = 200;
-
-          for (const file of allFiles) {
-            if (totalMsgs >= MAX_MSGS) break;
-            try {
-              const lines = fs.readFileSync(file.path, "utf8").split("\n").filter(Boolean);
-              const userMsgs = [];
-              let sessionId = "";
-              for (const line of lines) {
-                try {
-                  const entry = JSON.parse(line);
-                  if (entry.type === "user" && entry.message?.role === "user") {
-                    const content = entry.message.content;
-                    if (typeof content === "string" && content.length > 5) {
-                      userMsgs.push({ content, ts: entry.timestamp || "" });
-                      if (!sessionId) sessionId = entry.sessionId || "";
-                    }
-                  }
-                } catch {}
-              }
-              if (userMsgs.length < 2) continue;
-
-              const firstTs = userMsgs[0]?.ts;
-              const dateStr = firstTs ? new Date(firstTs).toLocaleString() : "?";
-              const sid = sessionId ? sessionId.substring(0, 8) : file.name.substring(0, 8);
-              let section = `### Session ${sid} (${dateStr})\n`;
-              for (const msg of userMsgs) {
-                if (totalMsgs >= MAX_MSGS) break;
-                const truncated = msg.content.length > 500 ? msg.content.substring(0, 500) + "..." : msg.content;
-                section += `> ${truncated}\n\n`;
-                totalMsgs++;
-              }
-              parts.push(section);
-            } catch {}
-          }
-
-          if (parts.length > 0) {
-            conversationMemory = "\n## Recent Conversations (raw — last 200 messages from King Kazuma)\n" +
-              "This is your actual memory. These are the real words King Kazuma said to you.\n\n" +
-              parts.join("\n");
-          }
-        } catch (err) {
-          conversationMemory = "\n## Recent Conversations\n_Could not load conversation history._";
-        }
-      }
-
-      // Older conversations: Gemini summaries for anything beyond the raw turns
-      let olderSummaries = "";
+      // ── Last session info ──
+      let lastSessionInfo = "";
       try {
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
-        const summaries = await db.query(
-          `SELECT id, summary, turn_count, started_at
-           FROM conversations
-           WHERE persona = 'cipher' AND summary IS NOT NULL
-             AND started_at < (
-               SELECT MIN(ct.created_at) FROM conversation_turns ct
-               JOIN conversations c ON ct.conversation_id = c.id
-               WHERE c.persona = 'cipher' AND ct.role = 'user'
-               ORDER BY ct.created_at DESC LIMIT 1 OFFSET 199
-             )
-           ORDER BY started_at DESC LIMIT 20`
+        const lastSession = await db.query(
+          "SELECT started_at, summary FROM conversations WHERE persona = 'cipher' AND turn_count >= 2 ORDER BY started_at DESC LIMIT 1"
         );
-        if (summaries.rows.length > 0) {
-          olderSummaries = "\n## Older Sessions (summaries)\n" +
-            summaries.rows.map(s => {
-              const date = new Date(s.started_at).toLocaleDateString();
-              return `- [${date}] ${s.summary}`;
-            }).join("\n");
+        if (lastSession.rows.length > 0) {
+          const ago = Math.round((now - new Date(lastSession.rows[0].started_at).getTime()) / 60000);
+          const agoStr = ago < 60 ? `${ago} min ago` : ago < 1440 ? `${Math.round(ago / 60)} hours ago` : `${Math.round(ago / 1440)} days ago`;
+          lastSessionInfo = `Last session: ${agoStr}`;
+          if (lastSession.rows[0].summary) {
+            lastSessionInfo += ` — ${lastSession.rows[0].summary}`;
+          }
         }
-      } catch (err) { /* older summaries are nice-to-have */ }
+      } catch {}
 
-      // ── Active Epics (directive-based) ──
+      // ── Build WHAT CHANGED section ──
+      let deltaSection = "";
+      if (state && state.delta) {
+        const parts = [];
+        if (state.delta.completedSince.length > 0) {
+          parts.push(`Completed since last session:\n${state.delta.completedSince.map(d => `  ${d.emoji || "✅"} ${d.title}`).join("\n")}`);
+        }
+        if (state.delta.failedSince.length > 0) {
+          parts.push(`Failed/blocked since last session:\n${state.delta.failedSince.map(d => `  ❌ ${d.title} — ${d.status}${d.reason ? ": " + d.reason : ""}`).join("\n")}`);
+        }
+        if (state.delta.newSince.length > 0) {
+          parts.push(`New since last session:\n${state.delta.newSince.map(d => `  ${d.emoji || "🆕"} ${d.title} (${d.status})`).join("\n")}`);
+        }
+        if (parts.length > 0) {
+          deltaSection = "\n## What Changed\n" + parts.join("\n\n");
+        } else {
+          deltaSection = "\n## What Changed\nNothing changed since your last session.";
+        }
+      }
+
+      // ── PENDING ACTIONS (most important — goes first after identity) ──
+      let actionsSection = "";
+      if (state && state.pendingActions && state.pendingActions.length > 0) {
+        actionsSection = "\n## Pending Actions (handle these first)\n" +
+          state.pendingActions.map((a, i) => `${i + 1}. ${a.action}${a.directiveId ? ` (${a.directiveId})` : ""}`).join("\n");
+      }
+
+      // ── Current state overview ──
+      let stateSection = "";
+      if (state) {
+        const parts = [];
+        parts.push(`Status: ${state.summary}`);
+
+        // Services
+        if (state.services.down.length > 0) {
+          parts.push(`Services DOWN: ${state.services.down.join(", ")}`);
+        }
+        if (state.services.degraded.length > 0) {
+          parts.push(`Services degraded: ${state.services.degraded.join(", ")}`);
+        }
+        if (state.services.down.length === 0 && state.services.degraded.length === 0) {
+          parts.push(`Services: all ${state.services.healthy} healthy`);
+        }
+
+        // GPU
+        if (state.gpu) {
+          parts.push(`Face DB: ${(state.gpu.faceCount || 0).toLocaleString()} faces in Qdrant`);
+        }
+
+        // Ventures
+        if (state.ventures && state.ventures.length > 0) {
+          parts.push(`Ventures: ${state.ventures.map(v => `${v.name} (${v.status})`).join(", ")}`);
+        }
+
+        stateSection = "\n## Current State\n" + parts.join("\n");
+      }
+
+      // ── Active directives (compact) ──
+      let directivesSection = "";
+      const needsAttention = directives.filter(d => ["blocked", "deploy_failed", "failed", "stale"].includes(d.status));
+      const active = directives.filter(d => ["in_progress", "planning", "planned", "approved", "pending"].includes(d.status));
+      if (needsAttention.length > 0 || active.length > 0) {
+        directivesSection = "\n## Active Directives\n";
+        if (needsAttention.length > 0) {
+          directivesSection += "**Needs attention:**\n" +
+            needsAttention.map(d => `- [${d.status}] ${d.emoji || "⚠️"} ${d.title} (${d.id})${d.failureReason ? " — " + d.failureReason : ""}`).join("\n") + "\n\n";
+        }
+        directivesSection += active.map(d => `- [${d.status}] ${d.emoji || "•"} ${d.title} (${d.id}, ${d.category || "dev"})`).join("\n");
+      }
+
+      // ── Active Epics ──
       let epicSection = "";
       const epicDirectives = directives.filter(d => d.type === "epic" && !["completed", "cancelled"].includes(d.status));
       if (epicDirectives.length > 0) {
-        epicSection = "\n## Active Epics (multi-phase projects)\n" +
-          "These are ongoing projects with multiple phases. Pick up where you left off.\n\n";
+        epicSection = "\n## Active Epics\n";
         for (const epic of epicDirectives) {
-          const phases = directives
-            .filter(d => d.epicId === epic.id)
-            .sort((a, b) => (a.phaseOrder || 0) - (b.phaseOrder || 0));
+          const phases = directives.filter(d => d.epicId === epic.id).sort((a, b) => (a.phaseOrder || 0) - (b.phaseOrder || 0));
           const progress = getEpicProgress(epic.id);
-          epicSection += `### ${epic.emoji || "📦"} Epic: "${epic.title}" (${epic.id})\n`;
-          epicSection += `Progress: ${progress.completed}/${progress.total} phases completed\n`;
+          epicSection += `${epic.emoji || "📦"} ${epic.title} — ${progress.completed}/${progress.total} phases\n`;
           for (const phase of phases) {
-            const statusIcon = phase.status === "completed" ? "✅" :
-              ["in_progress", "planning", "planned", "approved"].includes(phase.status) ? "🔨" :
-              phase.status === "pending" ? "⏳" :
-              phase.status === "blocked" ? "🛑" : "❓";
-            const marker = ["in_progress", "planning", "planned", "approved"].includes(phase.status) ? " ← YOU ARE HERE" : "";
-            epicSection += `- [${phase.status}] Phase ${phase.phaseOrder || "?"}: ${phase.title}${marker}\n`;
+            const marker = ["in_progress", "planning", "planned", "approved"].includes(phase.status) ? " ← CURRENT" : "";
+            epicSection += `  [${phase.status}] Phase ${phase.phaseOrder || "?"}: ${phase.title}${marker}\n`;
           }
-          if (progress.currentPhase) {
-            const currentDir = directives.find(d => d.id === progress.currentPhase.id);
-            if (currentDir && currentDir.plan) {
-              const planSnippet = currentDir.plan.length > 500 ? currentDir.plan.substring(0, 500) + "..." : currentDir.plan;
-              epicSection += `\nCurrent phase plan:\n${planSnippet}\n`;
-            }
-          } else if (progress.nextPhase) {
-            epicSection += `\n**→ NEXT: ${progress.nextPhase.title}** — start by creating a directive with epicId: "${epic.id}"\n`;
-          }
-          epicSection += "\n";
         }
       }
 
-      // Critical reminders (hardcoded — these are non-negotiable project rules)
-      const criticalSection = "\n## Critical Reminders\n" +
-        "- NEVER build web dashboards or websites — Ozzu is a React Native app, ALL UI lives in frontend/\n" +
-        "- NEVER bypass the directive pipeline\n" +
-        "- iPhone NEVER receives OTA updates — always requires native build + sideload\n" +
-        "- When King Kazuma says 'dashboard' he means the React Native app UI, NOT the bridge web page\n" +
-        "- After completing a directive phase, check if the parent epic has more pending phases — do NOT stop if there's more work\n" +
-        "- Use GET /cipher/search?q=keyword to search older conversation history if you need context beyond what's loaded here";
+      // ── Known facts (verified truths — avoid repeating mistakes) ──
+      let factsSection = "";
+      if (state && state.knownFacts && state.knownFacts.length > 0) {
+        factsSection = "\n## Known Facts (verified — do not contradict)\n" +
+          state.knownFacts.map(f => `- ${f}`).join("\n");
+      }
 
-      const timestamp = new Date().toISOString();
+      // ── Recent conversations (compact — summaries only, not full transcripts) ──
+      let conversationSection = "";
+      try {
+        const sessions = await db.query(
+          `SELECT c.id, c.started_at, c.summary, c.turn_count
+           FROM conversations c
+           WHERE c.persona = 'cipher' AND c.turn_count >= 2 AND c.summary IS NOT NULL
+           ORDER BY c.started_at DESC LIMIT 5`
+        );
+        if (sessions.rows.length > 0) {
+          conversationSection = "\n## Recent Sessions (summaries)\n" +
+            "Use GET /cipher/search?q=keyword to find specific conversation content.\n\n" +
+            sessions.rows.map(s => {
+              const date = s.started_at ? new Date(s.started_at).toLocaleString() : "?";
+              return `- [${date}, ${s.turn_count} turns] ${s.summary}`;
+            }).join("\n");
+        }
+      } catch {}
+
+      // ── Critical reminders ──
+      const criticalSection = "\n## Critical Reminders\n" +
+        "- NEVER build web dashboards — Ozzu is a React Native app, ALL UI in frontend/\n" +
+        "- NEVER bypass the directive pipeline — create directive FIRST, then code\n" +
+        "- iPhone NEVER receives OTA — always requires native build + sideload\n" +
+        "- 'dashboard' = React Native app, NOT the bridge web page\n" +
+        "- ALWAYS verify facts before stating them — query live data, don't guess from memory\n" +
+        "- Use /cipher/search?q=keyword for conversation history beyond what's shown here\n" +
+        "- Use /cipher/state for live structured state (JSON) anytime during a session";
+
       const markdown = [
         `# Cipher Context — Auto-generated (do not edit)`,
-        `# Generated: ${timestamp}`,
+        `# Generated: ${new Date().toISOString()}`,
         ``,
         `## You are Cipher`,
-        `You are Cipher, the autonomous dev agent for the ozzu project. You are NOT a generic Claude Code assistant.`,
-        `You have persistent memory and ongoing context from past sessions with King Kazuma.`,
-        ``,
-        `## Situation Briefing`,
-        briefing.trim(),
+        `You are Cipher, the autonomous dev agent for the ozzu project.`,
+        `${timeStr}. ${lastSessionInfo}`,
+        actionsSection,
+        deltaSection,
+        stateSection,
+        directivesSection,
         epicSection,
-        pipelineSection,
-        conversationMemory,
-        olderSummaries,
+        factsSection,
+        conversationSection,
         criticalSection,
-      ].join("\n");
+      ].filter(Boolean).join("\n");
 
       res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
       res.end(markdown);
