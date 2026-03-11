@@ -159,6 +159,39 @@ module.exports = function opsRoutes(ctx) {
       }
     }
 
+    // POST /ops/token-usage/ingest — Ingest token usage from CLI session sync
+    if (req.method === "POST" && pathname === "/ops/token-usage/ingest") {
+      if (!db) { sendJSON(res, 503, { ok: false, error: "Database not available" }); return true; }
+      const body = await parseBody(req);
+      const { source, session_id, run_id, usage } = body;
+      if (!usage || !source) { sendJSON(res, 400, { ok: false, error: "Missing source or usage" }); return true; }
+
+      try {
+        await db.query(
+          `INSERT INTO token_usage (source, session_id, run_id, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, metadata)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT DO NOTHING`,
+          [
+            source,
+            session_id || null,
+            run_id || null,
+            usage.model || "unknown",
+            usage.input_tokens || 0,
+            usage.output_tokens || 0,
+            usage.cache_read || 0,
+            usage.cache_create || 0,
+            usage.cost_usd || 0,
+            JSON.stringify(usage),
+          ]
+        );
+        sendJSON(res, 200, { ok: true });
+        return true;
+      } catch (err) {
+        sendJSON(res, 500, { ok: false, error: err.message });
+        return true;
+      }
+    }
+
     // GET /ops/token-usage/recent — Recent individual runs with token data
     if (req.method === "GET" && pathname === "/ops/token-usage/recent") {
       if (!db) { sendJSON(res, 503, { ok: false, error: "Database not available" }); return true; }
