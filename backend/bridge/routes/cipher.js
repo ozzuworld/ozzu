@@ -5,7 +5,7 @@ module.exports = function createCipherRoutes(ctx) {
           getDirectives, getEpicProgress, buildSituationBriefing,
           redis, isRedisConnected,
           getConversationTranscript, getCurrentPersona, isVoiceActive,
-          sendNotification, cipherDaemon } = ctx;
+          sendNotification, cipherDaemon, actionQueue } = ctx;
 
   return async function handleCipherRoutes(req, res, pathname, url) {
   if (req.method === "GET" && pathname === "/conversations/recent") {
@@ -292,6 +292,12 @@ module.exports = function createCipherRoutes(ctx) {
           state.pendingActions.map((a, i) => `${i + 1}. ${a.action}${a.directiveId ? ` (${a.directiveId})` : ""}`).join("\n");
       }
 
+      // ── Action Queue (from between sessions) ──
+      let actionQueueSection = "";
+      if (actionQueue) {
+        try { actionQueueSection = await actionQueue.getContextBlock(); } catch {}
+      }
+
       // ── Current state overview ──
       let stateSection = "";
       if (state) {
@@ -395,6 +401,7 @@ module.exports = function createCipherRoutes(ctx) {
         `You are Cipher, the autonomous dev agent for the ozzu project.`,
         `${timeStr}. ${lastSessionInfo}`,
         actionsSection,
+        actionQueueSection,
         deltaSection,
         stateSection,
         directivesSection,
@@ -867,6 +874,69 @@ module.exports = function createCipherRoutes(ctx) {
     const limit = parseInt(url.searchParams.get("limit") || "20", 10);
     const history = await daemon.getHistory(Math.min(limit, 100));
     sendJSON(res, 200, { runs: history });
+    return true;
+  }
+
+  // ── Action Queue endpoints ──
+
+  if (req.method === "POST" && pathname === "/cipher/actions/push") {
+    if (!actionQueue) return sendJSON(res, 500, { error: "action queue not loaded" }), true;
+    try {
+      const body = await parseBody(req);
+      if (!body.message) return sendJSON(res, 400, { error: "message required" }), true;
+      const result = await actionQueue.push({
+        type: body.type || "manual",
+        message: body.message,
+        priority: body.priority || "normal",
+        dedupKey: body.dedupKey,
+        metadata: body.metadata,
+        ttlMs: body.ttlMs,
+      });
+      sendJSON(res, 200, { ok: true, ...result });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return true;
+  }
+
+  if (req.method === "GET" && pathname === "/cipher/actions/pull") {
+    if (!actionQueue) return sendJSON(res, 500, { error: "action queue not loaded" }), true;
+    try {
+      const limit = parseInt(url.searchParams.get("limit") || "20", 10);
+      const includeAcked = url.searchParams.get("all") === "true";
+      const actions = await actionQueue.pull({ limit: Math.min(limit, 50), includeAcked });
+      sendJSON(res, 200, { actions, count: actions.length });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/cipher/actions/ack") {
+    if (!actionQueue) return sendJSON(res, 500, { error: "action queue not loaded" }), true;
+    try {
+      const body = await parseBody(req);
+      if (body.all) {
+        const count = await actionQueue.ackAll();
+        sendJSON(res, 200, { ok: true, acknowledged: count });
+      } else if (body.id) {
+        const found = await actionQueue.ack(body.id);
+        sendJSON(res, 200, { ok: found, id: body.id });
+      } else {
+        sendJSON(res, 400, { error: "id or all:true required" });
+      }
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return true;
+  }
+
+  if (req.method === "DELETE" && pathname.startsWith("/cipher/actions/")) {
+    if (!actionQueue) return sendJSON(res, 500, { error: "action queue not loaded" }), true;
+    const actionId = decodeURIComponent(pathname.replace("/cipher/actions/", ""));
+    if (!actionId) return sendJSON(res, 400, { error: "action id required" }), true;
+    const removed = await actionQueue.remove(actionId);
+    sendJSON(res, 200, { ok: removed });
     return true;
   }
 

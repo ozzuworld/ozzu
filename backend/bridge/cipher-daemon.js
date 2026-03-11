@@ -7,6 +7,7 @@
 
 const { execSync, spawn } = require("child_process");
 const path = require("path");
+let _actionQueue = null;
 
 // ── Config ──
 
@@ -103,6 +104,7 @@ function handleEvent(evt) {
   if (lastSpawn && Date.now() - lastSpawn < COOLDOWN_PER_TYPE_MS) {
     _stats.totalSuppressed++;
     log(`Suppressed spawn for "${action.eventKey}" — cooldown active (${Math.round((COOLDOWN_PER_TYPE_MS - (Date.now() - lastSpawn)) / 1000)}s left)`);
+    queueAction(action, "suppressed_cooldown");
     return;
   }
 
@@ -112,6 +114,7 @@ function handleEvent(evt) {
   if (recentSpawns.length >= MAX_SPAWNS_PER_HOUR) {
     _stats.totalSuppressed++;
     log(`Suppressed spawn for "${action.eventKey}" — hourly limit reached (${recentSpawns.length}/${MAX_SPAWNS_PER_HOUR})`);
+    queueAction(action, "suppressed_hourly_limit");
     return;
   }
 
@@ -165,6 +168,18 @@ function spawnClaude(action) {
     // Persist to DB
     persistRun(runId, action, code, stdout, stderr, duration);
 
+    // If daemon run failed, queue for next session
+    if (code !== 0 && _actionQueue) {
+      _actionQueue.push({
+        type: "daemon_failed_run",
+        message: `Daemon auto-fix failed (exit ${code}): ${action.reason}. Output: ${stdout.slice(-200)}`,
+        priority: "high",
+        dedupKey: action.eventKey,
+        metadata: { runId, eventKey: action.eventKey, exitCode: code },
+        ttlMs: 12 * 60 * 60 * 1000,
+      }).catch(() => {});
+    }
+
     // Broadcast result to dashboard
     if (_ctx?.broadcastToAll) {
       _ctx.broadcastToAll({
@@ -200,6 +215,22 @@ async function persistRun(runId, action, exitCode, stdout, stderr, durationMs) {
   }
 }
 
+// ── Action Queue integration ──
+
+function queueAction(action, reason) {
+  if (!_actionQueue) return;
+  _actionQueue.push({
+    type: "daemon_event",
+    message: `[${reason}] ${action.reason}: ${action.prompt.slice(0, 200)}`,
+    priority: action.eventKey.startsWith("service_down:") ? "critical" :
+              action.eventKey.startsWith("deploy_failed:") ? "high" :
+              action.eventKey === "gpu_idle" ? "high" : "normal",
+    dedupKey: action.eventKey,
+    metadata: { eventKey: action.eventKey, reason },
+    ttlMs: 12 * 60 * 60 * 1000, // 12 hours
+  }).catch(() => {});
+}
+
 // ── Directive event handler (called from routes/directives.js) ──
 
 function onDirectiveStatusChange(evt) {
@@ -215,6 +246,9 @@ function onDirectiveStatusChange(evt) {
 function start(ctx) {
   _ctx = ctx;
   _paused = false;
+
+  // Capture action queue for pushing suppressed events
+  try { _actionQueue = require("./action-queue"); } catch {}
 
   // Subscribe to watchdog state transitions
   if (ctx.watchdog?.onStateTransition) {

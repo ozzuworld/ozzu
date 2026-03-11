@@ -130,6 +130,7 @@ const mcpRoutes = require("./routes/mcp");
 const businessEmailRoutes = require("./routes/business-email");
 const watchdog = require("./watchdog");
 const cipherDaemon = require("./cipher-daemon");
+const actionQueue = require("./action-queue");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -795,6 +796,7 @@ async function initStorage() {
     await redis.connect();
     _redisConnected = true;
     log.redis.info("Connected");
+    actionQueue.init({ redis, db });
 
     // Restore active persona from Redis
     const savedPersona = await redis.get("ozzu:activePersona");
@@ -1521,8 +1523,8 @@ const routeCtx = {
   get cipherPipeline() { return typeof cipherPipeline !== "undefined" ? cipherPipeline : null; },
   get setLastRestartReason() { return typeof setLastRestartReason === "function" ? setLastRestartReason : () => {}; },
   get buildSituationBriefing() { return typeof buildSituationBriefing === "function" ? buildSituationBriefing : async () => ""; },
-  // Daemon
-  cipherDaemon,
+  // Daemon + Action Queue
+  cipherDaemon, actionQueue,
   // Node built-ins
   fs, path, crypto,
 };
