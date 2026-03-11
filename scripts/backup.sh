@@ -149,7 +149,10 @@ tar -czf "$ARCHIVE" -C /tmp "ozzu-backup-${TIMESTAMP}"
 if [ "$ENCRYPT" = true ]; then
   echo "[*] Encrypting backup..."
   # Use AES-256 with the bridge API key as passphrase
-  PASSPHRASE=$(grep '^BRIDGE_API_KEY=' "${PROJECT_ROOT}/backend/.env" | cut -d= -f2)
+  # Try .env first, fall back to .env.email, fall back to env var
+  PASSPHRASE=$(grep '^BRIDGE_API_KEY=' "${PROJECT_ROOT}/backend/.env" 2>/dev/null | cut -d= -f2 || true)
+  [ -z "$PASSPHRASE" ] && PASSPHRASE=$(grep '^BRIDGE_API_KEY=' "${PROJECT_ROOT}/backend/.env.email" 2>/dev/null | cut -d= -f2 || true)
+  [ -z "$PASSPHRASE" ] && PASSPHRASE="${BRIDGE_API_KEY:-}"
   if [ -z "$PASSPHRASE" ]; then
     echo "  WARNING: No BRIDGE_API_KEY found, skipping encryption"
   else
