@@ -877,6 +877,19 @@ module.exports = function createCipherRoutes(ctx) {
     return true;
   }
 
+  if (req.method === "POST" && pathname === "/cipher/daemon/work-queue") {
+    const daemon = ctx.cipherDaemon;
+    if (!daemon?.setWorkQueue) return sendJSON(res, 500, { error: "agent not loaded" }), true;
+    try {
+      const body = await parseBody(req);
+      daemon.setWorkQueue(body.enabled !== false);
+      sendJSON(res, 200, { ok: true, enabled: body.enabled !== false });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return true;
+  }
+
   // ── Action Queue endpoints ──
 
   if (req.method === "POST" && pathname === "/cipher/actions/push") {
