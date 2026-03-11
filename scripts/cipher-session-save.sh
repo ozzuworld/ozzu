@@ -47,13 +47,17 @@ if [ "$TURN_COUNT" -lt 1 ]; then
   exit 0
 fi
 
-# Build JSON payload: { sessionId, turns: [...] }
-PAYLOAD=$(echo "$TURNS" | jq -s '{ sessionId: "'"$SESSION_ID"'", turns: . }')
+# Build JSON payload and write to temp file (avoids curl argument-too-long for big sessions)
+PAYLOAD_FILE="$LOG_DIR/session-payload-$SESSION_ID.json"
+echo "$TURNS" | jq -s '{ sessionId: "'"$SESSION_ID"'", turns: . }' > "$PAYLOAD_FILE"
 
-# POST to bridge — wait for it to complete (don't background, ensure it finishes)
+# POST to bridge using file — wait for it to complete, ensure it finishes
 RESPONSE=$(curl -sf -X POST "$BRIDGE_URL" \
   -H "Content-Type: application/json" \
-  -d "$PAYLOAD" \
+  -d @"$PAYLOAD_FILE" \
   --max-time 120 2>&1) || true
+
+# Clean up temp file
+rm -f "$PAYLOAD_FILE"
 
 log "Session $SESSION_ID saved ($TURN_COUNT turns). Bridge response: $RESPONSE"
