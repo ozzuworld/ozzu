@@ -395,8 +395,8 @@ module.exports = function createCipherRoutes(ctx) {
       const body = await parseBody(req);
       const { sessionId, turns } = body;
 
-      if (!Array.isArray(turns) || turns.length < 4) {
-        sendJSON(res, 200, { success: false, reason: "skipped — fewer than 4 turns" });
+      if (!Array.isArray(turns) || turns.length < 1) {
+        sendJSON(res, 200, { success: false, reason: "skipped — no turns" });
         return;
       }
 
@@ -508,7 +508,7 @@ module.exports = function createCipherRoutes(ctx) {
             const t = turns[i];
             await db.addConversationTurn(
               convId, t.role === "user" ? "user" : "cipher",
-              t.content?.substring(0, 5000) || "", i, null, "text",
+              t.content || "", i, null, "text",
               { source: "cli", sessionId }
             ).catch(() => {});
           }

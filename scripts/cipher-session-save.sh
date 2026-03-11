@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # cipher-session-save.sh — Claude Code SessionEnd hook
-# Reads session info from stdin, extracts text turns from JSONL transcript,
-# and POSTs them to the bridge for summarization + storage.
+# Reads session info from stdin, extracts ALL text turns from JSONL transcript,
+# and POSTs them to the bridge for storage in postgres.
+# Every word, every turn, no truncation, no limits.
 
 set -euo pipefail
 
@@ -26,10 +27,8 @@ fi
 
 log "Processing session $SESSION_ID from $TRANSCRIPT_PATH"
 
-# Extract user/assistant text turns from JSONL transcript using jq.
-# - user messages: type="user", content is a string
-# - assistant messages: type="assistant", content is an array, extract type="text" entries
-# Skip tool_use, tool_result, thinking, file-history-snapshot entries.
+# Extract ALL user/assistant text turns from JSONL transcript.
+# No head limit — every single turn gets saved.
 TURNS=$(jq -c '
   if .type == "user" and (.message.content | type) == "string" and (.message.content | length) > 0 then
     { role: "user", content: .message.content }
@@ -39,25 +38,22 @@ TURNS=$(jq -c '
   else
     empty
   end
-' "$TRANSCRIPT_PATH" 2>/dev/null | head -200)
+' "$TRANSCRIPT_PATH" 2>/dev/null)
 
 TURN_COUNT=$(echo "$TURNS" | grep -c '^{' || true)
 
-if [ "$TURN_COUNT" -lt 4 ]; then
-  log "Only $TURN_COUNT turns — skipping (minimum 4)"
+if [ "$TURN_COUNT" -lt 1 ]; then
+  log "No turns found — skipping"
   exit 0
 fi
 
 # Build JSON payload: { sessionId, turns: [...] }
 PAYLOAD=$(echo "$TURNS" | jq -s '{ sessionId: "'"$SESSION_ID"'", turns: . }')
 
-# POST to bridge in background so we don't block session exit
-(
-  RESPONSE=$(curl -sf -X POST "$BRIDGE_URL" \
-    -H "Content-Type: application/json" \
-    -d "$PAYLOAD" \
-    --max-time 30 2>&1) || true
-  log "Bridge response: $RESPONSE"
-) &
+# POST to bridge — wait for it to complete (don't background, ensure it finishes)
+RESPONSE=$(curl -sf -X POST "$BRIDGE_URL" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD" \
+  --max-time 120 2>&1) || true
 
-log "Dispatched save for session $SESSION_ID ($TURN_COUNT turns)"
+log "Session $SESSION_ID saved ($TURN_COUNT turns). Bridge response: $RESPONSE"
