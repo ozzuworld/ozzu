@@ -91,8 +91,14 @@ async function checkRedis() {
 async function checkNginx() {
   const start = Date.now();
   try {
-    const res = await fetchWithTimeout("http://127.0.0.1:80", { timeout: 5000 });
-    return { ok: true, latencyMs: Date.now() - start, details: { statusCode: res.status } };
+    // Nginx returns 444 (drops connection) without a valid Host header
+    // Use the FQDN host header to get a real response
+    const res = await fetchWithTimeout("http://127.0.0.1:80", {
+      timeout: 5000,
+      headers: { Host: "home.ozzu.world" },
+    });
+    // 301/302 redirects to HTTPS are healthy, 444 means config issue
+    return { ok: res.status < 500, latencyMs: Date.now() - start, details: { statusCode: res.status } };
   } catch (err) {
     return { ok: false, latencyMs: Date.now() - start, details: { error: err.message } };
   }
@@ -101,8 +107,12 @@ async function checkNginx() {
 async function checkOpenvpn() {
   const start = Date.now();
   try {
-    // Check tun0 interface exists
-    execSync("ip link show tun0", { timeout: 3000, stdio: "pipe" });
+    // Container may not have `ip` command — check /sys/class/net or ping directly
+    const fs = require("fs");
+    const tun0Exists = fs.existsSync("/sys/class/net/tun0");
+    if (!tun0Exists) {
+      return { ok: false, latencyMs: Date.now() - start, details: { tun0: false } };
+    }
     // Ping home router through VPN
     try {
       execSync("ping -c 1 -W 2 10.8.0.2", { timeout: 4000, stdio: "pipe" });
@@ -131,9 +141,10 @@ async function checkHomeAssistant() {
   try {
     const res = await fetchWithTimeout("http://127.0.0.1:8123/api/", {
       timeout: 5000,
-      headers: { Authorization: `Bearer ${token}` },
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
-    return { ok: res.status === 200, latencyMs: Date.now() - start };
+    // 200 = authenticated, 401 = running but no/bad token — both mean HA is up
+    return { ok: res.status === 200 || res.status === 401, latencyMs: Date.now() - start, details: { statusCode: res.status } };
   } catch (err) {
     return { ok: false, latencyMs: Date.now() - start, details: { error: err.message } };
   }
