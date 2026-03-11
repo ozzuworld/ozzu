@@ -82,6 +82,8 @@ module.exports = function directiveRoutes(ctx) {
       }
 
       const priority = [1, 2, 3, 4].includes(data.priority) ? data.priority : 3;
+      const validCategories = ["dev", "business", "hardware", "ops", "planning"];
+      const category = validCategories.includes(data.category) ? data.category : "dev";
       const directive = {
         id: `dir_${Date.now()}`,
         type: data.type,
@@ -94,6 +96,7 @@ module.exports = function directiveRoutes(ctx) {
         retryCount: 0,
         failureReason: null,
         priority,
+        category,
         dependsOn: dependsOn.length > 0 ? dependsOn : null,
         epicId: data.epicId || null,
         phaseOrder: data.phaseOrder || null,
@@ -154,6 +157,77 @@ module.exports = function directiveRoutes(ctx) {
         directives = directives.filter((d) => d.status === statusFilter);
       }
       sendJSON(res, 200, directives);
+      return true;
+    }
+
+    // GET /directives/summary — human-readable at-a-glance summary with category breakdown
+    if (req.method === "GET" && pathname === "/directives/summary") {
+      const directives = getDirectives();
+      const now = Date.now();
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - 7); weekStart.setHours(0, 0, 0, 0);
+
+      const completedToday = directives.filter(d => d.status === "completed" && d.completedAt && d.completedAt >= todayStart.getTime());
+      const completedThisWeek = directives.filter(d => d.status === "completed" && d.completedAt && d.completedAt >= weekStart.getTime());
+      const active = directives.filter(d => ["in_progress", "planning", "planned", "approved", "pending"].includes(d.status));
+      const needsAttention = directives.filter(d => ["blocked", "deploy_failed", "failed", "stale"].includes(d.status));
+
+      // Category breakdown
+      const categories = {};
+      for (const d of directives) {
+        const cat = d.category || "dev";
+        if (!categories[cat]) categories[cat] = { total: 0, active: 0, completed: 0, blocked: 0 };
+        categories[cat].total++;
+        if (d.status === "completed") categories[cat].completed++;
+        else if (["blocked", "deploy_failed", "failed"].includes(d.status)) categories[cat].blocked++;
+        else if (["in_progress", "planning", "planned", "approved", "pending"].includes(d.status)) categories[cat].active++;
+      }
+
+      sendJSON(res, 200, {
+        headline: needsAttention.length > 0
+          ? `${needsAttention.length} need${needsAttention.length === 1 ? "s" : ""} attention`
+          : active.length > 0
+            ? `${active.length} active project${active.length === 1 ? "" : "s"}`
+            : "All clear",
+        completedToday: completedToday.length,
+        completedThisWeek: completedThisWeek.length,
+        activeCount: active.length,
+        needsAttentionCount: needsAttention.length,
+        needsAttention: needsAttention.map(d => ({ id: d.id, title: d.title, status: d.status, emoji: d.emoji })),
+        categories,
+        total: directives.length,
+      });
+      return true;
+    }
+
+    // GET /directives/timeline — group directives by time period
+    if (req.method === "GET" && pathname === "/directives/timeline") {
+      const directives = getDirectives();
+      const now = Date.now();
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+      const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - 7); weekStart.setHours(0, 0, 0, 0);
+      const categoryFilter = url.searchParams.get("category");
+
+      let filtered = directives;
+      if (categoryFilter && categoryFilter !== "all") {
+        filtered = directives.filter(d => (d.category || "dev") === categoryFilter);
+      }
+
+      const getTime = (d) => d.completedAt || d.updatedAt || d.createdAt || 0;
+
+      const today = filtered.filter(d => getTime(d) >= todayStart.getTime());
+      const yesterday = filtered.filter(d => getTime(d) >= yesterdayStart.getTime() && getTime(d) < todayStart.getTime());
+      const thisWeek = filtered.filter(d => getTime(d) >= weekStart.getTime() && getTime(d) < yesterdayStart.getTime());
+      const older = filtered.filter(d => getTime(d) < weekStart.getTime());
+
+      const sortByTime = (a, b) => getTime(b) - getTime(a);
+      sendJSON(res, 200, {
+        today: today.sort(sortByTime),
+        yesterday: yesterday.sort(sortByTime),
+        thisWeek: thisWeek.sort(sortByTime),
+        older: older.sort(sortByTime),
+      });
       return true;
     }
 
@@ -388,6 +462,10 @@ module.exports = function directiveRoutes(ctx) {
       if (data.emoji !== undefined) directive.emoji = data.emoji;
       if (data.epicId !== undefined) directive.epicId = data.epicId;
       if (data.phaseOrder !== undefined) directive.phaseOrder = data.phaseOrder;
+      if (data.category !== undefined) {
+        const validCategories = ["dev", "business", "hardware", "ops", "planning"];
+        if (validCategories.includes(data.category)) directive.category = data.category;
+      }
       if (data.working_state !== undefined) directive.working_state = data.working_state;
       if (data.work_summary !== undefined) directive.work_summary = data.work_summary;
       if (data.handoff_context !== undefined) directive.handoff_context = data.handoff_context;

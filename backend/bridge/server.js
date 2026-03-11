@@ -953,6 +953,11 @@ async function initStorage() {
     if (failedCount > 0) log.directive.info(`Failed ${failedCount} exhausted directive(s)`);
   }
 
+  // Backfill all in-memory directives to expanded PG schema
+  db.backfillDirectives(_directives).then(({ synced }) => {
+    if (synced > 0) log.directive.info(`Backfilled ${synced} directive(s) to postgres`);
+  }).catch(err => log.directive.error(`Backfill failed: ${err.message}`));
+
   // Phase B: Log actionable directives (Cipher handles them directly, no worker respawn)
   const actionable = _directives.filter(d => d.status === "planning" || d.status === "approved");
   if (actionable.length > 0) {

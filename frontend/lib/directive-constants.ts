@@ -42,6 +42,29 @@ export const PRIORITY_EMOJI: Record<number, string> = {
   4: "⚪",
 };
 
+export const CATEGORY_INFO: Record<string, { label: string; emoji: string; color: string }> = {
+  all: { label: "All", emoji: "🌍", color: "#06B6D4" },
+  dev: { label: "Dev", emoji: "💻", color: "#3B82F6" },
+  business: { label: "Business", emoji: "💼", color: "#F59E0B" },
+  hardware: { label: "Hardware", emoji: "🔧", color: "#A855F7" },
+  ops: { label: "Ops", emoji: "📡", color: "#22C55E" },
+  planning: { label: "Planning", emoji: "📋", color: "#8B5CF6" },
+};
+
+export const HUMAN_STATUS: Record<string, string> = {
+  pending: "Queued",
+  planning: "Planning",
+  planned: "Needs approval",
+  approved: "Ready to start",
+  in_progress: "In progress",
+  completed: "Done",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  stale: "Stale",
+  blocked: "Blocked",
+  deploy_failed: "Deploy failed",
+};
+
 export const ACTOR_COLORS: Record<string, string> = {
   "King Kazuma": "#A78BFA",
   June: "#67E8F9",

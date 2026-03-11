@@ -5,9 +5,11 @@ import {
   fetchDirectives,
   fetchApprovalDetails,
   fetchBuildStatus,
+  fetchDirectiveSummary,
   type Directive,
   type EnrichedApproval,
   type BuildStatus,
+  type DirectiveSummary,
 } from "./bridge-api";
 
 const BRIDGE_WS_URL =
@@ -26,6 +28,7 @@ export interface UseDirectivesResult {
   directives: Directive[];
   approvals: EnrichedApproval[];
   buildStatus: BuildStatus | null;
+  summary: DirectiveSummary | null;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -35,6 +38,7 @@ export function useDirectives(): UseDirectivesResult {
   const [directives, setDirectives] = useState<Directive[]>([]);
   const [approvals, setApprovals] = useState<EnrichedApproval[]>([]);
   const [buildStatus, setBuildStatus] = useState<BuildStatus | null>(null);
+  const [summary, setSummary] = useState<DirectiveSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,15 +52,17 @@ export function useDirectives(): UseDirectivesResult {
     try {
       if (!mountedRef.current) return;
       setError(null);
-      const [directiveData, approvalData, buildData] = await Promise.all([
+      const [directiveData, approvalData, buildData, summaryData] = await Promise.all([
         fetchDirectives(),
         fetchApprovalDetails().catch(() => [] as EnrichedApproval[]),
         fetchBuildStatus().catch(() => null as BuildStatus | null),
+        fetchDirectiveSummary().catch(() => null as DirectiveSummary | null),
       ]);
       if (!mountedRef.current) return;
       setDirectives(directiveData);
       setApprovals(approvalData);
       if (buildData) setBuildStatus(buildData);
+      if (summaryData) setSummary(summaryData);
       setLoading(false);
     } catch (e: any) {
       if (!mountedRef.current) return;
@@ -162,5 +168,5 @@ export function useDirectives(): UseDirectivesResult {
     };
   }, [hasActiveBuild, loadData]);
 
-  return { directives, approvals, buildStatus, loading, error, refresh };
+  return { directives, approvals, buildStatus, summary, loading, error, refresh };
 }

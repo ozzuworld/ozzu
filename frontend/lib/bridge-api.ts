@@ -101,8 +101,28 @@ export interface Directive {
   epicId?: string | null;
   phaseOrder?: number | null;
   phases?: Directive[];
+  category?: string;
+  work_summary?: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface DirectiveSummary {
+  headline: string;
+  completedToday: number;
+  completedThisWeek: number;
+  activeCount: number;
+  needsAttentionCount: number;
+  needsAttention: Array<{ id: string; title: string; status: string; emoji: string }>;
+  categories: Record<string, { total: number; active: number; completed: number; blocked: number }>;
+  total: number;
+}
+
+export interface DirectiveTimeline {
+  today: Directive[];
+  yesterday: Directive[];
+  thisWeek: Directive[];
+  older: Directive[];
 }
 
 export interface EnrichedApproval extends ApprovalRequest {
@@ -148,6 +168,23 @@ export async function fetchDirectives(status?: string): Promise<Directive[]> {
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Bridge directives error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchDirectiveSummary(): Promise<DirectiveSummary> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/summary`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge summary error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchDirectiveTimeline(category?: string): Promise<DirectiveTimeline> {
+  const qs = category && category !== "all" ? `?category=${encodeURIComponent(category)}` : "";
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/timeline${qs}`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge timeline error: ${res.status}`);
   return res.json();
 }
 

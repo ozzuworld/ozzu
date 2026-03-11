@@ -677,6 +677,24 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_relationships_a ON face_relationships(identity_a)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_face_relationships_b ON face_relationships(identity_b)`);
 
+    // Migration: expand directives table for CRM
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS emoji TEXT`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS created_by VARCHAR(30)`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS work_summary TEXT`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS working_state TEXT`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS activity_log JSONB DEFAULT '[]'`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS duration BIGINT`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 3`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS depends_on TEXT[]`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS failure_reason TEXT`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS category VARCHAR(20) DEFAULT 'dev'`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_directives_status ON directives(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_directives_category ON directives(category)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_directives_completed ON directives(completed_at DESC) WHERE completed_at IS NOT NULL`);
+
     // Migration: service health monitoring tables (watchdog)
     await pool.query(`CREATE TABLE IF NOT EXISTS service_health_log (
       id SERIAL PRIMARY KEY,
@@ -883,20 +901,54 @@ async function getRecentConversations(limit = 10) {
 async function saveDirective(directive) {
   if (!_pgConnected) return;
   await query(
-    `INSERT INTO directives (id, type, title, description, status, plan, approval_id, epic_id, phase_order, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_timestamp($10::double precision / 1000), to_timestamp($11::double precision / 1000))
+    `INSERT INTO directives (id, type, title, description, status, plan, approval_id, epic_id, phase_order,
+       created_at, updated_at, emoji, created_by, work_summary, working_state, activity_log,
+       started_at, completed_at, duration, priority, depends_on, failure_reason, category, retry_count)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+       to_timestamp($10::double precision / 1000), to_timestamp($11::double precision / 1000),
+       $12, $13, $14, $15, $16::jsonb,
+       CASE WHEN $17::double precision > 0 THEN to_timestamp($17::double precision / 1000) ELSE NULL END,
+       CASE WHEN $18::double precision > 0 THEN to_timestamp($18::double precision / 1000) ELSE NULL END,
+       $19, $20, $21::text[], $22, $23, $24)
      ON CONFLICT (id) DO UPDATE SET
        type = EXCLUDED.type, title = EXCLUDED.title, description = EXCLUDED.description,
        status = EXCLUDED.status, plan = EXCLUDED.plan, approval_id = EXCLUDED.approval_id,
        epic_id = EXCLUDED.epic_id, phase_order = EXCLUDED.phase_order,
-       updated_at = EXCLUDED.updated_at`,
+       updated_at = EXCLUDED.updated_at, emoji = EXCLUDED.emoji, created_by = EXCLUDED.created_by,
+       work_summary = EXCLUDED.work_summary, working_state = EXCLUDED.working_state,
+       activity_log = EXCLUDED.activity_log, started_at = EXCLUDED.started_at,
+       completed_at = EXCLUDED.completed_at, duration = EXCLUDED.duration,
+       priority = EXCLUDED.priority, depends_on = EXCLUDED.depends_on,
+       failure_reason = EXCLUDED.failure_reason, category = EXCLUDED.category,
+       retry_count = EXCLUDED.retry_count`,
     [
       directive.id, directive.type, directive.title || "", directive.description || "",
       directive.status, directive.plan || null, directive.directiveApprovalId || null,
       directive.epicId || null, directive.phaseOrder || null,
       directive.createdAt, directive.updatedAt,
+      directive.emoji || null, directive.createdBy || null,
+      directive.work_summary || null, directive.working_state || null,
+      JSON.stringify(directive.activity_log || []),
+      directive.startedAt || 0, directive.completedAt || 0,
+      directive.duration || null, directive.priority || 3,
+      directive.dependsOn || null, directive.failureReason || null,
+      directive.category || "dev", directive.retryCount || 0,
     ]
   );
+}
+
+async function backfillDirectives(directives) {
+  if (!_pgConnected) return { synced: 0 };
+  let synced = 0;
+  for (const d of directives) {
+    try {
+      await saveDirective(d);
+      synced++;
+    } catch (err) {
+      console.error(`[pg] Failed to backfill directive ${d.id}:`, err.message);
+    }
+  }
+  return { synced };
 }
 
 async function addDirectiveHistory(directiveId, oldStatus, newStatus, changedBy, notes = null) {
@@ -3009,6 +3061,7 @@ module.exports = {
   getRecentConversations,
   // Directives
   saveDirective,
+  backfillDirectives,
   addDirectiveHistory,
   getDirectiveHistory,
   getDirectives,
