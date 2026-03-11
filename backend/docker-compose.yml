@@ -44,6 +44,9 @@ services:
     restart: unless-stopped
     network_mode: host
     working_dir: /app
+    env_file:
+      - path: .env.email
+        required: false
     volumes:
       - ./bridge:/app
       - /tmp/ozzu-bridge:/tmp/ozzu-bridge
@@ -76,6 +79,8 @@ services:
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
       - VAST_API_KEY=${VAST_API_KEY:-}
+      - GMAIL_USER=${GMAIL_USER:-}
+      - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
     command: sh -c "npm install --omit=dev --prefer-offline 2>/dev/null; node server.js"
     depends_on:
       - redis

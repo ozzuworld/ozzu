@@ -79,6 +79,34 @@ module.exports = function mcpRoutes(ctx) {
       description: "Get real-time health status of all monitored services (postgres, redis, nginx, etc.).",
       inputSchema: { type: "object", properties: {} },
     },
+    {
+      name: "send_email",
+      description: "Send an email from eng.ozzu@gmail.com (Skyline Capital). Use for contacting suppliers, buyers, business communications. Always draft first and show to King Kazuma before sending unless he says otherwise.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "Recipient email address" },
+          subject: { type: "string", description: "Email subject line" },
+          text: { type: "string", description: "Plain text body" },
+          html: { type: "string", description: "HTML body (optional, for professional formatting)" },
+          cc: { type: "string", description: "CC recipients (comma-separated)" },
+          contactId: { type: "number", description: "Link to a business contact ID" },
+          directiveId: { type: "string", description: "Link to a directive ID" },
+        },
+        required: ["to", "subject", "text"],
+      },
+    },
+    {
+      name: "list_emails",
+      description: "List sent emails and drafts from the business email log.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["sent", "draft"], description: "Filter by status" },
+          limit: { type: "number", description: "Max results (default 20)" },
+        },
+      },
+    },
   ];
 
   // ── Tool handlers ──
@@ -246,6 +274,43 @@ module.exports = function mcpRoutes(ctx) {
         if (!watchdog) return { content: [{ type: "text", text: "Watchdog not available" }], isError: true };
         const status = watchdog.getStatus();
         return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
+      }
+
+      case "send_email": {
+        const http = require("http");
+        const payload = JSON.stringify({
+          to: args.to, subject: args.subject, text: args.text,
+          html: args.html, cc: args.cc,
+          contactId: args.contactId, directiveId: args.directiveId,
+        });
+        const result = await new Promise((resolve) => {
+          const req = http.request({ hostname: "localhost", port: 3333, path: "/business/email/send", method: "POST",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+          }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
+          req.on("error", e => resolve({ error: e.message }));
+          req.write(payload); req.end();
+        });
+        if (result.error) return { content: [{ type: "text", text: `Email send failed: ${result.error}` }], isError: true };
+        return { content: [{ type: "text", text: `Email sent to ${args.to}. Subject: "${args.subject}". MessageId: ${result.messageId}` }] };
+      }
+
+      case "list_emails": {
+        const qs = new URLSearchParams();
+        if (args.status) qs.set("status", args.status);
+        qs.set("limit", String(args.limit || 20));
+        const result = await new Promise((resolve) => {
+          const http = require("http");
+          http.get(`http://localhost:3333/business/emails?${qs}`, (res) => {
+            let d = ""; res.on("data", c => d += c);
+            res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } });
+          }).on("error", e => resolve({ error: e.message }));
+        });
+        if (result.error) return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
+        const summary = (result.emails || []).map(e => ({
+          id: e.id, to: e.to_addr, subject: e.subject, status: e.status,
+          sent_at: e.sent_at, created_at: e.created_at,
+        }));
+        return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
       }
 
       default:
