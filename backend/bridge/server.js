@@ -129,7 +129,7 @@ const opsRoutes = require("./routes/ops");
 const mcpRoutes = require("./routes/mcp");
 const businessEmailRoutes = require("./routes/business-email");
 const watchdog = require("./watchdog");
-const cipherDaemon = require("./cipher-daemon");
+const cipherDaemon = require("./cipher-agent");
 const actionQueue = require("./action-queue");
 const proactiveReporter = require("./proactive-reporter");
 
