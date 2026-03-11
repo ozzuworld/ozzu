@@ -1736,6 +1736,8 @@ async function handleRequest(req, res) {
       const state = JSON.parse(body);
       const fs = require("fs");
       fs.writeFileSync("/tmp/pipeline-state.json", JSON.stringify(state));
+      // Record heartbeat for training recovery watchdog
+      try { const wd = require("./watchdog"); wd.recordHeartbeat(); } catch {}
       sendJSON(res, 200, { ok: true });
     } catch (e) {
       sendJSON(res, 400, { error: e.message });

@@ -42,6 +42,65 @@ let _gpuIdleCount = 0;
 const GPU_IDLE_THRESHOLD = 5;   // percent utilization
 const GPU_IDLE_CHECKS = 3;      // consecutive checks before alert (6 min at 2min interval)
 
+// Training recovery
+let _lastHeartbeat = 0;
+let _recoveryAttempts = 0;
+const HEARTBEAT_STALE_MS = 5 * 60 * 1000;  // 5 min without heartbeat = stale
+const MAX_RECOVERY_ATTEMPTS = 3;
+
+function recordHeartbeat() {
+  _lastHeartbeat = Date.now();
+  _recoveryAttempts = 0; // reset on successful heartbeat
+}
+
+async function checkTrainingRecovery() {
+  // Skip if no heartbeat ever received, or GPU not running
+  if (!_lastHeartbeat) return;
+  const gpuState = _state["vast-gpu"];
+  if (!gpuState || gpuState.status !== "healthy") return;
+  const gpuDetails = gpuState.details || {};
+  if (!gpuDetails.instanceId) return;
+
+  const staleMs = Date.now() - _lastHeartbeat;
+  if (staleMs < HEARTBEAT_STALE_MS) return;
+
+  // Heartbeat is stale while GPU is running — training may have crashed
+  if (_recoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+    // Already tried 3 times, stop trying and alert
+    if (_recoveryAttempts === MAX_RECOVERY_ATTEMPTS) {
+      console.error("[watchdog] Training recovery exhausted after 3 attempts");
+      if (typeof _ctx?.sendNotification === "function") {
+        _ctx.sendNotification("Training recovery failed after 3 attempts. The GPU is running but training is not responding. Manual intervention needed.");
+      }
+      _recoveryAttempts++; // prevent repeated alerts
+    }
+    return;
+  }
+
+  _recoveryAttempts++;
+  const staleMin = Math.round(staleMs / 60000);
+  console.log(`[watchdog] Training heartbeat stale (${staleMin}m). Recovery attempt ${_recoveryAttempts}/${MAX_RECOVERY_ATTEMPTS}`);
+
+  // Alert King Kazuma
+  if (typeof _ctx?.sendNotification === "function") {
+    _ctx.sendNotification(`Training heartbeat lost for ${staleMin} minutes. Auto-recovery attempt ${_recoveryAttempts} of ${MAX_RECOVERY_ATTEMPTS}.`);
+  }
+
+  // SSH into Vast.ai and restart the orchestrator
+  try {
+    const sshAddr = gpuDetails.sshAddr || "ssh8.vast.ai";
+    const sshPort = gpuDetails.sshPort || "14666";
+    const cmd = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p ${sshPort} root@${sshAddr} "` +
+      `pgrep -f 'run-all-datasets.sh' > /dev/null 2>&1 && echo 'ORCHESTRATOR_RUNNING' || ` +
+      `(export QDRANT_URL=http://34.135.158.92:6333 BRIDGE_URL=http://34.135.158.92:3333; ` +
+      `nohup bash /root/run-all-datasets.sh >> /tmp/all-datasets.log 2>&1 & echo 'ORCHESTRATOR_RESTARTED')"`;
+    const result = execSync(cmd, { timeout: 30000, stdio: "pipe" }).toString().trim();
+    console.log(`[watchdog] Training recovery result: ${result}`);
+  } catch (err) {
+    console.error(`[watchdog] Training recovery SSH failed: ${err.message}`);
+  }
+}
+
 function initState() {
   for (const svc of Object.keys(SERVICES)) {
     _state[svc] = {
@@ -216,6 +275,8 @@ async function checkVastGpu() {
         gpuName: inst.gpu_name,
         costPerHr: inst.dph_total,
         instanceId: inst.id,
+        sshAddr: inst.ssh_host || inst.public_ipaddr,
+        sshPort: inst.ssh_port || inst.direct_port_start,
       },
     };
   } catch (err) {
@@ -417,8 +478,11 @@ function start(ctx) {
   // Standard services every 30s
   _timer = setInterval(runAllChecks, 30000);
 
-  // GPU check every 2 min
-  _gpuTimer = setInterval(runGpuCheck, 120000);
+  // GPU check every 2 min + training recovery check
+  _gpuTimer = setInterval(async () => {
+    await runGpuCheck();
+    await checkTrainingRecovery();
+  }, 120000);
 
   // Prune old health logs daily
   _pruneTimer = setInterval(pruneOldLogs, 86400000);
@@ -448,4 +512,4 @@ async function forceCheck() {
   return getStatus();
 }
 
-module.exports = { start, stop, getStatus, getIncidents, forceCheck };
+module.exports = { start, stop, getStatus, getIncidents, forceCheck, recordHeartbeat };
