@@ -96,82 +96,160 @@ module.exports = function createCipherRoutes(ctx) {
           }).join("\n");
       }
 
-      // ── RAW CONVERSATION MEMORY ──
-      // Read directly from JSONL files on disk — Claude Code writes these automatically.
-      // No hooks, no postgres sync needed. The JSONL files ARE the source of truth.
+      // ── FULL CONVERSATION HISTORY FROM POSTGRES ──
+      // Load complete conversation turns (both King Kazuma AND Cipher) from postgres.
+      // This is the source of truth — includes everything said by both sides.
       let conversationMemory = "";
       try {
-        const fs = require("fs");
-        const path = require("path");
-        const sessionDirs = [
-          path.join(process.env.HOME || "/root", ".claude/projects/-home-gcp-ozzu"),
-          path.join(process.env.HOME || "/root", ".claude/projects/-home-gcp-ozzu-scripts"),
-        ];
+        if (db.isConnected()) {
+          // Get the last 10 cipher sessions with their full turns
+          const sessions = await db.query(
+            `SELECT c.id, c.started_at, c.ended_at, c.summary, c.turn_count
+             FROM conversations c
+             WHERE c.persona = 'cipher' AND c.turn_count >= 2
+             ORDER BY c.started_at DESC LIMIT 10`
+          );
 
-        // Collect all JSONL session files with their modification times
-        let allFiles = [];
-        for (const dir of sessionDirs) {
-          try {
-            const files = fs.readdirSync(dir).filter(f => f.endsWith(".jsonl"));
-            for (const f of files) {
-              const fp = path.join(dir, f);
-              try {
-                const stat = fs.statSync(fp);
-                if (stat.size > 500) allFiles.push({ path: fp, mtime: stat.mtimeMs, name: f });
-              } catch {}
+          const parts = [];
+          let totalChars = 0;
+          const MAX_CHARS = 80000; // ~80K chars of context — enough for several full sessions
+
+          for (const session of sessions.rows) {
+            if (totalChars >= MAX_CHARS) break;
+
+            const turns = await db.query(
+              `SELECT role, content, content_type, created_at
+               FROM conversation_turns
+               WHERE conversation_id = $1
+               ORDER BY turn_index ASC`,
+              [session.id]
+            );
+
+            if (turns.rows.length < 2) continue;
+
+            const startDate = session.started_at ? new Date(session.started_at).toLocaleString() : "?";
+            const duration = session.ended_at && session.started_at
+              ? Math.round((new Date(session.ended_at) - new Date(session.started_at)) / 60000)
+              : "?";
+            let section = `### Session ${session.id} (${startDate} — ${duration} min, ${turns.rows.length} turns)\n`;
+            if (session.summary && session.summary !== "Session ended (auto-closed)") {
+              section += `Summary: ${session.summary}\n`;
             }
-          } catch {}
-        }
+            section += "\n";
 
-        // Sort by modification time, newest first — take last 20 sessions
-        allFiles.sort((a, b) => b.mtime - a.mtime);
-        allFiles = allFiles.slice(0, 20);
+            for (const turn of turns.rows) {
+              if (totalChars >= MAX_CHARS) break;
+              const role = turn.role === "user" ? "King Kazuma" : "Cipher";
+              const contentType = turn.content_type;
 
-        const parts = [];
-        let totalMsgs = 0;
-        const MAX_MSGS = 200;
-
-        for (const file of allFiles) {
-          if (totalMsgs >= MAX_MSGS) break;
-          try {
-            const lines = fs.readFileSync(file.path, "utf8").split("\n").filter(Boolean);
-            const userMsgs = [];
-            let sessionId = "";
-            for (const line of lines) {
-              try {
-                const entry = JSON.parse(line);
-                if (entry.type === "user" && entry.message?.role === "user") {
-                  const content = entry.message.content;
-                  if (typeof content === "string" && content.length > 5) {
-                    userMsgs.push({ content, ts: entry.timestamp || "" });
-                    if (!sessionId) sessionId = entry.sessionId || "";
-                  }
-                }
-              } catch {}
+              if (contentType === "tool_call" || contentType === "tool_result") {
+                // Show tool calls/results abbreviated
+                const abbreviated = turn.content.length > 200
+                  ? turn.content.substring(0, 200) + "..."
+                  : turn.content;
+                section += `[${contentType}] ${abbreviated}\n`;
+                totalChars += abbreviated.length;
+              } else if (contentType === "upload") {
+                section += `[${role}] [upload: ${turn.content}]\n`;
+                totalChars += turn.content.length;
+              } else {
+                // Full content for user and cipher messages — cap individual messages at 2000 chars
+                const content = turn.content.length > 2000
+                  ? turn.content.substring(0, 2000) + "..."
+                  : turn.content;
+                section += `[${role}] ${content}\n`;
+                totalChars += content.length;
+              }
+              section += "\n";
             }
-            if (userMsgs.length < 2) continue;
 
-            const firstTs = userMsgs[0]?.ts;
-            const dateStr = firstTs ? new Date(firstTs).toLocaleString() : "?";
-            const sid = sessionId ? sessionId.substring(0, 8) : file.name.substring(0, 8);
-            let section = `### Session ${sid} (${dateStr})\n`;
-            for (const msg of userMsgs) {
-              if (totalMsgs >= MAX_MSGS) break;
-              const truncated = msg.content.length > 500 ? msg.content.substring(0, 500) + "..." : msg.content;
-              section += `> ${truncated}\n\n`;
-              totalMsgs++;
-            }
             parts.push(section);
-          } catch {}
-        }
+          }
 
-        if (parts.length > 0) {
-          conversationMemory = "\n## Recent Conversations (raw — last 200 messages from King Kazuma)\n" +
-            "This is your actual memory. These are the real words King Kazuma said to you.\n\n" +
-            parts.join("\n");
+          if (parts.length > 0) {
+            conversationMemory = "\n## Full Conversation History (last sessions — both sides)\n" +
+              "This is the COMPLETE conversation record from postgres. Both King Kazuma's messages AND Cipher's responses.\n" +
+              "When King Kazuma says 'read the conversation' — THIS is the conversation. It's already here.\n\n" +
+              parts.join("\n");
+          }
         }
       } catch (err) {
-        conversationMemory = "\n## Recent Conversations\n_Could not load conversation history._";
+        // noop — fall through to JSONL fallback
+      }
+
+      // Fallback: if postgres didn't return anything, read from JSONL files
+      if (!conversationMemory) {
+        try {
+          const fs = require("fs");
+          const path = require("path");
+          const sessionDirs = [
+            path.join(process.env.HOME || "/root", ".claude/projects/-home-gcp-ozzu"),
+            path.join(process.env.HOME || "/root", ".claude/projects/-home-gcp-ozzu-scripts"),
+          ];
+
+          let allFiles = [];
+          for (const dir of sessionDirs) {
+            try {
+              const files = fs.readdirSync(dir).filter(f => f.endsWith(".jsonl"));
+              for (const f of files) {
+                const fp = path.join(dir, f);
+                try {
+                  const stat = fs.statSync(fp);
+                  if (stat.size > 500) allFiles.push({ path: fp, mtime: stat.mtimeMs, name: f });
+                } catch {}
+              }
+            } catch {}
+          }
+
+          allFiles.sort((a, b) => b.mtime - a.mtime);
+          allFiles = allFiles.slice(0, 20);
+
+          const parts = [];
+          let totalMsgs = 0;
+          const MAX_MSGS = 200;
+
+          for (const file of allFiles) {
+            if (totalMsgs >= MAX_MSGS) break;
+            try {
+              const lines = fs.readFileSync(file.path, "utf8").split("\n").filter(Boolean);
+              const userMsgs = [];
+              let sessionId = "";
+              for (const line of lines) {
+                try {
+                  const entry = JSON.parse(line);
+                  if (entry.type === "user" && entry.message?.role === "user") {
+                    const content = entry.message.content;
+                    if (typeof content === "string" && content.length > 5) {
+                      userMsgs.push({ content, ts: entry.timestamp || "" });
+                      if (!sessionId) sessionId = entry.sessionId || "";
+                    }
+                  }
+                } catch {}
+              }
+              if (userMsgs.length < 2) continue;
+
+              const firstTs = userMsgs[0]?.ts;
+              const dateStr = firstTs ? new Date(firstTs).toLocaleString() : "?";
+              const sid = sessionId ? sessionId.substring(0, 8) : file.name.substring(0, 8);
+              let section = `### Session ${sid} (${dateStr})\n`;
+              for (const msg of userMsgs) {
+                if (totalMsgs >= MAX_MSGS) break;
+                const truncated = msg.content.length > 500 ? msg.content.substring(0, 500) + "..." : msg.content;
+                section += `> ${truncated}\n\n`;
+                totalMsgs++;
+              }
+              parts.push(section);
+            } catch {}
+          }
+
+          if (parts.length > 0) {
+            conversationMemory = "\n## Recent Conversations (raw — last 200 messages from King Kazuma)\n" +
+              "This is your actual memory. These are the real words King Kazuma said to you.\n\n" +
+              parts.join("\n");
+          }
+        } catch (err) {
+          conversationMemory = "\n## Recent Conversations\n_Could not load conversation history._";
+        }
       }
 
       // Older conversations: Gemini summaries for anything beyond the raw turns
