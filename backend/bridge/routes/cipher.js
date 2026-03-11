@@ -5,7 +5,7 @@ module.exports = function createCipherRoutes(ctx) {
           getDirectives, getEpicProgress, buildSituationBriefing,
           redis, isRedisConnected,
           getConversationTranscript, getCurrentPersona, isVoiceActive,
-          sendNotification, cipherDaemon, actionQueue } = ctx;
+          sendNotification, cipherDaemon, actionQueue, proactiveReporter } = ctx;
 
   return async function handleCipherRoutes(req, res, pathname, url) {
   if (req.method === "GET" && pathname === "/conversations/recent") {
@@ -937,6 +937,21 @@ module.exports = function createCipherRoutes(ctx) {
     if (!actionId) return sendJSON(res, 400, { error: "action id required" }), true;
     const removed = await actionQueue.remove(actionId);
     sendJSON(res, 200, { ok: removed });
+    return true;
+  }
+
+  // ── Proactive Reporter endpoints ──
+
+  if (req.method === "GET" && pathname === "/cipher/reporter/status") {
+    if (!proactiveReporter) return sendJSON(res, 500, { error: "reporter not loaded" }), true;
+    sendJSON(res, 200, proactiveReporter.getStatus());
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/cipher/reporter/trigger") {
+    if (!proactiveReporter) return sendJSON(res, 500, { error: "reporter not loaded" }), true;
+    await proactiveReporter.forceDailySummary();
+    sendJSON(res, 200, { ok: true, message: "Summary delivered" });
     return true;
   }
 

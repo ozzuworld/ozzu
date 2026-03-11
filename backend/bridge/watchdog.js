@@ -344,6 +344,17 @@ function processResult(service, result) {
     for (const fn of _listeners) {
       try { fn({ type: "serviceTransition", ...incident }); } catch {}
     }
+
+    // Trigger proactive report if 3+ services down
+    if (s.status === "down") {
+      const downCount = Object.values(_state).filter(s => s.status === "down").length;
+      if (downCount >= 3) {
+        try {
+          const reporter = require("./proactive-reporter");
+          reporter.triggerEventReport(`${downCount} services down: ${Object.entries(_state).filter(([,s]) => s.status === "down").map(([k]) => k).join(", ")}`);
+        } catch {}
+      }
+    }
   }
 
   // GPU idle detection
