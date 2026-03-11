@@ -126,6 +126,7 @@ const scheduleRoutes = require("./routes/schedules");
 const profileRoutes = require("./routes/profile");
 const identityRoutes = require("./routes/identity");
 const opsRoutes = require("./routes/ops");
+const mcpRoutes = require("./routes/mcp");
 const watchdog = require("./watchdog");
 
 const log = {
@@ -1541,6 +1542,7 @@ function getRouteHandlers() {
       profile: profileRoutes(routeCtx),
       identity: identityRoutes(routeCtx),
       ops: opsRoutes(routeCtx),
+      mcp: mcpRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1582,6 +1584,7 @@ async function handleRequest(req, res) {
   if (await r.identity(req, res, pathname, url)) return;
   if (await r.backup(req, res, pathname, url)) return;
   if (await r.ops(req, res, pathname, url)) return;
+  if (await r.mcp(req, res, pathname, url)) return;
 
   // GET /api/training-stats — Face DB training pipeline stats
   if (req.method === "GET" && pathname === "/api/training-stats") {
