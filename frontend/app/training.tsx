@@ -61,7 +61,8 @@ const DATASET_INFO: Record<string, { label: string; total: number; color: string
   laion: { label: "LAION-Face", total: 50_000_000, color: PURPLE },
   ms1mv3: { label: "MS1MV3", total: 5_200_000, color: GREEN },
   ms1mv2: { label: "MS1MV2", total: 5_800_000, color: MAGENTA },
-  wikidata: { label: "Wikidata", total: 1_000_000, color: "#3B82F6" },
+  vggface2: { label: "VGGFace2", total: 3_310_000, color: "#3B82F6" },
+  wikidata: { label: "Wikidata", total: 1_000_000, color: "#8B5CF6" },
 };
 
 interface TrainingStats {
@@ -971,7 +972,7 @@ export default function TrainingScreen() {
               {Object.entries(sources)
                 .sort((a, b) => b[1] - a[1])
                 .map(([src, count]) => {
-                  const info = DATASET_INFO[src] || { label: src, total: count, color: "#666" };
+                  const info = DATASET_INFO[src] || { label: src, total: count, color: "#666666" };
                   return (
                     <SourceBar
                       key={src}
