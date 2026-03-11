@@ -5,7 +5,7 @@ module.exports = function createCipherRoutes(ctx) {
           getDirectives, getEpicProgress, buildSituationBriefing,
           redis, isRedisConnected,
           getConversationTranscript, getCurrentPersona, isVoiceActive,
-          sendNotification } = ctx;
+          sendNotification, cipherDaemon } = ctx;
 
   return async function handleCipherRoutes(req, res, pathname, url) {
   if (req.method === "GET" && pathname === "/conversations/recent") {
@@ -833,6 +833,40 @@ module.exports = function createCipherRoutes(ctx) {
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }
+    return true;
+  }
+
+  // ── Cipher Daemon endpoints ──
+
+  if (req.method === "GET" && pathname === "/cipher/daemon/status") {
+    const daemon = ctx.cipherDaemon;
+    if (!daemon) return sendJSON(res, 500, { error: "daemon not loaded" }), true;
+    sendJSON(res, 200, daemon.getStatus());
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/cipher/daemon/pause") {
+    const daemon = ctx.cipherDaemon;
+    if (!daemon) return sendJSON(res, 500, { error: "daemon not loaded" }), true;
+    daemon.pause();
+    sendJSON(res, 200, { ok: true, message: "Daemon paused" });
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/cipher/daemon/resume") {
+    const daemon = ctx.cipherDaemon;
+    if (!daemon) return sendJSON(res, 500, { error: "daemon not loaded" }), true;
+    daemon.resume();
+    sendJSON(res, 200, { ok: true, message: "Daemon resumed" });
+    return true;
+  }
+
+  if (req.method === "GET" && pathname === "/cipher/daemon/history") {
+    const daemon = ctx.cipherDaemon;
+    if (!daemon) return sendJSON(res, 500, { error: "daemon not loaded" }), true;
+    const limit = parseInt(url.searchParams.get("limit") || "20", 10);
+    const history = await daemon.getHistory(Math.min(limit, 100));
+    sendJSON(res, 200, { runs: history });
     return true;
   }
 

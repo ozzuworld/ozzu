@@ -37,6 +37,9 @@ const _state = {};       // { status, failCount, lastCheck, latencyMs, details }
 const _incidents = [];    // ring buffer, max 200
 const MAX_INCIDENTS = 200;
 
+// External listeners for state transitions
+const _listeners = [];
+
 // GPU idle tracking
 let _gpuIdleCount = 0;
 const GPU_IDLE_THRESHOLD = 5;   // percent utilization
@@ -336,6 +339,11 @@ function processResult(service, result) {
 
     // Broadcast alert
     broadcastAlert(service, s.status, prev, s.details);
+
+    // Notify external listeners (cipher-daemon etc.)
+    for (const fn of _listeners) {
+      try { fn({ type: "serviceTransition", ...incident }); } catch {}
+    }
   }
 
   // GPU idle detection
@@ -344,11 +352,15 @@ function processResult(service, result) {
     if (gpuUtil != null && gpuUtil < GPU_IDLE_THRESHOLD) {
       _gpuIdleCount++;
       if (_gpuIdleCount === GPU_IDLE_CHECKS) {
-        broadcastAlert("vast-gpu", "idle", "healthy", {
+        const idleDetails = {
           gpuUtil,
           idleMinutes: _gpuIdleCount * 2,
           message: `GPU idle (${gpuUtil}% util) for ${_gpuIdleCount * 2} minutes during active instance`,
-        });
+        };
+        broadcastAlert("vast-gpu", "idle", "healthy", idleDetails);
+        for (const fn of _listeners) {
+          try { fn({ type: "gpuIdle", service: "vast-gpu", details: idleDetails }); } catch {}
+        }
       }
     } else {
       _gpuIdleCount = 0;
@@ -512,4 +524,9 @@ async function forceCheck() {
   return getStatus();
 }
 
-module.exports = { start, stop, getStatus, getIncidents, forceCheck, recordHeartbeat };
+function onStateTransition(fn) {
+  _listeners.push(fn);
+  return () => { const i = _listeners.indexOf(fn); if (i >= 0) _listeners.splice(i, 1); };
+}
+
+module.exports = { start, stop, getStatus, getIncidents, forceCheck, recordHeartbeat, onStateTransition };

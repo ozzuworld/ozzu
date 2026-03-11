@@ -129,6 +129,7 @@ const opsRoutes = require("./routes/ops");
 const mcpRoutes = require("./routes/mcp");
 const businessEmailRoutes = require("./routes/business-email");
 const watchdog = require("./watchdog");
+const cipherDaemon = require("./cipher-daemon");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -1520,6 +1521,8 @@ const routeCtx = {
   get cipherPipeline() { return typeof cipherPipeline !== "undefined" ? cipherPipeline : null; },
   get setLastRestartReason() { return typeof setLastRestartReason === "function" ? setLastRestartReason : () => {}; },
   get buildSituationBriefing() { return typeof buildSituationBriefing === "function" ? buildSituationBriefing : async () => ""; },
+  // Daemon
+  cipherDaemon,
   // Node built-ins
   fs, path, crypto,
 };
@@ -6350,6 +6353,7 @@ wss.on("connection", (ws, req) => {
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
     startWatchdog();
     watchdog.start({ db, redis, broadcastToAll, sendNotification });
+    cipherDaemon.start({ db, redis, broadcastToAll, watchdog });
     metrics.startFlushTimer();
     // Initialize OSINT persistent scheduler + alert broadcast + monitoring
     osintEngine.setAlertBroadcast(broadcastToAll);

@@ -14,7 +14,7 @@ module.exports = function directiveRoutes(ctx) {
           _directiveCreationTimestamps,
           engage, sendNotification,
           routeDirective, mergeWorktreeToMain, cleanupWorktree,
-          broadcastToAll, setLastRestartReason, getConfig,
+          broadcastToAll, setLastRestartReason, getConfig, cipherDaemon,
           MAX_DIRECTIVES, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, DATA_DIR } = ctx;
 
   return async function(req, res, pathname, url) {
@@ -609,6 +609,10 @@ module.exports = function directiveRoutes(ctx) {
           newStatus: data.status,
           title: directive.title,
         });
+        // Notify cipher daemon for auto-recovery
+        if (cipherDaemon?.onDirectiveStatusChange) {
+          cipherDaemon.onDirectiveStatusChange({ directiveId: directive.id, oldStatus: prevStatus, newStatus: data.status, title: directive.title });
+        }
       }
 
       saveDirectives(directives, directive, prevStatus, patchActor);
