@@ -363,7 +363,7 @@ export default function DirectivesScreen() {
           paddingHorizontal: 8,
           height: 28,
         }}>
-          <Text style={{ color: "#3A3A3A", fontSize: 11, marginRight: 4 }}>search</Text>
+          <Text style={{ color: "#3A3A3A", fontSize: 12, marginRight: 4 }}>Search</Text>
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -395,19 +395,20 @@ export default function DirectivesScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#06B6D4" colors={["#06B6D4"]} />
         }
       >
-        {/* Pending Approvals Banner */}
+        {/* Pending Approvals */}
         {approvals.length > 0 ? (
           <View style={{
-            backgroundColor: "#0D2847",
-            borderWidth: 1,
-            borderColor: "#3B82F6",
-            borderRadius: 10,
-            padding: 14,
+            backgroundColor: "#111111",
+            borderRadius: 14,
+            padding: 16,
             marginBottom: 12,
           }}>
-            <Text style={{ color: "#60A5FA", fontSize: 12, fontWeight: "bold", letterSpacing: 1, marginBottom: 8 }}>
-              PENDING APPROVALS ({approvals.length})
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#3B82F6" }} />
+              <Text style={{ color: "#E5E5E5", fontSize: 15, fontWeight: "700" }}>
+                {approvals.length === 1 ? "1 item needs your approval" : `${approvals.length} items need your approval`}
+              </Text>
+            </View>
             {approvals.map((a) => (
               <Pressable
                 key={a.id}
@@ -415,26 +416,45 @@ export default function DirectivesScreen() {
                   const dir = directives.find((d) => d.id === a.directiveId);
                   if (dir) handlePlanReview(dir);
                 }}
-                style={{ backgroundColor: "#111", borderWidth: 1, borderColor: "#2A2A2A", borderRadius: 8, padding: 10, marginBottom: 6 }}
+                style={{
+                  backgroundColor: "#1A1A1A",
+                  borderRadius: 12,
+                  padding: 14,
+                  marginBottom: 8,
+                }}
               >
-                <Text style={{ color: "#E5E5E5", fontSize: 13, fontWeight: "600" }} numberOfLines={1}>
+                <Text style={{ color: "#F5F5F5", fontSize: 14, fontWeight: "600" }} numberOfLines={1}>
                   {a.directiveTitle || a.directiveId || a.id}
                 </Text>
                 {a.directivePlan ? (
-                  <Text style={{ color: "#525252", fontSize: 11, marginTop: 4 }} numberOfLines={2}>{a.directivePlan.slice(0, 150)}</Text>
+                  <Text style={{ color: "#525252", fontSize: 12, marginTop: 4, lineHeight: 18 }} numberOfLines={2}>{a.directivePlan.slice(0, 150)}</Text>
                 ) : null}
-                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
                   <Pressable
                     onPress={() => handleAction("approve", a.directiveId || "")}
-                    style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5, borderWidth: 1, borderColor: "#22C55E", backgroundColor: "rgba(34,197,94,0.1)" }}
+                    style={{
+                      flex: 2,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      backgroundColor: "#22C55E",
+                      alignItems: "center",
+                    }}
                   >
-                    <Text style={{ color: "#22C55E", fontSize: 11, fontWeight: "bold" }}>APPROVE</Text>
+                    <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>Approve</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => handleAction("deny", a.directiveId || "")}
-                    style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5, borderWidth: 1, borderColor: "#EF4444", backgroundColor: "rgba(239,68,68,0.1)" }}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      backgroundColor: "#1A1A1A",
+                      borderWidth: 1,
+                      borderColor: "#333333",
+                      alignItems: "center",
+                    }}
                   >
-                    <Text style={{ color: "#EF4444", fontSize: 11, fontWeight: "bold" }}>DENY</Text>
+                    <Text style={{ color: "#EF4444", fontSize: 13, fontWeight: "600" }}>Deny</Text>
                   </Pressable>
                 </View>
               </Pressable>

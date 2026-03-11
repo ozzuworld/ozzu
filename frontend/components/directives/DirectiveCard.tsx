@@ -15,33 +15,38 @@ import type { Directive, BuildStatus } from "../../lib/bridge-api";
 
 // ── Subcomponents ──
 
-function ActionButton({
+function ActionChip({
   label,
+  icon,
   color,
+  filled,
   onPress,
 }: {
   label: string;
+  icon?: string;
   color: string;
+  filled?: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
       style={{
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: color,
-        backgroundColor: `${color}15`,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 10,
+        backgroundColor: filled ? color : `${color}15`,
       }}
     >
+      {icon ? <Text style={{ fontSize: 13 }}>{icon}</Text> : null}
       <Text
         style={{
-          color,
-          fontSize: 11,
-          fontFamily: "monospace",
-          fontWeight: "bold",
+          color: filled ? "#fff" : color,
+          fontSize: 12,
+          fontWeight: "600",
         }}
       >
         {label}
@@ -52,19 +57,19 @@ function ActionButton({
 
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
-    <View style={{ width: "48%", marginBottom: 2 }}>
+    <View style={{ width: "48%", marginBottom: 6 }}>
       <Text
         style={{
           color: "#525252",
-          fontSize: 9,
-          fontFamily: "monospace",
-          fontWeight: "bold",
-          letterSpacing: 0.5,
+          fontSize: 10,
+          fontWeight: "600",
+          letterSpacing: 0.3,
+          marginBottom: 1,
         }}
       >
         {label}
       </Text>
-      <Text style={{ color: "#A3A3A3", fontSize: 11, fontFamily: "monospace" }}>
+      <Text style={{ color: "#A3A3A3", fontSize: 12 }}>
         {value}
       </Text>
     </View>
@@ -92,7 +97,7 @@ export function DirectiveCard({
 }: DirectiveCardProps) {
   const [expanded, setExpanded] = useState(false);
   const statusColor = STATUS_COLORS[directive.status] || "#737373";
-  const statusEmoji = STATUS_EMOJI[directive.status] || "•";
+  const statusEmoji = STATUS_EMOJI[directive.status] || "";
   const actLog = directive.activity_log || [];
 
   const toggle = useCallback(() => {
@@ -100,83 +105,96 @@ export function DirectiveCard({
     setExpanded((prev) => !prev);
   }, []);
 
+  const typeLabel = directive.type === "feature" ? "Feature" : directive.type === "epic" ? "Epic" : "Quick";
+
   return (
     <Pressable
       onPress={toggle}
       style={{
-        backgroundColor: "#1A1A1A",
-        borderRadius: 10,
+        backgroundColor: "#141414",
+        borderRadius: 14,
         borderLeftWidth: 3,
         borderLeftColor: statusColor,
-        borderWidth: 1,
-        borderColor: "#2A2A2A",
-        padding: 12,
+        padding: 14,
         flex: isTabletLandscape ? 1 : undefined,
       }}
     >
       {/* Header row */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Text style={{ fontSize: 14 }}>{directive.emoji || statusEmoji}</Text>
-        <Text
-          style={{
-            flex: 1,
-            color: "#E5E5E5",
-            fontSize: 14,
-            fontWeight: "600",
-            fontFamily: "monospace",
-          }}
-          numberOfLines={expanded ? undefined : 1}
-        >
-          {directive.title}
-        </Text>
-        <Text style={{ color: "#3A3A3A", fontSize: 10, fontFamily: "monospace" }}>
-          {expanded ? "▲" : "▶"}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Text style={{ fontSize: 18 }}>{directive.emoji || statusEmoji}</Text>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={{
+              color: "#F5F5F5",
+              fontSize: 15,
+              fontWeight: "600",
+              lineHeight: 20,
+            }}
+            numberOfLines={expanded ? undefined : 1}
+          >
+            {directive.title}
+          </Text>
+        </View>
+        <Text style={{ color: "#3A3A3A", fontSize: 12 }}>
+          {expanded ? "\u25B2" : "\u25B6"}
         </Text>
       </View>
 
-      {/* Meta row — clean single line */}
-      <Text
-        style={{
-          color: "#737373",
-          fontSize: 10,
-          fontFamily: "monospace",
-          marginTop: 4,
-          marginLeft: 24,
-        }}
-        numberOfLines={1}
-      >
-        <Text style={{ color: "#06B6D4", fontWeight: "bold" }}>
-          {directive.type?.toUpperCase() || "QUICK"}
-        </Text>
-        <Text style={{ color: "#525252" }}> · </Text>
-        <Text
-          style={{
-            color:
-              directive.priority <= 1
-                ? "#EF4444"
-                : directive.priority <= 2
-                  ? "#F59E0B"
-                  : "#737373",
-            fontWeight: "bold",
-          }}
-        >
-          {priorityLabel(directive.priority ?? 3)}
-        </Text>
+      {/* Tags row */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6, marginLeft: 26 }}>
+        {/* Type badge */}
+        <View style={{
+          paddingHorizontal: 8,
+          paddingVertical: 2,
+          borderRadius: 10,
+          backgroundColor: directive.type === "feature" ? "#3B82F615" : directive.type === "epic" ? "#A855F715" : "#22C55E15",
+        }}>
+          <Text style={{
+            color: directive.type === "feature" ? "#60A5FA" : directive.type === "epic" ? "#C084FC" : "#4ADE80",
+            fontSize: 11,
+            fontWeight: "600",
+          }}>
+            {typeLabel}
+          </Text>
+        </View>
+
+        {/* Priority — only if high/critical */}
+        {(directive.priority ?? 3) <= 2 ? (
+          <View style={{
+            paddingHorizontal: 8,
+            paddingVertical: 2,
+            borderRadius: 10,
+            backgroundColor: directive.priority <= 1 ? "#EF444415" : "#F59E0B15",
+          }}>
+            <Text style={{
+              color: directive.priority <= 1 ? "#FCA5A5" : "#FCD34D",
+              fontSize: 11,
+              fontWeight: "600",
+            }}>
+              {priorityLabel(directive.priority ?? 3)}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Created by */}
         {directive.createdBy ? (
-          <>
-            <Text style={{ color: "#525252" }}> · </Text>
-            <Text style={{ color: "#9CA3AF" }}>{directive.createdBy}</Text>
-          </>
+          <Text style={{ color: "#525252", fontSize: 11 }}>
+            {directive.createdBy}
+          </Text>
         ) : null}
-        <Text style={{ color: "#525252" }}> · </Text>
-        <Text style={{ color: "#525252" }}>{relativeTime(directive.updatedAt)}</Text>
+
+        {/* Relative time */}
+        <Text style={{ color: "#3A3A3A", fontSize: 11 }}>
+          {relativeTime(directive.updatedAt)}
+        </Text>
+
+        {/* Duration */}
         {directive.duration ? (
-          <>
-            <Text style={{ color: "#525252" }}> · </Text>
-            <Text style={{ color: "#525252" }}>{humanDuration(directive.duration)}</Text>
-          </>
+          <Text style={{ color: "#3A3A3A", fontSize: 11 }}>
+            {humanDuration(directive.duration)}
+          </Text>
         ) : null}
-      </Text>
+      </View>
 
       {/* Epic progress bar */}
       {directive.type === "epic" && directive.phases && directive.phases.length > 0 ? (() => {
@@ -184,12 +202,12 @@ export function DirectiveCard({
         const completed = directive.phases.filter((p: Directive) => p.status === "completed").length;
         const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
         return (
-          <View style={{ marginTop: 6, marginLeft: 24 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <View style={{ flex: 1, height: 4, backgroundColor: "#2A2A2A", borderRadius: 2, overflow: "hidden" }}>
+          <View style={{ marginTop: 8, marginLeft: 26 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View style={{ flex: 1, height: 4, backgroundColor: "#1A1A1A", borderRadius: 2, overflow: "hidden" }}>
                 <View style={{ width: `${pct}%` as any, height: "100%", backgroundColor: "#22C55E", borderRadius: 2 }} />
               </View>
-              <Text style={{ color: "#737373", fontSize: 10, fontFamily: "monospace" }}>
+              <Text style={{ color: "#525252", fontSize: 11 }}>
                 {completed}/{total}
               </Text>
             </View>
@@ -199,10 +217,18 @@ export function DirectiveCard({
 
       {/* Phase badge */}
       {directive.epicId && directive.phaseOrder ? (
-        <View style={{ marginTop: 4, marginLeft: 24 }}>
-          <Text style={{ color: "#A78BFA", fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
-            Phase {directive.phaseOrder}
-          </Text>
+        <View style={{ marginTop: 4, marginLeft: 26 }}>
+          <View style={{
+            alignSelf: "flex-start",
+            paddingHorizontal: 8,
+            paddingVertical: 2,
+            borderRadius: 10,
+            backgroundColor: "#A855F715",
+          }}>
+            <Text style={{ color: "#C084FC", fontSize: 11, fontWeight: "600" }}>
+              Phase {directive.phaseOrder}
+            </Text>
+          </View>
         </View>
       ) : null}
 
@@ -210,20 +236,17 @@ export function DirectiveCard({
       {directive.failureReason ? (
         <View
           style={{
-            backgroundColor: "rgba(239,68,68,0.1)",
-            borderWidth: 1,
-            borderColor: "rgba(239,68,68,0.3)",
-            borderRadius: 6,
-            padding: 8,
+            backgroundColor: "#EF444410",
+            borderRadius: 10,
+            padding: 10,
             marginTop: 8,
           }}
         >
           <Text
             style={{
               color: "#FCA5A5",
-              fontSize: 11,
-              fontFamily: "monospace",
-              lineHeight: 16,
+              fontSize: 12,
+              lineHeight: 18,
             }}
           >
             {directive.failureReason}
@@ -248,11 +271,10 @@ export function DirectiveCard({
       {actLog.length > 0 && !expanded ? (
         <Text
           style={{
-            color: "#737373",
-            fontSize: 11,
-            fontFamily: "monospace",
+            color: "#525252",
+            fontSize: 12,
             marginTop: 6,
-            marginLeft: 24,
+            marginLeft: 26,
           }}
           numberOfLines={1}
         >
@@ -262,57 +284,53 @@ export function DirectiveCard({
 
       {/* Action buttons — shown when expanded */}
       {expanded ? (
-        <View style={{ flexDirection: "row", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           {directive.status === "planned" ? (
             <>
-              <ActionButton label="✅ Approve" color="#22C55E" onPress={() => onAction("approve", directive.id)} />
-              <ActionButton label="❌ Deny" color="#EF4444" onPress={() => onAction("deny", directive.id)} />
+              <ActionChip label="Approve" icon="" color="#22C55E" filled onPress={() => onAction("approve", directive.id)} />
+              <ActionChip label="Deny" color="#EF4444" onPress={() => onAction("deny", directive.id)} />
             </>
           ) : null}
           {directive.status === "deploy_failed" ? (
             <>
-              <ActionButton label="🔄 Retry Merge" color="#F59E0B" onPress={() => onAction("retry_merge", directive.id)} />
-              <ActionButton label="🔄 Retry Full" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
+              <ActionChip label="Retry Merge" icon="" color="#F59E0B" onPress={() => onAction("retry_merge", directive.id)} />
+              <ActionChip label="Retry Full" icon="" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
             </>
           ) : null}
           {directive.status === "blocked" ? (
             <>
-              <ActionButton label="🔓 Unblock" color="#A855F7" onPress={() => onAction("unblock", directive.id)} />
-              <ActionButton label="🚫 Cancel" color="#EF4444" onPress={() => onAction("cancel", directive.id)} />
+              <ActionChip label="Unblock" color="#A855F7" onPress={() => onAction("unblock", directive.id)} />
+              <ActionChip label="Cancel" color="#EF4444" onPress={() => onAction("cancel", directive.id)} />
             </>
           ) : null}
           {["failed", "stale", "cancelled"].includes(directive.status) ? (
-            <ActionButton label="🔄 Retry" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
+            <ActionChip label="Retry" icon="" color="#3B82F6" onPress={() => onAction("retry", directive.id)} />
           ) : null}
           {!["completed", "failed", "cancelled", "stale", "planned", "blocked", "deploy_failed"].includes(directive.status) ? (
-            <ActionButton label="🚫 Cancel" color="#EF4444" onPress={() => onAction("cancel", directive.id)} />
+            <ActionChip label="Cancel" color="#EF4444" onPress={() => onAction("cancel", directive.id)} />
           ) : null}
 
-          {/* Plan review button for planned directives */}
           {directive.plan && onPlanReview ? (
-            <ActionButton label="📄 Plan" color="#06B6D4" onPress={() => onPlanReview(directive)} />
+            <ActionChip label="View Plan" icon="" color="#06B6D4" onPress={() => onPlanReview(directive)} />
           ) : null}
 
-          {/* Status change button */}
           {onStatusChange ? (
-            <ActionButton label="📝 Status" color="#A3A3A3" onPress={() => onStatusChange(directive)} />
+            <ActionChip label="Status" color="#737373" onPress={() => onStatusChange(directive)} />
           ) : null}
         </View>
       ) : null}
 
-
       {/* Expanded content */}
       {expanded ? (
-        <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: "#252525", paddingTop: 10 }}>
+        <View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: "#1E1E1E", paddingTop: 12 }}>
           {/* Description */}
           {directive.description ? (
             <Text
               style={{
                 color: "#A3A3A3",
-                fontSize: 12,
-                fontFamily: "monospace",
-                lineHeight: 18,
-                marginBottom: 10,
+                fontSize: 13,
+                lineHeight: 20,
+                marginBottom: 12,
               }}
             >
               {directive.description}
@@ -325,38 +343,28 @@ export function DirectiveCard({
               onPress={() => onPlanReview?.(directive)}
               style={{
                 borderWidth: 1,
-                borderColor: "#333",
-                borderRadius: 6,
-                padding: 10,
-                marginBottom: 10,
-                backgroundColor: "#141414",
+                borderColor: "#1E1E1E",
+                borderRadius: 12,
+                padding: 12,
+                marginBottom: 12,
+                backgroundColor: "#111111",
                 maxHeight: 120,
                 overflow: "hidden",
               }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 6 }}>
-                <Text style={{ fontSize: 10 }}>📄</Text>
-                <Text
-                  style={{
-                    color: "#06B6D4",
-                    fontSize: 10,
-                    fontFamily: "monospace",
-                    fontWeight: "bold",
-                    letterSpacing: 1,
-                  }}
-                >
-                  PLAN
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                <Text style={{ color: "#06B6D4", fontSize: 12, fontWeight: "600" }}>
+                  Plan
                 </Text>
-                <Text style={{ color: "#3B82F6", fontSize: 9, fontFamily: "monospace" }}>
-                  Tap to review ▶
+                <Text style={{ color: "#3B82F6", fontSize: 11 }}>
+                  Tap to review
                 </Text>
               </View>
               <Text
                 style={{
-                  color: "#A3A3A3",
-                  fontSize: 11,
-                  fontFamily: "monospace",
-                  lineHeight: 16,
+                  color: "#737373",
+                  fontSize: 12,
+                  lineHeight: 18,
                 }}
                 numberOfLines={4}
               >
@@ -371,54 +379,53 @@ export function DirectiveCard({
               flexDirection: "row",
               flexWrap: "wrap",
               gap: 4,
-              marginBottom: 10,
+              marginBottom: 12,
             }}
           >
-            <MetaItem label="🕒 Created" value={formatTimestamp(directive.createdAt)} />
-            <MetaItem label="🕒 Updated" value={formatTimestamp(directive.updatedAt)} />
+            <MetaItem label="Created" value={formatTimestamp(directive.createdAt)} />
+            <MetaItem label="Updated" value={formatTimestamp(directive.updatedAt)} />
             {directive.startedAt ? (
-              <MetaItem label="🚀 Started" value={formatTimestamp(directive.startedAt)} />
+              <MetaItem label="Started" value={formatTimestamp(directive.startedAt)} />
             ) : null}
             {directive.completedAt ? (
-              <MetaItem label="🎉 Completed" value={formatTimestamp(directive.completedAt)} />
+              <MetaItem label="Completed" value={formatTimestamp(directive.completedAt)} />
             ) : null}
             {directive.duration ? (
-              <MetaItem label="⏱️ Duration" value={humanDuration(directive.duration)} />
+              <MetaItem label="Duration" value={humanDuration(directive.duration)} />
             ) : null}
             {(directive.retryCount ?? 0) > 0 ? (
-              <MetaItem label="🔄 Retries" value={String(directive.retryCount)} />
+              <MetaItem label="Retries" value={String(directive.retryCount)} />
             ) : null}
             {directive.createdBy ? (
-              <MetaItem label="👤 Created By" value={directive.createdBy} />
+              <MetaItem label="Created By" value={directive.createdBy} />
             ) : null}
           </View>
 
           {/* Dependencies */}
           {directive.dependsOn && directive.dependsOn.length > 0 ? (
-            <View style={{ marginBottom: 10 }}>
+            <View style={{ marginBottom: 12 }}>
               <Text
                 style={{
                   color: "#525252",
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  fontWeight: "bold",
-                  letterSpacing: 1,
+                  fontSize: 11,
+                  fontWeight: "600",
+                  letterSpacing: 0.3,
                   marginBottom: 4,
                 }}
               >
-                🔗 DEPENDS ON
+                Dependencies
               </Text>
               {directive.dependsOn.map((depId) => (
                 <Text
                   key={depId}
                   style={{
-                    color: "#A3A3A3",
-                    fontSize: 11,
-                    fontFamily: "monospace",
+                    color: "#737373",
+                    fontSize: 12,
                     marginLeft: 8,
+                    lineHeight: 20,
                   }}
                 >
-                  • {depId}
+                  {depId}
                 </Text>
               ))}
             </View>
