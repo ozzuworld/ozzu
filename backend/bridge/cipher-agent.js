@@ -194,6 +194,7 @@ async function runAgent(action, mode) {
   let output = "";
   let exitReason = "unknown";
   let error = null;
+  let tokenUsage = null;
 
   try {
     const messages = query({
@@ -217,6 +218,13 @@ async function runAgent(action, mode) {
         }
       } else if (message.type === "result") {
         exitReason = message.subtype || "completed";
+        // Capture token usage from Agent SDK result
+        if (message.total_cost_usd != null || message.modelUsage) {
+          tokenUsage = {
+            costUsd: message.total_cost_usd || 0,
+            modelUsage: message.modelUsage || {},
+          };
+        }
       }
     }
   } catch (err) {
@@ -234,6 +242,15 @@ async function runAgent(action, mode) {
   log(`[${mode}] ${runId} finished (${exitReason}, ${Math.round(duration / 1000)}s)`);
 
   await persistRun(runId, action, exitReason, output, error, duration, mode);
+
+  // Persist token usage
+  if (tokenUsage) {
+    await persistTokenUsage(runId, tokenUsage, duration);
+    // Update in-memory stats
+    const totalTk = Object.values(tokenUsage.modelUsage || {}).reduce((sum, m) =>
+      sum + (m.inputTokens || 0) + (m.outputTokens || 0) + (m.cacheReadInputTokens || 0) + (m.cacheCreationInputTokens || 0), 0);
+    _stats.totalTokensUsed += totalTk;
+  }
 
   if (error || exitReason === "error") {
     queueAction(action, `agent_error: ${error || exitReason}`);
@@ -330,6 +347,45 @@ async function persistRun(runId, action, exitReason, output, error, durationMs, 
     );
   } catch (err) {
     log(`Failed to persist run ${runId}: ${err.message}`);
+  }
+}
+
+// ── Token Usage Persistence ──
+
+async function persistTokenUsage(runId, usage, durationMs) {
+  if (!_ctx?.db) return;
+  try {
+    // Insert per-model breakdown
+    const models = usage.modelUsage || {};
+    for (const [model, data] of Object.entries(models)) {
+      await _ctx.db.query(
+        `INSERT INTO token_usage (source, run_id, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, duration_ms, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          "agent_sdk",
+          runId,
+          model,
+          data.inputTokens || 0,
+          data.outputTokens || 0,
+          data.cacheReadInputTokens || 0,
+          data.cacheCreationInputTokens || 0,
+          data.costUSD || 0,
+          durationMs,
+          JSON.stringify({ totalCost: usage.costUsd }),
+        ]
+      );
+    }
+    // If no per-model data, insert aggregate
+    if (Object.keys(models).length === 0 && usage.costUsd > 0) {
+      await _ctx.db.query(
+        `INSERT INTO token_usage (source, run_id, model, cost_usd, duration_ms, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        ["agent_sdk", runId, MODEL, usage.costUsd, durationMs, JSON.stringify(usage)]
+      );
+    }
+    log(`Token usage saved for ${runId}: $${usage.costUsd?.toFixed(4) || "0"}`);
+  } catch (err) {
+    log(`Failed to persist token usage: ${err.message}`);
   }
 }
 

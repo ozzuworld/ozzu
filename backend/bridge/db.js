@@ -716,7 +716,27 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_incidents_service ON service_incidents(service, started_at DESC)`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog)");
+    // Migration: token usage tracking
+    await pool.query(`CREATE TABLE IF NOT EXISTS token_usage (
+      id SERIAL PRIMARY KEY,
+      source VARCHAR(20) NOT NULL,
+      session_id TEXT,
+      run_id TEXT,
+      model TEXT,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      cache_read_tokens INTEGER DEFAULT 0,
+      cache_creation_tokens INTEGER DEFAULT 0,
+      total_tokens INTEGER GENERATED ALWAYS AS (input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens) STORED,
+      cost_usd NUMERIC(10,6) DEFAULT 0,
+      duration_ms INTEGER,
+      metadata JSONB DEFAULT '{}',
+      recorded_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_token_usage_recorded ON token_usage(recorded_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_token_usage_source ON token_usage(source, recorded_at DESC)`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
