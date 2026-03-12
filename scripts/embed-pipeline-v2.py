@@ -22,6 +22,37 @@ Usage:
   python3 embed-pipeline-v2.py --benchmark         # Pure GPU benchmark (no Qdrant)
 """
 import os, sys, uuid, time, json, argparse, subprocess, signal
+
+# Auto-detect and preload CUDA libs from pip-installed nvidia packages
+# Must happen BEFORE importing onnxruntime
+def _setup_cuda_libs():
+    """Find NVIDIA CUDA libraries and preload them via ctypes."""
+    import site, ctypes, glob as globmod
+    lib_dirs = []
+    for sp in (site.getsitepackages() if hasattr(site, 'getsitepackages') else []) + \
+              ([site.getusersitepackages()] if hasattr(site, 'getusersitepackages') else []):
+        nvidia_dir = os.path.join(sp, "nvidia")
+        if os.path.isdir(nvidia_dir):
+            for pkg in os.listdir(nvidia_dir):
+                lib_dir = os.path.join(nvidia_dir, pkg, "lib")
+                if os.path.isdir(lib_dir):
+                    lib_dirs.append(lib_dir)
+    if lib_dirs:
+        # Set env for child processes
+        existing = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = ":".join(lib_dirs) + (":" + existing if existing else "")
+        # Preload key libs that onnxruntime needs
+        for lib_dir in lib_dirs:
+            for pattern in ["libcublas*.so*", "libcudnn*.so*", "libcufft*.so*",
+                           "libcurand*.so*", "libcusolver*.so*", "libcusparse*.so*",
+                           "libcudart*.so*"]:
+                for lib in globmod.glob(os.path.join(lib_dir, pattern)):
+                    try:
+                        ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+                    except OSError:
+                        pass
+_setup_cuda_libs()
+
 import numpy as np
 import cv2
 import onnxruntime as ort
@@ -618,17 +649,18 @@ def run_benchmark(sess, inp_name):
     log(f"  Model: w600k_r50.onnx")
     log("=" * 60)
 
+    # Pre-allocate batch (avoids np.random overhead polluting measurement)
+    batch = np.random.randn(GPU_BATCH, 3, 112, 112).astype(np.float32)
+
     # Warm up
     for _ in range(5):
-        dummy = np.random.randn(GPU_BATCH, 3, 112, 112).astype(np.float32)
-        sess.run(None, {inp_name: dummy})
+        sess.run(None, {inp_name: batch})
 
-    # Benchmark — 100 batches
+    # Benchmark — 100 batches with pre-allocated data
     total_faces = 0
     t0 = time.time()
     for i in range(100):
-        dummy = np.random.randn(GPU_BATCH, 3, 112, 112).astype(np.float32)
-        sess.run(None, {inp_name: dummy})
+        sess.run(None, {inp_name: batch})
         total_faces += GPU_BATCH
         if (i + 1) % 20 == 0:
             elapsed = time.time() - t0
@@ -771,14 +803,96 @@ def main():
         log(f"[decode] ProcessPool failed, falling back to ThreadPool")
         decode_pool = ThreadPoolExecutor(max_workers=DECODE_WORKERS)
 
-    # Process with prefetch: extract next shard while GPU processes current
+    # Double-buffer: extract+decode next shard while GPU processes current
+    # This overlaps CPU work (tar extract + image decode) with GPU inference
     extract_pool = ThreadPoolExecutor(max_workers=2)
 
-    for idx, (shard_num, shard_path) in enumerate(shard_paths):
-        if not running.is_set():
-            break
-        stats.current_shard = shard_num
-        process_shard(shard_num, shard_path, config, sess, inp_name, source_name, decode_pool)
+    def extract_and_decode_shard(shard_num, shard_path):
+        """Extract raw images and decode them in parallel. Returns decoded data."""
+        fmt = config["format"]
+        try:
+            if fmt == "parquet":
+                raw_images = extract_parquet_images(
+                    shard_path, shard_num,
+                    config.get("image_col", "image"),
+                    config.get("label_col", "label"),
+                )
+            else:
+                raw_images = extract_tar_images(shard_path)
+        except Exception as e:
+            log(f"[error] Shard {shard_num} extract failed: {e}")
+            stats.add_error(f"Shard {shard_num}: {e}")
+            return None
+
+        if not raw_images:
+            return None
+
+        img_bytes_list = [r[0] for r in raw_images]
+        names = [r[1] for r in raw_images]
+        labels_list = [r[2] for r in raw_images]
+
+        tensors = list(decode_pool.map(_decode_image_bytes, img_bytes_list, chunksize=128))
+
+        good_t, good_n, good_l, failed = [], [], [], 0
+        for tensor, name, label in zip(tensors, names, labels_list):
+            if tensor is None:
+                failed += 1
+            else:
+                good_t.append(tensor)
+                good_n.append(name)
+                good_l.append(label)
+
+        return (good_t, good_n, good_l, failed, len(raw_images), shard_num)
+
+    def gpu_process(decoded_data, source_name):
+        """Run GPU inference on pre-decoded data."""
+        if decoded_data is None:
+            return
+        good_t, good_n, good_l, failed, total_raw, shard_num = decoded_data
+        shard_start = time.time()
+
+        for i in range(0, len(good_t), GPU_BATCH):
+            batch_t = good_t[i:i+GPU_BATCH]
+            batch_n = good_n[i:i+GPU_BATCH]
+            batch_l = good_l[i:i+GPU_BATCH]
+            embeddings = batch_embed(sess, inp_name, batch_t)
+            queue_batch(embeddings, batch_l, batch_n, source_name)
+            stats.add_processed(len(batch_t))
+
+        stats.add_failed(failed)
+        stats.shards_done += 1
+        elapsed_shard = time.time() - shard_start
+        total_elapsed = time.time() - start_time
+        rate = stats.indexed / (total_elapsed / 60) if total_elapsed > 0 else 0
+        log(f"[shard {shard_num:04d}] {total_raw:,} imgs, {failed} fail, "
+            f"{elapsed_shard:.1f}s GPU | total:{stats.indexed:,} rate:{rate:,.0f}/min")
+
+    if shard_paths:
+        # Start extracting first shard
+        current_future = extract_pool.submit(
+            extract_and_decode_shard, shard_paths[0][0], shard_paths[0][1])
+
+        for idx in range(len(shard_paths)):
+            if not running.is_set():
+                break
+            stats.current_shard = shard_paths[idx][0]
+
+            # Start extracting NEXT shard while we wait/process current
+            next_future = None
+            if idx + 1 < len(shard_paths):
+                next_future = extract_pool.submit(
+                    extract_and_decode_shard,
+                    shard_paths[idx + 1][0], shard_paths[idx + 1][1])
+
+            # Wait for current shard's extraction to complete
+            decoded = current_future.result()
+
+            # GPU processes current shard (while next is being extracted in background)
+            gpu_process(decoded, source_name)
+
+            # Next becomes current
+            if next_future is not None:
+                current_future = next_future
 
     # Shutdown
     running.clear()
