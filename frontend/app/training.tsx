@@ -57,11 +57,13 @@ const EPIC_TARGET = 100_000_000;
 // Dataset metadata for labels and targets
 const DATASET_INFO: Record<string, { label: string; total: number; color: string }> = {
   glint360k: { label: "Glint360K", total: 17_100_000, color: CYAN },
+  webface4m: { label: "WebFace4M", total: 4_200_000, color: "#F97316" },
   satellite: { label: "Satellite Crawl", total: 50_000_000, color: AMBER },
   laion: { label: "LAION-Face", total: 50_000_000, color: PURPLE },
   ms1mv3: { label: "MS1MV3", total: 5_200_000, color: GREEN },
   ms1mv2: { label: "MS1MV2", total: 5_800_000, color: MAGENTA },
   vggface2: { label: "VGGFace2", total: 3_310_000, color: "#3B82F6" },
+  casia: { label: "CASIA-WebFace", total: 500_000, color: "#6366F1" },
   wikidata: { label: "Wikidata", total: 1_000_000, color: "#8B5CF6" },
 };
 
@@ -702,6 +704,8 @@ export default function TrainingScreen() {
   const [startPoints, setStartPoints] = useState<number | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [activityLog, setActivityLog] = useState<string[]>([]);
+  const prevIndexedRef = useRef<number | null>(null);
+  const [deltaRate, setDeltaRate] = useState<number>(0);
 
   // Header glow pulse
   const headerGlow = useSharedValue(0.5);
@@ -746,6 +750,16 @@ export default function TrainingScreen() {
           [`+${diff.toLocaleString()} faces indexed [${new Date().toLocaleTimeString()}]`, ...log].slice(0, 20)
         );
       }
+
+      // Compute delta rate from pipeline indexed count (smoother than Qdrant point deltas)
+      const pipelineIndexed = data.pipeline?.indexed || 0;
+      if (pipelineIndexed > 0 && prevIndexedRef.current !== null && prevIndexedRef.current > 0) {
+        const idxDiff = pipelineIndexed - prevIndexedRef.current;
+        if (idxDiff > 0) {
+          setDeltaRate(idxDiff / (AUTO_REFRESH_MS / 60000));
+        }
+      }
+      prevIndexedRef.current = pipelineIndexed;
     } catch (e: any) {
       setError(e.message);
     }
@@ -940,9 +954,9 @@ export default function TrainingScreen() {
             delay={100}
           />
           <GlowCard
-            value={recentRate > 0 ? `${Math.round(recentRate).toLocaleString()}` : "—"}
+            value={deltaRate > 0 ? `${Math.round(deltaRate).toLocaleString()}` : recentRate > 0 ? `${Math.round(recentRate).toLocaleString()}` : "—"}
             label="DELTA/MIN"
-            sublabel="last interval"
+            sublabel={deltaRate > 0 ? "gpu indexed" : "last interval"}
             color={AMBER}
             delay={200}
           />

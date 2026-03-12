@@ -33,6 +33,7 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.ozzu"
     },
+    "platforms": ["ios", "android"],
     "web": {
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
