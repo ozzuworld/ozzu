@@ -205,13 +205,35 @@ def stats_reporter():
                 f"fail:{fail:,} queue:{qlen:,} "
                 f"rate:{rate:,.0f}/min {elapsed:.0f}s")
 
+def decode_image(args):
+    """Decode a single image — runs in worker threads."""
+    i, img_data, label, shard_num = args
+    try:
+        if isinstance(img_data, dict) and "bytes" in img_data:
+            img_bytes = img_data["bytes"]
+        elif isinstance(img_data, bytes):
+            img_bytes = img_data
+        else:
+            return None
+        if len(img_bytes) < 100:
+            return None
+        arr = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+        if arr is None:
+            return None
+        tensor = preprocess(arr)
+        return (tensor, str(label), f"shard{shard_num:04d}/img{i}")
+    except Exception:
+        return None
+
 def process_parquet_shard(parquet_path, shard_num, sess, inp_name, source_name, image_col, label_col):
     import pyarrow.parquet as pq
+    from concurrent.futures import ThreadPoolExecutor
     shard_start = time.time()
     count = 0
     batch_tensors = []
     batch_names = []
     batch_labels = []
+    num_workers = min(os.cpu_count() or 4, 16)
 
     try:
         table = pq.read_table(parquet_path)
@@ -234,30 +256,27 @@ def process_parquet_shard(parquet_path, shard_num, sess, inp_name, source_name, 
             log(f"[error] Shard {shard_num}: no image column found in {columns}")
             return
 
-        for i in range(len(table)):
-            try:
-                img_data = table.column(img_col)[i].as_py()
-                label = table.column(lbl_col)[i].as_py() if lbl_col else str(i)
+        # Extract all data from pyarrow first (single-threaded, fast)
+        n = len(table)
+        img_column = table.column(img_col)
+        lbl_column = table.column(lbl_col) if lbl_col else None
+        work_items = []
+        for i in range(n):
+            img_data = img_column[i].as_py()
+            label = lbl_column[i].as_py() if lbl_column else str(i)
+            work_items.append((i, img_data, label, shard_num))
 
-                # Handle different image formats in parquet
-                if isinstance(img_data, dict) and "bytes" in img_data:
-                    img_bytes = img_data["bytes"]
-                elif isinstance(img_data, bytes):
-                    img_bytes = img_data
-                else:
+        # Decode images in parallel using thread pool
+        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+            for result in pool.map(decode_image, work_items, chunksize=64):
+                if result is None:
                     with stats_lock: stats["skipped"] += 1
                     continue
 
-                if len(img_bytes) < 100:
-                    with stats_lock: stats["skipped"] += 1
-                    continue
-
-                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-                arr = np.array(img)[:, :, ::-1].copy()
-                tensor = preprocess(arr)
+                tensor, label, name = result
                 batch_tensors.append(tensor)
-                batch_names.append(f"shard{shard_num:04d}/img{i}")
-                batch_labels.append(str(label))
+                batch_names.append(name)
+                batch_labels.append(label)
                 with stats_lock: stats["processed"] += 1
                 count += 1
 
@@ -268,8 +287,6 @@ def process_parquet_shard(parquet_path, shard_num, sess, inp_name, source_name, 
                     batch_tensors.clear()
                     batch_names.clear()
                     batch_labels.clear()
-            except Exception:
-                with stats_lock: stats["failed"] += 1
 
     except Exception as e:
         log(f"[error] Shard {shard_num} read failed: {e}")

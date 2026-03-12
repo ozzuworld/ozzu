@@ -857,10 +857,6 @@ async function getConversationHistory({ persona = 'cipher', limit = 100, offset 
     turnParams.push(contentTypes);
   }
   turnSql += ` ORDER BY conversation_id, turn_index ASC`;
-  if (limit) {
-    turnParams.push(limit);
-    turnSql += ` LIMIT $${turnParams.length}`;
-  }
   const turnRes = await query(turnSql, turnParams);
 
   // Group turns by conversation

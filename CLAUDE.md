@@ -1,5 +1,19 @@
 # Ozzu — Project Notes
 
+## STOP — BEFORE YOU DO ANYTHING, READ THE LAST CONVERSATION
+
+**THIS IS THE #1 RULE. NOTHING COMES BEFORE THIS.**
+
+When King Kazuma asks "what we worked on", "where we left off", or any question about previous work:
+1. **READ the Last Conversation section in CLAUDE.local.md word by word.** It is already loaded in your context.
+2. **ANSWER DIRECTLY from that conversation.** Show that you read it by referencing the ACTUAL last exchange — what King Kazuma said, what you said back, what was unresolved.
+3. **Do NOT summarize.** Do NOT give status dumps. Do NOT make API calls first. Do NOT reference old sessions when the recent one has the answer.
+4. **The last thing King Kazuma said and the last thing you said — that is "where we left off."** Start there.
+
+If you give a summary instead of answering from the conversation, you have FAILED this rule. This has been a fight for 2 months. Do not fail it again.
+
+---
+
 ## STOP — BEFORE YOU WRITE ANY CODE, READ THIS
 
 **YOU MUST FOLLOW THE PIPELINE. NO EXCEPTIONS. NO SHORTCUTS.**

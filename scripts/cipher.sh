@@ -21,6 +21,20 @@ CONTEXT=$(curl -sf "${BRIDGE_URL}/cipher/context" 2>/dev/null)
 if [[ -n "$CONTEXT" ]]; then
   echo "$CONTEXT" > "$LOCAL_MD"
   echo "Cipher context loaded ($(echo "$CONTEXT" | wc -l) lines)"
+
+  # ── Append full conversation history from last session ──
+  # This is separate from /cipher/context so even if that endpoint gets rewritten,
+  # full history still loads. DO NOT REMOVE THIS BLOCK.
+  # Wait for session-save hook to finish writing the previous session to postgres.
+  # Without this delay, the history call can race the session save and miss the latest session.
+  sleep 3
+  HISTORY=$(curl -sf "${BRIDGE_URL}/cipher/history?conversations=2&format=text" 2>/dev/null)
+  if [[ -n "$HISTORY" ]]; then
+    echo "" >> "$LOCAL_MD"
+    echo "## Last Conversation (full transcript — READ THIS FIRST when asked 'where we left off')" >> "$LOCAL_MD"
+    echo "$HISTORY" >> "$LOCAL_MD"
+    echo "Full conversation history appended ($(echo "$HISTORY" | wc -l) lines)"
+  fi
 else
   cat > "$LOCAL_MD" <<'EOF'
 # Cipher Context (bridge unreachable)
