@@ -61,6 +61,13 @@ DATASETS = {
         "suffix": ".tar",
         "description": "VGGFace2 (3.3M faces, 9K identities)",
     },
+    "ms1mv2": {
+        "repo": "LSIbabnikz/ms1mv2_wds",
+        "num_shards": 117,
+        "prefix": "shard-",
+        "suffix": ".tar",
+        "description": "MS1MV2 (5.8M faces, 85K identities)",
+    },
 }
 
 # ── State (minimized lock contention) ──

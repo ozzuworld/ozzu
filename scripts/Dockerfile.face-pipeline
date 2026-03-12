@@ -1,0 +1,33 @@
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+# System deps (libgl for opencv, libglib for insightface)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential python3-dev libgl1-mesa-glx libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python deps — all pre-installed, zero setup on instance boot
+RUN pip install --no-cache-dir \
+    insightface \
+    onnxruntime-gpu \
+    qdrant-client \
+    pyarrow \
+    huggingface_hub
+
+# Pre-download the buffalo_l face model so instances don't waste time on first run
+RUN python3 -c "from insightface.app import FaceAnalysis; app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider']); app.prepare(ctx_id=0)"
+
+# Copy pipeline scripts
+COPY embed-hf-dataset.py embed-parquet-dataset.py gpu-orchestrator.sh /root/
+
+# Launcher script with LD_LIBRARY_PATH set for CUDA
+RUN echo '#!/bin/bash\n\
+export LD_LIBRARY_PATH=$(python3 -c "import site,glob;d=[];[d.extend(glob.glob(s+\"/nvidia/*/lib\")) for s in site.getsitepackages()+[site.getusersitepackages()]];print(\":\".join(d))"):$LD_LIBRARY_PATH\n\
+export QDRANT_URL="${QDRANT_URL:-https://home.ozzu.world:443}"\n\
+export QDRANT_PREFIX="${QDRANT_PREFIX:-qdrant}"\n\
+export BRIDGE_URL="${BRIDGE_URL:-https://home.ozzu.world/bridge}"\n\
+export ONNXRUNTIME_LOG_LEVEL=3\n\
+exec "$@"' > /root/entrypoint.sh && chmod +x /root/entrypoint.sh
+
+WORKDIR /root
+ENTRYPOINT ["/root/entrypoint.sh"]
+CMD ["bash"]
