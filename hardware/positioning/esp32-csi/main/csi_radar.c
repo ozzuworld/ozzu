@@ -1,5 +1,6 @@
-// csi_radar.c — WiFi CSI presence/motion detection (SOTA)
-// Phase + amplitude analysis, promiscuous mode, multi-feature ML scoring
+// csi_radar.c — WiFi CSI presence/motion detection (SOTA v2)
+// Phase + amplitude, promiscuous mode, ML scoring, Hampel filter,
+// subcarrier selection, EMA smoothing, hysteresis
 #include "csi_radar.h"
 #include "udp_sender.h"
 #include "esp_wifi.h"
@@ -13,20 +14,33 @@
 
 static const char *TAG = "csi_radar";
 
-// ── CSI processing state ──
+// ── Subcarrier selection ──
+// ESP32 802.11n HT20: 64 subcarriers, but only 52 carry data.
+// DC subcarrier (index 0) and edge/guard subcarriers are noisy — skip them.
+#define CSI_RAW_MAX        64
+#define CSI_SKIP_DC         1    // skip DC (center) subcarrier
+#define CSI_SKIP_EDGE       3    // skip 3 edge subcarriers on each side
+#define CSI_SUBCARRIERS    46    // 52 - DC - 2*EDGE = 46 usable
 
-#define CSI_SUBCARRIERS    52
-#define CSI_HISTORY_LEN    30    // sliding window (larger = more stable)
-#define BASELINE_SAMPLES   15    // frames to calibrate empty room
+// ── Processing parameters ──
+#define CSI_HISTORY_LEN    30    // sliding window
+#define BASELINE_SAMPLES   15    // calibration frames
+#define EMA_ALPHA          0.15f // exponential moving average decay
+#define HAMPEL_WINDOW       5    // Hampel filter half-window
+#define HAMPEL_THRESHOLD   3.0f  // MAD multiplier for outlier detection
 
-// ── Feature extraction buffers ──
+// ── Hysteresis ──
+#define HYSTERESIS_FRAMES   4    // must see new state N times before switching
+#define STALE_TIMEOUT_MS   10000 // 10s without CSI = mark stale
+
+// ── Feature buffers ──
 
 static float _amp_history[CSI_HISTORY_LEN][CSI_SUBCARRIERS];
 static float _phase_history[CSI_HISTORY_LEN][CSI_SUBCARRIERS];
 static int   _history_idx = 0;
 static int   _history_count = 0;
 
-// Baseline (empty room calibration)
+// Baseline (empty room)
 static float _amp_baseline[CSI_SUBCARRIERS];
 static float _phase_baseline[CSI_SUBCARRIERS];
 static bool  _baseline_set = false;
@@ -34,9 +48,20 @@ static int   _baseline_samples = 0;
 static float _amp_baseline_accum[CSI_SUBCARRIERS];
 static float _phase_baseline_accum[CSI_SUBCARRIERS];
 
-// Temporal stability tracker
+// EMA smoothed features
+static float _ema_amp_var = 0.0f;
+static float _ema_phase_var = 0.0f;
+static float _ema_deviation = 0.0f;
+static bool  _ema_init = false;
+
+// Temporal stability
 static float _prev_amp_variance = 0.0f;
 static float _prev_phase_variance = 0.0f;
+
+// Hysteresis state
+static uint8_t _pending_state = 0;
+static int     _pending_count = 0;
+static uint8_t _confirmed_state = 0;
 
 static SemaphoreHandle_t _state_mutex;
 static csi_report_t _current_state;
@@ -46,65 +71,137 @@ static const node_config_t *_cfg;
 static uint32_t _csi_cb_count = 0;
 
 // ── ML scoring weights (logistic regression) ──
-// Features: amp_variance, phase_variance, baseline_deviation, temporal_stability
-// Tuned empirically — good separation on ESP32 CSI data
 
 typedef struct {
-    float w_amp_var;         // amplitude variance weight
-    float w_phase_var;       // phase variance weight
-    float w_baseline_dev;    // deviation from baseline weight
-    float w_temporal;        // temporal stability (variance-of-variance) weight
-    float w_cross;           // cross-feature (amp * phase interaction) weight
-    float bias;              // bias term
+    float w_amp_var;
+    float w_phase_var;
+    float w_baseline_dev;
+    float w_temporal;
+    float w_cross;
+    float bias;
 } ml_weights_t;
 
-// Motion detector — high variance = motion
+// Motion: high variance + temporal jitter
 static const ml_weights_t W_MOTION = {
-    .w_amp_var     =  0.35f,
-    .w_phase_var   =  0.30f,
+    .w_amp_var      =  0.30f,
+    .w_phase_var    =  0.25f,
     .w_baseline_dev =  0.10f,
-    .w_temporal    =  0.15f,
-    .w_cross       =  0.10f,
-    .bias          = -0.40f,
+    .w_temporal     =  0.20f,
+    .w_cross        =  0.15f,
+    .bias           = -0.35f,
 };
 
-// Presence detector — baseline deviation + phase micro-changes = someone still
+// Presence: phase micro-changes + baseline shift
 static const ml_weights_t W_PRESENCE = {
-    .w_amp_var     =  0.10f,
-    .w_phase_var   =  0.35f,   // phase is key for static presence (breathing)
+    .w_amp_var      =  0.10f,
+    .w_phase_var    =  0.35f,
     .w_baseline_dev =  0.30f,
-    .w_temporal    =  0.15f,
-    .w_cross       =  0.10f,
-    .bias          = -0.25f,
+    .w_temporal     =  0.10f,
+    .w_cross        =  0.15f,
+    .bias           = -0.20f,
 };
 
-// Sigmoid activation
 static inline float sigmoid(float x) {
     if (x > 10.0f) return 1.0f;
     if (x < -10.0f) return 0.0f;
     return 1.0f / (1.0f + expf(-x));
 }
 
-// ── CSI amplitude + phase extraction ──
+// ── Hampel filter — replace outliers with median ──
+
+static float median3(float a, float b, float c) {
+    if (a > b) { float t = a; a = b; b = t; }
+    if (b > c) { float t = b; b = c; c = t; }
+    if (a > b) { b = a; }
+    return b;
+}
+
+static void hampel_filter(float *data, int len) {
+    float filtered[CSI_SUBCARRIERS];
+    memcpy(filtered, data, sizeof(float) * len);
+
+    for (int i = HAMPEL_WINDOW; i < len - HAMPEL_WINDOW; i++) {
+        // Compute median in window
+        float window[2 * HAMPEL_WINDOW + 1];
+        for (int j = -HAMPEL_WINDOW; j <= HAMPEL_WINDOW; j++) {
+            window[j + HAMPEL_WINDOW] = data[i + j];
+        }
+        // Simple median for small window: sort
+        int wsize = 2 * HAMPEL_WINDOW + 1;
+        for (int a = 0; a < wsize - 1; a++) {
+            for (int b = a + 1; b < wsize; b++) {
+                if (window[a] > window[b]) {
+                    float t = window[a]; window[a] = window[b]; window[b] = t;
+                }
+            }
+        }
+        float med = window[wsize / 2];
+
+        // Compute MAD (Median Absolute Deviation)
+        float deviations[2 * HAMPEL_WINDOW + 1];
+        for (int j = 0; j < wsize; j++) {
+            deviations[j] = fabsf(data[i + j - HAMPEL_WINDOW] - med);
+        }
+        for (int a = 0; a < wsize - 1; a++) {
+            for (int b = a + 1; b < wsize; b++) {
+                if (deviations[a] > deviations[b]) {
+                    float t = deviations[a]; deviations[a] = deviations[b]; deviations[b] = t;
+                }
+            }
+        }
+        float mad = deviations[wsize / 2] * 1.4826f; // scale to std dev
+
+        if (mad > 0.001f && fabsf(data[i] - med) > HAMPEL_THRESHOLD * mad) {
+            filtered[i] = med; // replace outlier
+        }
+    }
+
+    memcpy(data, filtered, sizeof(float) * len);
+}
+
+// ── Feature extraction with subcarrier selection ──
 
 static void extract_features(const int8_t *raw_csi, int len,
                               float *amplitudes, float *phases) {
     int pairs = len / 2;
-    if (pairs > CSI_SUBCARRIERS) pairs = CSI_SUBCARRIERS;
+    if (pairs > CSI_RAW_MAX) pairs = CSI_RAW_MAX;
+
+    float raw_amp[CSI_RAW_MAX];
+    float raw_phase[CSI_RAW_MAX];
 
     for (int i = 0; i < pairs; i++) {
         float imag = (float)raw_csi[i * 2];
         float real = (float)raw_csi[i * 2 + 1];
-        amplitudes[i] = sqrtf(imag * imag + real * real);
-        phases[i] = atan2f(imag, real);
+        raw_amp[i] = sqrtf(imag * imag + real * real);
+        raw_phase[i] = atan2f(imag, real);
     }
-    for (int i = pairs; i < CSI_SUBCARRIERS; i++) {
+    for (int i = pairs; i < CSI_RAW_MAX; i++) {
+        raw_amp[i] = 0.0f;
+        raw_phase[i] = 0.0f;
+    }
+
+    // Select usable subcarriers: skip DC and edges
+    int out_idx = 0;
+    for (int i = 0; i < pairs && out_idx < CSI_SUBCARRIERS; i++) {
+        // Skip DC subcarrier (center)
+        if (i == pairs / 2) continue;
+        // Skip edge subcarriers
+        if (i < CSI_SKIP_EDGE || i >= pairs - CSI_SKIP_EDGE) continue;
+
+        amplitudes[out_idx] = raw_amp[i];
+        phases[out_idx] = raw_phase[i];
+        out_idx++;
+    }
+    for (int i = out_idx; i < CSI_SUBCARRIERS; i++) {
         amplitudes[i] = 0.0f;
         phases[i] = 0.0f;
     }
+
+    // Hampel filter to remove outlier subcarriers
+    hampel_filter(amplitudes, CSI_SUBCARRIERS);
 }
 
-// ── Phase unwrapping (handle -pi/+pi discontinuity) ──
+// ── Phase unwrapping ──
 
 static float phase_diff(float a, float b) {
     float d = a - b;
@@ -113,16 +210,15 @@ static float phase_diff(float a, float b) {
     return d;
 }
 
-// ── Presence/motion detection with ML scoring ──
+// ── Presence/motion detection ──
 
 static void detect_presence(float *amplitudes, float *phases) {
-    // Store in history ring buffers
     memcpy(_amp_history[_history_idx], amplitudes, sizeof(float) * CSI_SUBCARRIERS);
     memcpy(_phase_history[_history_idx], phases, sizeof(float) * CSI_SUBCARRIERS);
     _history_idx = (_history_idx + 1) % CSI_HISTORY_LEN;
     if (_history_count < CSI_HISTORY_LEN) _history_count++;
 
-    // Baseline calibration (empty room)
+    // Baseline calibration
     if (!_baseline_set) {
         for (int s = 0; s < CSI_SUBCARRIERS; s++) {
             _amp_baseline_accum[s] += amplitudes[s];
@@ -130,7 +226,7 @@ static void detect_presence(float *amplitudes, float *phases) {
         }
         _baseline_samples++;
         if ((_baseline_samples % 5) == 0) {
-            ESP_LOGI(TAG, "Calibrating: %d/%d samples", _baseline_samples, BASELINE_SAMPLES);
+            ESP_LOGI(TAG, "Calibrating: %d/%d", _baseline_samples, BASELINE_SAMPLES);
         }
         if (_baseline_samples >= BASELINE_SAMPLES) {
             for (int s = 0; s < CSI_SUBCARRIERS; s++) {
@@ -138,14 +234,14 @@ static void detect_presence(float *amplitudes, float *phases) {
                 _phase_baseline[s] = _phase_baseline_accum[s] / (float)_baseline_samples;
             }
             _baseline_set = true;
-            ESP_LOGI(TAG, "Baseline calibrated (%d samples, amp+phase)", _baseline_samples);
+            ESP_LOGI(TAG, "Baseline calibrated (%d samples)", _baseline_samples);
         }
         return;
     }
 
     if (_history_count < 5) return;
 
-    // ── Feature extraction across all subcarriers ──
+    // ── Feature extraction ──
 
     float total_amp_var = 0.0f;
     float total_phase_var = 0.0f;
@@ -153,11 +249,9 @@ static void detect_presence(float *amplitudes, float *phases) {
     float total_phase_dev = 0.0f;
 
     for (int s = 0; s < CSI_SUBCARRIERS; s++) {
-        // Amplitude: mean + variance
         float amp_mean = 0.0f;
-        for (int h = 0; h < _history_count; h++) {
+        for (int h = 0; h < _history_count; h++)
             amp_mean += _amp_history[h][s];
-        }
         amp_mean /= (float)_history_count;
 
         float amp_var = 0.0f;
@@ -168,12 +262,11 @@ static void detect_presence(float *amplitudes, float *phases) {
         amp_var /= (float)_history_count;
         total_amp_var += amp_var;
 
-        // Phase: variance using circular unwrapping
+        // Phase variance with circular unwrapping
         float phase_ref = _phase_history[0][s];
         float phase_sum = 0.0f;
-        for (int h = 0; h < _history_count; h++) {
+        for (int h = 0; h < _history_count; h++)
             phase_sum += phase_diff(_phase_history[h][s], phase_ref);
-        }
         float phase_mean = phase_ref + phase_sum / (float)_history_count;
 
         float phase_var = 0.0f;
@@ -184,31 +277,40 @@ static void detect_presence(float *amplitudes, float *phases) {
         phase_var /= (float)_history_count;
         total_phase_var += phase_var;
 
-        // Deviation from baseline
         total_amp_dev += fabsf(amp_mean - _amp_baseline[s]);
         total_phase_dev += fabsf(phase_diff(phase_mean, _phase_baseline[s]));
     }
 
-    // Normalize to per-subcarrier averages
     float amp_variance = total_amp_var / CSI_SUBCARRIERS;
     float phase_variance = total_phase_var / CSI_SUBCARRIERS;
-    float amp_deviation = total_amp_dev / CSI_SUBCARRIERS;
-    float phase_deviation = total_phase_dev / CSI_SUBCARRIERS;
+    float deviation = (total_amp_dev + total_phase_dev) / CSI_SUBCARRIERS;
 
-    // Temporal stability: how much variance itself is changing
-    float temporal = fabsf(amp_variance - _prev_amp_variance) +
-                     fabsf(phase_variance - _prev_phase_variance);
-    _prev_amp_variance = amp_variance;
-    _prev_phase_variance = phase_variance;
+    // ── EMA smoothing (reduces noise-induced state flipping) ──
 
-    // Cross-feature interaction
-    float cross = sqrtf(amp_variance * phase_variance);
+    if (!_ema_init) {
+        _ema_amp_var = amp_variance;
+        _ema_phase_var = phase_variance;
+        _ema_deviation = deviation;
+        _ema_init = true;
+    } else {
+        _ema_amp_var = EMA_ALPHA * amp_variance + (1.0f - EMA_ALPHA) * _ema_amp_var;
+        _ema_phase_var = EMA_ALPHA * phase_variance + (1.0f - EMA_ALPHA) * _ema_phase_var;
+        _ema_deviation = EMA_ALPHA * deviation + (1.0f - EMA_ALPHA) * _ema_deviation;
+    }
 
-    // ── Normalize features to ~[0,1] range for scoring ──
+    // Temporal stability
+    float temporal = fabsf(_ema_amp_var - _prev_amp_variance) +
+                     fabsf(_ema_phase_var - _prev_phase_variance);
+    _prev_amp_variance = _ema_amp_var;
+    _prev_phase_variance = _ema_phase_var;
 
-    float f_amp_var   = fminf(amp_variance / 20.0f, 1.0f);
-    float f_phase_var = fminf(phase_variance / 1.5f, 1.0f);
-    float f_dev       = fminf((amp_deviation + phase_deviation) / 15.0f, 1.0f);
+    float cross = sqrtf(_ema_amp_var * _ema_phase_var);
+
+    // ── Normalize features ──
+
+    float f_amp_var   = fminf(_ema_amp_var / 20.0f, 1.0f);
+    float f_phase_var = fminf(_ema_phase_var / 1.5f, 1.0f);
+    float f_dev       = fminf(_ema_deviation / 15.0f, 1.0f);
     float f_temporal  = fminf(temporal / 10.0f, 1.0f);
     float f_cross     = fminf(cross / 5.0f, 1.0f);
 
@@ -232,31 +334,52 @@ static void detect_presence(float *amplitudes, float *phases) {
         W_PRESENCE.bias
     );
 
-    // ── Classify using ML scores ──
+    // ── Classify ──
 
-    uint8_t presence;
+    uint8_t raw_state;
     uint8_t motion_level;
     uint8_t confidence;
 
     if (motion_score > 0.55f) {
-        presence = PRESENCE_MOVING;
+        raw_state = PRESENCE_MOVING;
         motion_level = (uint8_t)(fminf(motion_score * 255.0f, 255.0f));
         confidence = (uint8_t)(fminf(motion_score * 100.0f, 100.0f));
     } else if (presence_score > 0.50f) {
-        presence = PRESENCE_STATIC;
-        motion_level = (uint8_t)(fminf(amp_variance, 255.0f));
+        raw_state = PRESENCE_STATIC;
+        motion_level = (uint8_t)(fminf(_ema_amp_var, 255.0f));
         confidence = (uint8_t)(fminf(presence_score * 100.0f, 100.0f));
     } else {
-        presence = PRESENCE_EMPTY;
+        raw_state = PRESENCE_EMPTY;
         motion_level = 0;
         confidence = (uint8_t)(fminf((1.0f - presence_score) * 100.0f, 100.0f));
+    }
+
+    // ── Hysteresis — require N consistent frames before switching state ──
+
+    if (raw_state == _pending_state) {
+        _pending_count++;
+    } else {
+        _pending_state = raw_state;
+        _pending_count = 1;
+    }
+
+    if (_pending_count >= HYSTERESIS_FRAMES) {
+        _confirmed_state = _pending_state;
+    }
+
+    // Use confirmed state but raw confidence/motion for responsiveness
+    uint8_t final_presence = _confirmed_state;
+
+    // Boost confidence when state is stable
+    if (_pending_count >= HYSTERESIS_FRAMES * 2) {
+        confidence = (uint8_t)fminf(confidence + 10, 100);
     }
 
     // Update state (thread-safe)
     xSemaphoreTake(_state_mutex, portMAX_DELAY);
     _current_state.magic = OZZU_MAGIC_CSI;
     _current_state.node_id = _cfg->node_id;
-    _current_state.presence = presence;
+    _current_state.presence = final_presence;
     _current_state.motion_level = motion_level;
     _current_state.confidence = confidence;
     _current_state.uptime_sec = (uint32_t)((esp_timer_get_time() / 1000000ULL));
@@ -264,14 +387,14 @@ static void detect_presence(float *amplitudes, float *phases) {
     xSemaphoreGive(_state_mutex);
 }
 
-// ── WiFi CSI callback (called from WiFi task) ──
+// ── WiFi CSI callback ──
 
 static void csi_callback(void *ctx, wifi_csi_info_t *info) {
     if (!info) return;
 
     _csi_cb_count++;
-    if (_csi_cb_count <= 3 || (_csi_cb_count % 200) == 0) {
-        ESP_LOGI(TAG, "CSI frame #%lu len=%d rssi=%d",
+    if (_csi_cb_count <= 3 || (_csi_cb_count % 500) == 0) {
+        ESP_LOGI(TAG, "CSI #%lu len=%d rssi=%d",
                  (unsigned long)_csi_cb_count,
                  info->buf ? info->len : 0, info->rx_ctrl.rssi);
     }
@@ -286,7 +409,6 @@ static void csi_callback(void *ctx, wifi_csi_info_t *info) {
         memset(phases, 0, sizeof(phases));
     }
 
-    // Update RSSI
     xSemaphoreTake(_state_mutex, portMAX_DELAY);
     _current_state.rssi = info->rx_ctrl.rssi;
     xSemaphoreGive(_state_mutex);
@@ -295,8 +417,6 @@ static void csi_callback(void *ctx, wifi_csi_info_t *info) {
 }
 
 // ── Promiscuous mode handler ──
-// Required for promiscuous mode — CSI is still delivered via csi_callback,
-// this just needs to exist for the mode to work.
 
 static void promisc_rx_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     (void)buf;
@@ -316,7 +436,6 @@ static void csi_report_task(void *arg) {
         memcpy(&report, &_current_state, sizeof(report));
         xSemaphoreGive(_state_mutex);
 
-        // Always send — hub needs heartbeats even when calibrating
         udp_send_csi_report(&report);
     }
 }
@@ -336,10 +455,9 @@ void csi_radar_init(const node_config_t *cfg) {
     memset(_amp_baseline_accum, 0, sizeof(_amp_baseline_accum));
     memset(_phase_baseline_accum, 0, sizeof(_phase_baseline_accum));
 
-    // Enable CSI collection
     wifi_csi_config_t csi_cfg = {
-        .lltf_en = true,           // L-LTF (Legacy Long Training Field)
-        .htltf_en = true,          // HT-LTF
+        .lltf_en = true,
+        .htltf_en = true,
         .stbc_htltf2_en = true,
         .ltf_merge_en = true,
         .channel_filter_en = false,
@@ -351,16 +469,15 @@ void csi_radar_init(const node_config_t *cfg) {
     ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(csi_callback, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_csi(true));
 
-    // Enable promiscuous mode for passive CSI capture from ALL WiFi frames
+    // Promiscuous mode — capture CSI from all WiFi traffic
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(promisc_rx_callback));
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
-
     wifi_promiscuous_filter_t filter = {
         .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA,
     };
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
 
-    ESP_LOGI(TAG, "CSI capture enabled — promiscuous mode ON, phase+amplitude analysis");
+    ESP_LOGI(TAG, "CSI SOTA v2 — promiscuous, phase+amp, Hampel, EMA, hysteresis");
     ESP_LOGI(TAG, "Calibrating baseline (%d frames)...", BASELINE_SAMPLES);
 }
 
