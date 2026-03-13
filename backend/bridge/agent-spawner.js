@@ -1440,6 +1440,21 @@ function detectBridgeChanges() {
   }
 }
 
+// Returns true if ESP32 firmware source files changed
+function detectFirmwareChanges() {
+  try {
+    const { execSync } = require("child_process");
+    const changed = execSync("git diff --name-only HEAD~1 HEAD", {
+      cwd: WORKDIR, encoding: "utf8", timeout: 10000,
+    }).trim();
+    if (!changed) return false;
+    const fwPatterns = [/hardware\/positioning\/esp32-csi\/main\//, /hardware\/positioning\/esp32-csi\/partitions\.csv/, /hardware\/positioning\/esp32-csi\/sdkconfig/];
+    return changed.split("\n").some(line => fwPatterns.some(p => p.test(line)));
+  } catch {
+    return false;
+  }
+}
+
 // Spawn a deploy command as a detached process that survives bridge restarts.
 // Writes a wrapper script to /tmp, runs it with nohup, logs to /tmp/ozzu-bridge/.
 // On completion, POSTs a notification to the bridge.
@@ -1582,6 +1597,19 @@ function smartDeploy(directive) {
       `IPA_FILE=$(find /tmp/ozzu-ipa-cache -name "*.ipa" 2>/dev/null | head -1)`,
       `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
       `rm -rf /tmp/ozzu-ipa-cache`,
+    ].join(" && "));
+  }
+
+  // ESP32 firmware deploy — build in Docker, SCP to Rock Pi, trigger instant OTA
+  const firmwareChanged = detectFirmwareChanges();
+  if (firmwareChanged) {
+    log("Firmware changes detected — building and deploying ESP32 OTA");
+    notify("Firmware update building — ESP32 nodes will update automatically.");
+    spawnDetachedDeploy("firmware", [
+      `cd ${WORKDIR}/hardware/positioning/esp32-csi`,
+      `docker run --rm -v "$(pwd):/project" -w /project espressif/idf:v5.2.3 bash -c "idf.py build" 2>&1 | tail -20`,
+      `scp build/ozzu-room-node.bin root@172.168.0.55:/opt/ozzu-positioning/ota/firmware.bin`,
+      `ssh root@172.168.0.55 "python3 -c \\"import socket,struct;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1);s.sendto(struct.pack('<I',0x4F544155),('10.0.50.255',5502));s.close();print('OTA trigger sent')\\""`,
     ].join(" && "));
   }
 

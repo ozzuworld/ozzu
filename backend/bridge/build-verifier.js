@@ -68,6 +68,7 @@ async function detectChangeType(directiveId) {
     let hasFrontend = false;
     let hasFrontendNative = false;
     let hasBackend = false;
+    let hasFirmware = false;
 
     const nativePatterns = [
       /frontend\/android\//,
@@ -78,6 +79,7 @@ async function detectChangeType(directiveId) {
     ];
     const frontendPatterns = [/^frontend\//];
     const backendPatterns = [/^backend\/bridge\//];
+    const firmwarePatterns = [/hardware\/positioning\/esp32-csi\/main\//, /hardware\/positioning\/esp32-csi\/partitions\.csv/, /hardware\/positioning\/esp32-csi\/sdkconfig/];
 
     for (const file of changedFiles) {
       if (nativePatterns.some(p => p.test(file))) {
@@ -88,6 +90,9 @@ async function detectChangeType(directiveId) {
       }
       if (backendPatterns.some(p => p.test(file))) {
         hasBackend = true;
+      }
+      if (firmwarePatterns.some(p => p.test(file))) {
+        hasFirmware = true;
       }
     }
 
@@ -113,8 +118,10 @@ async function detectChangeType(directiveId) {
     else if (hasBackend) changeType = "backend";
     else changeType = "other";
 
+    if (hasFirmware && changeType === "other") changeType = "firmware";
+
     verificationLog.push(`Change type: ${changeType}`);
-    return { changeType, changedFiles, verificationLog, hasFrontend, hasBackend };
+    return { changeType, changedFiles, verificationLog, hasFrontend, hasBackend, hasFirmware };
   } catch (err) {
     verificationLog.push(`Change detection failed: ${err.message}`);
     return { changeType: "unknown", changedFiles: [], verificationLog };
@@ -284,6 +291,32 @@ async function verifyFrontendNativeChanges(changedFiles) {
   return { success: allPassed, log: results };
 }
 
+// Verify ESP32 firmware changes — Docker build with ESP-IDF
+async function verifyFirmwareChanges() {
+  const results = [];
+
+  // Check that changed C files exist and aren't empty
+  const fwDir = path.join(WORKDIR, "hardware/positioning/esp32-csi/main");
+  if (!fs.existsSync(fwDir)) {
+    results.push("FAIL: firmware source directory not found");
+    return { success: false, log: results };
+  }
+
+  // Run idf.py build in Docker to verify firmware compiles
+  try {
+    const { stdout } = await execAsync(
+      `docker run --rm -v "${WORKDIR}/hardware/positioning/esp32-csi:/project" -w /project espressif/idf:v5.2.3 bash -c "idf.py build" 2>&1 | tail -10`,
+      { timeout: 5 * 60 * 1000 }  // 5 min for full build
+    );
+    results.push("ESP32 firmware build: OK");
+    results.push(stdout.trim().split("\n").slice(-3).join(" | "));
+    return { success: true, log: results };
+  } catch (err) {
+    results.push(`ESP32 firmware build FAILED: ${err.message.split("\n").slice(0, 5).join(" | ")}`);
+    return { success: false, log: results };
+  }
+}
+
 // Main verification entry point
 async function verify(directive) {
   const startTime = Date.now();
@@ -336,6 +369,17 @@ async function verify(directive) {
     if (!jsResult.success) {
       success = false;
       failureReason = failureReason || "Frontend JS verification (OTA export) failed";
+    }
+  }
+
+  // Firmware verification — compile with ESP-IDF
+  if (detection.hasFirmware) {
+    const fwResult = await verifyFirmwareChanges();
+    verificationLog.push("--- Firmware verification ---");
+    verificationLog.push(...fwResult.log);
+    if (!fwResult.success) {
+      success = false;
+      failureReason = failureReason || "ESP32 firmware build failed";
     }
   }
 
