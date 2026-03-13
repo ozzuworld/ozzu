@@ -805,15 +805,16 @@ export default function TrainingScreen() {
   const activeDataset = pipeline?.activeDataset || null;
   const activeInfo = activeDataset ? DATASET_INFO[activeDataset] : null;
 
-  // Pipeline rate: prefer server-side rate from GPU script, fall back to client-side
-  const serverRate = pipeline?.rate || 0;
+  // Pipeline rate: only show if heartbeat is alive (not stale)
+  const heartbeatAlive = pipeline?.heartbeatAlive ?? false;
+  const serverRate = heartbeatAlive ? (pipeline?.rate || 0) : 0;
 
   const sessionRate =
     startPoints !== null && startTime !== null && stats
       ? (points - startPoints) / ((Date.now() - startTime) / 60000)
       : 0;
 
-  const displayRate = serverRate > 0 ? serverRate : sessionRate;
+  const displayRate = serverRate > 0 ? serverRate : (heartbeatAlive ? sessionRate : 0);
 
   const recentRate =
     history.length >= 2
@@ -830,7 +831,9 @@ export default function TrainingScreen() {
   const remaining = activeTotal - activeCount;
   const etaMinutes = displayRate > 0 && remaining > 0 ? remaining / displayRate : 0;
   const etaStr =
-    etaMinutes <= 0
+    !activeDataset && !heartbeatAlive
+      ? "—"
+      : etaMinutes <= 0
       ? "DONE"
       : etaMinutes < 60
       ? `${Math.round(etaMinutes)}m`
@@ -851,7 +854,6 @@ export default function TrainingScreen() {
 
   // Heartbeat status
   const heartbeatAge = pipeline?.heartbeatAge ?? null;
-  const heartbeatAlive = pipeline?.heartbeatAlive ?? false;
 
   // Pipeline errors
   const pipelineErrors = pipeline?.errors ?? [];
