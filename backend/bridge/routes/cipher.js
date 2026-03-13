@@ -189,9 +189,8 @@ module.exports = function createCipherRoutes(ctx) {
           pendingActions.push({ priority: 1, action: `Fix ${d.status} directive: "${d.title}"`, directiveId: d.id, reason: d.failureReason });
         }
       }
-      if (downServices.length > 0) {
-        pendingActions.push({ priority: 1, action: `Services down: ${downServices.join(", ")}` });
-      }
+      // Don't add service status to pending actions — it goes stale.
+      // Cipher should check live via get_service_status MCP tool.
 
       const state = {
         timestamp: new Date().toISOString(),
@@ -304,21 +303,13 @@ module.exports = function createCipherRoutes(ctx) {
         const parts = [];
         parts.push(`Status: ${state.summary}`);
 
-        // Services
-        if (state.services.down.length > 0) {
-          parts.push(`Services DOWN: ${state.services.down.join(", ")}`);
-        }
-        if (state.services.degraded.length > 0) {
-          parts.push(`Services degraded: ${state.services.degraded.join(", ")}`);
-        }
-        if (state.services.down.length === 0 && state.services.degraded.length === 0) {
-          parts.push(`Services: all ${state.services.healthy} healthy`);
-        }
+        // Services — DO NOT include live status here, it goes stale between sessions.
+        // Cipher must query live via get_service_status MCP tool.
+        parts.push(`Services: ${state.services.healthy} monitored — query get_service_status for live status, NEVER state from this context`);
 
-        // GPU
-        if (state.gpu) {
-          parts.push(`Face DB: ${(state.gpu.faceCount || 0).toLocaleString()} faces in Qdrant`);
-        }
+        // GPU — DO NOT include face count here, it goes stale.
+        // Cipher must query Qdrant live: curl localhost:6333/collections/faces
+        parts.push(`Face DB: query curl localhost:6333/collections/faces — NEVER state count from this context`);
 
         // Ventures
         if (state.ventures && state.ventures.length > 0) {
