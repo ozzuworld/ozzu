@@ -63,9 +63,26 @@ const DATASET_INFO: Record<string, { label: string; total: number; color: string
   ms1mv3: { label: "MS1MV3", total: 5_200_000, color: GREEN },
   ms1mv2: { label: "MS1MV2", total: 5_800_000, color: MAGENTA },
   vggface2: { label: "VGGFace2", total: 3_310_000, color: "#3B82F6" },
+  vggface2_wds: { label: "VGGFace2-WDS", total: 3_310_000, color: "#3B82F6" },
   casia: { label: "CASIA-WebFace", total: 500_000, color: "#6366F1" },
+  imdb_wiki: { label: "IMDB-Wiki", total: 512_000, color: "#8B5CF6" },
+  celeba: { label: "CelebA", total: 200_000, color: "#EC4899" },
   wikidata: { label: "Wikidata", total: 1_000_000, color: "#8B5CF6" },
 };
+
+interface DatasetProgress {
+  status: "pending" | "running" | "completed" | "failed";
+  description?: string;
+  indexed?: number;
+  processed?: number;
+  failed?: number;
+  rate?: number;
+  elapsedSec?: number;
+  completedAt?: number;
+  startedAt?: number;
+  shards?: number;
+  error?: string;
+}
 
 interface TrainingStats {
   qdrant: {
@@ -75,6 +92,7 @@ interface TrainingStats {
     segments_count: number;
   };
   sources?: Record<string, number>;
+  datasetProgress?: Record<string, DatasetProgress>;
   pipeline?: {
     activeDataset: string | null;
     model: string;
@@ -978,29 +996,87 @@ export default function TrainingScreen() {
         {/* ── Ticker ──────────────────────────────────────────────── */}
         <ActivityTicker events={tickerEvents} />
 
-        {/* ── Sources breakdown ────────────────────────────────────── */}
-        {Object.keys(sources).length > 0 && (
-          <>
-            <SectionDivider title="SOURCES" icon="◈" />
-            <View style={[s.panel, { padding: 14 }]}>
-              {Object.entries(sources)
-                .sort((a, b) => b[1] - a[1])
-                .map(([src, count]) => {
-                  const info = DATASET_INFO[src] || { label: src, total: count, color: "#666666" };
-                  return (
-                    <SourceBar
-                      key={src}
-                      label={info.label}
-                      count={count}
-                      total={info.total}
-                      color={info.color}
-                      active={src === activeDataset}
+        {/* ── Dataset Progress ─────────────────────────────────────── */}
+        <SectionDivider title="DATASETS" icon="◈" />
+        <View style={[s.panel, { padding: 14 }]}>
+          {(() => {
+            const dp = stats?.datasetProgress || {};
+            // Build combined list: known datasets from DATASET_INFO + any extras from progress
+            const allKeys = new Set([
+              ...Object.keys(DATASET_INFO).filter(k => k !== "satellite" && k !== "laion" && k !== "wikidata"),
+              ...Object.keys(dp),
+            ]);
+            const entries = Array.from(allKeys).map(key => {
+              const info = DATASET_INFO[key] || { label: key, total: 0, color: "#666" };
+              const prog = dp[key];
+              const count = sources[key] || prog?.indexed || 0;
+              const status = prog?.status || (count > 0 ? "completed" : "pending");
+              return { key, info, prog, count, status };
+            });
+            // Sort: running first, then completed (by count desc), then failed, then pending
+            const order: Record<string, number> = { running: 0, completed: 1, failed: 2, pending: 3 };
+            entries.sort((a, b) => {
+              const oa = order[a.status] ?? 4, ob = order[b.status] ?? 4;
+              if (oa !== ob) return oa - ob;
+              return b.count - a.count;
+            });
+
+            return entries.map(({ key, info, prog, count, status }) => {
+              const statusIcon = status === "completed" ? "✓" : status === "running" ? "▶" : status === "failed" ? "✗" : "·";
+              const statusColor = status === "completed" ? GREEN : status === "running" ? CYAN : status === "failed" ? RED : "#333";
+              const pct = info.total > 0 ? Math.min(100, (count / info.total) * 100) : 0;
+              const rateStr = prog?.rate ? `${prog.rate.toLocaleString()}/min` : "";
+              const timeStr = prog?.elapsedSec ? (prog.elapsedSec > 3600 ? `${(prog.elapsedSec / 3600).toFixed(1)}h` : `${Math.round(prog.elapsedSec / 60)}m`) : "";
+
+              return (
+                <View key={key} style={{ marginBottom: 10 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+                      <Text style={{ color: statusColor, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>{statusIcon}</Text>
+                      <Text style={{ color: "#999", fontSize: 10, fontFamily: "monospace" }} numberOfLines={1}>{info.label}</Text>
+                      {status === "running" && key === activeDataset && (
+                        <PulsingGlow active={true} color={CYAN} />
+                      )}
+                    </View>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      {rateStr ? <Text style={{ color: "#333", fontSize: 8, fontFamily: "monospace" }}>{rateStr}</Text> : null}
+                      {timeStr ? <Text style={{ color: "#333", fontSize: 8, fontFamily: "monospace" }}>{timeStr}</Text> : null}
+                      <Text style={{ color: statusColor, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
+                        {count > 0 ? formatCompact(count) : "—"}
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Progress bar */}
+                  <View style={{ height: 3, backgroundColor: "#111", borderRadius: 2 }}>
+                    <View
+                      style={{
+                        height: 3,
+                        width: `${pct}%`,
+                        backgroundColor: status === "completed" ? GREEN : status === "running" ? info.color : status === "failed" ? RED : "#222",
+                        borderRadius: 2,
+                      }}
                     />
-                  );
-                })}
+                  </View>
+                  {prog?.error && (
+                    <Text style={{ color: RED, fontSize: 8, fontFamily: "monospace", marginTop: 2 }}>{prog.error}</Text>
+                  )}
+                </View>
+              );
+            });
+          })()}
+          {/* Satellite / untracked remainder */}
+          {(sources["satellite"] || 0) > 0 && (
+            <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: "#111" }}>
+              <SourceBar
+                label="Satellite + Legacy"
+                count={sources["satellite"]}
+                total={50_000_000}
+                color={AMBER}
+                active={false}
+              />
             </View>
-          </>
-        )}
+          )}
+        </View>
 
         {/* ── GPU ─────────────────────────────────────────────────── */}
         <SectionDivider title="GPU COMPUTE" icon="⚡" />

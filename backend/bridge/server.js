@@ -1635,9 +1635,6 @@ async function handleRequest(req, res) {
       const qdrantResult = qdrant?.result || {};
       const vastInstance = vastData?.instances?.[0] || null;
 
-      // Source breakdown from pipeline state + known baseline
-      // Pre-Glint360K baseline: ~17.8M faces from satellite crawlers
-      const sourceBreakdown = {};
       const totalPoints = qdrantResult.points_count || 0;
 
       // Read pipeline state file if it exists (written by embed script heartbeat)
@@ -1650,20 +1647,51 @@ async function handleRequest(req, res) {
         }
       } catch {}
 
-      // Source breakdown from pipeline state
-      if (pipelineState?.dataset) {
-        const pipelineIndexed = pipelineState?.indexed || 0;
-        if (pipelineIndexed > 0) sourceBreakdown[pipelineState.dataset] = pipelineIndexed;
+      // Read per-dataset progress (written by multi-dataset pipeline)
+      let datasetProgress = {};
+      try {
+        const fs = require("fs");
+        const progressFile = "/tmp/pipeline-progress.json";
+        if (fs.existsSync(progressFile)) {
+          const prog = JSON.parse(fs.readFileSync(progressFile, "utf8"));
+          datasetProgress = prog.datasets || {};
+        }
+      } catch {}
+
+      // Source breakdown: use real per-dataset progress data
+      const sourceBreakdown = {};
+      let knownCount = 0;
+      for (const [name, info] of Object.entries(datasetProgress)) {
+        const count = info.indexed || 0;
+        if (count > 0) {
+          sourceBreakdown[name] = count;
+          knownCount += count;
+        }
       }
-      // Baseline: everything not from the active pipeline is from satellite crawlers
-      const pipelineCount = Object.values(sourceBreakdown).reduce((a, b) => a + b, 0);
-      if (totalPoints > pipelineCount) {
-        sourceBreakdown["satellite"] = totalPoints - pipelineCount;
+      // If active pipeline is running and not yet in progress file, add from heartbeat
+      if (pipelineState?.dataset && pipelineState?.indexed > 0) {
+        const ds = pipelineState.dataset;
+        const existing = sourceBreakdown[ds] || 0;
+        // Only use heartbeat count if it's higher (more current) than progress file
+        if (pipelineState.indexed > existing && pipelineState.phase !== "complete") {
+          knownCount += (pipelineState.indexed - existing);
+          sourceBreakdown[ds] = pipelineState.indexed;
+        }
+      }
+      // Remainder = untracked faces (satellite crawlers, old datasets, etc)
+      if (totalPoints > knownCount) {
+        sourceBreakdown["satellite"] = totalPoints - knownCount;
       }
 
-      let activeDataset = pipelineState?.dataset || null;
-      if (!activeDataset && vastInstance?.actual_status === "running") {
-        activeDataset = "glint360k"; // default assumption when GPU is running
+      let activeDataset = null;
+      if (pipelineState?.dataset && pipelineState?.phase !== "complete") {
+        activeDataset = pipelineState.dataset;
+      }
+      // Check if any dataset is "running" in progress
+      if (!activeDataset) {
+        for (const [name, info] of Object.entries(datasetProgress)) {
+          if (info.status === "running") { activeDataset = name; break; }
+        }
       }
 
       // Calculate instance uptime from start_date (epoch seconds)
@@ -1689,6 +1717,7 @@ async function handleRequest(req, res) {
           segments_count: qdrantResult.segments_count || 0,
         },
         sources: sourceBreakdown,
+        datasetProgress,
         pipeline: {
           activeDataset,
           model: "ArcFace w600k_r50",
@@ -1752,6 +1781,39 @@ async function handleRequest(req, res) {
       sendJSON(res, 200, { ok: true });
     } catch (e) {
       sendJSON(res, 400, { error: e.message });
+    }
+    return;
+  }
+
+  // POST /api/pipeline-progress — persistent per-dataset progress from multi-dataset pipeline
+  if (req.method === "POST" && pathname === "/api/pipeline-progress") {
+    try {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = Buffer.concat(chunks).toString();
+      const progress = JSON.parse(body);
+      const fs = require("fs");
+      fs.writeFileSync("/tmp/pipeline-progress.json", JSON.stringify(progress));
+      sendJSON(res, 200, { ok: true });
+    } catch (e) {
+      sendJSON(res, 400, { error: e.message });
+    }
+    return;
+  }
+
+  // GET /api/pipeline-progress — read per-dataset progress
+  if (req.method === "GET" && pathname === "/api/pipeline-progress") {
+    try {
+      const fs = require("fs");
+      const file = "/tmp/pipeline-progress.json";
+      if (fs.existsSync(file)) {
+        const data = JSON.parse(fs.readFileSync(file, "utf8"));
+        sendJSON(res, 200, data);
+      } else {
+        sendJSON(res, 200, { datasets: {} });
+      }
+    } catch (e) {
+      sendJSON(res, 500, { error: e.message });
     }
     return;
   }
