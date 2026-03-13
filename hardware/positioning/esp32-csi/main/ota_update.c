@@ -1,7 +1,10 @@
 // ota_update.c — HTTP OTA firmware update from Rock Pi hub
 // Supports scheduled polling (30min) and instant trigger via UDP command
 // Compares running firmware size to avoid infinite update loops
+// Also handles PAIR command to trigger BLE pairing mode
 #include "ota_update.h"
+#include "ble_scanner.h"
+#include "protocol.h"
 #include "esp_ota_ops.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
@@ -237,7 +240,7 @@ static void ota_cmd_task(void *arg) {
 
     ESP_LOGI(TAG, "OTA command listener on UDP :%d", OTA_CMD_PORT);
 
-    uint8_t rxbuf[16];
+    uint8_t rxbuf[64];
     while (1) {
         int len = recvfrom(sock, rxbuf, sizeof(rxbuf), 0, NULL, NULL);
         if (len >= 4) {
@@ -246,6 +249,25 @@ static void ota_cmd_task(void *arg) {
             if (magic == OTA_TRIGGER_MAGIC) {
                 ESP_LOGI(TAG, "OTA trigger received — checking for update now");
                 xEventGroupSetBits(_ota_events, OTA_CHECK_NOW_BIT);
+            } else if (magic == OZZU_CMD_PAIR) {
+                uint16_t timeout = 60;  // default 60s
+                if (len >= 6) {
+                    memcpy(&timeout, rxbuf + 4, 2);
+                }
+                ESP_LOGI(TAG, "PAIR command received — entering pairing mode (%ds)", timeout);
+                ble_scanner_enter_pair_mode(timeout);
+            } else if (magic == OZZU_MAGIC_IRK) {
+                // Hub is syncing IRKs to this node
+                if (len >= (int)(sizeof(irk_header_t) + sizeof(irk_entry_t))) {
+                    irk_header_t *hdr = (irk_header_t *)rxbuf;
+                    irk_entry_t *entries = (irk_entry_t *)(rxbuf + sizeof(irk_header_t));
+                    for (int i = 0; i < hdr->irk_count && i < MAX_TRACKED_IRKS; i++) {
+                        if ((int)(sizeof(irk_header_t) + (i + 1) * sizeof(irk_entry_t)) > len) break;
+                        ble_scanner_add_irk(entries[i].irk, entries[i].addr,
+                                           entries[i].addr_type, entries[i].label);
+                    }
+                    ESP_LOGI(TAG, "Received %d IRK(s) from hub", hdr->irk_count);
+                }
             }
         }
     }

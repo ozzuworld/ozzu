@@ -8,6 +8,7 @@ from typing import Optional
 
 MAGIC_CSI = 0x4F5A4301  # "OZC\x01"
 MAGIC_BLE = 0x4F5A4201  # "OZB\x01"
+MAGIC_IRK = 0x4F5A4B01  # "OZK\x01" — IRK key exchange
 
 # CSI report: 20 bytes
 #   uint32 magic, uint8 node_id, uint8 presence, uint8 motion_level,
@@ -24,6 +25,21 @@ BLE_HDR_SIZE = struct.calcsize(BLE_HDR_FMT)
 #   6x uint8 addr, int8 rssi, uint8 addr_type, uint16 reserved
 BLE_DEV_FMT = "<6s b B H"
 BLE_DEV_SIZE = struct.calcsize(BLE_DEV_FMT)
+
+# IRK header: 8 bytes
+#   uint32 magic, uint8 node_id, uint8 action, uint8 irk_count, uint8 reserved
+IRK_HDR_FMT = "<IBBBB"
+IRK_HDR_SIZE = struct.calcsize(IRK_HDR_FMT)
+
+# IRK entry: 40 bytes
+#   16x uint8 irk, 6x uint8 addr, uint8 addr_type, uint8 reserved, 16s label
+IRK_ENTRY_FMT = "<16s 6s BB 16s"
+IRK_ENTRY_SIZE = struct.calcsize(IRK_ENTRY_FMT)
+
+# IRK actions
+IRK_ACTION_REPORT = 0     # node → hub: new IRK from pairing
+IRK_ACTION_SYNC = 1       # hub → node: distributing IRK
+IRK_ACTION_PAIR_MODE = 2  # hub → node: enter pairing mode
 
 PRESENCE_EMPTY = 0
 PRESENCE_STATIC = 1
@@ -51,6 +67,21 @@ class BleDevice:
     addr: str  # "AA:BB:CC:DD:EE:FF"
     rssi: int
     addr_type: int  # 0=public, 1=random
+
+
+@dataclass
+class IrkEntry:
+    irk: bytes      # 16-byte IRK
+    addr: str       # "AA:BB:CC:DD:EE:FF" identity address
+    addr_type: int
+    label: str      # human label, e.g., "kk_iphone"
+
+
+@dataclass
+class IrkReport:
+    node_id: int
+    action: int     # 0=report, 1=sync, 2=pair_mode
+    entries: list   # list of IrkEntry
 
 
 @dataclass
@@ -104,5 +135,31 @@ def parse_packet(data: bytes) -> Optional[object]:
             seq=seq,
             devices=devices,
         )
+
+    if magic == MAGIC_IRK and len(data) >= IRK_HDR_SIZE:
+        hdr = struct.unpack_from(IRK_HDR_FMT, data, 0)
+        node_id = hdr[1]
+        action = hdr[2]
+        irk_count = hdr[3]
+
+        entries = []
+        offset = IRK_HDR_SIZE
+        for _ in range(irk_count):
+            if offset + IRK_ENTRY_SIZE > len(data):
+                break
+            ent = struct.unpack_from(IRK_ENTRY_FMT, data, offset)
+            irk_bytes = ent[0]
+            addr_bytes = ent[1]
+            addr_str = ":".join(f"{b:02X}" for b in addr_bytes)
+            label = ent[3].rstrip(b"\x00").decode("utf-8", errors="replace")
+            entries.append(IrkEntry(
+                irk=irk_bytes,
+                addr=addr_str,
+                addr_type=ent[2],
+                label=label,
+            ))
+            offset += IRK_ENTRY_SIZE
+
+        return IrkReport(node_id=node_id, action=action, entries=entries)
 
     return None

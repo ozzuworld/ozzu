@@ -12,3 +12,6 @@ void udp_send_csi_report(const csi_report_t *report);
 
 // Send BLE sighting report (header + devices)
 void udp_send_ble_report(const ble_report_header_t *header, const ble_device_t *devices);
+
+// Send IRK report (header + entries)
+void udp_send_irk_report(const irk_header_t *header, const irk_entry_t *entries);

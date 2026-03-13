@@ -49,3 +49,20 @@ void udp_send_ble_report(const ble_report_header_t *header, const ble_device_t *
         ESP_LOGW(TAG, "BLE send failed: errno %d", errno);
     }
 }
+
+void udp_send_irk_report(const irk_header_t *header, const irk_entry_t *entries) {
+    if (_sock < 0 || header->irk_count == 0) return;
+
+    size_t hdr_sz = sizeof(irk_header_t);
+    size_t ent_sz = header->irk_count * sizeof(irk_entry_t);
+    uint8_t buf[hdr_sz + ent_sz];
+
+    memcpy(buf, header, hdr_sz);
+    memcpy(buf + hdr_sz, entries, ent_sz);
+
+    int sent = sendto(_sock, buf, hdr_sz + ent_sz, 0,
+                      (struct sockaddr *)&_hub_addr, sizeof(_hub_addr));
+    if (sent < 0) {
+        ESP_LOGW(TAG, "IRK send failed: errno %d", errno);
+    }
+}

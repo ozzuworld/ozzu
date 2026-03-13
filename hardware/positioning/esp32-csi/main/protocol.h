@@ -7,6 +7,7 @@
 // Magic bytes for packet identification
 #define OZZU_MAGIC_CSI  0x4F5A4301  // "OZC\x01"
 #define OZZU_MAGIC_BLE  0x4F5A4201  // "OZB\x01"
+#define OZZU_MAGIC_IRK  0x4F5A4B01  // "OZK\x01" — IRK key exchange
 
 // ── CSI presence report (sent every csi_report_interval_ms) ──
 // Total: 20 bytes fixed header
@@ -47,3 +48,36 @@ typedef struct __attribute__((packed)) {
 
 // Max BLE devices per report (keep UDP under MTU)
 #define MAX_BLE_DEVICES_PER_REPORT  50
+
+// ── IRK key exchange (for resolving iOS randomized MACs) ──
+// Sent after pairing extracts IRK, or from hub to sync IRKs across nodes
+
+#define IRK_LEN  16
+#define MAX_TRACKED_IRKS  8
+
+// Direction: node → hub (after pairing) or hub → node (sync)
+typedef struct __attribute__((packed)) {
+    uint32_t magic;           // OZZU_MAGIC_IRK
+    uint8_t  node_id;         // originating node
+    uint8_t  action;          // 0=report_new, 1=sync_from_hub, 2=request_pair_mode
+    uint8_t  irk_count;       // number of IRK entries (1 for report, N for sync)
+    uint8_t  _reserved;
+    // Followed by irk_count * irk_entry_t
+} irk_header_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  irk[IRK_LEN];   // 128-bit Identity Resolving Key
+    uint8_t  addr[6];         // identity address (real MAC from bond)
+    uint8_t  addr_type;       // 0=public, 1=random static
+    uint8_t  _reserved;
+    char     label[16];       // human label, e.g., "kk_iphone"
+} irk_entry_t;
+
+// IRK actions
+#define IRK_ACTION_REPORT     0  // node extracted IRK from pairing → send to hub
+#define IRK_ACTION_SYNC       1  // hub distributing IRK to all nodes
+#define IRK_ACTION_PAIR_MODE  2  // hub tells node to enter pairing mode
+
+// UDP command port for pairing trigger (reuse OTA port)
+#define OZZU_CMD_PORT  5502
+#define OZZU_CMD_PAIR  0x50414952  // "PAIR" — enter pairing mode
