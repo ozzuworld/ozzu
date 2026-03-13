@@ -3,6 +3,7 @@
 "use strict";
 
 const watchdog = require("../watchdog");
+const recoveryEngine = (() => { try { return require("../recovery-engine"); } catch { return null; } })();
 
 module.exports = function opsRoutes(ctx) {
   const { sendJSON, parseBody, db } = ctx;
@@ -216,6 +217,91 @@ module.exports = function opsRoutes(ctx) {
         sendJSON(res, 500, { ok: false, error: err.message });
         return true;
       }
+    }
+
+    // GET /ops/recovery-log — Recovery engine action history
+    if (req.method === "GET" && pathname === "/ops/recovery-log") {
+      const limitParam = url.searchParams.get("limit");
+      let limit = limitParam ? parseInt(limitParam, 10) : 50;
+      if (isNaN(limit) || limit < 1) limit = 50;
+
+      // Try DB first
+      if (db) {
+        try {
+          const result = await db.query(
+            `SELECT id, service, outcome, attempts, details, created_at
+             FROM recovery_log ORDER BY created_at DESC LIMIT $1`,
+            [limit]
+          );
+          sendJSON(res, 200, { ok: true, log: result.rows, source: "db" });
+          return true;
+        } catch {}
+      }
+
+      // Fallback to in-memory
+      if (recoveryEngine) {
+        sendJSON(res, 200, { ok: true, log: recoveryEngine.getLog(limit), source: "memory" });
+        return true;
+      }
+      sendJSON(res, 200, { ok: true, log: [], source: "none" });
+      return true;
+    }
+
+    // GET /ops/recovery-state — Current recovery engine state per service
+    if (req.method === "GET" && pathname === "/ops/recovery-state") {
+      if (!recoveryEngine) {
+        sendJSON(res, 503, { ok: false, error: "Recovery engine not available" });
+        return true;
+      }
+      sendJSON(res, 200, { ok: true, state: recoveryEngine.getState(), ts: new Date().toISOString() });
+      return true;
+    }
+
+    // GET /ops/capabilities — Structured manifest of system capabilities
+    if (req.method === "GET" && pathname === "/ops/capabilities") {
+      const capabilities = {
+        monitoring: {
+          services: Object.keys(watchdog.getStatus()),
+          checkInterval: "30s (standard), 2min (GPU)",
+          alertChannels: ["websocket", "june_verbal", "email"],
+        },
+        recovery: {
+          tier1: {
+            name: "Recovery Engine",
+            method: "docker restart with backoff",
+            services: recoveryEngine ? Object.keys(recoveryEngine.getState()) : [],
+            cost: "$0",
+            speed: "5-60s",
+          },
+          tier2: {
+            name: "Cipher Agent (LLM)",
+            method: "Claude diagnoses root cause",
+            triggerCondition: "Tier 1 exhausted or cascade",
+            cost: "tokens",
+            speed: "1-5min",
+          },
+          tier3: {
+            name: "Human Escalation",
+            channels: ["email", "app_push", "june_verbal"],
+            triggerCondition: "Tier 2 failed or external service",
+          },
+        },
+        pipeline: {
+          directives: true,
+          mergeAndDeploy: true,
+          smartDeploy: true,
+          verification: ["expo export", "node -c", "docker compose config"],
+        },
+        observability: {
+          endpoints: [
+            "GET /ops/status", "GET /ops/incidents", "GET /ops/gpu",
+            "GET /ops/token-usage", "GET /ops/recovery-log", "GET /ops/recovery-state",
+            "GET /ops/capabilities", "POST /ops/check",
+          ],
+        },
+      };
+      sendJSON(res, 200, { ok: true, capabilities });
+      return true;
     }
 
     return false;

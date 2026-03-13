@@ -26,11 +26,19 @@ const SERVICES_SEVERITY = {
   browser: "low", "vast-gpu": "critical",
 };
 
+// Services that recovery-engine handles first (Tier 1 docker restart).
+// cipher-agent only handles these on 'recoveryFailed' events.
+const DOCKER_RECOVERABLE = new Set([
+  "postgres", "redis", "nginx", "openvpn", "qdrant",
+  "homeassistant", "face-recognition", "osint-tools", "browser",
+]);
+
 // ── State ──
 
 let _ctx = null;
 let _paused = false;
 let _watchdogUnsub = null;
+let _recoveryUnsub = null;
 let _actionQueue = null;
 let _workQueueTimer = null;
 let _workQueueEnabled = true;    // toggle via API
@@ -61,6 +69,9 @@ const EVENT_HANDLERS = {
     const svc = evt.service;
     const severity = SERVICES_SEVERITY[svc];
     if (!severity || (severity !== "critical" && severity !== "high")) return null;
+    // Docker-recoverable services are handled by recovery-engine (Tier 1).
+    // cipher-agent only fires on recoveryFailed for those.
+    if (DOCKER_RECOVERABLE.has(svc)) return null;
     return {
       eventKey: `service_down:${svc}`,
       prompt: `URGENT: The ${svc} service just went DOWN (was ${evt.fromStatus}). Details: ${JSON.stringify(evt.details || {})}. Diagnose the root cause, fix it, and verify it's back up. Use docker logs, docker restart, systemctl as needed.`,
@@ -85,6 +96,21 @@ const EVENT_HANDLERS = {
     priority: "high",
     maxTurns: MAX_TURNS_PER_RUN,
   }),
+
+  // Tier 2: recovery-engine failed → LLM diagnoses root cause
+  serviceTransitionForced: (evt) => {
+    const svc = evt.service;
+    const severity = SERVICES_SEVERITY[svc];
+    if (!severity || (severity !== "critical" && severity !== "high")) return null;
+    const recoveryDetail = evt.details?.detail || "unknown";
+    return {
+      eventKey: `recovery_failed:${svc}`,
+      prompt: `The ${svc} service is DOWN and auto-recovery (docker restart) FAILED. Reason: ${evt.details?.recoveryReason || "exhausted"}. Detail: ${recoveryDetail}. Diagnose the ROOT CAUSE — check docker logs ${svc}, disk space, memory, dependencies. Fix it and verify it's back up.`,
+      reason: `${svc} recovery failed — LLM diagnosis`,
+      priority: "critical",
+      maxTurns: MAX_TURNS_PER_RUN,
+    };
+  },
 
   directiveBlocked: (evt) => ({
     eventKey: `blocked:${evt.directiveId}`,
@@ -436,9 +462,24 @@ function start(ctx) {
 
   try { _actionQueue = require("./action-queue"); } catch {}
 
-  // Subscribe to watchdog events
+  // Subscribe to watchdog events (non-recoverable services only — see serviceTransition filter)
   if (ctx.watchdog?.onStateTransition) {
     _watchdogUnsub = ctx.watchdog.onStateTransition(handleEvent);
+  }
+
+  // Subscribe to recovery-engine failures (Tier 2 — LLM diagnoses after docker restart failed)
+  if (ctx.recoveryEngine?.onRecoveryFailed) {
+    _recoveryUnsub = ctx.recoveryEngine.onRecoveryFailed((payload) => {
+      // Skip external services and cooldown — those don't need LLM
+      if (payload.reason === "external_service" || payload.reason === "cooldown") return;
+      handleEvent({
+        type: "serviceTransitionForced",
+        service: payload.service,
+        toStatus: "down",
+        fromStatus: "recovering",
+        details: { recoveryReason: payload.reason, detail: payload.detail },
+      });
+    });
   }
 
   // Start work queue polling
@@ -453,6 +494,7 @@ function start(ctx) {
 function stop() {
   _paused = true;
   if (_watchdogUnsub) { _watchdogUnsub(); _watchdogUnsub = null; }
+  if (_recoveryUnsub) { _recoveryUnsub(); _recoveryUnsub = null; }
   if (_workQueueTimer) { clearInterval(_workQueueTimer); _workQueueTimer = null; }
   log("Stopped");
 }

@@ -129,6 +129,7 @@ const opsRoutes = require("./routes/ops");
 const mcpRoutes = require("./routes/mcp");
 const businessEmailRoutes = require("./routes/business-email");
 const watchdog = require("./watchdog");
+const recoveryEngine = require("./recovery-engine");
 const cipherDaemon = require("./cipher-agent");
 const actionQueue = require("./action-queue");
 const proactiveReporter = require("./proactive-reporter");
@@ -6418,7 +6419,8 @@ wss.on("connection", (ws, req) => {
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
     startWatchdog();
     watchdog.start({ db, redis, broadcastToAll, sendNotification });
-    cipherDaemon.start({ db, redis, broadcastToAll, watchdog });
+    recoveryEngine.start({ db, redis, broadcastToAll, sendNotification, watchdog });
+    cipherDaemon.start({ db, redis, broadcastToAll, watchdog, recoveryEngine });
     proactiveReporter.start({ db, redis, broadcastToAll, sendNotification, getDirectives });
     metrics.startFlushTimer();
     // Initialize OSINT persistent scheduler + alert broadcast + monitoring

@@ -10,6 +10,7 @@ module.exports = function mcpRoutes(ctx) {
   const log = typeof logObj === "function" ? logObj : (...args) => (logObj?.bridge?.info?.(...args) || console.log(...args));
 
   const watchdog = (() => { try { return require("../watchdog"); } catch { return null; } })();
+  const recoveryEngine = (() => { try { return require("../recovery-engine"); } catch { return null; } })();
   const buildVerifier = (() => { try { return require("../build-verifier"); } catch { return null; } })();
   const { mergeWorktreeToMain, smartDeploy } = (() => {
     try { return require("../agent-spawner"); } catch { return {}; }
@@ -77,6 +78,11 @@ module.exports = function mcpRoutes(ctx) {
     {
       name: "get_service_status",
       description: "Get real-time health status of all monitored services (postgres, redis, nginx, etc.).",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "get_system_state",
+      description: "Get complete live system state in one call: all service health, recovery engine state, active directives, face DB count, and pending actions.",
       inputSchema: { type: "object", properties: {} },
     },
     {
@@ -274,6 +280,63 @@ module.exports = function mcpRoutes(ctx) {
         if (!watchdog) return { content: [{ type: "text", text: "Watchdog not available" }], isError: true };
         const status = watchdog.getStatus();
         return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
+      }
+
+      case "get_system_state": {
+        const state = {};
+
+        // Service health from watchdog
+        if (watchdog) {
+          state.services = watchdog.getStatus();
+        }
+
+        // Recovery engine state
+        if (recoveryEngine) {
+          state.recovery = recoveryEngine.getState();
+        }
+
+        // Active directives
+        const directives = getDirectives();
+        state.directives = {
+          active: directives.filter(d => !["completed", "archived"].includes(d.status)).map(d => ({
+            id: d.id, title: d.title, status: d.status, emoji: d.emoji, type: d.type,
+          })),
+          counts: {
+            total: directives.length,
+            inProgress: directives.filter(d => d.status === "in_progress").length,
+            pending: directives.filter(d => ["pending", "planning", "planned", "approved"].includes(d.status)).length,
+            problems: directives.filter(d => ["deploy_failed", "blocked"].includes(d.status)).length,
+          },
+        };
+
+        // Face DB count (live Qdrant query)
+        try {
+          const qdrantRes = await new Promise((resolve) => {
+            const req = require("http").get("http://127.0.0.1:6333/collections/faces", { timeout: 3000 }, (res) => {
+              let d = ""; res.on("data", c => d += c);
+              res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } });
+            });
+            req.on("error", () => resolve(null));
+            req.on("timeout", () => { req.destroy(); resolve(null); });
+          });
+          state.faceDb = {
+            count: qdrantRes?.result?.points_count ?? null,
+            vectors: qdrantRes?.result?.vectors_count ?? null,
+            status: qdrantRes?.result?.status ?? "unknown",
+          };
+        } catch {
+          state.faceDb = { count: null, status: "unreachable" };
+        }
+
+        // Pending action queue
+        try {
+          const aq = require("../action-queue");
+          state.actionQueue = aq.list ? aq.list() : [];
+        } catch {
+          state.actionQueue = [];
+        }
+
+        return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }] };
       }
 
       case "send_email": {
