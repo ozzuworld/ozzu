@@ -1,10 +1,13 @@
 // ota_update.c — HTTP OTA firmware update from Rock Pi hub
 // Supports scheduled polling (30min) and instant trigger via UDP command
+// Compares running firmware size to avoid infinite update loops
 #include "ota_update.h"
 #include "esp_ota_ops.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_app_desc.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -26,9 +29,45 @@ static char _ota_url[128];
 static EventGroupHandle_t _ota_events;
 #define OTA_CHECK_NOW_BIT      BIT0
 
+// Track last applied firmware size (persisted in NVS) to prevent update loops
+static int _last_applied_size = 0;
+#define NVS_OTA_NAMESPACE "ota"
+#define NVS_KEY_FW_SIZE   "fw_size"
+
+static void load_last_fw_size(void) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_OTA_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+        int32_t val = 0;
+        if (nvs_get_i32(h, NVS_KEY_FW_SIZE, &val) == ESP_OK) {
+            _last_applied_size = (int)val;
+        }
+        nvs_close(h);
+    }
+}
+
+static void save_last_fw_size(int size) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_OTA_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_i32(h, NVS_KEY_FW_SIZE, (int32_t)size);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    _last_applied_size = size;
+}
+
 static void ota_task(void *arg) {
     // Wait 60s after boot before first check (let WiFi stabilize)
     vTaskDelay(pdMS_TO_TICKS(60000));
+
+    // Load last applied firmware size from NVS
+    load_last_fw_size();
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_app_desc_t running_desc;
+    if (running && esp_ota_get_partition_description(running, &running_desc) == ESP_OK) {
+        ESP_LOGI(TAG, "Running firmware: %s (built %s %s), last OTA size=%d",
+                 running_desc.version, running_desc.date, running_desc.time, _last_applied_size);
+    }
 
     while (1) {
         ESP_LOGI(TAG, "Checking for firmware update at %s", _ota_url);
@@ -62,7 +101,14 @@ static void ota_task(void *arg) {
             goto next;
         }
 
-        ESP_LOGI(TAG, "Firmware found (%d bytes), starting OTA...", content_len);
+        // Skip if this is the same firmware we last applied (prevents update loops)
+        if (content_len == _last_applied_size) {
+            ESP_LOGI(TAG, "Firmware unchanged (%d bytes) — skipping", content_len);
+            goto next;
+        }
+
+        ESP_LOGI(TAG, "New firmware found (%d bytes, was %d), starting OTA...",
+                 content_len, _last_applied_size);
 
         // Perform OTA
         esp_http_client_config_t ota_cfg = {
@@ -147,6 +193,9 @@ static void ota_task(void *arg) {
                 goto next;
             }
 
+            // Persist firmware size in NVS so we don't re-apply after reboot
+            save_last_fw_size(total_len);
+
             ESP_LOGI(TAG, "OTA success! Rebooting in 3s...");
             vTaskDelay(pdMS_TO_TICKS(3000));
             esp_restart();
@@ -188,12 +237,12 @@ static void ota_cmd_task(void *arg) {
 
     ESP_LOGI(TAG, "OTA command listener on UDP :%d", OTA_CMD_PORT);
 
-    uint8_t buf[16];
+    uint8_t rxbuf[16];
     while (1) {
-        int len = recvfrom(sock, buf, sizeof(buf), 0, NULL, NULL);
+        int len = recvfrom(sock, rxbuf, sizeof(rxbuf), 0, NULL, NULL);
         if (len >= 4) {
             uint32_t magic;
-            memcpy(&magic, buf, 4);
+            memcpy(&magic, rxbuf, 4);
             if (magic == OTA_TRIGGER_MAGIC) {
                 ESP_LOGI(TAG, "OTA trigger received — checking for update now");
                 xEventGroupSetBits(_ota_events, OTA_CHECK_NOW_BIT);

@@ -1,11 +1,14 @@
 // main.c — Ozzu Room Node: WiFi CSI presence + BLE scanner
-// ESP32-S3 firmware for indoor positioning system
+// ESP32 firmware for indoor positioning system
 // Reports to Rock Pi hub via UDP binary packets
 
+#include <inttypes.h>
+#include <string.h>
 #include "config.h"
 #include "csi_radar.h"
 #include "ble_scanner.h"
 #include "udp_sender.h"
+#include "ota_update.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -89,7 +92,7 @@ static void status_task(void *arg) {
         const char *presence_str = state.presence == PRESENCE_MOVING ? "MOVING" :
                                    state.presence == PRESENCE_STATIC ? "STATIC" : "EMPTY";
 
-        ESP_LOGI(TAG, "[%s] node=%d presence=%s confidence=%d%% motion=%d rssi=%d seq=%u",
+        ESP_LOGI(TAG, "[%s] node=%d presence=%s confidence=%d%% motion=%d rssi=%d seq=%" PRIu32,
                  _cfg.room_name, _cfg.node_id, presence_str,
                  state.confidence, state.motion_level, state.rssi, state.seq);
 
@@ -142,6 +145,9 @@ void app_main(void) {
     } else {
         ESP_LOGW(TAG, "BLE disabled in config");
     }
+
+    // OTA update checker
+    ota_update_init(&_cfg);
 
     // Status logging task
     xTaskCreate(status_task, "status", 2048, NULL, 1, NULL);
