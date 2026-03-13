@@ -1,0 +1,18 @@
+# Ozzu Positioning Hub — Configuration
+# Copy this to the Rock Pi and edit for your setup
+
+hub_port: 5500
+bridge_url: "http://10.8.0.1:3333"   # Bridge via VPN
+bridge_push_interval: 1.0             # seconds between updates
+
+# Node ID → Room name mapping (must match ESP32 NVS config)
+rooms:
+  1: "kitchen"
+  2: "bedroom"
+  3: "living"
+
+# BLE MAC addresses of phones to track
+# Find your phone's BLE MAC: Settings → About → Bluetooth Address
+# Note: iOS randomizes BLE MACs — you'll need to use the WiFi MAC instead
+target_devices: []
+  # - "AA:BB:CC:DD:EE:FF"   # King Kazuma's phone

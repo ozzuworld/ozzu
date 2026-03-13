@@ -126,6 +126,7 @@ const scheduleRoutes = require("./routes/schedules");
 const profileRoutes = require("./routes/profile");
 const identityRoutes = require("./routes/identity");
 const opsRoutes = require("./routes/ops");
+const positioningRoutes = require("./routes/positioning");
 const mcpRoutes = require("./routes/mcp");
 const businessEmailRoutes = require("./routes/business-email");
 const watchdog = require("./watchdog");
@@ -1555,6 +1556,7 @@ function getRouteHandlers() {
       profile: profileRoutes(routeCtx),
       identity: identityRoutes(routeCtx),
       ops: opsRoutes(routeCtx),
+      positioning: positioningRoutes(routeCtx),
       mcp: mcpRoutes(routeCtx),
       businessEmail: businessEmailRoutes(routeCtx),
     };
@@ -1598,6 +1600,7 @@ async function handleRequest(req, res) {
   if (await r.identity(req, res, pathname, url)) return;
   if (await r.backup(req, res, pathname, url)) return;
   if (await r.ops(req, res, pathname, url)) return;
+  if (await r.positioning(req, res, pathname, url)) return;
   if (await r.mcp(req, res, pathname, url)) return;
   if (await r.businessEmail(req, res, pathname, url)) return;
 
