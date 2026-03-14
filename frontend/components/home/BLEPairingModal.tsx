@@ -92,7 +92,7 @@ export function BLEPairingModal({ visible, onClose, bridgeUrl }: Props) {
     }, 30000);
 
     manager.startDeviceScan(
-      [HEART_RATE_SERVICE],
+      null,
       { allowDuplicates: false },
       async (err: BleError | null, device: Device | null) => {
         if (err) {

@@ -123,21 +123,11 @@ module.exports = function positioningRoutes(ctx) {
       }
       const timeout = body.timeoutSec || 90;
       try {
-        const dgram = require("dgram");
-        const client = dgram.createSocket("udp4");
-        // PAIR command: magic 0x50414952 + uint16 timeout
-        const buf = Buffer.alloc(6);
-        buf.writeUInt32LE(0x50414952, 0);
-        buf.writeUInt16LE(timeout, 4);
-        await new Promise((resolve, reject) => {
-          client.bind({ address: "10.0.50.1", port: 0 }, () => {
-            client.send(buf, 5502, body.nodeIp, (err) => {
-              client.close();
-              if (err) reject(err); else resolve();
-            });
-          });
-        });
-        sendJSON(res, 200, { ok: true, nodeIp: body.nodeIp, timeoutSec: timeout });
+        // Send PAIR command via Rock Pi (bridge is on GCP, can't reach sensor subnet directly)
+        const { execSync } = require("child_process");
+        const cmd = `ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@172.168.0.55 "python3 -c \\"import socket,struct;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.sendto(struct.pack('<IH',0x50414952,${timeout}),('${body.nodeIp.replace(/[^0-9.]/g, '')}',5502));s.close();print('PAIR sent')\\""`;
+        const result = execSync(cmd, { timeout: 10000, encoding: "utf8" });
+        sendJSON(res, 200, { ok: true, nodeIp: body.nodeIp, timeoutSec: timeout, result: result.trim() });
       } catch (err) {
         sendJSON(res, 500, { error: err.message });
       }
