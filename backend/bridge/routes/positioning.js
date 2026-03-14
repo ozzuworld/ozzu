@@ -114,6 +114,54 @@ module.exports = function positioningRoutes(ctx) {
       return true;
     }
 
+    // POST /positioning/pair — Trigger BLE pairing mode on an ESP32 node
+    if (req.method === "POST" && pathname === "/positioning/pair") {
+      const body = await parseBody(req);
+      if (!body || !body.nodeIp) {
+        sendJSON(res, 400, { error: "nodeIp required" });
+        return true;
+      }
+      const timeout = body.timeoutSec || 90;
+      try {
+        const dgram = require("dgram");
+        const client = dgram.createSocket("udp4");
+        // PAIR command: magic 0x50414952 + uint16 timeout
+        const buf = Buffer.alloc(6);
+        buf.writeUInt32LE(0x50414952, 0);
+        buf.writeUInt16LE(timeout, 4);
+        await new Promise((resolve, reject) => {
+          client.bind({ address: "10.0.50.1", port: 0 }, () => {
+            client.send(buf, 5502, body.nodeIp, (err) => {
+              client.close();
+              if (err) reject(err); else resolve();
+            });
+          });
+        });
+        sendJSON(res, 200, { ok: true, nodeIp: body.nodeIp, timeoutSec: timeout });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /positioning/nodes — List known ESP32 nodes for pairing UI
+    if (req.method === "GET" && pathname === "/positioning/nodes") {
+      const nodes = [
+        { id: 1, room: "living", ip: "10.0.50.21" },
+        { id: 2, room: "master", ip: "10.0.50.23" },
+        { id: 3, room: "office", ip: "10.0.50.22" },
+        { id: 4, room: "rooftop", ip: "10.0.50.24" },
+      ];
+      // Check which have IRKs by looking at room states
+      const nodesWithStatus = nodes.map(n => ({
+        ...n,
+        online: _roomStates.some(r => r.node_id === n.id && !r.stale),
+        irks: _roomStates.find(r => r.node_id === n.id)?.irk_count || 0,
+      }));
+      sendJSON(res, 200, { ok: true, nodes: nodesWithStatus });
+      return true;
+    }
+
     // GET /positioning/rooms — Room-level summary (for app dashboard)
     if (req.method === "GET" && pathname === "/positioning/rooms") {
       const rooms = _roomStates.map(r => ({

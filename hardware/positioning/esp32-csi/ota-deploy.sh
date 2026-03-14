@@ -8,7 +8,7 @@
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROCK_PI="root@172.168.0.55"
-OTA_DIR="/opt/ozzu-positioning/ota"
+OTA_DIR="/opt/ozzu-ota"
 OTA_CMD_PORT=5502
 BROADCAST="10.0.50.255"
 
@@ -19,7 +19,7 @@ done
 
 echo "=== Building firmware ==="
 cd "$SCRIPT_DIR/.."
-docker run --rm -v "$(pwd)/esp32-csi:/project" -w /project espressif/idf:v5.2.3 \
+docker run --rm -v "$(pwd)/esp32-csi:/project" -w /project espressif/idf:v5.4.1 \
     bash -c "idf.py build" 2>&1 | tail -5
 
 echo ""

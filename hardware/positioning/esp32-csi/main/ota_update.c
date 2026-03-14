@@ -5,6 +5,8 @@
 #include "ota_update.h"
 #include "ble_scanner.h"
 #include "protocol.h"
+#include "host/ble_gap.h"
+#include "esp_wifi.h"
 #include "esp_ota_ops.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
@@ -199,8 +201,14 @@ static void ota_task(void *arg) {
             // Persist firmware size in NVS so we don't re-apply after reboot
             save_last_fw_size(total_len);
 
-            ESP_LOGI(TAG, "OTA success! Rebooting in 3s...");
-            vTaskDelay(pdMS_TO_TICKS(3000));
+            ESP_LOGI(TAG, "OTA success! Cleaning up and rebooting...");
+
+            // Clean shutdown — stop BLE and WiFi before reboot
+            // Prevents radio hardware state issues on warm reboot
+            ble_gap_disc_cancel();
+            esp_wifi_disconnect();
+            esp_wifi_stop();
+            vTaskDelay(pdMS_TO_TICKS(2000));
             esp_restart();
         } else {
             esp_ota_abort(ota_handle);
@@ -218,31 +226,63 @@ next:
 // ── UDP command listener — triggers instant OTA check ──
 
 static void ota_cmd_task(void *arg) {
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    // Wait for WiFi to be ready before binding socket
+    ESP_LOGI(TAG, "OTA cmd task starting — waiting for network...");
+    vTaskDelay(pdMS_TO_TICKS(10000));
+
+    int sock = -1;
+    for (int attempt = 0; attempt < 10; attempt++) {
+        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (sock < 0) {
+            ESP_LOGW(TAG, "OTA cmd socket failed (attempt %d): errno %d", attempt + 1, errno);
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            continue;
+        }
+
+        struct sockaddr_in addr = {
+            .sin_family = AF_INET,
+            .sin_port = htons(OTA_CMD_PORT),
+            .sin_addr.s_addr = htonl(INADDR_ANY),
+        };
+
+        if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            ESP_LOGW(TAG, "OTA cmd bind failed (attempt %d): errno %d", attempt + 1, errno);
+            close(sock);
+            sock = -1;
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            continue;
+        }
+        break;
+    }
+
     if (sock < 0) {
-        ESP_LOGE(TAG, "OTA cmd socket failed: errno %d", errno);
+        ESP_LOGE(TAG, "OTA cmd socket failed after 10 attempts — giving up");
         vTaskDelete(NULL);
         return;
     }
 
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(OTA_CMD_PORT),
-        .sin_addr.s_addr = htonl(INADDR_ANY),
-    };
-
-    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        ESP_LOGE(TAG, "OTA cmd bind failed: errno %d", errno);
-        close(sock);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    ESP_LOGI(TAG, "OTA command listener on UDP :%d", OTA_CMD_PORT);
+    ESP_LOGW(TAG, ">>> OTA CMD LISTENER READY on UDP :%d <<<", OTA_CMD_PORT);
 
     uint8_t rxbuf[64];
+    int recv_count = 0;
     while (1) {
+        // Use select with timeout so we can log heartbeats
+        fd_set rfds;
+        struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
+        FD_ZERO(&rfds);
+        FD_SET(sock, &rfds);
+        int sel = select(sock + 1, &rfds, NULL, NULL, &tv);
+        if (sel == 0) {
+            ESP_LOGI(TAG, "OTA cmd heartbeat (port %d, recv=%d)", OTA_CMD_PORT, recv_count);
+            continue;
+        }
+        if (sel < 0) {
+            ESP_LOGE(TAG, "OTA cmd select error: %d", errno);
+            continue;
+        }
         int len = recvfrom(sock, rxbuf, sizeof(rxbuf), 0, NULL, NULL);
+        recv_count++;
+        ESP_LOGW(TAG, "OTA cmd received %d bytes (total=%d)", len, recv_count);
         if (len >= 4) {
             uint32_t magic;
             memcpy(&magic, rxbuf, 4);
@@ -277,6 +317,6 @@ void ota_update_init(const node_config_t *cfg) {
     _ota_events = xEventGroupCreate();
     snprintf(_ota_url, sizeof(_ota_url), "http://%s:%d/firmware.bin", cfg->hub_ip, OTA_PORT);
     xTaskCreate(ota_task, "ota", 8192, NULL, 2, NULL);
-    xTaskCreate(ota_cmd_task, "ota_cmd", 2048, NULL, 3, NULL);
+    xTaskCreate(ota_cmd_task, "ota_cmd", 4096, NULL, 3, NULL);
     ESP_LOGI(TAG, "OTA update task started (check every %ds, url=%s)", OTA_CHECK_INTERVAL_MS / 1000, _ota_url);
 }

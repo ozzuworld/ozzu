@@ -9,12 +9,14 @@
 #include "protocol.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
 #include "host/ble_store.h"
 #include "host/ble_uuid.h"
+#include "host/util/util.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 #include "freertos/FreeRTOS.h"
@@ -50,10 +52,13 @@ static SemaphoreHandle_t _irk_mutex;
 
 // ── Pairing mode state ──
 
+static uint8_t _own_addr_type = BLE_OWN_ADDR_PUBLIC;
+
 static volatile bool _pair_mode = false;
 static volatile bool _pair_success = false;
 static uint16_t _pair_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t _pair_timeout_sec = 60;
+static esp_timer_handle_t _pair_timer = NULL;
 
 // ── NVS persistence for IRKs ──
 
@@ -256,29 +261,38 @@ static int _pair_gap_event(struct ble_gap_event *event, void *arg) {
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0) {
                 _pair_conn_handle = event->connect.conn_handle;
-                ESP_LOGI(TAG, "Peer connected (handle=%d) — initiating security",
+                ESP_LOGW(TAG, ">>> Peer CONNECTED (handle=%d) — waiting for app to read encrypted char <<<",
                          _pair_conn_handle);
-                // Request pairing/bonding
-                ble_gap_security_initiate(_pair_conn_handle);
+                // Do NOT call ble_gap_security_initiate() — let the app trigger
+                // pairing by reading the READ_ENC characteristic. iOS shows the
+                // pairing dialog when it gets "insufficient encryption" from NimBLE.
             } else {
                 ESP_LOGW(TAG, "Connection failed: %d", event->connect.status);
             }
             break;
 
         case BLE_GAP_EVENT_DISCONNECT:
-            ESP_LOGI(TAG, "Peer disconnected — reason=%d",
+            ESP_LOGW(TAG, ">>> Peer DISCONNECTED — reason=%d <<<",
                      event->disconnect.reason);
             if (_pair_success) {
-                ESP_LOGI(TAG, "Pairing complete — IRK extracted");
+                ESP_LOGW(TAG, ">>> PAIRING COMPLETE — IRK extracted <<<");
             }
             _pair_conn_handle = BLE_HS_CONN_HANDLE_NONE;
-            // Exit pair mode after disconnect
+            // Cancel timeout timer and exit pair mode
+            if (_pair_timer) {
+                esp_timer_stop(_pair_timer);
+                esp_timer_delete(_pair_timer);
+                _pair_timer = NULL;
+            }
             _pair_mode = false;
+            ESP_LOGI(TAG, "Restarting WiFi after pairing...");
+            esp_wifi_start();
+            esp_wifi_connect();
             break;
 
         case BLE_GAP_EVENT_ENC_CHANGE:
             if (event->enc_change.status == 0) {
-                ESP_LOGI(TAG, "Encryption established — extracting IRK");
+                ESP_LOGW(TAG, ">>> ENCRYPTION ESTABLISHED — extracting IRK <<<");
 
                 // Get peer address
                 struct ble_gap_conn_desc desc;
@@ -290,8 +304,24 @@ static int _pair_gap_event(struct ble_gap_event *event, void *arg) {
             }
             break;
 
+        case BLE_GAP_EVENT_PASSKEY_ACTION:
+            ESP_LOGW(TAG, ">>> PASSKEY ACTION: %d <<<",
+                     event->passkey.params.action);
+            if (event->passkey.params.action == BLE_SM_IOACT_NUMCMP) {
+                // Numeric comparison — auto-confirm
+                struct ble_sm_io pk = {0};
+                pk.action = BLE_SM_IOACT_NUMCMP;
+                pk.numcmp_accept = 1;
+                ble_sm_inject_io(event->passkey.conn_handle, &pk);
+            } else if (event->passkey.params.action == BLE_SM_IOACT_NONE) {
+                // Just Works — nothing to do, NimBLE handles it
+                ESP_LOGI(TAG, "Just Works pairing — no action needed");
+            }
+            break;
+
         case BLE_GAP_EVENT_REPEAT_PAIRING: {
             // Delete old bond, allow re-pairing
+            ESP_LOGI(TAG, "Repeat pairing requested — clearing old bond");
             struct ble_gap_conn_desc desc;
             ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc);
             ble_store_util_delete_peer(&desc.peer_id_addr);
@@ -299,10 +329,63 @@ static int _pair_gap_event(struct ble_gap_event *event, void *arg) {
         }
 
         default:
+            ESP_LOGD(TAG, "Pair GAP event: %d", event->type);
             break;
     }
     return 0;
 }
+
+// ── GATT services for iOS enrollment (matching ESPresense exactly) ──
+// Heart Rate Service (0x180D) with READ_ENC characteristics.
+// When iOS reads an encrypted characteristic, NimBLE returns
+// "insufficient encryption" → iOS triggers pairing dialog automatically.
+// This is the proven ESPresense approach (PR #1655, iOS 17/18 fix).
+
+static int _hrs_access_cb(uint16_t conn_handle, uint16_t attr_handle,
+                           struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    uint8_t hrm[] = {0x00, 60};  // flags=uint8, heart_rate=60 bpm
+    os_mbuf_append(ctxt->om, hrm, sizeof(hrm));
+    return 0;
+}
+
+static int _devinfo_access_cb(uint16_t conn_handle, uint16_t attr_handle,
+                               struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    const char *val = "Ozzu";
+    os_mbuf_append(ctxt->om, val, strlen(val));
+    return 0;
+}
+
+static const struct ble_gatt_svc_def _gatt_svcs[] = {
+    {
+        // Heart Rate Service (0x180D) — ESPresense uses this, not HID
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = BLE_UUID16_DECLARE(0x180D),
+        .characteristics = (struct ble_gatt_chr_def[]) {
+            {
+                // Heart Rate Measurement (0x2A37) — READ_ENC triggers iOS pairing
+                .uuid = BLE_UUID16_DECLARE(0x2A37),
+                .access_cb = _hrs_access_cb,
+                .flags = BLE_GATT_CHR_F_READ_ENC | BLE_GATT_CHR_F_NOTIFY,
+            },
+            { 0 }
+        },
+    },
+    {
+        // Device Information Service (0x180A)
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = BLE_UUID16_DECLARE(0x180A),
+        .characteristics = (struct ble_gatt_chr_def[]) {
+            {
+                // Manufacturer Name (0x2A29) — READ_ENC
+                .uuid = BLE_UUID16_DECLARE(0x2A29),
+                .access_cb = _devinfo_access_cb,
+                .flags = BLE_GATT_CHR_F_READ_ENC,
+            },
+            { 0 }
+        },
+    },
+    { 0 }  // end of services
+};
 
 // ── Pairing mode advertising ──
 
@@ -319,20 +402,47 @@ static void _start_advertising(void) {
     snprintf(name, sizeof(name), "Ozzu-Node-%d", _cfg->node_id);
     ble_svc_gap_device_name_set(name);
 
-    // Build advertising data
+    // Build advertising data with HID service UUID so iOS shows it in Settings
     struct ble_hs_adv_fields fields = {0};
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.name = (uint8_t *)name;
     fields.name_len = strlen(name);
     fields.name_is_complete = 1;
 
+    // Advertise Heart Rate service (0x180D) — matching ESPresense
+    // iOS discovers this, tries to read encrypted chars, triggers pairing
+    static const ble_uuid16_t svc_uuids[] = {
+        BLE_UUID16_INIT(0x180D),  // Heart Rate
+    };
+    fields.uuids16 = svc_uuids;
+    fields.num_uuids16 = 1;
+    fields.uuids16_is_complete = 1;
+
+    // Set appearance to Heart Rate Sensor
+    fields.appearance = 0x0340;  // Generic Heart Rate Sensor
+    fields.appearance_is_present = 1;
+
     ble_gap_adv_set_fields(&fields);
 
-    int rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
-                                &adv_params, _pair_gap_event, NULL);
+    // Add scan response with preferred connection parameters (helps iPhone connections)
+    struct ble_hs_adv_fields rsp_fields = {0};
+    rsp_fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
+    rsp_fields.tx_pwr_lvl_is_present = 1;
+    ble_gap_adv_rsp_set_fields(&rsp_fields);
+
+    int rc = -1;
+    for (int attempt = 0; attempt < 5; attempt++) {
+        rc = ble_gap_adv_start(_own_addr_type, NULL, BLE_HS_FOREVER,
+                                    &adv_params, _pair_gap_event, NULL);
+        if (rc == 0) break;
+        ESP_LOGW(TAG, "Advertising start attempt %d failed: %d, retrying...", attempt + 1, rc);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
     if (rc != 0) {
-        ESP_LOGE(TAG, "Advertising start failed: %d", rc);
+        ESP_LOGE(TAG, "Advertising failed after 5 attempts — restarting WiFi");
         _pair_mode = false;
+        esp_wifi_start();
+        esp_wifi_connect();
         return;
     }
 
@@ -365,7 +475,7 @@ static void ble_scan_task(void *arg) {
         xSemaphoreGive(_devices_mutex);
 
         // Start scan
-        int rc = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, _cfg->ble_scan_interval_ms,
+        int rc = ble_gap_disc(_own_addr_type, _cfg->ble_scan_interval_ms,
                               &scan_params, ble_gap_event, NULL);
         if (rc != 0 && rc != BLE_HS_EALREADY) {
             ESP_LOGW(TAG, "Scan start failed: %d", rc);
@@ -400,8 +510,22 @@ static void ble_scan_task(void *arg) {
 // ── NimBLE host task ──
 
 static void _on_sync(void) {
-    // NimBLE host synced — we're ready
-    ESP_LOGI(TAG, "NimBLE host synced");
+    // NimBLE host synced — configure address and privacy
+    ESP_LOGI(TAG, "NimBLE host synced — configuring address");
+
+    // Ensure we have a valid address
+    int rc = ble_hs_util_ensure_addr(0);
+    if (rc != 0) {
+        ESP_LOGW(TAG, "ble_hs_util_ensure_addr failed: %d", rc);
+    }
+
+    // Infer address type (public or random)
+    rc = ble_hs_id_infer_auto(0, &_own_addr_type);
+    if (rc != 0) {
+        ESP_LOGW(TAG, "ble_hs_id_infer_auto failed: %d, defaulting to public", rc);
+        _own_addr_type = BLE_OWN_ADDR_PUBLIC;
+    }
+    ESP_LOGI(TAG, "BLE address type: %d", _own_addr_type);
 }
 
 static void _on_reset(int reason) {
@@ -431,15 +555,28 @@ void ble_scanner_init(const node_config_t *cfg) {
     // Configure security for bonding + IRK exchange
     ble_hs_cfg.sync_cb = _on_sync;
     ble_hs_cfg.reset_cb = _on_reset;
-    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;      // Just Works pairing
-    ble_hs_cfg.sm_bonding = 1;                          // enable bonding
-    ble_hs_cfg.sm_sc = 1;                               // secure connections
+    // Bond store callbacks — CRITICAL: without this, bonds are never persisted
+    ble_hs_cfg.store_status_cb = ble_store_util_status_rr;  // round-robin eviction
+    // Security config matching ESPresense PR #1655 (iOS 17/18 fix)
+    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;      // Just Works (no PIN)
+    ble_hs_cfg.sm_bonding = 1;                          // enable bonding (persist keys)
+    ble_hs_cfg.sm_sc = 1;                               // Secure Connections (required for iOS IRK)
+    ble_hs_cfg.sm_mitm = 1;                             // MITM flag (iOS requires for IRK distribution)
     ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
-    // Initialize GATT services (required for advertising as peripheral)
+    // Initialize standard GATT services + our encrypted characteristic
     ble_svc_gap_init();
     ble_svc_gatt_init();
+
+    // Register our custom service with encrypted read (triggers iOS pairing)
+    int rc = ble_gatts_count_cfg(_gatt_svcs);
+    if (rc == 0) {
+        rc = ble_gatts_add_svcs(_gatt_svcs);
+    }
+    if (rc != 0) {
+        ESP_LOGW(TAG, "Custom GATT service registration failed: %d", rc);
+    }
 
     // Load stored IRKs from NVS
     _load_irks_from_nvs();
@@ -457,12 +594,14 @@ void ble_scanner_start(void) {
 
 static void _pair_timeout_cb(void *arg) {
     if (_pair_mode && !_pair_success) {
-        ESP_LOGW(TAG, "Pairing timeout — no device paired");
+        ESP_LOGW(TAG, "Pairing timeout — no device paired, restarting WiFi");
         ble_gap_adv_stop();
         if (_pair_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
             ble_gap_terminate(_pair_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         }
         _pair_mode = false;
+        esp_wifi_start();
+        esp_wifi_connect();
     }
 }
 
@@ -472,26 +611,38 @@ void ble_scanner_enter_pair_mode(uint16_t timeout_sec) {
         return;
     }
 
-    ESP_LOGI(TAG, "Entering pairing mode (timeout=%ds)", timeout_sec);
-
-    // Stop scanning
-    ble_gap_disc_cancel();
+    ESP_LOGI(TAG, "Entering pairing mode (timeout=%ds) — stopping WiFi for BLE advertising", timeout_sec);
 
     _pair_mode = true;
     _pair_success = false;
     _pair_timeout_sec = timeout_sec;
 
+    // Stop scanning first
+    ble_gap_disc_cancel();
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // Stop WiFi to free antenna for BLE advertising (ESP32-WROOM-32 shared antenna)
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+
+    // Wait for radio to settle before starting BLE advertising
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
     // Start advertising
     _start_advertising();
 
-    // Set timeout via esp_timer
+    // Cancel any old timer before creating a new one
+    if (_pair_timer) {
+        esp_timer_stop(_pair_timer);
+        esp_timer_delete(_pair_timer);
+        _pair_timer = NULL;
+    }
     const esp_timer_create_args_t timer_args = {
         .callback = _pair_timeout_cb,
         .name = "pair_timeout",
     };
-    esp_timer_handle_t timer;
-    esp_timer_create(&timer_args, &timer);
-    esp_timer_start_once(timer, (uint64_t)timeout_sec * 1000000ULL);
+    esp_timer_create(&timer_args, &_pair_timer);
+    esp_timer_start_once(_pair_timer, (uint64_t)timeout_sec * 1000000ULL);
 }
 
 bool ble_scanner_add_irk(const uint8_t irk[16], const uint8_t addr[6],

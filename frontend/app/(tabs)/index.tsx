@@ -27,8 +27,9 @@ import { VacuumWidget } from "../../components/devices/VacuumWidget";
 import { FloorPlanMap } from "../../components/home/FloorPlanMap";
 import { DeviceSheet } from "../../components/home/DeviceSheet";
 import type { MapPin } from "../../lib/map-config";
-import { fetchSchedules, updateSchedule, type DeviceSchedule } from "../../lib/bridge-api";
+import { fetchSchedules, updateSchedule, type DeviceSchedule, getBridgeUrl } from "../../lib/bridge-api";
 import { useGlasses, type FocusedDevice } from "../../lib/glasses-context";
+import { BLEPairingModal } from "../../components/home/BLEPairingModal";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -561,6 +562,7 @@ export default function HomeScreen() {
   const [activePin, setActivePin] = useState<MapPin | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [schedules, setSchedules] = useState<DeviceSchedule[]>([]);
+  const [pairingVisible, setPairingVisible] = useState(false);
 
   useEffect(() => {
     fetchSchedules().then((r) => setSchedules(r.schedules)).catch(() => {});
@@ -671,6 +673,9 @@ export default function HomeScreen() {
                 </Text>
               </View>
             )}
+            <Pressable onPress={() => setPairingVisible(true)} hitSlop={12} style={{ padding: 4 }}>
+              <Text style={{ color: C.textSec, fontSize: 18 }}>BLE</Text>
+            </Pressable>
             <Pressable onPress={toggleView} hitSlop={12} style={{ padding: 4 }}>
               <Text style={{ color: C.textSec, fontSize: 20 }}>
                 {viewMode === "cards" ? "\uD83D\uDDFA" : "\u2630"}
@@ -800,6 +805,13 @@ export default function HomeScreen() {
           </Text>
         </View>
       )}
+
+      {/* BLE Pairing Modal */}
+      <BLEPairingModal
+        visible={pairingVisible}
+        onClose={() => setPairingVisible(false)}
+        bridgeUrl={getBridgeUrl()}
+      />
 
       <StatusBar style="light" />
     </View>
