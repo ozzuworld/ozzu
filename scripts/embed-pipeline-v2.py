@@ -360,9 +360,14 @@ def sync_local_to_remote(final=False):
         errors = 0
 
         def _upsert_batch(batch):
-            """Thread worker: upsert one batch to remote."""
-            remote.upsert(collection_name=COLLECTION, points=batch, wait=False)
-            return len(batch)
+            """Thread worker: convert Records to PointStructs and upsert to remote."""
+            from qdrant_client.models import PointStruct
+            points = [
+                PointStruct(id=r.id, vector=r.vector, payload=r.payload)
+                for r in batch
+            ]
+            remote.upsert(collection_name=COLLECTION, points=points, wait=False)
+            return len(points)
 
         with ThreadPoolExecutor(max_workers=SYNC_WORKERS) as pool:
             futures = []
@@ -471,120 +476,81 @@ def cleanup_local_qdrant():
         _qdrant_process = None
     log("[qdrant-local] Stopped")
 
-# ── Shared memory decode system ──
-# Pre-allocate a shared numpy array. Worker processes write decoded tensors
-# directly into it by slot index. Zero pickle overhead.
-TENSOR_SHAPE = (3, 112, 112)
-TENSOR_SIZE = 3 * 112 * 112  # 37,632 float32 elements
-TENSOR_BYTES = TENSOR_SIZE * 4  # 150,528 bytes per tensor
+# ── ThreadPool decode system ──
+# TurboJPEG releases GIL during JPEG decode, so ThreadPool threads run truly
+# in parallel. Per-image work: TurboJPEG decode + resize (GIL-free C calls).
+# Normalize+transpose done as batch vectorized numpy op in main thread.
+# This architecture achieved 90K/min vs 16K with ProcessPool+SharedMemory.
 
-# Shared state for decode workers
-_shm_name = None
-_shm_valid_name = None
-_shm_capacity = 0
-
-def _init_decode_worker(shm_name, valid_name, capacity):
-    """Called once per worker process to attach to shared memory."""
-    global _shm_name, _shm_valid_name, _shm_capacity
-    global _shm_buf, _shm_array, _shm_valid_buf, _shm_valid
-    _shm_name = shm_name
-    _shm_valid_name = valid_name
-    _shm_capacity = capacity
-    _shm_buf = shared_memory.SharedMemory(name=shm_name)
-    _shm_array = np.ndarray((capacity, 3, 112, 112), dtype=np.float32, buffer=_shm_buf.buf)
-    _shm_valid_buf = shared_memory.SharedMemory(name=valid_name)
-    _shm_valid = np.ndarray((capacity,), dtype=np.uint8, buffer=_shm_valid_buf.buf)
-
-def _decode_to_shm(args):
-    """Decode image bytes and write directly to shared memory slot."""
-    idx, img_bytes = args
+def _decode_hwc(img_bytes):
+    """Decode JPEG bytes → HWC uint8 numpy array. GIL released during decode."""
     try:
         tj = _get_turbojpeg()
         if tj:
             img = tj.decode(img_bytes)
             if img is None:
-                _shm_valid[idx] = 0
-                return idx
+                return None
         else:
             buf = np.frombuffer(img_bytes, dtype=np.uint8)
             img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
             if img is None:
-                _shm_valid[idx] = 0
-                return idx
+                return None
         if img.shape[0] != 112 or img.shape[1] != 112:
             img = cv2.resize(img, (112, 112))
-        img = (img.astype(np.float32) - 127.5) / 127.5
-        _shm_array[idx] = np.transpose(img, (2, 0, 1))
-        _shm_valid[idx] = 1
+        return img  # HWC uint8 — no normalize/transpose here (GIL-heavy)
     except Exception:
-        _shm_valid[idx] = 0
-    return idx
+        return None
 
-class SharedMemoryDecoder:
-    """Manages shared memory for zero-copy decode across processes."""
+class ThreadPoolDecoder:
+    """ThreadPool-based decoder. TurboJPEG releases GIL so threads run parallel.
 
-    def __init__(self, max_images_per_shard, n_workers):
-        self.capacity = max_images_per_shard
+    Threads decode JPEG → raw HWC uint8 pixels (GIL-free C calls only).
+    Main thread does batch vectorized normalize+transpose (single numpy op).
+    Pre-allocated buffers avoid malloc overhead.
+    """
+
+    def __init__(self, batch_size, n_workers):
+        self.batch_size = batch_size
         self.n_workers = n_workers
-
-        # Allocate shared memory for tensors + validity flags
-        tensor_total = self.capacity * TENSOR_BYTES
-        self.shm_tensors = shared_memory.SharedMemory(create=True, size=tensor_total)
-        self.shm_valid = shared_memory.SharedMemory(create=True, size=self.capacity)
-
-        # Numpy views into shared memory
-        self.tensors = np.ndarray(
-            (self.capacity, 3, 112, 112), dtype=np.float32,
-            buffer=self.shm_tensors.buf)
-        self.valid = np.ndarray(
-            (self.capacity,), dtype=np.uint8, buffer=self.shm_valid.buf)
-
-        # Process pool with shared memory initializer
-        self.pool = ProcessPoolExecutor(
-            max_workers=n_workers,
-            initializer=_init_decode_worker,
-            initargs=(self.shm_tensors.name, self.shm_valid.name, self.capacity),
-        )
-        log(f"[shm-decode] Shared memory: {tensor_total/1024/1024:.0f}MB for {self.capacity} slots, "
-            f"{n_workers} workers")
+        # Pre-allocate buffers — touched with zeros to avoid NUMA scatter
+        self.hwc_buf = np.zeros((batch_size, 112, 112, 3), dtype=np.uint8)
+        self.chw_buf = np.zeros((batch_size, 3, 112, 112), dtype=np.float32)
+        self.pool = ThreadPoolExecutor(max_workers=n_workers)
+        log(f"[decode] ThreadPool: {n_workers} threads, batch={batch_size} "
+            f"(TurboJPEG releases GIL — threads run parallel)")
 
     def decode_batch(self, img_bytes_list):
-        """Decode images into shared memory. Returns (valid_indices, n_failed)."""
+        """Decode images via ThreadPool. Returns (valid_indices, n_failed)."""
         n = len(img_bytes_list)
-        if n > self.capacity:
-            raise ValueError(f"Batch {n} exceeds shared memory capacity {self.capacity}")
+        # Dispatch to threads — TurboJPEG.decode() releases GIL
+        results = list(self.pool.map(_decode_hwc, img_bytes_list))
 
-        # Clear validity flags
-        self.valid[:n] = 0
+        # Collect valid results into pre-allocated buffer
+        valid_indices = []
+        for i, img in enumerate(results):
+            if img is not None:
+                self.hwc_buf[len(valid_indices)] = img
+                valid_indices.append(i)
 
-        # Dispatch to workers — each writes directly to shared memory by index
-        args = [(i, img_bytes_list[i]) for i in range(n)]
-        list(self.pool.map(_decode_to_shm, args, chunksize=256))
+        n_valid = len(valid_indices)
+        n_failed = n - n_valid
+        return np.array(valid_indices, dtype=np.intp), n_failed
 
-        # Read validity flags — no data was pickled back, just the index ints
-        valid_mask = self.valid[:n].astype(bool)
-        valid_indices = np.where(valid_mask)[0]
-        n_failed = n - len(valid_indices)
-        return valid_indices, n_failed
-
-    def get_tensors(self, indices):
-        """Get tensor data for given indices. Returns a contiguous copy for GPU."""
-        if len(indices) == 0:
+    def get_tensors(self, valid_indices):
+        """Batch vectorized normalize+transpose. Single numpy op, no per-image GIL."""
+        n = len(valid_indices)
+        if n == 0:
             return np.empty((0, 3, 112, 112), dtype=np.float32)
-        return self.tensors[indices].copy()  # Contiguous copy for np.stack/GPU
+        # Batch normalize: (uint8 → float32 - 127.5) / 127.5
+        hwc = self.hwc_buf[:n].astype(np.float32)
+        hwc -= 127.5
+        hwc *= (1.0 / 127.5)
+        # Batch transpose: HWC → CHW
+        self.chw_buf[:n] = np.transpose(hwc, (0, 3, 1, 2))
+        return self.chw_buf[:n].copy()  # Contiguous copy for GPU
 
     def shutdown(self):
         self.pool.shutdown(wait=False)
-        try:
-            self.shm_tensors.close()
-            self.shm_tensors.unlink()
-        except Exception:
-            pass
-        try:
-            self.shm_valid.close()
-            self.shm_valid.unlink()
-        except Exception:
-            pass
 
 # ── Flush workers (concurrent Qdrant writers) ──
 flush_queue = Queue(maxsize=200)
@@ -1401,7 +1367,7 @@ def main():
         stats.phase = "embed"
         log(f"[embed] Processing {len(shard_paths)} shards with {DECODE_WORKERS} decode workers...")
 
-        shm_decoder = SharedMemoryDecoder(GPU_BATCH, DECODE_WORKERS)
+        shm_decoder = ThreadPoolDecoder(GPU_BATCH, DECODE_WORKERS)
         gpu_queue = Queue(maxsize=16)
 
         def extract_decode_produce(shard_list, source_name, _config=config):
