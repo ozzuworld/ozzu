@@ -307,53 +307,152 @@ def ensure_local_collection():
         log(f"[qdrant-local] Collection '{COLLECTION}' exists")
     return client
 
-def sync_local_to_remote():
-    """Snapshot local Qdrant and restore to remote. Handles the full sync."""
-    log("[qdrant-sync] Creating snapshot of local collection...")
+SYNC_WORKERS = int(os.environ.get("SYNC_WORKERS", "4"))
+SYNC_BATCH = int(os.environ.get("SYNC_BATCH", "1000"))
+SYNC_INTERVAL = int(os.environ.get("SYNC_INTERVAL", "120"))  # seconds between sync passes
+
+# Persistent sync state — survives restarts
+SYNC_STATE_FILE = os.path.expanduser("~/.pipeline-sync-state.json")
+_sync_stop = Event()
+
+def _load_sync_state():
+    try:
+        with open(SYNC_STATE_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"last_synced_offset": None, "total_synced": 0}
+
+def _save_sync_state(state):
+    try:
+        with open(SYNC_STATE_FILE, "w") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
+
+def sync_local_to_remote(final=False):
+    """Sync local Qdrant to remote. Parallel scroll+upsert with resume support.
+
+    If final=True, does a complete pass ensuring everything is synced.
+    If final=False, does one incremental pass (for background use).
+    """
     try:
         from qdrant_client import QdrantClient
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         local = QdrantClient(url=f"http://localhost:{LOCAL_QDRANT_PORT}", timeout=300)
 
-        # Get local point count
         info = local.get_collection(COLLECTION)
         local_count = info.points_count
-        log(f"[qdrant-sync] Local has {local_count:,} points to sync")
 
         if local_count == 0:
-            log("[qdrant-sync] Nothing to sync")
-            return
+            if final:
+                log("[qdrant-sync] Nothing to sync")
+            return 0
 
-        # Use scrolling to read from local and upsert to remote in batches
         remote = QdrantClient(
             url=REMOTE_QDRANT_URL, port=443, https=True,
             prefix=REMOTE_QDRANT_PREFIX, timeout=300,
             verify=False, check_compatibility=False,
         )
 
+        sync_state = _load_sync_state()
         synced = 0
-        offset = None
-        batch_size = 500  # Smaller batches for remote HTTPS
-        while True:
-            results, offset = local.scroll(
-                collection_name=COLLECTION,
-                limit=batch_size,
-                offset=offset,
-                with_vectors=True,
-                with_payload=True,
-            )
-            if not results:
-                break
-            remote.upsert(collection_name=COLLECTION, points=results, wait=True)
-            synced += len(results)
-            if synced % 10000 < batch_size:
-                log(f"[qdrant-sync] Synced {synced:,}/{local_count:,}")
-            if offset is None:
-                break
+        offset = sync_state.get("last_synced_offset")
+        errors = 0
 
-        log(f"[qdrant-sync] Done — {synced:,} points synced to remote")
+        def _upsert_batch(batch):
+            """Thread worker: upsert one batch to remote."""
+            remote.upsert(collection_name=COLLECTION, points=batch, wait=False)
+            return len(batch)
+
+        with ThreadPoolExecutor(max_workers=SYNC_WORKERS) as pool:
+            futures = []
+            while not _sync_stop.is_set():
+                try:
+                    results, next_offset = local.scroll(
+                        collection_name=COLLECTION,
+                        limit=SYNC_BATCH,
+                        offset=offset,
+                        with_vectors=True,
+                        with_payload=True,
+                    )
+                except Exception as e:
+                    log(f"[qdrant-sync] Scroll error: {e}")
+                    errors += 1
+                    if errors > 10:
+                        break
+                    time.sleep(2)
+                    continue
+
+                if not results:
+                    if final and offset is not None:
+                        # Wrap around for final pass to catch anything missed
+                        offset = None
+                        continue
+                    break
+
+                futures.append(pool.submit(_upsert_batch, results))
+                offset = next_offset
+
+                # Harvest completed futures to avoid memory buildup
+                done = [f for f in futures if f.done()]
+                for f in done:
+                    try:
+                        synced += f.result()
+                    except Exception as e:
+                        log(f"[qdrant-sync] Upsert error: {e}")
+                        errors += 1
+                    futures.remove(f)
+
+                # Log progress
+                if synced % 50000 < SYNC_BATCH:
+                    total = sync_state.get("total_synced", 0) + synced
+                    log(f"[qdrant-sync] {total:,}/{local_count:,} synced to remote ({SYNC_WORKERS} threads)")
+
+                if offset is None:
+                    break
+
+            # Wait for remaining futures
+            for f in as_completed(futures):
+                try:
+                    synced += f.result()
+                except Exception as e:
+                    log(f"[qdrant-sync] Upsert error: {e}")
+
+        # Save state for resume
+        sync_state["last_synced_offset"] = offset
+        sync_state["total_synced"] = sync_state.get("total_synced", 0) + synced
+        _save_sync_state(sync_state)
+
+        if synced > 0:
+            log(f"[qdrant-sync] Pass done — {synced:,} points synced (cumulative: {sync_state['total_synced']:,}/{local_count:,})")
+        return synced
     except Exception as e:
         log(f"[qdrant-sync] ERROR: {e}")
         log("[qdrant-sync] Local data preserved in /root/qdrant_data — can retry sync later")
+        return 0
+
+def background_sync_worker():
+    """Background thread: periodically syncs local Qdrant to remote while pipeline runs."""
+    log(f"[qdrant-sync] Background sync started (every {SYNC_INTERVAL}s, {SYNC_WORKERS} threads, {SYNC_BATCH}/batch)")
+    # Wait for some data to accumulate before first sync
+    initial_delay = min(SYNC_INTERVAL, 60)
+    for _ in range(initial_delay):
+        if _sync_stop.is_set():
+            return
+        time.sleep(1)
+
+    while not _sync_stop.is_set():
+        try:
+            sync_local_to_remote(final=False)
+        except Exception as e:
+            log(f"[qdrant-sync] Background sync error: {e}")
+        # Wait for next interval
+        for _ in range(SYNC_INTERVAL):
+            if _sync_stop.is_set():
+                return
+            time.sleep(1)
+
+    log("[qdrant-sync] Background sync stopped")
 
 def cleanup_local_qdrant():
     """Stop local Qdrant."""
@@ -1179,6 +1278,13 @@ def main():
         log(f"  [{i+1}] {label} — {status}")
     log(f"{'='*60}\n")
 
+    # Start background sync thread if using local Qdrant
+    _bg_sync_thread = None
+    if _use_local_qdrant and not args.no_sync:
+        _sync_stop.clear()
+        _bg_sync_thread = Thread(target=background_sync_worker, daemon=True)
+        _bg_sync_thread.start()
+
     for ds_idx, ds_name in enumerate(dataset_queue):
         if not running.is_set():
             log("[signal] Stopping before next dataset")
@@ -1206,8 +1312,12 @@ def main():
             completed_datasets.append(source_name)
             continue
 
-        start_shard = 0
+        # Resume from last completed shard if restarting a partially-done dataset
+        ds_progress = progress.get("datasets", {}).get(source_name, {})
+        start_shard = ds_progress.get("last_completed_shard", -1) + 1
         end_shard = config["num_shards"]
+        if start_shard > 0:
+            log(f"[resume] {source_name}: resuming from shard {start_shard} (shards 0-{start_shard-1} already done)")
         local_dir = f"/root/{source_name}"
 
         # Reset stats for this dataset
@@ -1363,6 +1473,17 @@ def main():
                     log(f"[shard {shard_num:04d}] {total_raw:,} imgs, {failed} fail, "
                         f"{elapsed_shard:.1f}s GPU | total:{stats.indexed:,} rate:{rate:,.0f}/min")
                     shard_start = time.time()
+
+                    # Save shard-level checkpoint so we can resume from here
+                    progress.setdefault("datasets", {})[source_name] = {
+                        "status": "running",
+                        "description": config["description"],
+                        "startedAt": progress.get("datasets", {}).get(source_name, {}).get("startedAt", time.time()),
+                        "shards": end_shard - start_shard,
+                        "last_completed_shard": shard_num,
+                        "indexed_so_far": stats.indexed,
+                    }
+                    save_progress(progress)
                     continue
 
                 batch_arr, batch_names, batch_labels = item[0], item[1], item[2]
@@ -1456,7 +1577,12 @@ def main():
         set_qdrant_bulk_mode(enable=False)
 
     if _use_local_qdrant and not args.no_sync:
-        sync_local_to_remote()
+        # Stop background sync and do one final complete pass
+        _sync_stop.set()
+        if _bg_sync_thread:
+            _bg_sync_thread.join(timeout=10)
+        log("[qdrant-sync] Final sync pass — ensuring all data reaches remote...")
+        sync_local_to_remote(final=True)
 
     grand_elapsed = time.time() - grand_start
     grand_rate = grand_indexed / (grand_elapsed / 60) if grand_elapsed > 0 else 0
