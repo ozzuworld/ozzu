@@ -329,7 +329,15 @@ module.exports = function createCipherRoutes(ctx) {
           directivesSection += "**Needs attention:**\n" +
             needsAttention.map(d => `- [${d.status}] ${d.emoji || "⚠️"} ${d.title} (${d.id})${d.failureReason ? " — " + d.failureReason : ""}`).join("\n") + "\n\n";
         }
-        directivesSection += active.map(d => `- [${d.status}] ${d.emoji || "•"} ${d.title} (${d.id}, ${d.category || "dev"})`).join("\n");
+        directivesSection += active.map(d => {
+          let line = `- [${d.status}] ${d.emoji || "•"} ${d.title} (${d.id}, ${d.category || "dev"})`;
+          // Show handoff context for in_progress directives so fresh sessions know what's happening
+          if (d.status === "in_progress" && d.handoff_context) {
+            const ctx = typeof d.handoff_context === "string" ? d.handoff_context : JSON.stringify(d.handoff_context);
+            line += `\n  > Last state: ${ctx.substring(0, 300)}${ctx.length > 300 ? "..." : ""}`;
+          }
+          return line;
+        }).join("\n");
       }
 
       // ── Active Epics ──

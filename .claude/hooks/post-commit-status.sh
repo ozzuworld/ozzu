@@ -26,4 +26,13 @@ curl -s -X POST "http://localhost:3333/status" \
   -d "{\"directiveId\":\"$DIR_ID\",\"message\":\"Committed $COMMIT_HASH on $BRANCH\",\"event\":\"commit\",\"persona\":\"cipher\"}" \
   --max-time 3 > /dev/null 2>&1 &
 
+# Auto-update directive with commit details (work-update endpoint)
+COMMIT_MSG=$(git -C /home/gcp/ozzu log -1 --pretty=%B 2>/dev/null | head -5 | tr '"' "'" | tr '\n' ' ')
+DIFF_STAT=$(git -C /home/gcp/ozzu diff --stat HEAD~1 HEAD 2>/dev/null | tail -1 | tr '"' "'")
+
+curl -s -X POST "http://localhost:3333/directives/$DIR_ID/work-update" \
+  -H 'Content-Type: application/json' \
+  -d "{\"message\":\"Commit $COMMIT_HASH: $COMMIT_MSG ($DIFF_STAT)\",\"log_type\":\"commit\",\"append_summary\":true,\"work_summary\":\"Commit $COMMIT_HASH: $COMMIT_MSG\"}" \
+  --max-time 3 > /dev/null 2>&1 &
+
 exit 0

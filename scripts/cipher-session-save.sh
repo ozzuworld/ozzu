@@ -61,3 +61,34 @@ RESPONSE=$(curl -sf -X POST "$BRIDGE_URL" \
 rm -f "$PAYLOAD_FILE"
 
 log "Session $SESSION_ID saved ($TURN_COUNT turns). Bridge response: $RESPONSE"
+
+# ── Auto-save handoff to active directive ──
+# If on a cipher/dir_XXX branch, save session handoff so the next session can pick up
+BRANCH=$(git -C /home/gcp/ozzu rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+DIR_ID=$(echo "$BRANCH" | grep -oE 'dir_[0-9]{10,}' || true)
+
+if [ -n "$DIR_ID" ]; then
+  log "Saving handoff to directive $DIR_ID"
+
+  # Extract last 5 assistant turns for handoff context
+  LAST_ASSISTANT=$(echo "$TURNS" | grep '"role":"assistant"' | tail -5 | jq -sr '[.[].content] | join("\n---\n")' 2>/dev/null | head -c 2000 | tr '"' "'")
+  # Extract last 3 user turns for context
+  LAST_USER=$(echo "$TURNS" | grep '"role":"user"' | tail -3 | jq -sr '[.[].content] | join("\n---\n")' 2>/dev/null | head -c 1000 | tr '"' "'")
+
+  HANDOFF="Last user messages: $LAST_USER\n\nLast assistant work: $LAST_ASSISTANT"
+
+  # Build JSON payload for handoff
+  HANDOFF_FILE="$LOG_DIR/handoff-$DIR_ID.json"
+  jq -n \
+    --arg handoff "$HANDOFF" \
+    --arg summary "Session ended with $TURN_COUNT turns on branch $BRANCH" \
+    '{handoff_context: $handoff, work_summary: $summary}' > "$HANDOFF_FILE"
+
+  curl -sf -X POST "http://localhost:3333/directives/$DIR_ID/session-handoff" \
+    -H "Content-Type: application/json" \
+    -d @"$HANDOFF_FILE" \
+    --max-time 10 > /dev/null 2>&1 || log "Handoff POST failed for $DIR_ID"
+
+  rm -f "$HANDOFF_FILE"
+  log "Handoff saved for $DIR_ID"
+fi

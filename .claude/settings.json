@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/post-compact-directive-load.sh"
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "matcher": "",
