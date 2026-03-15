@@ -74,20 +74,6 @@ Install: `git config core.hooksPath .githooks` (cipher.sh auto-installs).
 - **June**: Gemini Live AI companion (tablet/TV app)
 - **Cipher**: Claude Code agent (GCP VM)
 
-## Compact Instructions
-
-When context is compacted, the summary MUST preserve:
-1. **The current task** — what Cipher was working on, exact file paths, what's done vs pending
-2. **The directive ID and branch** — so work continues on the right branch
-3. **King Kazuma's last instruction** — exact words, not a summary
-4. **Any uncommitted changes** — list modified files and what changed
-
-After compaction, your FIRST response MUST be:
-> "Context was compacted. What would you like me to work on?"
-
-**DO NOT auto-resume any task.** DO NOT jump to BLE, GPU, face training, or any work.
-WAIT for the user to tell you what to do.
-
 ## Reference
 
 Network architecture, devices, services, deploy workflows, iOS sideloading details → see **INVENTORY.md**
