@@ -11,10 +11,10 @@ import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 
 const TOP_BAR_HEIGHT = 48;
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB (3D scans can be large)
 
-const ALLOWED_MIME_PREFIXES = ["image/", "text/", "application/pdf", "application/json"];
-const ALLOWED_EXTENSIONS = [".txt", ".pdf", ".md", ".json", ".csv", ".log"];
+const ALLOWED_MIME_PREFIXES = ["image/", "text/", "application/pdf", "application/json", "model/", "application/octet-stream"];
+const ALLOWED_EXTENSIONS = [".txt", ".pdf", ".md", ".json", ".csv", ".log", ".glb", ".gltf", ".obj", ".usdz", ".zip", ".bin"];
 
 type Mode = "FILE" | "TEXT";
 type ContentType = "image" | "document" | "text";
@@ -28,9 +28,16 @@ interface SelectedFile {
   previewUri?: string;
 }
 
-function detectContentType(mimeType: string): ContentType {
+const BINARY_EXTENSIONS = [".glb", ".gltf", ".obj", ".usdz", ".zip", ".bin"];
+
+function detectContentType(mimeType: string, name?: string): ContentType {
   if (mimeType.startsWith("image/")) return "image";
   return "document";
+}
+
+function isBinaryFile(name: string, mimeType: string): boolean {
+  const ext = name.substring(name.lastIndexOf(".")).toLowerCase();
+  return BINARY_EXTENSIONS.includes(ext) || mimeType.startsWith("model/") || mimeType === "application/octet-stream";
 }
 
 function formatSize(bytes: number): string {
@@ -84,7 +91,7 @@ export default function UploadScreen() {
     setError(null);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ["text/*", "application/pdf", "application/json", "image/*"],
+        type: ["text/*", "application/pdf", "application/json", "image/*", "model/*", "application/octet-stream", "*/*"],
         copyToCacheDirectory: true,
         multiple: true,
       });
@@ -154,8 +161,9 @@ export default function UploadScreen() {
           bridgeRef.current.sendUpload(target, "text", textContent);
         } else if (files.length > 0) {
           for (const f of files) {
+            const useBinary = f.contentType === "image" || isBinaryFile(f.name, f.mimeType);
             const data = await FileSystem.readAsStringAsync(f.uri, {
-              encoding: f.contentType === "image"
+              encoding: useBinary
                 ? FileSystem.EncodingType.Base64
                 : FileSystem.EncodingType.UTF8,
             });

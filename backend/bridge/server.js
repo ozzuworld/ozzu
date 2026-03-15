@@ -5944,7 +5944,10 @@ wss.on("connection", (ws, req) => {
           const ts = Date.now();
           const safeName = (filename || `upload-${ts}`).replace(/[^a-zA-Z0-9._-]/g, "_");
           const savePath = `${uploadsDir}/${ts}-${target}-${safeName}`;
-          if (contentType === "image") {
+          const binaryExts = [".glb", ".gltf", ".obj", ".usdz", ".zip", ".bin"];
+          const ext = (filename || "").substring((filename || "").lastIndexOf(".")).toLowerCase();
+          const isBinary = contentType === "image" || binaryExts.includes(ext);
+          if (isBinary) {
             fs.writeFileSync(savePath, Buffer.from(data, "base64"));
           } else {
             fs.writeFileSync(savePath, data, "utf8");
