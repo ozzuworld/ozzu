@@ -355,34 +355,9 @@ module.exports = function createCipherRoutes(ctx) {
           state.knownFacts.map(f => `- ${f}`).join("\n");
       }
 
-      // ── Recent conversations (compact — summaries only, not full transcripts) ──
-      let conversationSection = "";
-      try {
-        const sessions = await db.query(
-          `SELECT c.id, c.started_at, c.summary, c.turn_count
-           FROM conversations c
-           WHERE c.persona = 'cipher' AND c.turn_count >= 2 AND c.summary IS NOT NULL
-           ORDER BY c.started_at DESC LIMIT 5`
-        );
-        if (sessions.rows.length > 0) {
-          conversationSection = "\n## Recent Sessions (summaries)\n" +
-            "Use GET /cipher/search?q=keyword to find specific conversation content.\n\n" +
-            sessions.rows.map(s => {
-              const date = s.started_at ? new Date(s.started_at).toLocaleString() : "?";
-              return `- [${date}, ${s.turn_count} turns] ${s.summary}`;
-            }).join("\n");
-        }
-      } catch {}
-
-      // ── Critical reminders ──
-      const criticalSection = "\n## Critical Reminders\n" +
-        "- NEVER build web dashboards — Ozzu is a React Native app, ALL UI in frontend/\n" +
-        "- NEVER bypass the directive pipeline — create directive FIRST, then code\n" +
-        "- iPhone NEVER receives OTA — always requires native build + sideload\n" +
-        "- 'dashboard' = React Native app, NOT the bridge web page\n" +
-        "- ALWAYS verify facts before stating them — query live data, don't guess from memory\n" +
-        "- Use /cipher/search?q=keyword for conversation history beyond what's shown here\n" +
-        "- Use /cipher/state for live structured state (JSON) anytime during a session";
+      // Recent Sessions and Critical Reminders removed — duplicated CLAUDE.md rules
+      // and wasted context tokens every turn. Session history is in postgres,
+      // searchable via /cipher/search?q=keyword.
 
       const markdown = [
         `# Cipher Context — Auto-generated (do not edit)`,
@@ -398,8 +373,6 @@ module.exports = function createCipherRoutes(ctx) {
         directivesSection,
         epicSection,
         factsSection,
-        conversationSection,
-        criticalSection,
       ].filter(Boolean).join("\n");
 
       res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
