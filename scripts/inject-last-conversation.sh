@@ -8,6 +8,29 @@
 
 BRIDGE_URL="http://localhost:3333"
 STATE_FILE="/tmp/ozzu-bridge/cipher-preflight-done"
+COMPACTION_FLAG="/tmp/ozzu-bridge/compaction-just-happened"
+
+# ── Post-compaction detection ──
+# If compaction just happened, inject hard stop and consume the flag
+if [ -f "$COMPACTION_FLAG" ]; then
+  rm -f "$COMPACTION_FLAG"
+  echo "=== COMPACTION DETECTED ==="
+  echo "Context was just compacted. You have lost prior conversation detail."
+  echo ""
+  echo "YOUR FIRST RESPONSE MUST BE:"
+  echo '  "Context was compacted. What would you like me to work on?"'
+  echo ""
+  echo "DO NOT auto-resume any task. DO NOT jump to BLE, GPU, face training, or any work."
+  echo "WAIT for the user to tell you what to do."
+  TASK_STATE="/tmp/ozzu-bridge/pre-compact-task-state.json"
+  if [ -f "$TASK_STATE" ]; then
+    echo ""
+    echo "TASK STATE BEFORE COMPACTION:"
+    cat "$TASK_STATE"
+  fi
+  echo "=== END COMPACTION NOTICE ==="
+  exit 0
+fi
 
 # Pull the last 2 conversations via bridge API
 RESULT=$(curl -s "${BRIDGE_URL}/cipher/history?limit=2" 2>/dev/null)
