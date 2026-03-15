@@ -7,4 +7,7 @@ const config = getDefaultConfig(__dirname);
 config.resolver.unstable_enablePackageExports = true;
 config.resolver.unstable_conditionNames = ["browser", "import", "require"];
 
+// Add 3D model asset extensions
+config.resolver.assetExts = [...(config.resolver.assetExts || []), "glb", "gltf", "obj"];
+
 module.exports = withNativeWind(config, { input: "./global.css" });

@@ -25,6 +25,7 @@ import { rooms, type InventoryItem, type Room } from "../../lib/rooms";
 import { ACWidget } from "../../components/devices/ACWidget";
 import { VacuumWidget } from "../../components/devices/VacuumWidget";
 import { FloorPlanMap } from "../../components/home/FloorPlanMap";
+import HomeMap3D from "../../components/home/HomeMap3D";
 import { DeviceSheet } from "../../components/home/DeviceSheet";
 import type { MapPin } from "../../lib/map-config";
 import { fetchSchedules, updateSchedule, type DeviceSchedule, getBridgeUrl } from "../../lib/bridge-api";
@@ -688,7 +689,7 @@ export default function HomeScreen() {
 
       {viewMode === "map" ? (
         <View style={{ flex: 1 }}>
-          <FloorPlanMap onPinPress={handlePinPress} onMapLoadError={handleMapLoadError} />
+          <HomeMap3D />
         </View>
       ) : (
         <ScrollView
