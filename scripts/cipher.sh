@@ -22,18 +22,23 @@ if [[ -n "$CONTEXT" ]]; then
   echo "$CONTEXT" > "$LOCAL_MD"
   echo "Cipher context loaded ($(echo "$CONTEXT" | wc -l) lines)"
 
-  # ── Append full conversation history from last session ──
-  # This is separate from /cipher/context so even if that endpoint gets rewritten,
-  # full history still loads. DO NOT REMOVE THIS BLOCK.
-  # Wait for session-save hook to finish writing the previous session to postgres.
-  # Without this delay, the history call can race the session save and miss the latest session.
+  # ── Append TAIL of last conversation (capped to prevent bloat) ──
+  # Full transcripts are in postgres — use /cipher/search?q= to find anything.
+  # Only the last ~30K chars go here so CLAUDE.local.md stays under 40K total.
   sleep 3
-  HISTORY=$(curl -sf "${BRIDGE_URL}/cipher/history?conversations=2&format=text" 2>/dev/null)
+  MAX_HISTORY_CHARS=30000
+  HISTORY=$(curl -sf "${BRIDGE_URL}/cipher/history?conversations=1&format=text" 2>/dev/null)
   if [[ -n "$HISTORY" ]]; then
+    HISTORY_LEN=${#HISTORY}
+    if [[ $HISTORY_LEN -gt $MAX_HISTORY_CHARS ]]; then
+      # Keep only the tail (most recent messages)
+      HISTORY="[...truncated — ${HISTORY_LEN} chars total, showing last ${MAX_HISTORY_CHARS}. Use /cipher/search?q= for full history...]\n$(echo "$HISTORY" | tail -c $MAX_HISTORY_CHARS)"
+    fi
     echo "" >> "$LOCAL_MD"
-    echo "## Last Conversation (full transcript — READ THIS FIRST when asked 'where we left off')" >> "$LOCAL_MD"
-    echo "$HISTORY" >> "$LOCAL_MD"
-    echo "Full conversation history appended ($(echo "$HISTORY" | wc -l) lines)"
+    echo "## Last Conversation (tail — full transcript in postgres, search via /cipher/search?q=)" >> "$LOCAL_MD"
+    echo -e "$HISTORY" >> "$LOCAL_MD"
+    FINAL_SIZE=$(wc -c < "$LOCAL_MD")
+    echo "Conversation tail appended (${FINAL_SIZE} bytes total CLAUDE.local.md)"
   fi
 else
   cat > "$LOCAL_MD" <<'EOF'
