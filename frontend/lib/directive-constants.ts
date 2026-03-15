@@ -84,6 +84,12 @@ export const AUDIT_TYPE_EMOJIS: Record<string, string> = {
   deploy_failed: "💥",
   comment: "💬",
   escalation: "⚡",
+  commit: "📝",
+  work_update: "🔧",
+  session_handoff: "🔀",
+  merged: "🔗",
+  ci_build: "🏗️",
+  agent_status: "🤖",
 };
 
 // Status groupings

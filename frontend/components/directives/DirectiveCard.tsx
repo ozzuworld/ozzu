@@ -373,6 +373,44 @@ export function DirectiveCard({
             </Pressable>
           ) : null}
 
+          {/* Work Summary — Jira-style context section */}
+          {directive.work_summary ? (
+            <View style={{
+              backgroundColor: "#111111",
+              borderRadius: 10,
+              padding: 12,
+              marginBottom: 12,
+              borderLeftWidth: 2,
+              borderLeftColor: "#3B82F6",
+            }}>
+              <Text style={{ color: "#525252", fontSize: 10, fontWeight: "700", letterSpacing: 0.5, marginBottom: 4 }}>
+                WORK SUMMARY
+              </Text>
+              <Text style={{ color: "#A3A3A3", fontSize: 12, lineHeight: 18 }} numberOfLines={8}>
+                {directive.work_summary}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Handoff Context — what the last session left for the next */}
+          {directive.handoff_context ? (
+            <View style={{
+              backgroundColor: "#111111",
+              borderRadius: 10,
+              padding: 12,
+              marginBottom: 12,
+              borderLeftWidth: 2,
+              borderLeftColor: "#A855F7",
+            }}>
+              <Text style={{ color: "#525252", fontSize: 10, fontWeight: "700", letterSpacing: 0.5, marginBottom: 4 }}>
+                LAST SESSION HANDOFF
+              </Text>
+              <Text style={{ color: "#A3A3A3", fontSize: 12, lineHeight: 18 }} numberOfLines={6}>
+                {directive.handoff_context}
+              </Text>
+            </View>
+          ) : null}
+
           {/* Metadata grid */}
           <View
             style={{

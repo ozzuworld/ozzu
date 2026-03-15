@@ -25,6 +25,8 @@ import {
 } from "../lib/bridge-api";
 import {
   STATUS_ORDER,
+  STATUS_COLORS,
+  STATUS_EMOJI,
   ACTIVE_STATUSES,
   FAILED_STATUSES,
   NEEDS_ACTION_STATUSES,
@@ -45,7 +47,7 @@ if (
 
 const TOP_BAR_HEIGHT = 48;
 
-type ViewMode = "overview" | "timeline" | "list";
+type ViewMode = "overview" | "board" | "timeline" | "list";
 
 export default function DirectivesScreen() {
   const router = useRouter();
@@ -153,6 +155,32 @@ export default function DirectivesScreen() {
     const active = filtered.filter((d) => ACTIVE_STATUSES.includes(d.status) && !["blocked"].includes(d.status));
     const completed = filtered.filter((d) => d.status === "completed").sort((a, b) => (b.completedAt || b.updatedAt) - (a.completedAt || a.updatedAt)).slice(0, 10);
     return { needsAttention, active, completed };
+  }, [filtered]);
+
+  // Board columns (Jira-style kanban)
+  const boardColumns = useMemo(() => {
+    const columns: Array<{ key: string; label: string; color: string; items: Directive[] }> = [
+      { key: "needs_action", label: "Needs Action", color: "#EF4444", items: [] },
+      { key: "todo", label: "To Do", color: "#737373", items: [] },
+      { key: "in_progress", label: "In Progress", color: "#3B82F6", items: [] },
+      { key: "done", label: "Done", color: "#22C55E", items: [] },
+    ];
+    for (const d of filtered) {
+      if (["blocked", "deploy_failed", "failed", "stale"].includes(d.status)) {
+        columns[0].items.push(d);
+      } else if (["pending", "planning", "planned", "approved"].includes(d.status)) {
+        columns[1].items.push(d);
+      } else if (d.status === "in_progress") {
+        columns[2].items.push(d);
+      } else if (["completed", "cancelled"].includes(d.status)) {
+        columns[3].items.push(d);
+      }
+    }
+    // Only show Done column's last 5
+    columns[3].items = columns[3].items
+      .sort((a, b) => (b.completedAt || b.updatedAt) - (a.completedAt || a.updatedAt))
+      .slice(0, 5);
+    return columns;
   }, [filtered]);
 
   // Status-sorted list view
@@ -324,9 +352,9 @@ export default function DirectivesScreen() {
         gap: 8,
       }}>
         {/* View mode toggles */}
-        {(["overview", "timeline", "list"] as ViewMode[]).map((mode) => {
+        {(["overview", "board", "timeline", "list"] as ViewMode[]).map((mode) => {
           const isActive = viewMode === mode;
-          const labels: Record<ViewMode, string> = { overview: "Overview", timeline: "Timeline", list: "All" };
+          const labels: Record<ViewMode, string> = { overview: "Overview", board: "Board", timeline: "Timeline", list: "All" };
           return (
             <Pressable
               key={mode}
@@ -485,6 +513,125 @@ export default function DirectivesScreen() {
             {renderSection("Active", overviewGroups.active, "#3B82F6")}
             {renderSection("Recently Completed", overviewGroups.completed, "#22C55E")}
           </>
+        ) : viewMode === "board" ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 12, paddingRight: 16 }}
+          >
+            {boardColumns.map((col) => (
+              <View
+                key={col.key}
+                style={{
+                  width: Math.min(280, screenWidth * 0.72),
+                  backgroundColor: "#111111",
+                  borderRadius: 12,
+                  borderTopWidth: 3,
+                  borderTopColor: col.color,
+                  padding: 10,
+                }}
+              >
+                {/* Column header */}
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <Text style={{ color: "#A3A3A3", fontSize: 12, fontWeight: "700", letterSpacing: 0.5 }}>
+                    {col.label.toUpperCase()}
+                  </Text>
+                  <View style={{
+                    backgroundColor: `${col.color}20`,
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 10,
+                  }}>
+                    <Text style={{ color: col.color, fontSize: 11, fontWeight: "bold" }}>
+                      {col.items.length}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Column cards */}
+                {col.items.length === 0 ? (
+                  <View style={{ paddingVertical: 20, alignItems: "center" }}>
+                    <Text style={{ color: "#2A2A2A", fontSize: 12 }}>Empty</Text>
+                  </View>
+                ) : (
+                  <View style={{ gap: 8 }}>
+                    {col.items.map((d) => {
+                      const sColor = STATUS_COLORS[d.status] || "#737373";
+                      return (
+                        <Pressable
+                          key={d.id}
+                          onPress={() => {
+                            // Switch to overview and the card will be there
+                          }}
+                          style={{
+                            backgroundColor: "#1A1A1A",
+                            borderRadius: 10,
+                            padding: 10,
+                            borderLeftWidth: 3,
+                            borderLeftColor: sColor,
+                          }}
+                        >
+                          {/* Card: emoji + title */}
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                            <Text style={{ fontSize: 14 }}>{d.emoji || STATUS_EMOJI[d.status] || ""}</Text>
+                            <Text
+                              style={{ color: "#E5E5E5", fontSize: 13, fontWeight: "600", flex: 1 }}
+                              numberOfLines={2}
+                            >
+                              {d.title}
+                            </Text>
+                          </View>
+
+                          {/* Card: status lozenge + type + time */}
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
+                            <View style={{
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              borderRadius: 4,
+                              backgroundColor: `${sColor}20`,
+                            }}>
+                              <Text style={{ color: sColor, fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>
+                                {HUMAN_STATUS[d.status] || d.status}
+                              </Text>
+                            </View>
+                            <Text style={{ color: "#3A3A3A", fontSize: 10 }}>
+                              {relativeTime(d.updatedAt)}
+                            </Text>
+                          </View>
+
+                          {/* Card: work summary preview */}
+                          {d.work_summary ? (
+                            <Text
+                              style={{ color: "#525252", fontSize: 10, marginTop: 4, lineHeight: 14 }}
+                              numberOfLines={2}
+                            >
+                              {d.work_summary}
+                            </Text>
+                          ) : null}
+
+                          {/* Card: assignee/creator */}
+                          {d.createdBy ? (
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                              <View style={{
+                                width: 14, height: 14, borderRadius: 7,
+                                backgroundColor: d.createdBy === "Cipher" ? "#6EE7B720" : "#A78BFA20",
+                                alignItems: "center", justifyContent: "center",
+                              }}>
+                                <Text style={{ fontSize: 7, color: d.createdBy === "Cipher" ? "#6EE7B7" : "#A78BFA" }}>
+                                  {d.createdBy[0]}
+                                </Text>
+                              </View>
+                              <Text style={{ color: "#3A3A3A", fontSize: 9 }}>{d.createdBy}</Text>
+                            </View>
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            ))}
+          </ScrollView>
         ) : viewMode === "timeline" ? (
           <>
             {renderSection("Today", timelineGroups.today, "#06B6D4")}

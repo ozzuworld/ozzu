@@ -103,6 +103,8 @@ export interface Directive {
   phases?: Directive[];
   category?: string;
   work_summary?: string | null;
+  working_state?: any | null;
+  handoff_context?: string | null;
   createdAt: number;
   updatedAt: number;
 }
