@@ -88,7 +88,7 @@ static const ml_weights_t W_MOTION = {
     .w_baseline_dev =  0.10f,
     .w_temporal     =  0.20f,
     .w_cross        =  0.15f,
-    .bias           = -0.35f,
+    .bias           = -0.55f,
 };
 
 // Presence: phase micro-changes + baseline shift
@@ -340,7 +340,7 @@ static void detect_presence(float *amplitudes, float *phases) {
     uint8_t motion_level;
     uint8_t confidence;
 
-    if (motion_score > 0.55f) {
+    if (motion_score > 0.70f) {
         raw_state = PRESENCE_MOVING;
         motion_level = (uint8_t)(fminf(motion_score * 255.0f, 255.0f));
         confidence = (uint8_t)(fminf(motion_score * 100.0f, 100.0f));

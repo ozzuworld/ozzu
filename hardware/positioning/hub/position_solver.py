@@ -175,21 +175,47 @@ class PositionSolver:
             new_beliefs[nid] = self_prob + other_prob
 
         # ── Step 2: CSI observation likelihood ──
+        # Use RELATIVE motion levels across nodes instead of absolute thresholds.
+        # When all nodes report "MOVING", the one with highest motion_level
+        # is most likely where the person actually is.
         likelihoods = {}
-        for nid, room in self.rooms.items():
-            if room.stale:
-                # Stale node — uninformative (likelihood = uniform)
-                likelihoods[nid] = 1.0 / n_rooms
-                continue
-
-            conf = room.confidence / 100.0
-
-            if room.presence == 2:  # MOVING
-                likelihoods[nid] = 0.5 + 0.5 * conf  # strong evidence
-            elif room.presence == 1:  # STATIC
-                likelihoods[nid] = 0.3 + 0.4 * conf  # moderate evidence
-            else:  # EMPTY
-                likelihoods[nid] = 0.1 * (1.0 - conf) + 0.05  # evidence of absence
+        
+        active_rooms = {nid: r for nid, r in self.rooms.items() if not r.stale}
+        
+        if len(active_rooms) >= 2:
+            motion_levels = {nid: r.motion_level for nid, r in active_rooms.items()}
+            max_motion = max(motion_levels.values())
+            min_motion = min(motion_levels.values())
+            motion_range = max_motion - min_motion
+            
+            for nid, room in self.rooms.items():
+                if room.stale:
+                    likelihoods[nid] = 1.0 / n_rooms
+                    continue
+                
+                conf = room.confidence / 100.0
+                
+                if room.presence == 0:  # EMPTY
+                    likelihoods[nid] = 0.1 * (1.0 - conf) + 0.05
+                elif motion_range > 3:
+                    # Meaningful variation — use relative ranking
+                    rel_motion = (room.motion_level - min_motion) / motion_range
+                    likelihoods[nid] = 0.2 + 0.7 * rel_motion * conf
+                else:
+                    # All nodes identical — UNINFORMATIVE (let transition prior hold position)
+                    likelihoods[nid] = 1.0
+        else:
+            for nid, room in self.rooms.items():
+                if room.stale:
+                    likelihoods[nid] = 1.0 / n_rooms
+                    continue
+                conf = room.confidence / 100.0
+                if room.presence == 2:
+                    likelihoods[nid] = 0.5 + 0.5 * conf
+                elif room.presence == 1:
+                    likelihoods[nid] = 0.3 + 0.4 * conf
+                else:
+                    likelihoods[nid] = 0.1 * (1.0 - conf) + 0.05
 
         # ── Step 3: BLE observation (if available) ──
         ble_room_nid = None
@@ -214,16 +240,26 @@ class PositionSolver:
                 else:
                     likelihoods[nid] *= (0.3 * (1.0 - ble_confidence) + 0.1)
 
-        # ── Step 4: Posterior = prior × likelihood, then normalize ──
-        posteriors = {}
-        for nid in self.rooms:
-            posteriors[nid] = new_beliefs.get(nid, 0.0) * likelihoods.get(nid, 1.0)
+        # ── Step 3.5: Check if CSI is informative ──
+        # If all active room likelihoods are 1.0 (can't differentiate) and no BLE,
+        # skip update entirely — hold current beliefs to prevent drift to uniform.
+        active_likelihoods = [likelihoods[nid] for nid in active_rooms]
+        csi_informative = not all(l == 1.0 for l in active_likelihoods) if active_likelihoods else False
+        
+        if not csi_informative and ble_room_nid is None:
+            # No useful data — hold current beliefs, still update location estimate
+            posteriors = {nid: room.belief for nid, room in self.rooms.items()}
+        else:
+            # ── Step 4: Posterior = prior × likelihood, then normalize ──
+            posteriors = {}
+            for nid in self.rooms:
+                posteriors[nid] = new_beliefs.get(nid, 0.0) * likelihoods.get(nid, 1.0)
 
-        total = sum(posteriors.values())
-        if total > 0:
-            for nid in posteriors:
-                posteriors[nid] /= total
-                self.rooms[nid].belief = posteriors[nid]
+            total = sum(posteriors.values())
+            if total > 0:
+                for nid in posteriors:
+                    posteriors[nid] /= total
+                    self.rooms[nid].belief = posteriors[nid]
 
         # ── Step 5: Extract location estimate ──
         best_nid = max(posteriors, key=lambda nid: posteriors[nid])
