@@ -26,9 +26,9 @@ const DEVICES = {
     name: "dev-01 (local Linux)",
     hostname: "dev-01",
     ip: "172.168.0.57",
-    role: "Local compute, GCP extension, Docker host",
+    role: "Local compute, GCP extension, Docker host, BLE pairing hub",
     ssh: { user: "hadmin", key: "~/.ssh/dev01_key", timeout: 5 },
-    services: [],
+    services: ["bluetooth"],
     portChecks: [],
   },
 };

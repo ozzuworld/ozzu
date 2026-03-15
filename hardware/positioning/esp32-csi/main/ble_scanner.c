@@ -59,6 +59,8 @@ static volatile bool _pair_success = false;
 static uint16_t _pair_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t _pair_timeout_sec = 60;
 static esp_timer_handle_t _pair_timer = NULL;
+static ble_addr_t _peer_id_addr;
+static bool _peer_addr_valid = false;
 
 // ── NVS persistence for IRKs ──
 
@@ -261,11 +263,19 @@ static int _pair_gap_event(struct ble_gap_event *event, void *arg) {
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0) {
                 _pair_conn_handle = event->connect.conn_handle;
-                ESP_LOGW(TAG, ">>> Peer CONNECTED (handle=%d) — waiting for app to read encrypted char <<<",
-                         _pair_conn_handle);
-                // Do NOT call ble_gap_security_initiate() — let the app trigger
-                // pairing by reading the READ_ENC characteristic. iOS shows the
-                // pairing dialog when it gets "insufficient encryption" from NimBLE.
+                ESP_LOGW(TAG, ">>> Peer CONNECTED (handle=%d) <<<", _pair_conn_handle);
+                // Save peer address for disconnect fallback IRK read
+                struct ble_gap_conn_desc cd;
+                if (ble_gap_conn_find(_pair_conn_handle, &cd) == 0) {
+                    _peer_id_addr = cd.peer_id_addr;
+                    _peer_addr_valid = true;
+                }
+                // ACTIVELY initiate security — Derek Seaman's key fix
+                // iOS won't start pairing on its own; we must request it
+                ESP_LOGW(TAG, ">>> Initiating security in 100ms <<<");
+                vTaskDelay(pdMS_TO_TICKS(100));  // Brief settle
+                int rc = ble_gap_security_initiate(_pair_conn_handle);
+                ESP_LOGW(TAG, ">>> security_initiate rc=%d <<<", rc);
             } else {
                 ESP_LOGW(TAG, "Connection failed: %d", event->connect.status);
             }
@@ -274,10 +284,22 @@ static int _pair_gap_event(struct ble_gap_event *event, void *arg) {
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGW(TAG, ">>> Peer DISCONNECTED — reason=%d <<<",
                      event->disconnect.reason);
+            // Fallback IRK read on disconnect — Derek Seaman's approach
+            if (!_pair_success && _peer_addr_valid) {
+                ESP_LOGW(TAG, ">>> Trying IRK read on disconnect (fallback) <<<");
+                _extract_irk_from_bond(&_peer_id_addr);
+            }
+            // Also try after 800ms delay (NVS flush delay)
+            if (!_pair_success && _peer_addr_valid) {
+                vTaskDelay(pdMS_TO_TICKS(800));
+                ESP_LOGW(TAG, ">>> Trying IRK read after 800ms NVS flush <<<");
+                _extract_irk_from_bond(&_peer_id_addr);
+            }
             if (_pair_success) {
                 ESP_LOGW(TAG, ">>> PAIRING COMPLETE — IRK extracted <<<");
             }
             _pair_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+            _peer_addr_valid = false;
             // Cancel timeout timer and exit pair mode
             if (_pair_timer) {
                 esp_timer_stop(_pair_timer);
@@ -300,7 +322,11 @@ static int _pair_gap_event(struct ble_gap_event *event, void *arg) {
                     _extract_irk_from_bond(&desc.peer_id_addr);
                 }
             } else {
-                ESP_LOGW(TAG, "Encryption failed: %d", event->enc_change.status);
+                ESP_LOGW(TAG, "Encryption failed: %d — clearing bonds", event->enc_change.status);
+                struct ble_gap_conn_desc desc;
+                if (ble_gap_conn_find(event->enc_change.conn_handle, &desc) == 0) {
+                    ble_store_util_delete_peer(&desc.peer_id_addr);
+                }
             }
             break;
 
@@ -561,7 +587,7 @@ void ble_scanner_init(const node_config_t *cfg) {
     ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;      // Just Works (no PIN)
     ble_hs_cfg.sm_bonding = 1;                          // enable bonding (persist keys)
     ble_hs_cfg.sm_sc = 1;                               // Secure Connections (required for iOS IRK)
-    ble_hs_cfg.sm_mitm = 1;                             // MITM flag (iOS requires for IRK distribution)
+    ble_hs_cfg.sm_mitm = 0;                             // NO MITM — mitm=1 + NO_IO contradicts, iOS skips key exchange
     ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
