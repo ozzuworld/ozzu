@@ -6,13 +6,17 @@ INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 STDOUT=$(echo "$INPUT" | jq -r '.tool_output.stdout // empty' 2>/dev/null)
 
-# Only process successful git commits
-if ! echo "$COMMAND" | grep -qE '^\s*git\s+commit'; then
+# Only process successful git commits (command may start with cd, env vars, etc.)
+if ! echo "$COMMAND" | grep -qE 'git\s+commit'; then
   exit 0
 fi
 
-# Extract directive ID from commit message
-DIR_ID=$(echo "$COMMAND" | grep -oE 'dir_[0-9]{10,}' | head -1)
+# Extract directive ID from the actual commit message (not the command string)
+DIR_ID=$(git -C /home/gcp/ozzu log -1 --pretty=%B 2>/dev/null | grep -oE 'dir_[0-9]{10,}' | head -1)
+if [ -z "$DIR_ID" ]; then
+  # Fallback: try the command string
+  DIR_ID=$(echo "$COMMAND" | grep -oE 'dir_[0-9]{10,}' | head -1)
+fi
 if [ -z "$DIR_ID" ]; then
   exit 0
 fi
