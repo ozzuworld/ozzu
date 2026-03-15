@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -9,36 +9,44 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useOpsStatus, useOpsIncidents } from "../../lib/ops-hooks";
+import { useInfraState } from "../../lib/infra-hooks";
 import SystemBanner from "../../components/ops/SystemBanner";
 import ServiceCard from "../../components/ops/ServiceCard";
 import GpuCard from "../../components/ops/GpuCard";
-import DeviceRow from "../../components/ops/DeviceRow";
 import IncidentList from "../../components/ops/IncidentList";
+import NetworkBanner from "../../components/ops/NetworkBanner";
+import InfraDeviceCard from "../../components/ops/InfraDeviceCard";
+import GcpCard from "../../components/ops/GcpCard";
+import RouterCard from "../../components/ops/RouterCard";
+import PositioningCard from "../../components/ops/PositioningCard";
 
 const ACCENT = "#06B6D4";
+
+type Tab = "services" | "infra";
 
 export default function OpsScreen() {
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>("infra");
 
-  const { services, loading, lastUpdate, forceCheck } = useOpsStatus();
+  const { services, loading: svcLoading, lastUpdate, forceCheck } = useOpsStatus();
   const { incidents, loading: incidentsLoading, refresh: refreshIncidents } = useOpsIncidents(20);
+  const { state: infra, loading: infraLoading, refresh: refreshInfra } = useInfraState();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([forceCheck(), refreshIncidents()]);
+    await Promise.all([forceCheck(), refreshIncidents(), refreshInfra()]);
     setRefreshing(false);
-  }, [forceCheck, refreshIncidents]);
+  }, [forceCheck, refreshIncidents, refreshInfra]);
 
-  // Service entries for grid (exclude vast-gpu, shown separately)
   const gridServices = Object.entries(services).filter(([name]) => name !== "vast-gpu");
   const gpuStatus = services["vast-gpu"];
-
-  // Count down services for header badge
   const downCount = Object.values(services).filter((s) => s.status === "down").length;
 
+  const loading = activeTab === "services" ? svcLoading : infraLoading;
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#111", paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: "#0A0A0A", paddingTop: insets.top }}>
       {/* Header */}
       <View
         style={{
@@ -58,11 +66,11 @@ export default function OpsScreen() {
             fontSize: 16,
             color: "#E2E8F0",
             letterSpacing: 2,
-            flex: 1,
           }}
         >
           OPS
         </Text>
+        <View style={{ flex: 1 }} />
         {downCount > 0 && (
           <View
             style={{
@@ -85,55 +93,128 @@ export default function OpsScreen() {
         </Pressable>
       </View>
 
+      {/* Tab bar */}
+      <View
+        style={{
+          flexDirection: "row",
+          borderBottomWidth: 1,
+          borderBottomColor: "rgba(255,255,255,0.06)",
+        }}
+      >
+        {(["infra", "services"] as Tab[]).map((tab) => (
+          <Pressable
+            key={tab}
+            onPress={() => setActiveTab(tab)}
+            style={{
+              flex: 1,
+              paddingVertical: 8,
+              borderBottomWidth: 2,
+              borderBottomColor: activeTab === tab ? ACCENT : "transparent",
+              alignItems: "center",
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: "monospace",
+                fontWeight: "700",
+                fontSize: 11,
+                letterSpacing: 1,
+                color: activeTab === tab ? ACCENT : "#525252",
+              }}
+            >
+              {tab === "infra" ? "INFRASTRUCTURE" : "SERVICES"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
       {loading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={ACCENT} size="large" />
           <Text style={{ fontFamily: "monospace", fontSize: 11, color: "#525252", marginTop: 12 }}>
-            Checking services...
+            {activeTab === "infra" ? "Probing infrastructure..." : "Checking services..."}
           </Text>
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+          contentContainerStyle={{ padding: 12, paddingBottom: 32 }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />
           }
           showsVerticalScrollIndicator={false}
         >
-          {/* System Banner */}
-          <SystemBanner services={services} />
+          {activeTab === "infra" ? (
+            /* ── INFRASTRUCTURE TAB ── */
+            <>
+              {/* Network banner */}
+              {infra?.network && (
+                <NetworkBanner network={infra.network} probeTimeMs={infra.probeTimeMs || 0} />
+              )}
 
-          {/* Service Grid */}
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-            {gridServices.map(([name, status]) => (
-              <View key={name} style={{ width: "48%" }}>
-                <ServiceCard name={name} status={status} />
+              {/* GCP VM */}
+              {infra?.gcp && <GcpCard gcp={infra.gcp} />}
+
+              {/* Physical devices */}
+              {infra?.devices && Object.entries(infra.devices).map(([id, dev]) => (
+                <InfraDeviceCard key={id} id={id} device={dev} />
+              ))}
+
+              {/* Router */}
+              {infra?.router && <RouterCard router={infra.router} />}
+
+              {/* Positioning */}
+              {(infra?.esp32Nodes || infra?.positioningHub) && (
+                <PositioningCard
+                  nodes={infra.esp32Nodes || []}
+                  hub={infra.positioningHub || { service: "unknown" }}
+                />
+              )}
+
+              {/* GPU */}
+              <GpuCard gpu={gpuStatus} />
+
+              {/* Timestamp */}
+              {infra?.timestamp && (
+                <Text
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: 9,
+                    color: "#525252",
+                    textAlign: "center",
+                    marginTop: 8,
+                  }}
+                >
+                  Last probe: {new Date(infra.timestamp).toLocaleTimeString()}
+                </Text>
+              )}
+            </>
+          ) : (
+            /* ── SERVICES TAB ── */
+            <>
+              <SystemBanner services={services} />
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                {gridServices.map(([name, status]) => (
+                  <View key={name} style={{ width: "48%" }}>
+                    <ServiceCard name={name} status={status} />
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
-
-          {/* GPU Card */}
-          <GpuCard gpu={gpuStatus} />
-
-          {/* Device Row */}
-          <DeviceRow openvpn={services.openvpn} />
-
-          {/* Recent Incidents */}
-          <IncidentList incidents={incidents} loading={incidentsLoading} />
-
-          {/* Last update footer */}
-          {lastUpdate && (
-            <Text
-              style={{
-                fontFamily: "monospace",
-                fontSize: 9,
-                color: "#525252",
-                textAlign: "center",
-                marginTop: 12,
-              }}
-            >
-              Last check: {new Date(lastUpdate).toLocaleTimeString()}
-            </Text>
+              <GpuCard gpu={gpuStatus} />
+              <IncidentList incidents={incidents} loading={incidentsLoading} />
+              {lastUpdate && (
+                <Text
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: 9,
+                    color: "#525252",
+                    textAlign: "center",
+                    marginTop: 12,
+                  }}
+                >
+                  Last check: {new Date(lastUpdate).toLocaleTimeString()}
+                </Text>
+              )}
+            </>
           )}
         </ScrollView>
       )}
