@@ -12,6 +12,7 @@ module.exports = function mcpRoutes(ctx) {
   const watchdog = (() => { try { return require("../watchdog"); } catch { return null; } })();
   const recoveryEngine = (() => { try { return require("../recovery-engine"); } catch { return null; } })();
   const buildVerifier = (() => { try { return require("../build-verifier"); } catch { return null; } })();
+  const infraMonitor = (() => { try { return require("../infra-monitor"); } catch { return null; } })();
   const { mergeWorktreeToMain, smartDeploy } = (() => {
     try { return require("../agent-spawner"); } catch { return {}; }
   })();
@@ -110,6 +111,17 @@ module.exports = function mcpRoutes(ctx) {
         properties: {
           status: { type: "string", enum: ["sent", "draft"], description: "Filter by status" },
           limit: { type: "number", description: "Max results (default 20)" },
+        },
+      },
+    },
+    {
+      name: "get_infra_state",
+      description: "Get live infrastructure state: network topology (VPN, routes, LAN subnet), all devices (Rock Pi, dev-01, ESP32 nodes) with reachability/services/resources, GCP host state (docker, disk, memory), positioning hub status. Cached and refreshed every 60s. Use refresh=true to force fresh probe.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          refresh: { type: "boolean", description: "Force fresh probe instead of using cache (takes ~15s)" },
+          section: { type: "string", enum: ["network", "devices", "esp32", "gcp", "hub", "all"], description: "Return only a specific section. Default: all" },
         },
       },
     },
@@ -374,6 +386,27 @@ module.exports = function mcpRoutes(ctx) {
           sent_at: e.sent_at, created_at: e.created_at,
         }));
         return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+      }
+
+      case "get_infra_state": {
+        if (!infraMonitor) return { content: [{ type: "text", text: "Infra monitor not available" }], isError: true };
+        const state = args.refresh ? infraMonitor.refresh() : infraMonitor.getState();
+        if (!state) return { content: [{ type: "text", text: "No infra state available yet" }], isError: true };
+
+        if (args.section && args.section !== "all") {
+          const sectionMap = {
+            network: state.network,
+            devices: state.devices,
+            esp32: state.esp32Nodes,
+            gcp: state.gcp,
+            hub: state.positioningHub,
+          };
+          const section = sectionMap[args.section];
+          if (!section) return { content: [{ type: "text", text: `Unknown section: ${args.section}` }], isError: true };
+          return { content: [{ type: "text", text: JSON.stringify({ timestamp: state.timestamp, [args.section]: section }, null, 2) }] };
+        }
+
+        return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }] };
       }
 
       default:

@@ -128,6 +128,7 @@ const identityRoutes = require("./routes/identity");
 const opsRoutes = require("./routes/ops");
 const positioningRoutes = require("./routes/positioning");
 const mcpRoutes = require("./routes/mcp");
+const infraRoutes = require("./routes/infra");
 const businessEmailRoutes = require("./routes/business-email");
 const watchdog = require("./watchdog");
 const recoveryEngine = require("./recovery-engine");
@@ -1558,6 +1559,7 @@ function getRouteHandlers() {
       ops: opsRoutes(routeCtx),
       positioning: positioningRoutes(routeCtx),
       mcp: mcpRoutes(routeCtx),
+      infra: infraRoutes(routeCtx),
       businessEmail: businessEmailRoutes(routeCtx),
     };
   }
@@ -1602,6 +1604,7 @@ async function handleRequest(req, res) {
   if (await r.ops(req, res, pathname, url)) return;
   if (await r.positioning(req, res, pathname, url)) return;
   if (await r.mcp(req, res, pathname, url)) return;
+  if (await r.infra(req, res, pathname, url)) return;
   if (await r.businessEmail(req, res, pathname, url)) return;
 
   // GET /api/training-stats — Face DB training pipeline stats
@@ -6422,6 +6425,7 @@ wss.on("connection", (ws, req) => {
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
     startWatchdog();
     watchdog.start({ db, redis, broadcastToAll, sendNotification });
+    try { require("./infra-monitor").start(); } catch (e) { log.bridge.error("infra-monitor start error:", e.message); }
     recoveryEngine.start({ db, redis, broadcastToAll, sendNotification, watchdog });
     cipherDaemon.start({ db, redis, broadcastToAll, watchdog, recoveryEngine });
     proactiveReporter.start({ db, redis, broadcastToAll, sendNotification, getDirectives });
