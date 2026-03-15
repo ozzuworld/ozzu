@@ -125,7 +125,9 @@ def parse_packet(data: bytes) -> Optional[object]:
                 break
             dev = struct.unpack_from(BLE_DEV_FMT, data, offset)
             addr_bytes = dev[0]
-            addr_str = ":".join(f"{b:02X}" for b in addr_bytes)
+            # BLE addresses come in little-endian (LSB first) from ESP32/NimBLE
+            # Reverse to conventional notation (MSB first) so C4:23:60:DA:C6:44 matches config
+            addr_str = ":".join(f"{b:02X}" for b in reversed(addr_bytes))
             devices.append(BleDevice(addr=addr_str, rssi=dev[1], addr_type=dev[2]))
             offset += BLE_DEV_SIZE
 
@@ -150,7 +152,8 @@ def parse_packet(data: bytes) -> Optional[object]:
             ent = struct.unpack_from(IRK_ENTRY_FMT, data, offset)
             irk_bytes = ent[0]
             addr_bytes = ent[1]
-            addr_str = ":".join(f"{b:02X}" for b in addr_bytes)
+            # Reverse BLE address from little-endian to conventional notation
+            addr_str = ":".join(f"{b:02X}" for b in reversed(addr_bytes))
             label = ent[3].rstrip(b"\x00").decode("utf-8", errors="replace")
             entries.append(IrkEntry(
                 irk=irk_bytes,

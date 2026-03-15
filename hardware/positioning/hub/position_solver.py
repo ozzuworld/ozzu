@@ -11,7 +11,32 @@ import math
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+import subprocess
 from protocol import CsiReport, BleReport, BleDevice, PRESENCE_NAMES
+
+
+def _aes128_ecb_encrypt(key: bytes, plaintext: bytes) -> bytes:
+    """AES-128-ECB single block encrypt using openssl CLI."""
+    r = subprocess.run(
+        ["openssl", "enc", "-aes-128-ecb", "-nopad", "-K", key.hex(), "-nosalt"],
+        input=plaintext, capture_output=True
+    )
+    return r.stdout
+
+
+def resolve_rpa(rpa_bytes: bytes, irk_bytes: bytes) -> bool:
+    """Resolve a BLE Resolvable Private Address using an IRK.
+    rpa_bytes: 6-byte address in conventional (MSB-first) notation.
+    irk_bytes: 16-byte IRK in big-endian (reversed from BlueZ storage).
+    BLE Core Spec Vol 3, Part H, 2.2.2: RPA = prand(MSB) || hash(LSB)
+    """
+    prand = rpa_bytes[0:3]      # MSB 3 bytes = prand (top 2 bits must be 01)
+    rpa_hash = rpa_bytes[3:6]   # LSB 3 bytes = hash
+    if (prand[0] >> 6) != 1:
+        return False
+    plaintext = b'\x00' * 13 + prand
+    result = _aes128_ecb_encrypt(irk_bytes, plaintext)
+    return result[13:16] == rpa_hash
 
 
 # ── 1D Kalman Filter for sensor smoothing ──
@@ -247,9 +272,21 @@ class BeliefEKF:
 class PositionSolver:
     """EKF-enhanced Bayesian multi-room fusion with BLE tracking."""
 
-    def __init__(self, room_config: Dict[int, str], target_devices: list = None):
+    def __init__(self, room_config: Dict[int, str], target_devices: list = None,
+                 irk_store: list = None):
         self.room_config = room_config
         self.target_devices = set(d.upper() for d in (target_devices or []))
+        # IRK store for resolving random BLE addresses on the hub side
+        self.irk_entries = []  # list of (irk_bytes_be, identity_addr_upper)
+        for entry in (irk_store or []):
+            try:
+                irk_raw = bytes.fromhex(entry["irk_hex"])
+                # BlueZ/NimBLE store IRK in little-endian — reverse to big-endian for AES
+                irk_be = bytes(reversed(irk_raw))
+                identity = entry["addr"].upper()
+                self.irk_entries.append((irk_be, identity))
+            except (KeyError, ValueError):
+                pass
 
         self.rooms: Dict[int, RoomState] = {}
         self.room_index: Dict[int, int] = {}  # node_id → index in EKF state
@@ -295,10 +332,20 @@ class PositionSolver:
 
         self._ekf_update()
 
+    def _resolve_addr(self, addr: str, addr_type: int) -> str:
+        """Try to resolve a random BLE address using stored IRKs."""
+        if addr_type != 1 or not self.irk_entries:
+            return addr  # not a random address or no IRKs
+        addr_bytes = bytes(int(x, 16) for x in addr.split(":"))
+        for irk_bytes, identity in self.irk_entries:
+            if resolve_rpa(addr_bytes, irk_bytes):
+                return identity
+        return addr
+
     def update_ble(self, report: BleReport):
         now = time.time()
         for dev in report.devices:
-            addr = dev.addr.upper()
+            addr = self._resolve_addr(dev.addr.upper(), dev.addr_type)
             if addr not in self.devices:
                 self.devices[addr] = TrackedDevice(
                     addr=addr,

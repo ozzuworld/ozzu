@@ -51,10 +51,6 @@ DEFAULT_CONFIG = {
 class PositioningHub:
     def __init__(self, config: dict):
         self.config = config
-        self.solver = PositionSolver(
-            room_config=config["rooms"],
-            target_devices=config.get("target_devices", []),
-        )
         self.running = False
         self._last_push = 0.0
         self._last_location = None
@@ -62,6 +58,11 @@ class PositioningHub:
         self._irk_store = []    # list of {irk, addr, addr_type, label, node_id}
         self._irk_file = os.path.join(os.path.dirname(__file__), "irk_store.json")
         self._load_irks()
+        self.solver = PositionSolver(
+            room_config=config["rooms"],
+            target_devices=config.get("target_devices", []),
+            irk_store=self._irk_store,
+        )
         self._stats = {
             "csi_packets": 0,
             "ble_packets": 0,
@@ -158,7 +159,8 @@ class PositioningHub:
         """Send an IRK to all known nodes (except the one that sent it)."""
         # Build IRK sync packet
         irk_bytes = bytes.fromhex(irk_entry["irk_hex"])
-        addr_bytes = bytes(int(x, 16) for x in irk_entry["addr"].split(":"))
+        # Reverse address to BLE byte order (little-endian) for ESP32
+        addr_bytes = bytes(reversed([int(x, 16) for x in irk_entry["addr"].split(":")]))
         label_bytes = irk_entry.get("label", "phone").encode("utf-8")[:16].ljust(16, b"\x00")
 
         header = struct.pack("<IBBBB",
@@ -240,7 +242,14 @@ class PositioningHub:
 
         # Track node addresses for IRK distribution
         if hasattr(report, "node_id"):
+            is_new_node = report.node_id not in self._node_addrs
             self._node_addrs[report.node_id] = addr
+            # When we discover a new node, push all stored IRKs to it
+            if is_new_node and self._irk_store:
+                log.info("New node %d at %s — distributing %d stored IRKs",
+                         report.node_id, addr[0], len(self._irk_store))
+                for irk_entry in self._irk_store:
+                    self._distribute_irk(irk_entry)
 
         if isinstance(report, CsiReport):
             self._stats["csi_packets"] += 1

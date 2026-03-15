@@ -116,7 +116,7 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "get_infra_state",
-      description: "Get live infrastructure state: network topology (VPN, routes, LAN subnet), all devices (Rock Pi + extended WiFi/temp/netio, dev-01, ESP32 nodes) with reachability/services/resources, TP-Link ER605 router (DHCP leases, WAN status, VPN tunnels, firmware), GCP host state (docker, disk, memory), positioning hub status. Cached and refreshed every 60s. Use refresh=true to force fresh probe.",
+      description: "Get live infrastructure state. TOPOLOGY: Rock Pi (172.168.0.55) is the ESP32 hub — it runs the ozzu-nodes WiFi AP and the positioning service. ESP32 nodes connect to the Rock Pi, NOT to dev-01. dev-01 (172.168.0.57) is a separate x86 Linux workstation. Sections: network (VPN, routes, LAN), devices (Rock Pi, dev-01 with reachability/services/resources), esp32 (nodes connected to Rock Pi AP), gcp (Docker, disk, memory), hub (positioning service status), router (ER605 DHCP/WAN/VPN). Cached 60s, use refresh=true for fresh probe.",
       inputSchema: {
         type: "object",
         properties: {
