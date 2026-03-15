@@ -86,15 +86,23 @@ function MetricPill({ label, value, color }: { label: string; value: string; col
 }
 
 const DEVICE_EMOJI: Record<string, string> = {
-  rockpi: "🔧",
+  rockpi: "🧊",
   "dev-01": "🖥️",
   gcp: "☁️",
   router: "📡",
 };
 
+const DEVICE_BADGES: Record<string, { label: string; color: string }[]> = {
+  rockpi: [
+    { label: "ESP32 HUB", color: "#06B6D4" },
+    { label: "WiFi AP", color: "#8B5CF6" },
+  ],
+};
+
 export default function InfraDeviceCard({ id, device, children }: Props) {
   const [expanded, setExpanded] = useState(false);
   const emoji = DEVICE_EMOJI[id] || "📦";
+  const badges = DEVICE_BADGES[id] || [];
   const reachable = device.reachable;
   const borderColor = reachable ? "rgba(255,255,255,0.08)" : "rgba(239,68,68,0.3)";
 
@@ -115,9 +123,16 @@ export default function InfraDeviceCard({ id, device, children }: Props) {
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <Text style={{ fontSize: 16 }}>{emoji}</Text>
           <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: "monospace", fontWeight: "700", fontSize: 12, color: "#E2E8F0", letterSpacing: 0.5 }}>
-              {device.name}
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <Text style={{ fontFamily: "monospace", fontWeight: "700", fontSize: 12, color: "#E2E8F0", letterSpacing: 0.5 }}>
+                {device.name}
+              </Text>
+              {badges.map(b => (
+                <View key={b.label} style={{ backgroundColor: `${b.color}20`, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                  <Text style={{ fontFamily: "monospace", fontSize: 7, fontWeight: "700", color: b.color, letterSpacing: 0.5 }}>{b.label}</Text>
+                </View>
+              ))}
+            </View>
             <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>{device.ip}</Text>
           </View>
           <View style={{ alignItems: "flex-end" }}>
@@ -148,6 +163,16 @@ export default function InfraDeviceCard({ id, device, children }: Props) {
               label="SERVICES"
               value={`${serviceEntries.filter(([, s]) => s === "active" || s === "listening").length}/${serviceEntries.length}`}
             />
+          )}
+          {id === "rockpi" && device.extended?.hostapdClients != null && (
+            <MetricPill
+              label="AP CLIENTS"
+              value={`${device.extended.hostapdClients.length}`}
+              color={device.extended.hostapdClients.length > 0 ? GREEN : GRAY}
+            />
+          )}
+          {id === "rockpi" && (
+            <MetricPill label="AP SUBNET" value="10.0.50.0/24" color={ACCENT} />
           )}
         </View>
 
@@ -193,10 +218,23 @@ export default function InfraDeviceCard({ id, device, children }: Props) {
             {device.extended?.hostapdClients && device.extended.hostapdClients.length > 0 && (
               <View style={{ marginTop: 8 }}>
                 <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: GRAY, letterSpacing: 1, marginBottom: 4 }}>
-                  WIFI CLIENTS ({device.extended.hostapdClients.length})
+                  AP CLIENTS — ozzu-nodes ({device.extended.hostapdClients.length})
                 </Text>
                 {device.extended.hostapdClients.map((c: any, i: number) => (
-                  <Text key={i} style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>{JSON.stringify(c)}</Text>
+                  <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 3 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: GREEN }} />
+                    <Text style={{ fontFamily: "monospace", fontSize: 9, color: "#CBD5E1", flex: 1 }}>{c.mac}</Text>
+                    {c.signalDbm != null && (
+                      <Text style={{ fontFamily: "monospace", fontSize: 8, color: c.signalDbm > -60 ? GREEN : c.signalDbm > -75 ? YELLOW : RED }}>
+                        {c.signalDbm} dBm
+                      </Text>
+                    )}
+                    {c.connectedSecs != null && (
+                      <Text style={{ fontFamily: "monospace", fontSize: 8, color: GRAY }}>
+                        {c.connectedSecs > 3600 ? `${Math.floor(c.connectedSecs / 3600)}h` : `${Math.floor(c.connectedSecs / 60)}m`}
+                      </Text>
+                    )}
+                  </View>
                 ))}
               </View>
             )}

@@ -92,7 +92,7 @@ export default function PositioningCard({ nodes, hub }: Props) {
               POSITIONING
             </Text>
             <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>
-              ESP32 mesh + Bayesian fusion
+              ESP32 nodes → Rock Pi hub → Bridge
             </Text>
           </View>
           <View style={{ alignItems: "flex-end" }}>
@@ -126,21 +126,45 @@ export default function PositioningCard({ nodes, hub }: Props) {
             {/* Hub details */}
             <View style={{ marginTop: 8 }}>
               <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: GRAY, letterSpacing: 1, marginBottom: 4 }}>
-                HUB STATUS
+                HUB — ROCK PI (172.168.0.55)
               </Text>
-              <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>
-                Service: {hub?.service || "unknown"}
-              </Text>
-              <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>
-                WiFi AP: {hub?.wifiAp || "unknown"}
-              </Text>
-              <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>
-                IRK Store: {hub?.irkStore || "unknown"}
-              </Text>
-              {hub?.otaFirmware && (
-                <Text style={{ fontFamily: "monospace", fontSize: 8, color: GRAY, marginTop: 2 }}>
-                  OTA: {hub.otaFirmware}
+              <View style={{ backgroundColor: "rgba(139,92,246,0.08)", borderRadius: 6, padding: 8, marginBottom: 6 }}>
+                <Text style={{ fontFamily: "monospace", fontSize: 8, color: "#A78BFA", marginBottom: 2 }}>
+                  TOPOLOGY
                 </Text>
+                <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>
+                  Rock Pi runs hostapd → "ozzu-nodes" WiFi AP (10.0.50.1/24)
+                </Text>
+                <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>
+                  ESP32 nodes connect via WiFi → send UDP to 10.0.50.1:5500
+                </Text>
+                <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>
+                  Hub fuses CSI + BLE → pushes location to Bridge via VPN
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 }}>
+                <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>Service</Text>
+                <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: hubActive ? GREEN : RED }}>
+                  {hub?.service || "unknown"}
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 }}>
+                <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>WiFi AP (hostapd)</Text>
+                <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: apActive ? GREEN : RED }}>
+                  {hub?.wifiAp || "unknown"}
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 }}>
+                <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>IRK Store</Text>
+                <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: hasIrk ? GREEN : YELLOW }}>
+                  {hub?.irkStore || "unknown"}
+                </Text>
+              </View>
+              {hub?.otaFirmware && (
+                <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 }}>
+                  <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>OTA Firmware</Text>
+                  <Text style={{ fontFamily: "monospace", fontSize: 8, color: GRAY }}>{hub.otaFirmware.replace(/.*firmware/, "firmware")}</Text>
+                </View>
               )}
             </View>
 
