@@ -40,6 +40,36 @@ Skip any step = pipeline violation. Git hooks will block direct commits to main.
 - **NEVER state face counts from memory.** Query Qdrant live first.
 - **NEVER tell King Kazuma something works without VERIFYING FIRST.**
 
+## RULE 5 — UPDATE THE DIRECTIVE AS YOU WORK
+
+The directive is your external memory. If context compacts or the session dies, the directive is how the next session knows what happened. **Empty directives = amnesia.**
+
+**After every significant action**, call `POST /directives/{id}/work-update`:
+```json
+{
+  "work_summary": "What was done so far, what failed, what decisions were made",
+  "working_state": "Current state: what's running, what's blocked, what numbers matter",
+  "message": "Brief log of what just happened"
+}
+```
+
+**What counts as significant:**
+- After each commit
+- After a failed attempt (what you tried, why it failed)
+- After a decision that changes direction
+- Before any long-running operation (so state is saved if session dies)
+
+**On session end or topic change**, call `POST /directives/{id}/session-handoff`:
+```json
+{
+  "handoff_context": "Exact state for next session to pick up",
+  "work_summary": "Everything done in this session",
+  "working_state": "Where things stand right now"
+}
+```
+
+**On new session with active directive**: `GET /directives/{id}` — read `work_summary`, `working_state`, `handoff_context` before doing anything. This is where you left off, not your memory.
+
 ## Cipher Workflow
 
 **YOUR FIRST ACTION when asked to change code: create/find a directive. NOT reading files. NOT writing code.**
