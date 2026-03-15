@@ -7,6 +7,7 @@ import { HAProvider } from "../lib/ha-context";
 import { GlassesProvider } from "../lib/glasses-context";
 import { setImmersiveCallback } from "../lib/immersive-events";
 import { probeBridgeUrl, resetBridgeUrl } from "../lib/bridge-api";
+import * as BleBeacon from "../modules/ble-beacon";
 
 if (!__DEV__) {
   LogBox.ignoreAllLogs();
@@ -125,6 +126,12 @@ export default function RootLayout() {
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") { resetBridgeUrl(); probeBridgeUrl(); }
     });
+
+    // Start BLE beacon on iPhone for indoor positioning
+    if (Platform.OS === "ios" && BleBeacon.nativeAvailable && BleBeacon.isAvailable()) {
+      BleBeacon.startAdvertising("kazuma-iphone");
+    }
+
     return () => sub.remove();
   }, []);
 
