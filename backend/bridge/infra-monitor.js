@@ -419,10 +419,13 @@ function probeRockPiExtended() {
 }
 
 async function probeRouter() {
-  if (!er605) return null;
+  if (!er605) { console.log("[infra-monitor] er605 module not loaded"); return null; }
   try {
-    return await er605.getFullState();
+    const result = await er605.getFullState();
+    console.log("[infra-monitor] Router probe:", result?.model || "no model", "clients:", result?.dhcp?.clients?.length || 0);
+    return result;
   } catch (e) {
+    console.error("[infra-monitor] Router probe error:", e.message);
     return { error: e.message, timestamp: new Date().toISOString() };
   }
 }
