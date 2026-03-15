@@ -79,6 +79,40 @@ export function BLEPairingModal({ visible, onClose, bridgeUrl }: Props) {
     }
     const manager = managerRef.current;
 
+    // Wait for Bluetooth adapter to reach PoweredOn (iOS starts in "Unknown")
+    try {
+      const state = await manager.state();
+      if (state !== "PoweredOn") {
+        setStatus("Waiting for Bluetooth to be ready...");
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            sub.remove();
+            reject(new Error("Bluetooth not available. Check Settings → Bluetooth is ON."));
+          }, 10000);
+          const sub = manager.onStateChange((newState) => {
+            if (newState === "PoweredOn") {
+              clearTimeout(timeout);
+              sub.remove();
+              resolve();
+            } else if (newState === "PoweredOff" || newState === "Unauthorized") {
+              clearTimeout(timeout);
+              sub.remove();
+              reject(
+                new Error(
+                  `Bluetooth is ${newState}. Enable Bluetooth in Settings.`,
+                ),
+              );
+            }
+          }, true);
+        });
+      }
+    } catch (e: any) {
+      setError(e.message);
+      setStep("error");
+      return;
+    }
+    setStatus(`Scanning for Ozzu-Node-${node.id}...`);
+
     const targetName = `Ozzu-Node-${node.id}`;
     let found = false;
 
