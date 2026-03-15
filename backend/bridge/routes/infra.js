@@ -11,7 +11,7 @@ module.exports = function infraRoutes(ctx) {
     if (req.method === "GET" && pathname === "/infra/state") {
       if (!infraMonitor) { sendJSON(res, 500, { error: "Infra monitor not available" }); return true; }
       const refresh = url.searchParams.get("refresh") === "true";
-      const state = refresh ? infraMonitor.refresh() : infraMonitor.getState();
+      const state = refresh ? await infraMonitor.refresh() : infraMonitor.getState();
       sendJSON(res, 200, state || { error: "No state yet" });
       return true;
     }

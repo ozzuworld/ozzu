@@ -8,6 +8,7 @@
 
 const { execSync } = require("child_process");
 const fs = require("fs");
+const er605 = (() => { try { return require("./er605-client"); } catch { return null; } })();
 
 // ── Device & service definitions ──
 
@@ -345,9 +346,90 @@ function probePositioningHub() {
   return hub;
 }
 
+function probeRockPiExtended() {
+  const extended = {
+    hostapdClients: [],
+    networkIo: null,
+    temperature: null,
+  };
+
+  // Batch all extended queries in one SSH call
+  const batchCmd = [
+    "echo ---HOSTAPD_START---",
+    "hostapd_cli -i wlan0 all_sta 2>/dev/null || echo no_hostapd",
+    "echo ---HOSTAPD_END---",
+    "echo ---NETIO_START---",
+    "cat /proc/net/dev 2>/dev/null",
+    "echo ---NETIO_END---",
+    "echo TEMP=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo null)",
+  ].join("; ");
+
+  const result = sshExec("rockpi", batchCmd, 20000);
+  if (!result) return extended;
+
+  // Parse hostapd clients
+  const hapStart = result.indexOf("---HOSTAPD_START---");
+  const hapEnd = result.indexOf("---HOSTAPD_END---");
+  if (hapStart !== -1 && hapEnd !== -1) {
+    const hapBlock = result.slice(hapStart + 20, hapEnd).trim();
+    if (hapBlock && hapBlock !== "no_hostapd") {
+      // hostapd_cli output: MAC on its own line, then key=value pairs
+      const stations = hapBlock.split(/\n(?=[0-9a-f]{2}:[0-9a-f]{2}:)/i);
+      for (const block of stations) {
+        const lines = block.trim().split("\n");
+        if (!lines[0]) continue;
+        const mac = lines[0].trim();
+        if (!/^[0-9a-f]{2}:/i.test(mac)) continue;
+        const client = { mac };
+        for (const line of lines.slice(1)) {
+          const [k, v] = line.split("=", 2);
+          if (k === "signal") client.signalDbm = +v;
+          if (k === "rx_bytes") client.rxBytes = +v;
+          if (k === "tx_bytes") client.txBytes = +v;
+          if (k === "connected_time") client.connectedSecs = +v;
+        }
+        extended.hostapdClients.push(client);
+      }
+    }
+  }
+
+  // Parse network I/O
+  const netStart = result.indexOf("---NETIO_START---");
+  const netEnd = result.indexOf("---NETIO_END---");
+  if (netStart !== -1 && netEnd !== -1) {
+    const netBlock = result.slice(netStart + 18, netEnd).trim();
+    extended.networkIo = {};
+    for (const line of netBlock.split("\n")) {
+      const match = line.match(/^\s*(\w+):\s*(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+(\d+)/);
+      if (match && ["eth0", "wlan0", "tun0"].includes(match[1])) {
+        extended.networkIo[match[1]] = { rxBytes: +match[2], txBytes: +match[3] };
+      }
+    }
+  }
+
+  // Temperature
+  for (const line of result.split("\n")) {
+    if (line.startsWith("TEMP=") && line.slice(5) !== "null") {
+      const milliC = +line.slice(5);
+      if (!isNaN(milliC)) extended.temperature = +(milliC / 1000).toFixed(1);
+    }
+  }
+
+  return extended;
+}
+
+async function probeRouter() {
+  if (!er605) return null;
+  try {
+    return await er605.getFullState();
+  } catch (e) {
+    return { error: e.message, timestamp: new Date().toISOString() };
+  }
+}
+
 // ── Main update ──
 
-function updateState() {
+async function updateState() {
   const start = Date.now();
   const state = {
     timestamp: new Date().toISOString(),
@@ -356,6 +438,7 @@ function updateState() {
     esp32Nodes: [],
     gcp: probeGcpLocal(),
     positioningHub: null,
+    router: null,
   };
 
   // Probe each device
@@ -367,6 +450,7 @@ function updateState() {
   if (state.devices.rockpi?.reachable) {
     state.esp32Nodes = probeEsp32Nodes();
     state.positioningHub = probePositioningHub();
+    state.devices.rockpi.extended = probeRockPiExtended();
   } else {
     state.esp32Nodes = ESP32_NODES.map(n => ({
       ...n,
@@ -375,6 +459,9 @@ function updateState() {
     }));
     state.positioningHub = { service: "unknown_rockpi_down" };
   }
+
+  // Router probe (async — runs in parallel with nothing, but async by nature)
+  state.router = await probeRouter();
 
   state.probeTimeMs = Date.now() - start;
   _state = state;
@@ -386,7 +473,11 @@ function updateState() {
 // ── Public API ──
 
 function getState() {
-  if (!_state) updateState();
+  if (!_state) {
+    // Trigger async update, return placeholder for now
+    updateState().catch(e => console.error("[infra-monitor] Initial probe error:", e.message));
+    return _state || { timestamp: null, status: "first_probe_in_progress" };
+  }
   return _state;
 }
 
@@ -397,9 +488,9 @@ function getQuickState() {
 function start() {
   if (_timer) return;
   console.log("[infra-monitor] Starting — probing every 60s");
-  try { updateState(); } catch (e) { console.error("[infra-monitor] Initial probe error:", e.message); }
+  updateState().catch(e => console.error("[infra-monitor] Initial probe error:", e.message));
   _timer = setInterval(() => {
-    try { updateState(); } catch (e) { console.error("[infra-monitor] Probe error:", e.message); }
+    updateState().catch(e => console.error("[infra-monitor] Probe error:", e.message));
   }, UPDATE_INTERVAL);
 }
 
@@ -407,8 +498,8 @@ function stop() {
   if (_timer) { clearInterval(_timer); _timer = null; }
 }
 
-function refresh() {
-  return updateState();
+async function refresh() {
+  return await updateState();
 }
 
 module.exports = { getState, getQuickState, start, stop, refresh, DEVICES, ESP32_NODES };
