@@ -379,7 +379,7 @@ class PositionSolver:
 
     def _estimate_coordinates(self) -> Optional[Tuple[float, float, str]]:
         """Estimate x,z coordinates from BLE trilateration with wall attenuation.
-        Returns (x, z, furniture_context) or None if insufficient BLE data.
+        Returns (x, z, furniture_context) or None if insufficient/unreliable BLE data.
         """
         now = time.time()
 
@@ -397,11 +397,10 @@ class PositionSolver:
         if target_dev is None:
             return None
 
-        # Get active node readings
+        # Get active node readings (smoothed RSSI)
         active_readings = {}
         for nid, (rssi, ts) in target_dev.node_rssi.items():
             if now - ts < 15.0 and nid in NODE_POSITIONS:
-                # Use smoothed RSSI
                 if nid in target_dev.rssi_kf:
                     active_readings[nid] = target_dev.rssi_kf[nid].x
                 else:
@@ -410,12 +409,41 @@ class PositionSolver:
         if len(active_readings) < 2:
             return None
 
+        # ── Reliability check: skip trilateration if RSSI values too similar ──
+        rssi_values = list(active_readings.values())
+        rssi_spread = max(rssi_values) - min(rssi_values)
+        if rssi_spread < 2.0:
+            # All nodes see similar signal — trilateration unreliable
+            # Fall back to weighted centroid based on RSSI strength
+            log.debug("RSSI spread %.1f dB too low — using weighted centroid", rssi_spread)
+            total_w = 0.0
+            cx, cz = 0.0, 0.0
+            for nid, rssi in active_readings.items():
+                pos = NODE_POSITIONS[nid]
+                w = 10.0 ** (rssi / 20.0)  # linear power weight
+                cx += pos[0] * w
+                cz += pos[1] * w
+                total_w += w
+            if total_w > 0:
+                cx /= total_w
+                cz /= total_w
+                # Clamp
+                cx = max(-4.3, min(4.3, cx))
+                cz = max(-5.4, min(5.4, cz))
+                room_id = point_in_room(cx, cz)
+                furniture = nearest_furniture(cx, cz, room_id)
+                # Apply coordinate smoothing
+                cx, cz = self._smooth_coordinates(cx, cz)
+                return (cx, cz, furniture)
+            return None
+
         # First pass: estimate position without wall correction (rough)
         measurements_raw = []
         for nid, rssi in active_readings.items():
             pos = NODE_POSITIONS[nid]
             dist = rssi_to_distance(rssi, wall_count=0)
             measurements_raw.append((pos, dist))
+            log.debug("Node %d: RSSI=%.1f dist_raw=%.1fm", nid, rssi, dist)
 
         rough_pos = trilaterate(measurements_raw)
         if rough_pos is None:
@@ -438,15 +466,43 @@ class PositionSolver:
 
         x, z = final_pos
 
-        # Clamp to apartment bounds
-        x = max(-4.4, min(4.4, x))
-        z = max(-5.5, min(5.5, z))
+        # ── Boundary clamp with confidence reduction ──
+        clamped = False
+        if x < -4.3 or x > 4.3 or z < -5.4 or z > 5.4:
+            clamped = True
+            log.debug("Coordinates clamped: (%.1f, %.1f)", x, z)
+        x = max(-4.3, min(4.3, x))
+        z = max(-5.4, min(5.4, z))
+
+        # ── Coordinate smoothing (temporal Kalman filter) ──
+        x, z = self._smooth_coordinates(x, z)
 
         # Determine room and furniture
         room_id = point_in_room(x, z)
         furniture = nearest_furniture(x, z, room_id)
 
+        # If clamped, mark as less reliable (caller can reduce confidence)
+        if clamped:
+            self._coord_clamped = True
+        else:
+            self._coord_clamped = False
+
         return (x, z, furniture)
+
+    def _smooth_coordinates(self, x: float, z: float) -> Tuple[float, float]:
+        """Apply temporal Kalman filtering to smooth coordinate estimates."""
+        if not hasattr(self, '_coord_kf_x'):
+            self._coord_kf_x = KalmanFilter1D(
+                process_noise=0.5, measurement_noise=2.0,
+                initial_estimate=x, initial_covariance=10.0
+            )
+            self._coord_kf_z = KalmanFilter1D(
+                process_noise=0.5, measurement_noise=2.0,
+                initial_estimate=z, initial_covariance=10.0
+            )
+        sx = self._coord_kf_x.update(x)
+        sz = self._coord_kf_z.update(z)
+        return (sx, sz)
 
     def _ekf_update(self):
         """EKF-enhanced Bayesian update."""
@@ -607,8 +663,12 @@ class PositionSolver:
             else:
                 best_room_name = best_room.room_name
             method = "ekf+ble+coord"
-            # Boost confidence when we have coordinates
-            confidence = min(99, confidence * 1.15)
+            # Adjust confidence based on coordinate quality
+            was_clamped = getattr(self, '_coord_clamped', False)
+            if was_clamped:
+                confidence = min(99, confidence * 0.9)  # reduce when hitting bounds
+            else:
+                confidence = min(99, confidence * 1.15)  # boost for good coordinates
         else:
             best_room_name = best_room.room_name
 

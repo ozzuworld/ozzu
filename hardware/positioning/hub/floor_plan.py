@@ -73,9 +73,10 @@ FURNITURE = {
 }
 
 # ── Signal attenuation constants ──
-WALL_ATTENUATION_DB = 4.0     # dB loss per wall crossing
-PATH_LOSS_EXPONENT = 2.2      # indoor path loss exponent (free space = 2.0)
-RSSI_AT_1M = -59              # calibrated RSSI at 1 meter (typical BLE)
+WALL_ATTENUATION_DB = 3.5     # dB loss per wall crossing (interior walls)
+PATH_LOSS_EXPONENT = 3.0      # indoor path loss exponent (3.0 = typical indoor w/ walls)
+RSSI_AT_1M = -65              # calibrated from live readings: -80dBm at ~2m = RSSI_1m ≈ -65
+# With -65 and n=3.0: -75 → 2.2m, -80 → 3.2m, -85 → 4.6m, -95 → 10m
 
 
 def _segments_intersect(p1: Tuple, p2: Tuple, p3: Tuple, p4: Tuple) -> bool:
@@ -183,9 +184,9 @@ def trilaterate(measurements: List[Tuple[Tuple[float, float], float]]) -> Option
         x1, z1 = ref[0]
         d1 = ref[1]
 
-        # 2*(xi-x1)*x + 2*(zi-z1)*z = di²-d1² - xi²+x1² - zi²+z1²
+        # 2*(xi-x1)*x + 2*(zi-z1)*z = d1²-di² + xi²-x1² + zi²-z1²
         A.append([2 * (xi - x1), 2 * (zi - z1)])
-        b.append(di**2 - d1**2 - xi**2 + x1**2 - zi**2 + z1**2)
+        b.append(d1**2 - di**2 + xi**2 - x1**2 + zi**2 - z1**2)
 
     # Solve Ax = b using normal equations: x = (A'A)^-1 A'b
     # For 2x2 this is straightforward
