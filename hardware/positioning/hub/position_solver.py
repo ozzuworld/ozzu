@@ -331,6 +331,12 @@ class PositionSolver:
         self._last_room = None
         self._last_presence = None
 
+        # Room hysteresis — prevent drift at boundaries
+        self._committed_room = None       # current locked-in room
+        self._candidate_room = None       # room we might be transitioning to
+        self._candidate_start = 0.0       # when we first saw the candidate
+        self._room_switch_delay = 5.0     # seconds a new room must dominate before switching
+
     def update_csi(self, report: CsiReport):
         room = self.rooms.get(report.node_id)
         if not room:
@@ -656,21 +662,16 @@ class PositionSolver:
         coord_result = self._estimate_coordinates()
         if coord_result is not None:
             coord_x, coord_z, furniture_ctx = coord_result
-            # Override room from coordinates (more accurate than belief when BLE available)
-            coord_room = point_in_room(coord_x, coord_z)
-            if coord_room and coord_room in [r.room_name for r in self.rooms.values()]:
-                best_room_name = coord_room
-            else:
-                best_room_name = best_room.room_name
             method = "ekf+ble+coord"
-            # Adjust confidence based on coordinate quality
             was_clamped = getattr(self, '_coord_clamped', False)
             if was_clamped:
-                confidence = min(99, confidence * 0.9)  # reduce when hitting bounds
+                confidence = min(99, confidence * 0.9)
             else:
-                confidence = min(99, confidence * 1.15)  # boost for good coordinates
-        else:
-            best_room_name = best_room.room_name
+                confidence = min(99, confidence * 1.15)
+
+        # ── Room hysteresis — sticky room to prevent boundary drift ──
+        raw_room = best_room.room_name
+        best_room_name = self._apply_room_hysteresis(raw_room, now)
 
         self.location = LocationEstimate(
             room=best_room_name,
@@ -698,6 +699,41 @@ class PositionSolver:
             })
             self._last_room = current_room
             self._last_presence = presence
+
+    def _apply_room_hysteresis(self, raw_room: str, now: float) -> str:
+        """Only switch rooms after the new room dominates for N seconds.
+        Prevents flickering at room boundaries due to RSSI/CSI noise."""
+        if self._committed_room is None:
+            # First reading — commit immediately
+            self._committed_room = raw_room
+            return raw_room
+
+        if raw_room == self._committed_room:
+            # Still in same room — reset any pending transition
+            self._candidate_room = None
+            self._candidate_start = 0.0
+            return self._committed_room
+
+        # Different room detected
+        if raw_room != self._candidate_room:
+            # New candidate — start the clock
+            self._candidate_room = raw_room
+            self._candidate_start = now
+            log.debug("Room candidate: %s (from %s)", raw_room, self._committed_room)
+            return self._committed_room  # stay in current room
+
+        # Same candidate as before — check if enough time has passed
+        elapsed = now - self._candidate_start
+        if elapsed >= self._room_switch_delay:
+            log.info("Room transition: %s → %s (after %.1fs)",
+                     self._committed_room, raw_room, elapsed)
+            self._committed_room = raw_room
+            self._candidate_room = None
+            self._candidate_start = 0.0
+            return raw_room
+
+        # Still waiting
+        return self._committed_room
 
     def get_location(self) -> Optional[dict]:
         if self.location:
