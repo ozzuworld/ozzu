@@ -309,9 +309,14 @@ class PositioningHub:
                 )
                 urlopen(req, timeout=5)
                 self._stats["bridge_pushes"] += 1
-                log.info("Location: %s (%s, %.0f%% conf, method=%s)",
+                coord_str = ""
+                if location.get("x") is not None:
+                    coord_str = f" @({location['x']:.1f},{location['z']:.1f})"
+                    if location.get("furniture"):
+                        coord_str += f" [{location['furniture']}]"
+                log.info("Location: %s (%s, %.0f%% conf, method=%s)%s",
                          location["room"], location["presence"],
-                         location["confidence"], location["method"])
+                         location["confidence"], location["method"], coord_str)
             except (URLError, OSError) as e:
                 self._stats["errors"] += 1
                 log.warning("Bridge push failed: %s", e)

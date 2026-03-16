@@ -8,11 +8,19 @@ Fuses CSI presence from all nodes using:
 
 import time
 import math
+import logging
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import subprocess
 from protocol import CsiReport, BleReport, BleDevice, PRESENCE_NAMES
+from floor_plan import (
+    NODE_POSITIONS, WALL_SEGMENTS, ROOMS, FURNITURE,
+    count_walls_between, rssi_to_distance, trilaterate,
+    point_in_room, nearest_furniture,
+)
+
+log = logging.getLogger("solver")
 
 
 def _aes128_ecb_encrypt(key: bytes, plaintext: bytes) -> bytes:
@@ -165,9 +173,14 @@ class LocationEstimate:
     ble_device: Optional[str] = None
     timestamp: float = 0.0
     all_rooms: dict = field(default_factory=dict)
+    # Coordinate-based fields
+    x: Optional[float] = None
+    z: Optional[float] = None
+    furniture: Optional[str] = None
+    walls_to_nodes: dict = field(default_factory=dict)
 
     def to_dict(self):
-        return {
+        d = {
             "room": self.room,
             "presence": self.presence,
             "confidence": round(self.confidence, 1),
@@ -176,6 +189,12 @@ class LocationEstimate:
             "timestamp": self.timestamp,
             "beliefs": {k: round(v, 2) for k, v in self.all_rooms.items()},
         }
+        if self.x is not None and self.z is not None:
+            d["x"] = round(self.x, 2)
+            d["z"] = round(self.z, 2)
+        if self.furniture:
+            d["furniture"] = self.furniture
+        return d
 
 
 # ── Transition model ──
@@ -358,6 +377,77 @@ class PositionSolver:
 
         self._ekf_update()
 
+    def _estimate_coordinates(self) -> Optional[Tuple[float, float, str]]:
+        """Estimate x,z coordinates from BLE trilateration with wall attenuation.
+        Returns (x, z, furniture_context) or None if insufficient BLE data.
+        """
+        now = time.time()
+
+        # Find target device with active readings
+        target_dev = None
+        for addr, dev in self.devices.items():
+            if not dev.is_target:
+                continue
+            active = {nid: (rssi, ts) for nid, (rssi, ts) in dev.node_rssi.items()
+                      if now - ts < 15.0 and nid in NODE_POSITIONS}
+            if len(active) >= 2:
+                target_dev = dev
+                break
+
+        if target_dev is None:
+            return None
+
+        # Get active node readings
+        active_readings = {}
+        for nid, (rssi, ts) in target_dev.node_rssi.items():
+            if now - ts < 15.0 and nid in NODE_POSITIONS:
+                # Use smoothed RSSI
+                if nid in target_dev.rssi_kf:
+                    active_readings[nid] = target_dev.rssi_kf[nid].x
+                else:
+                    active_readings[nid] = rssi
+
+        if len(active_readings) < 2:
+            return None
+
+        # First pass: estimate position without wall correction (rough)
+        measurements_raw = []
+        for nid, rssi in active_readings.items():
+            pos = NODE_POSITIONS[nid]
+            dist = rssi_to_distance(rssi, wall_count=0)
+            measurements_raw.append((pos, dist))
+
+        rough_pos = trilaterate(measurements_raw)
+        if rough_pos is None:
+            return None
+
+        # Second pass: count walls between rough position and each node,
+        # then re-estimate distances with wall correction
+        measurements_corrected = []
+        for nid, rssi in active_readings.items():
+            node_pos = NODE_POSITIONS[nid]
+            walls = count_walls_between(rough_pos, node_pos)
+            dist = rssi_to_distance(rssi, wall_count=walls)
+            measurements_corrected.append((node_pos, dist))
+            log.debug("Node %d: RSSI=%.1f walls=%d dist=%.1fm",
+                       nid, rssi, walls, dist)
+
+        final_pos = trilaterate(measurements_corrected)
+        if final_pos is None:
+            return None
+
+        x, z = final_pos
+
+        # Clamp to apartment bounds
+        x = max(-4.4, min(4.4, x))
+        z = max(-5.5, min(5.5, z))
+
+        # Determine room and furniture
+        room_id = point_in_room(x, z)
+        furniture = nearest_furniture(x, z, room_id)
+
+        return (x, z, furniture)
+
     def _ekf_update(self):
         """EKF-enhanced Bayesian update."""
         now = time.time()
@@ -505,14 +595,34 @@ class PositionSolver:
 
         all_beliefs = {self.rooms[nid].room_name: posteriors[nid] for nid in posteriors}
 
+        # ── Coordinate estimation via BLE trilateration ──
+        coord_x, coord_z, furniture_ctx = None, None, None
+        coord_result = self._estimate_coordinates()
+        if coord_result is not None:
+            coord_x, coord_z, furniture_ctx = coord_result
+            # Override room from coordinates (more accurate than belief when BLE available)
+            coord_room = point_in_room(coord_x, coord_z)
+            if coord_room and coord_room in [r.room_name for r in self.rooms.values()]:
+                best_room_name = coord_room
+            else:
+                best_room_name = best_room.room_name
+            method = "ekf+ble+coord"
+            # Boost confidence when we have coordinates
+            confidence = min(99, confidence * 1.15)
+        else:
+            best_room_name = best_room.room_name
+
         self.location = LocationEstimate(
-            room=best_room.room_name,
+            room=best_room_name,
             presence=presence,
             confidence=min(99, confidence),
             method=method,
             ble_device=ble_addr,
             timestamp=now,
             all_rooms=all_beliefs,
+            x=coord_x,
+            z=coord_z,
+            furniture=furniture_ctx,
         )
 
         # Track transitions
