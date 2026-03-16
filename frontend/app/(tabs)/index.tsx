@@ -13,6 +13,7 @@ import { useMediaPlayer } from "../../lib/useMediaPlayer";
 import HomeMap3D, { DEVICE_MARKERS } from "../../components/home/HomeMap3D";
 import { getBridgeUrl } from "../../lib/bridge-api";
 import { useGlasses } from "../../lib/glasses-context";
+import { usePosition } from "../../lib/usePosition";
 import { BLEPairingModal } from "../../components/home/BLEPairingModal";
 
 // ── Design System ──
@@ -71,6 +72,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { entities, callService } = useHA();
   const { lastGestureAction } = useGlasses();
+  const { position } = usePosition();
   const acEntity = useEntity("climate.living_room_ac");
   const [pairingVisible, setPairingVisible] = useState(false);
 
@@ -119,6 +121,7 @@ export default function HomeScreen() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       {/* Fullscreen 3D Map */}
       <HomeMap3D
+        position={position}
         deviceStates={deviceStates}
         onDeviceToggle={handleDeviceToggle}
       />
