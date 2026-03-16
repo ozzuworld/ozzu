@@ -221,6 +221,7 @@ function DeviceMarker3D({
 function PositionBeacon({ position }: { position: PositionData }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const ringRef = useRef<THREE.Mesh>(null);
+  const pillarRef = useRef<THREE.Mesh>(null);
 
   const pos = useMemo(() => {
     if (position.x != null && position.z != null) {
@@ -232,14 +233,18 @@ function PositionBeacon({ position }: { position: PositionData }) {
   }, [position]);
 
   useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
     if (meshRef.current) {
-      const pulse = Math.sin(clock.getElapsedTime() * 3) * 0.05 + 0.25;
-      meshRef.current.scale.setScalar(pulse / 0.25);
+      // Pulsing scale
+      const pulse = 1.0 + Math.sin(t * 3) * 0.2;
+      meshRef.current.scale.setScalar(pulse);
+      // Gentle hover
+      meshRef.current.position.y = 0.5 + Math.sin(t * 2) * 0.1;
     }
     if (ringRef.current) {
-      const expand = (clock.getElapsedTime() % 2) / 2;
-      ringRef.current.scale.setScalar(1 + expand * 3);
-      (ringRef.current.material as THREE.MeshBasicMaterial).opacity = 0.6 * (1 - expand);
+      const expand = (t % 2) / 2;
+      ringRef.current.scale.setScalar(1 + expand * 4);
+      (ringRef.current.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - expand);
     }
   });
 
@@ -247,17 +252,25 @@ function PositionBeacon({ position }: { position: PositionData }) {
 
   return (
     <group position={pos}>
-      <mesh position={[0, -0.75, 0]}>
-        <cylinderGeometry args={[0.03, 0.03, 1.5, 8]} />
-        <meshBasicMaterial color={color} transparent opacity={0.4} />
+      {/* Vertical pillar — always visible */}
+      <mesh ref={pillarRef} position={[0, -0.5, 0]}>
+        <cylinderGeometry args={[0.04, 0.04, 2.0, 8]} />
+        <meshBasicMaterial color={color} transparent opacity={0.5} depthTest={false} />
       </mesh>
-      <mesh ref={meshRef}>
-        <sphereGeometry args={[0.25, 16, 16]} />
-        <meshBasicMaterial color={color} />
+      {/* Main beacon sphere — large, above everything, no depth test */}
+      <mesh ref={meshRef} position={[0, 0.5, 0]} renderOrder={999}>
+        <sphereGeometry args={[0.3, 16, 16]} />
+        <meshBasicMaterial color={color} depthTest={false} />
       </mesh>
-      <mesh ref={ringRef} position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.25, 0.35, 32]} />
-        <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} />
+      {/* Outer glow sphere */}
+      <mesh position={[0, 0.5, 0]} renderOrder={998}>
+        <sphereGeometry args={[0.5, 16, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.15} depthTest={false} />
+      </mesh>
+      {/* Pulsing ring at floor level */}
+      <mesh ref={ringRef} position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={997}>
+        <ringGeometry args={[0.3, 0.45, 32]} />
+        <meshBasicMaterial color={color} transparent opacity={0.8} side={THREE.DoubleSide} depthTest={false} />
       </mesh>
     </group>
   );

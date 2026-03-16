@@ -197,6 +197,7 @@ export default function HomeScreen() {
               </Text>
               <Text style={{ color: C.textSec, fontSize: 10 }}>
                 {activeDeviceCount} device{activeDeviceCount !== 1 ? "s" : ""} active
+                {position ? ` \u00B7 ${position.room}` : ""}
               </Text>
             </View>
           </View>
