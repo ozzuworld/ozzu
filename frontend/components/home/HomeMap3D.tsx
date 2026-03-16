@@ -71,8 +71,9 @@ interface CameraState {
 }
 
 // ── GLB Model ──
-function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
+function ApartmentModel({ activeRoom, modelRef }: { activeRoom?: string | null; modelRef?: React.MutableRefObject<THREE.Group | null> }) {
   const [model, setModel] = useState<THREE.Group | null>(null);
+  const prevRoom = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,7 +90,12 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
         const view = new Uint8Array(buffer);
         for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
         const loader = new GLTFLoader();
-        loader.parse(buffer, "", (gltf) => { if (!cancelled) setModel(gltf.scene); });
+        loader.parse(buffer, "", (gltf) => {
+          if (!cancelled) {
+            setModel(gltf.scene);
+            if (modelRef) modelRef.current = gltf.scene;
+          }
+        });
       } catch (err) {
         console.warn("Failed to load GLB:", err);
       }
@@ -100,6 +106,8 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
 
   useEffect(() => {
     if (!model) return;
+
+    // Reset all meshes to base color
     model.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
         const mat = child.material as THREE.MeshStandardMaterial;
@@ -110,6 +118,8 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
         mat.metalness = 0.05;
       }
     });
+
+    // Highlight the active room's floor mesh with its color
     if (activeRoom) {
       const room = roomData.rooms.find((r) => r.id === activeRoom);
       if (room) {
@@ -117,17 +127,33 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
         if (floorMesh instanceof THREE.Mesh && floorMesh.material) {
           const mat = floorMesh.material as THREE.MeshStandardMaterial;
           mat.color.set(room.color);
-          mat.opacity = 0.6;
+          mat.opacity = 0.7;
         }
+        // Also tint the shadow/wall mesh
         const shadowIdx = parseInt(room.floor_mesh.replace("GLTF_", "")) + 1;
         const shadowMesh = model.getObjectByName(`GLTF_${shadowIdx}`);
         if (shadowMesh instanceof THREE.Mesh && shadowMesh.material) {
           const mat = shadowMesh.material as THREE.MeshStandardMaterial;
           mat.color.set(room.color);
-          mat.opacity = 0.4;
+          mat.opacity = 0.45;
         }
       }
     }
+
+    // Dim rooms that are NOT active (subtle darkening)
+    if (activeRoom) {
+      for (const room of roomData.rooms) {
+        if (room.id === activeRoom) continue;
+        const floorMesh = model.getObjectByName(room.floor_mesh);
+        if (floorMesh instanceof THREE.Mesh && floorMesh.material) {
+          const mat = floorMesh.material as THREE.MeshStandardMaterial;
+          mat.color.set("#a1a1aa");
+          mat.opacity = 0.6;
+        }
+      }
+    }
+
+    prevRoom.current = activeRoom || null;
   }, [model, activeRoom]);
 
   if (!model) return null;
@@ -217,60 +243,117 @@ function DeviceMarker3D({
   );
 }
 
-// ── Position Beacon ──
+// ── Room Highlight Overlay — glowing floor for the active room ──
+function RoomHighlight({ roomId, model }: { roomId: string; model: THREE.Group | null }) {
+  const glowRef = useRef<THREE.Mesh>(null);
+  const room = roomData.rooms.find((r) => r.id === roomId);
+
+  useFrame(({ clock }) => {
+    if (!glowRef.current || !room) return;
+    const t = clock.getElapsedTime();
+    // Gentle breathing glow
+    const pulse = 0.12 + Math.sin(t * 1.5) * 0.04;
+    (glowRef.current.material as THREE.MeshBasicMaterial).opacity = pulse;
+  });
+
+  if (!room) return null;
+
+  const cx = room.center[0];
+  const cz = room.center[1];
+  const sx = room.bounds.x[1] - room.bounds.x[0];
+  const sz = room.bounds.z[1] - room.bounds.z[0];
+
+  return (
+    <mesh
+      ref={glowRef}
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[cx, -1.53, cz]}
+      renderOrder={990}
+    >
+      <planeGeometry args={[sx, sz]} />
+      <meshBasicMaterial
+        color={room.color}
+        transparent
+        opacity={0.12}
+        side={THREE.DoubleSide}
+        depthTest={false}
+      />
+    </mesh>
+  );
+}
+
+// ── Position Beacon — smoothed, snapped to room bounds ──
 function PositionBeacon({ position }: { position: PositionData }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const ringRef = useRef<THREE.Mesh>(null);
   const pillarRef = useRef<THREE.Mesh>(null);
+  const smoothPos = useRef(new THREE.Vector3(0, 0, 0));
+  const initialized = useRef(false);
 
-  const pos = useMemo(() => {
-    if (position.x != null && position.z != null) {
-      return new THREE.Vector3(position.x, 0, position.z);
-    }
+  // Compute target position: use coordinates if available, clamp to room bounds
+  const targetPos = useMemo(() => {
     const room = roomData.rooms.find((r) => r.id === position.room);
+    if (position.x != null && position.z != null && room) {
+      // Clamp coordinates to the detected room's bounds
+      const cx = Math.max(room.bounds.x[0], Math.min(room.bounds.x[1], position.x));
+      const cz = Math.max(room.bounds.z[0], Math.min(room.bounds.z[1], position.z));
+      return new THREE.Vector3(cx, 0, cz);
+    }
     if (room) return new THREE.Vector3(room.center[0], 0, room.center[1]);
     return new THREE.Vector3(0, 0, 0);
   }, [position]);
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime();
+
+    // Smooth lerp — heavy damping to prevent teleporting
+    // 0.03 = very smooth glide (~1-2 seconds to settle)
+    if (!initialized.current) {
+      smoothPos.current.copy(targetPos);
+      initialized.current = true;
+    } else {
+      smoothPos.current.lerp(targetPos, 0.03);
+    }
+
     if (meshRef.current) {
-      // Pulsing scale
-      const pulse = 1.0 + Math.sin(t * 3) * 0.2;
-      meshRef.current.scale.setScalar(pulse);
+      meshRef.current.parent!.position.set(smoothPos.current.x, 0, smoothPos.current.z);
       // Gentle hover
-      meshRef.current.position.y = 0.5 + Math.sin(t * 2) * 0.1;
+      const pulse = 1.0 + Math.sin(t * 2) * 0.15;
+      meshRef.current.scale.setScalar(pulse);
+      meshRef.current.position.y = 0.3 + Math.sin(t * 1.5) * 0.08;
     }
     if (ringRef.current) {
-      const expand = (t % 2) / 2;
-      ringRef.current.scale.setScalar(1 + expand * 4);
-      (ringRef.current.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - expand);
+      const expand = (t % 2.5) / 2.5;
+      ringRef.current.scale.setScalar(1 + expand * 3);
+      (ringRef.current.material as THREE.MeshBasicMaterial).opacity = 0.6 * (1 - expand);
     }
   });
 
   const color = position.method?.includes("ble") ? "#22C55E" : "#06B6D4";
+  // Scale beacon size by confidence — lower confidence = smaller, more transparent
+  const conf = Math.max(20, position.confidence || 50) / 100;
 
   return (
-    <group position={pos}>
+    <group position={[0, 0, 0]}>
       {/* Vertical pillar — always visible */}
-      <mesh ref={pillarRef} position={[0, -0.5, 0]}>
-        <cylinderGeometry args={[0.04, 0.04, 2.0, 8]} />
-        <meshBasicMaterial color={color} transparent opacity={0.5} depthTest={false} />
+      <mesh ref={pillarRef} position={[0, -0.6, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 1.6, 8]} />
+        <meshBasicMaterial color={color} transparent opacity={0.3 * conf} depthTest={false} />
       </mesh>
-      {/* Main beacon sphere — large, above everything, no depth test */}
-      <mesh ref={meshRef} position={[0, 0.5, 0]} renderOrder={999}>
-        <sphereGeometry args={[0.3, 16, 16]} />
-        <meshBasicMaterial color={color} depthTest={false} />
+      {/* Main beacon sphere */}
+      <mesh ref={meshRef} position={[0, 0.3, 0]} renderOrder={999}>
+        <sphereGeometry args={[0.22 * conf + 0.08, 16, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.85} depthTest={false} />
       </mesh>
       {/* Outer glow sphere */}
-      <mesh position={[0, 0.5, 0]} renderOrder={998}>
-        <sphereGeometry args={[0.5, 16, 16]} />
-        <meshBasicMaterial color={color} transparent opacity={0.15} depthTest={false} />
+      <mesh position={[0, 0.3, 0]} renderOrder={998}>
+        <sphereGeometry args={[0.4, 16, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.1 * conf} depthTest={false} />
       </mesh>
       {/* Pulsing ring at floor level */}
       <mesh ref={ringRef} position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={997}>
-        <ringGeometry args={[0.3, 0.45, 32]} />
-        <meshBasicMaterial color={color} transparent opacity={0.8} side={THREE.DoubleSide} depthTest={false} />
+        <ringGeometry args={[0.25, 0.38, 32]} />
+        <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} depthTest={false} />
       </mesh>
     </group>
   );
@@ -627,6 +710,7 @@ export default function HomeMap3D({
   const effectiveActiveRoom = activeRoom || position?.room;
   const [selectedDevice, setSelectedDevice] = useState<DeviceMarker | null>(null);
   const [popupVisible, setPopupVisible] = useState(false);
+  const modelRef = useRef<THREE.Group | null>(null);
 
   // Camera orbit state
   const cameraState = useRef<CameraState>({
@@ -767,8 +851,13 @@ export default function HomeMap3D({
           <CameraController stateRef={cameraState} />
           <Lighting />
           <Suspense fallback={null}>
-            <ApartmentModel activeRoom={effectiveActiveRoom} />
+            <ApartmentModel activeRoom={effectiveActiveRoom} modelRef={modelRef} />
           </Suspense>
+
+          {/* Room glow overlay */}
+          {!editMode && effectiveActiveRoom && (
+            <RoomHighlight roomId={effectiveActiveRoom} model={modelRef.current} />
+          )}
 
           {/* Device markers */}
           {placedDevices.map((device) => {
@@ -793,6 +882,77 @@ export default function HomeMap3D({
           )}
         </Canvas>
       </View>
+
+      {/* Room label overlay — shows current room + confidence */}
+      {!editMode && position && effectiveActiveRoom && (() => {
+        const room = roomData.rooms.find((r: any) => r.id === effectiveActiveRoom);
+        if (!room) return null;
+        const conf = position.confidence || 0;
+        const methodLabel = position.method?.includes("ble") ? "BLE" : position.method?.includes("coord") ? "BLE+CSI" : "CSI";
+        return (
+          <View
+            style={{
+              position: "absolute",
+              bottom: 24,
+              left: 16,
+              right: 16,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              backgroundColor: "rgba(0,0,0,0.7)",
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: `${room.color}40`,
+              paddingVertical: 10,
+              paddingHorizontal: 16,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 5,
+                  backgroundColor: room.color,
+                  ...(Platform.OS === "ios" ? {
+                    shadowColor: room.color,
+                    shadowRadius: 6,
+                    shadowOpacity: 0.8,
+                    shadowOffset: { width: 0, height: 0 },
+                  } : {}),
+                }}
+              />
+              <Text style={{ color: "#FFF", fontSize: 15, fontWeight: "600" }}>
+                {room.name}
+              </Text>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={{
+                color: "rgba(255,255,255,0.4)",
+                fontSize: 11,
+                fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+              }}>
+                {methodLabel}
+              </Text>
+              <View style={{
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                borderRadius: 6,
+                backgroundColor: conf > 60 ? "rgba(34,197,94,0.2)" : conf > 35 ? "rgba(251,191,36,0.2)" : "rgba(239,68,68,0.2)",
+              }}>
+                <Text style={{
+                  color: conf > 60 ? "#22C55E" : conf > 35 ? "#FBBF24" : "#EF4444",
+                  fontSize: 11,
+                  fontWeight: "700",
+                  fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                }}>
+                  {Math.round(conf)}%
+                </Text>
+              </View>
+            </View>
+          </View>
+        );
+      })()}
 
       {/* Edit mode banner */}
       {editMode && (
