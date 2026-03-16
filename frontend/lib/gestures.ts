@@ -286,16 +286,17 @@ function detectSwipe(landmarks: HandLandmark[]): GestureResult | null {
     const dt = now - prevWristTime;
 
     if (dt > 50) {
-      // Check vertical swipe first (two-finger swipe down = target lock)
+      // Check vertical swipe first (swipe down = cycle device target)
       // y increases downward in image space, so dy > 0 = swipe down
-      if (dy > 0.12 && Math.abs(dy) > Math.abs(dx) * 1.5) {
-        // Swipe down — check if two fingers are extended (index + middle)
+      if (dy > 0.10 && Math.abs(dy) > Math.abs(dx) * 1.3) {
+        // Swipe down — just need 2+ fingers visible (any open hand swipe)
         const indexUp = isFingerExtended(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP);
         const middleUp = isFingerExtended(landmarks, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP);
-        const ringCurled = isFingerCurled(landmarks, RING_TIP, RING_PIP);
-        const pinkyCurled = isFingerCurled(landmarks, PINKY_TIP, PINKY_PIP);
+        const ringUp = isFingerExtended(landmarks, RING_TIP, RING_PIP, RING_MCP);
+        const pinkyUp = isFingerExtended(landmarks, PINKY_TIP, PINKY_PIP, PINKY_MCP);
+        const extendedCount = [indexUp, middleUp, ringUp, pinkyUp].filter(Boolean).length;
 
-        if (indexUp && middleUp && ringCurled && pinkyCurled) {
+        if (extendedCount >= 2) {
           prevWristX = wristX;
           prevWristY = wristY;
           prevWristTime = now;
