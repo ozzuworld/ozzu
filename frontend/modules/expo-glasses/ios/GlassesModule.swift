@@ -231,11 +231,42 @@ public class GlassesModule: Module {
             self.sendEvent("onConnectionChanged", ["state": self.connectionState])
 
             do {
+                // If already registered, unregister first then re-register
+                let currentState = Wearables.shared.registrationState
+                if case .registered = currentState {
+                    GlassesModule.log("Already registered — unregistering first")
+                    try await Wearables.shared.startUnregistration()
+                    GlassesModule.log("Unregistration succeeded, now re-registering")
+                }
+
                 try await Wearables.shared.startRegistration()
                 GlassesModule.log("startRegistration() succeeded")
             } catch let regError as RegistrationError {
-                // Catch RegistrationError specifically — .description has the real error message
                 let desc = regError.description
+                // Auto-retry: if "already registered", unregister and try once more
+                if desc.lowercased().contains("already registered") {
+                    GlassesModule.log("RegistrationError: already registered — auto-retrying")
+                    do {
+                        try await Wearables.shared.startUnregistration()
+                        GlassesModule.log("Unregistration succeeded, retrying registration")
+                        try await Wearables.shared.startRegistration()
+                        GlassesModule.log("Re-registration succeeded after unregister")
+                        return
+                    } catch {
+                        let retryMsg = "\(error)"
+                        GlassesModule.log("Re-registration failed: \(retryMsg)")
+                        self.connectionState = "disconnected"
+                        self.sendEvent("onConnectionChanged", [
+                            "state": self.connectionState,
+                            "error": retryMsg
+                        ])
+                        self.sendEvent("onError", [
+                            "code": "REGISTRATION_FAILED",
+                            "message": retryMsg
+                        ])
+                        return
+                    }
+                }
                 GlassesModule.log("RegistrationError: \(desc) (raw: \(regError))")
                 self.connectionState = "disconnected"
                 self.sendEvent("onConnectionChanged", [

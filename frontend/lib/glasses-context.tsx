@@ -469,29 +469,10 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
     try {
       await Glasses.initialize();
 
-      // Check if already registered from a previous session
-      const diag = Glasses.getDiagnostics();
-      const regState = diag?.registrationState || "";
-      if (regState.toLowerCase().includes("registered") && !regState.toLowerCase().includes("un")) {
-        // Stale registration — unregister first, then re-register
-        try { await Glasses.unregisterDevice(); } catch {}
-      }
-
+      // Native module handles "already registered" retry automatically
       await Glasses.registerDevice();
     } catch (e: any) {
-      const msg = e.message || "Failed to connect";
-      // If "already registered", try unregister + re-register once
-      if (msg.toLowerCase().includes("already registered")) {
-        try {
-          await Glasses.unregisterDevice();
-          await Glasses.registerDevice();
-          return; // success on retry
-        } catch (retryErr: any) {
-          setError(retryErr.message || "Failed to reconnect");
-          return;
-        }
-      }
-      setError(msg);
+      setError(e.message || "Failed to connect");
     }
   }, []);
 
