@@ -1,64 +1,28 @@
-// Home Dashboard — Map-centric smart home control
-// 3D apartment map hero + compact device controls below
+// Home Dashboard — Fullscreen 3D apartment map with interactive device markers
+// Devices placed at real positions, tappable for controls
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  Dimensions,
-  Modal,
-  Switch,
-  Platform,
-} from "react-native";
+import { View, Text, Pressable, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBadge } from "../../components/StatusBadge";
 import { HamburgerMenu } from "../../components/HamburgerMenu";
 import { useHA } from "../../lib/ha-context";
 import { useEntity } from "../../lib/useEntity";
 import { useMediaPlayer } from "../../lib/useMediaPlayer";
-import { useVacuum } from "../../lib/useVacuum";
-import { rooms, type InventoryItem, type Room } from "../../lib/rooms";
-import { ACWidget } from "../../components/devices/ACWidget";
-import { VacuumWidget } from "../../components/devices/VacuumWidget";
-import HomeMap3D from "../../components/home/HomeMap3D";
-import { DeviceSheet } from "../../components/home/DeviceSheet";
-import type { MapPin } from "../../lib/map-config";
-import { fetchSchedules, updateSchedule, type DeviceSchedule, getBridgeUrl } from "../../lib/bridge-api";
-import { useGlasses, type FocusedDevice } from "../../lib/glasses-context";
+import HomeMap3D, { DEVICE_MARKERS } from "../../components/home/HomeMap3D";
+import { getBridgeUrl } from "../../lib/bridge-api";
+import { useGlasses } from "../../lib/glasses-context";
 import { BLEPairingModal } from "../../components/home/BLEPairingModal";
-
-const { width: SW } = Dimensions.get("window");
 
 // ── Design System ──
 const C = {
   bg: "#000000",
-  card: "rgba(255,255,255,0.06)",
-  cardActive: "rgba(255,255,255,0.12)",
-  border: "rgba(255,255,255,0.08)",
-  borderActive: "rgba(255,255,255,0.18)",
   text: "#FFFFFF",
   textSec: "rgba(255,255,255,0.55)",
   textDim: "rgba(255,255,255,0.3)",
   climate: "#4FC3F7",
-  media: "#CE93D8",
-  security: "#66BB6A",
-  power: "#FFB830",
-  vacuum: "#10B981",
-  generic: "#90A4AE",
 };
-
-function deviceColor(domain: string, entityId: string): string {
-  if (domain === "climate") return C.climate;
-  if (domain === "vacuum") return C.vacuum;
-  if (domain === "media_player") return C.media;
-  if (entityId.includes("cam") || entityId.includes("siren")) return C.security;
-  if (domain === "switch") return C.power;
-  return C.generic;
-}
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -68,391 +32,37 @@ function getGreeting(): string {
   return "Good evening";
 }
 
-// ── Compact Device Chip ──
-function DeviceChip({
-  item,
-  onPress,
-}: {
-  item: InventoryItem;
-  onPress: () => void;
-}) {
-  const entity = useEntity(item.primaryEntityId);
-  const state = entity?.state ?? "unavailable";
-  const isOn = state === "on" || state === "playing" || state === "home" || state === "cleaning"
-    || state === "cool" || state === "heat" || state === "auto" || state === "returning";
-  const isUnavailable = state === "unavailable";
-  const domain = item.primaryEntityId.split(".")[0];
-  const color = deviceColor(domain, item.primaryEntityId);
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        backgroundColor: isOn ? `${color}18` : C.card,
-        borderWidth: 1,
-        borderColor: isOn ? `${color}35` : C.border,
-        borderRadius: 14,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        opacity: pressed ? 0.7 : isUnavailable ? 0.35 : 1,
-        minWidth: (SW - 52) / 2,
-        flex: 1,
-      })}
-    >
-      {/* Icon */}
-      <View
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 16,
-          backgroundColor: isOn ? `${color}25` : "rgba(255,255,255,0.06)",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <Text style={{ fontSize: 14 }}>{item.icon}</Text>
-      </View>
-      {/* Name + state */}
-      <View style={{ flex: 1 }}>
-        <Text
-          numberOfLines={1}
-          style={{
-            color: isOn ? C.text : "rgba(255,255,255,0.6)",
-            fontSize: 12,
-            fontWeight: "600",
-          }}
-        >
-          {item.name}
-        </Text>
-        <Text
-          style={{
-            color: isOn ? `${color}CC` : C.textDim,
-            fontSize: 10,
-            fontWeight: "400",
-            marginTop: 1,
-          }}
-        >
-          {isUnavailable ? "Offline" : state}
-        </Text>
-      </View>
-      {/* Status dot */}
-      <View
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: 3,
-          backgroundColor: isOn ? color : "rgba(255,255,255,0.12)",
-        }}
-      />
-    </Pressable>
-  );
-}
-
-// ── Quick Action Pill ──
-function QuickPill({
-  icon,
-  label,
-  entityId,
-  domain,
-  isActive,
-  onPress,
-}: {
-  icon: string;
-  label: string;
-  entityId: string;
-  domain: string;
-  isActive: boolean;
-  onPress: () => void;
-}) {
-  const color = deviceColor(domain, entityId);
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        height: 36,
-        paddingHorizontal: 14,
-        gap: 6,
-        backgroundColor: isActive ? `${color}20` : "rgba(255,255,255,0.06)",
-        borderWidth: 1,
-        borderColor: isActive ? `${color}40` : C.border,
-        borderRadius: 18,
-        opacity: pressed ? 0.7 : 1,
-      })}
-    >
-      <Text style={{ fontSize: 14 }}>{icon}</Text>
-      <Text
-        style={{
-          color: isActive ? color : C.textSec,
-          fontSize: 11,
-          fontWeight: "600",
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-// ── Spotify Mini Banner ──
-function SpotifyBanner() {
+// ── Now Playing Mini Bar ──
+function NowPlayingBar() {
   const { state } = useMediaPlayer();
-  const router = useRouter();
   if (!state.available || !state.isPlaying) return null;
 
   return (
-    <Pressable
-      onPress={() => router.push("/(tabs)/music")}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-        padding: 10,
-        backgroundColor: "rgba(29,185,84,0.08)",
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: "rgba(29,185,84,0.2)",
-        opacity: pressed ? 0.7 : 1,
-      })}
-    >
-      <View
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          backgroundColor: "rgba(29,185,84,0.15)",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <Text style={{ fontSize: 14 }}>{"\uD83C\uDFB5"}</Text>
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={{ color: "#1DB954", fontSize: 12, fontWeight: "600" }}>
-          {state.trackName}
-        </Text>
-        <Text numberOfLines={1} style={{ color: C.textDim, fontSize: 10 }}>
-          {state.artist}
-        </Text>
-      </View>
-      <Text style={{ color: "#1DB954", fontSize: 10 }}>{"\u25B6"}</Text>
-    </Pressable>
-  );
-}
-
-function WasherBanner() {
-  const status = useEntity("sensor.151732606804847_status");
-  const progress = useEntity("sensor.151732606804847_progress");
-  const remaining = useEntity("sensor.151732606804847_time_remaining");
-  if (!status || status.state === "unavailable" || status.state === "idle" || status.state === "off") return null;
-
-  const pct = progress ? parseInt(progress.state, 10) : 0;
-
-  return (
     <View
       style={{
-        padding: 10,
-        backgroundColor: "rgba(59,130,246,0.08)",
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: "rgba(59,130,246,0.2)",
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Text style={{ fontSize: 14 }}>{"\uD83E\uDEE7"}</Text>
-          <Text style={{ color: "#93C5FD", fontSize: 12, fontWeight: "600" }}>
-            Washer {"\u00B7"} {status.state}
-          </Text>
-        </View>
-        {remaining?.state && (
-          <Text style={{ color: C.textDim, fontSize: 10 }}>{remaining.state}</Text>
-        )}
-      </View>
-      {pct > 0 && (
-        <View style={{ marginTop: 8, height: 2, backgroundColor: "rgba(59,130,246,0.12)", borderRadius: 1 }}>
-          <View style={{ width: `${Math.min(100, pct)}%`, height: 2, backgroundColor: "#3B82F6", borderRadius: 1 }} />
-        </View>
-      )}
-    </View>
-  );
-}
-
-function VacuumBanner() {
-  const { state: vac } = useVacuum();
-  if (!vac.state || vac.state === "unavailable" || vac.isDocked) return null;
-
-  const color = vac.isCleaning ? C.vacuum : vac.isReturning ? "#F59E0B" : vac.isPaused ? "#F97316" : C.generic;
-
-  return (
-    <View
-      style={{
-        padding: 10,
-        backgroundColor: `${color}10`,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: `${color}30`,
+        position: "absolute",
+        bottom: 52,
+        left: 12,
+        right: 12,
         flexDirection: "row",
         alignItems: "center",
-        justifyContent: "space-between",
+        gap: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        backgroundColor: "rgba(29,185,84,0.15)",
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: "rgba(29,185,84,0.25)",
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text style={{ fontSize: 14 }}>{"\uD83E\uDD16"}</Text>
-        <View>
-          <Text style={{ color, fontSize: 12, fontWeight: "600" }}>
-            Dusk Vader {"\u00B7"} {vac.status}
-          </Text>
-          {vac.currentRoom && (
-            <Text style={{ color: C.textDim, fontSize: 10 }}>{vac.currentRoom}</Text>
-          )}
-        </View>
-      </View>
-      <Text style={{ color: vac.battery < 20 ? "#EF4444" : C.textSec, fontSize: 11, fontWeight: "600" }}>
-        {"\uD83D\uDD0B"} {vac.battery}%
+      <Text style={{ fontSize: 12 }}>{"\uD83C\uDFB5"}</Text>
+      <Text numberOfLines={1} style={{ flex: 1, color: "#1DB954", fontSize: 11, fontWeight: "600" }}>
+        {state.trackName}
+      </Text>
+      <Text numberOfLines={1} style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>
+        {state.artist}
       </Text>
     </View>
-  );
-}
-
-// ── Schedule Row ──
-const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
-
-function ScheduleRow({
-  schedule,
-  onToggle,
-}: {
-  schedule: DeviceSchedule;
-  onToggle: (id: number, enabled: boolean) => void;
-}) {
-  const timeStr = `${String(schedule.cron_hour).padStart(2, "0")}:${String(schedule.cron_minute).padStart(2, "0")}`;
-  const daysStr = schedule.cron_days.length === 7
-    ? "Every day"
-    : schedule.cron_days.map((d) => DAY_LABELS[d]).join(" ");
-
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: C.card,
-        borderRadius: 12,
-        padding: 12,
-        borderWidth: 1,
-        borderColor: schedule.enabled ? C.borderActive : C.border,
-      }}
-    >
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: schedule.enabled ? C.text : C.textDim, fontSize: 12, fontWeight: "500" }}>
-          {schedule.name}
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
-          <Text
-            style={{
-              color: schedule.enabled ? C.text : C.textDim,
-              fontSize: 18,
-              fontWeight: "300",
-              fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-            }}
-          >
-            {timeStr}
-          </Text>
-          <Text style={{ color: C.textDim, fontSize: 10 }}>{daysStr}</Text>
-        </View>
-      </View>
-      <Switch
-        value={schedule.enabled}
-        onValueChange={(val) => onToggle(schedule.id, val)}
-        trackColor={{ false: "rgba(255,255,255,0.08)", true: "rgba(6,182,212,0.3)" }}
-        thumbColor={schedule.enabled ? C.climate : "rgba(255,255,255,0.3)"}
-      />
-    </View>
-  );
-}
-
-// ── Room Detail Modal ──
-function RoomDetailModal({
-  room,
-  visible,
-  onClose,
-  onFocusDevice,
-}: {
-  room: Room | null;
-  visible: boolean;
-  onClose: () => void;
-  onFocusDevice: (d: FocusedDevice) => void;
-}) {
-  const insets = useSafeAreaInsets();
-  if (!room) return null;
-
-  const isLivingRoom = room.name === "Living Room";
-  const isCleaning = room.name === "Cleaning";
-
-  return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            paddingHorizontal: 20,
-            paddingVertical: 16,
-            borderBottomWidth: 1,
-            borderColor: C.border,
-          }}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <Text style={{ fontSize: 24 }}>{room.icon}</Text>
-            <Text style={{ color: C.text, fontSize: 20, fontWeight: "600" }}>{room.name}</Text>
-          </View>
-          <Pressable
-            onPress={onClose}
-            hitSlop={20}
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              backgroundColor: "rgba(255,255,255,0.08)",
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ color: C.text, fontSize: 16, fontWeight: "600" }}>X</Text>
-          </Pressable>
-        </View>
-
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}>
-          <View style={{ gap: 8 }}>
-            {room.items.map((item) => (
-              <DeviceChip
-                key={item.id}
-                item={item}
-                onPress={() => {
-                  const domain = item.primaryEntityId.split(".")[0];
-                  onFocusDevice({ entityId: item.primaryEntityId, domain, name: item.name });
-                }}
-              />
-            ))}
-          </View>
-          {isLivingRoom && (
-            <View style={{ marginTop: 20 }}>
-              <ACWidget entityId="climate.living_room_ac" />
-            </View>
-          )}
-          {isCleaning && (
-            <View style={{ marginTop: 20 }}>
-              <VacuumWidget entityId="vacuum.dusk_vader" />
-            </View>
-          )}
-        </ScrollView>
-      </View>
-    </Modal>
   );
 }
 
@@ -460,29 +70,16 @@ function RoomDetailModal({
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { entities, callService } = useHA();
-  const { setFocusedDevice, lastGestureAction } = useGlasses();
+  const { lastGestureAction } = useGlasses();
   const acEntity = useEntity("climate.living_room_ac");
-  const [expandedRoom, setExpandedRoom] = useState<Room | null>(null);
-  const [schedules, setSchedules] = useState<DeviceSchedule[]>([]);
   const [pairingVisible, setPairingVisible] = useState(false);
 
-  useEffect(() => {
-    fetchSchedules().then((r) => setSchedules(r.schedules)).catch(() => {});
-  }, []);
-
-  const handleScheduleToggle = useCallback(async (id: number, enabled: boolean) => {
-    setSchedules((prev) => prev.map((s) => s.id === id ? { ...s, enabled } : s));
-    try { await updateSchedule(id, { enabled }); }
-    catch { setSchedules((prev) => prev.map((s) => s.id === id ? { ...s, enabled: !enabled } : s)); }
-  }, []);
-
+  // Count active devices
   const activeDeviceCount = useMemo(() => {
     let count = 0;
-    for (const room of rooms) {
-      for (const item of room.items) {
-        const e = entities[item.primaryEntityId];
-        if (e && (e.state === "on" || e.state === "playing" || e.state === "cleaning")) count++;
-      }
+    for (const marker of DEVICE_MARKERS) {
+      const e = entities[marker.entityId];
+      if (e && ["on", "playing", "cleaning", "cool", "heat", "auto"].includes(e.state)) count++;
     }
     return count;
   }, [entities]);
@@ -491,66 +88,76 @@ export default function HomeScreen() {
     ? Math.round(acEntity.attributes.current_temperature)
     : null;
 
-  const quickActions = useMemo(() => [
-    { icon: "\u2744\uFE0F", label: "AC", entityId: "climate.living_room_ac", domain: "climate" },
-    { icon: "\uD83D\uDCFA", label: "TV", entityId: "media_player.main_tv", domain: "media_player" },
-    { icon: "\uD83E\uDD16", label: "Vacuum", entityId: "vacuum.dusk_vader", domain: "vacuum" },
-    { icon: "\uD83D\uDCF9", label: "LR Cam", entityId: "switch.living_room_cam_power", domain: "switch" },
-    { icon: "\uD83D\uDCF9", label: "Sec Cam", entityId: "switch.cam1_power", domain: "switch" },
-    { icon: "\uD83E\uDEE7", label: "Washer", entityId: "switch.151732606804847_power", domain: "switch" },
-  ], []);
-
-  const handleQuickAction = useCallback((action: typeof quickActions[0]) => {
-    const e = entities[action.entityId];
-    if (!e) return;
-    setFocusedDevice({ entityId: action.entityId, domain: action.domain, name: action.label });
-    if (action.domain === "switch") {
-      callService("switch", "toggle", {}, { entity_id: action.entityId });
-    } else if (action.domain === "media_player") {
-      callService("media_player", "toggle", {}, { entity_id: action.entityId });
-    } else if (action.domain === "vacuum") {
-      const isActive = e.state === "cleaning" || e.state === "returning";
-      callService("vacuum", isActive ? "return_to_base" : "start", {}, { entity_id: action.entityId });
+  // Build device states map for the 3D scene
+  const deviceStates = useMemo(() => {
+    const states: Record<string, { state: string; attributes?: any }> = {};
+    for (const marker of DEVICE_MARKERS) {
+      const e = entities[marker.entityId];
+      if (e) states[marker.entityId] = { state: e.state, attributes: e.attributes };
     }
-  }, [entities, callService, setFocusedDevice]);
-
-  const roomActiveCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const room of rooms) {
-      let c = 0;
-      for (const item of room.items) {
-        const e = entities[item.primaryEntityId];
-        if (e && (e.state === "on" || e.state === "playing" || e.state === "cleaning" || e.state === "home")) c++;
-      }
-      counts[room.name] = c;
-    }
-    return counts;
+    return states;
   }, [entities]);
+
+  // Handle device toggle from popup
+  const handleDeviceToggle = useCallback((entityId: string, domain: string) => {
+    if (domain === "switch") {
+      callService("switch", "toggle", {}, { entity_id: entityId });
+    } else if (domain === "media_player") {
+      callService("media_player", "toggle", {}, { entity_id: entityId });
+    } else if (domain === "climate") {
+      const e = entities[entityId];
+      const isOn = e && ["cool", "heat", "auto"].includes(e.state);
+      callService("climate", isOn ? "turn_off" : "turn_on", {}, { entity_id: entityId });
+    } else if (domain === "vacuum") {
+      const e = entities[entityId];
+      const isActive = e && (e.state === "cleaning" || e.state === "returning");
+      callService("vacuum", isActive ? "return_to_base" : "start", {}, { entity_id: entityId });
+    }
+  }, [entities, callService]);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* ── Compact Header ── */}
-      <View style={{ paddingTop: insets.top + 4, paddingBottom: 6, paddingHorizontal: 16 }}>
+      {/* Fullscreen 3D Map */}
+      <HomeMap3D
+        deviceStates={deviceStates}
+        onDeviceToggle={handleDeviceToggle}
+      />
+
+      {/* Floating Header Overlay */}
+      <View
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          paddingTop: insets.top + 4,
+          paddingBottom: 8,
+          paddingHorizontal: 16,
+          // Gradient-like fade from top
+          backgroundColor: "rgba(0,0,0,0.5)",
+        }}
+        pointerEvents="box-none"
+      >
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }} pointerEvents="auto">
             <HamburgerMenu />
             <View>
-              <Text style={{ color: C.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.5 }}>
+              <Text style={{ color: C.text, fontSize: 20, fontWeight: "700", letterSpacing: -0.5 }}>
                 {getGreeting()}
               </Text>
-              <Text style={{ color: C.textSec, fontSize: 11 }}>
+              <Text style={{ color: C.textSec, fontSize: 10 }}>
                 {activeDeviceCount} device{activeDeviceCount !== 1 ? "s" : ""} active
               </Text>
             </View>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }} pointerEvents="auto">
             {currentTemp != null && (
               <View
                 style={{
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  backgroundColor: `${C.climate}12`,
-                  borderRadius: 10,
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  backgroundColor: "rgba(0,0,0,0.4)",
+                  borderRadius: 8,
                   borderWidth: 1,
                   borderColor: `${C.climate}25`,
                 }}
@@ -558,7 +165,7 @@ export default function HomeScreen() {
                 <Text
                   style={{
                     color: C.climate,
-                    fontSize: 15,
+                    fontSize: 14,
                     fontWeight: "300",
                     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
                   }}
@@ -572,132 +179,8 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* ── 3D Map Hero ── */}
-      <HomeMap3D compact={false} />
-
-      {/* ── Content Below Map ── */}
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 24 + insets.bottom }}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Quick Actions */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ gap: 6, paddingRight: 16 }}
-        >
-          {quickActions.map((action) => {
-            const e = entities[action.entityId];
-            const isActive = e ? (e.state === "on" || e.state === "playing" || e.state === "cleaning"
-              || e.state === "cool" || e.state === "heat" || e.state === "auto") : false;
-            return (
-              <QuickPill
-                key={action.entityId}
-                icon={action.icon}
-                label={action.label}
-                entityId={action.entityId}
-                domain={action.domain}
-                isActive={isActive}
-                onPress={() => handleQuickAction(action)}
-              />
-            );
-          })}
-        </ScrollView>
-
-        {/* Active Banners */}
-        <View style={{ marginTop: 10, gap: 6 }}>
-          <SpotifyBanner />
-          <WasherBanner />
-          <VacuumBanner />
-        </View>
-
-        {/* Room Sections with Compact Device Chips */}
-        {rooms.map((room) => {
-          const activeCount = roomActiveCounts[room.name] || 0;
-          return (
-            <View key={room.name} style={{ marginTop: 16 }}>
-              {/* Room Header */}
-              <Pressable
-                onPress={() => setExpandedRoom(room)}
-                style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}
-              >
-                <Text style={{ fontSize: 14 }}>{room.icon}</Text>
-                <Text style={{ color: C.text, fontSize: 14, fontWeight: "600" }}>{room.name}</Text>
-                {activeCount > 0 && (
-                  <View
-                    style={{
-                      backgroundColor: "rgba(255,255,255,0.08)",
-                      paddingHorizontal: 6,
-                      paddingVertical: 1,
-                      borderRadius: 6,
-                    }}
-                  >
-                    <Text style={{ color: C.textSec, fontSize: 10, fontWeight: "600" }}>{activeCount}</Text>
-                  </View>
-                )}
-                <View style={{ flex: 1 }} />
-                <Text style={{ color: C.textDim, fontSize: 10 }}>{"\u203A"}</Text>
-              </Pressable>
-
-              {/* Device chips — 2 column grid */}
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                {room.items.slice(0, 4).map((item) => (
-                  <DeviceChip
-                    key={item.id}
-                    item={item}
-                    onPress={() => {
-                      const domain = item.primaryEntityId.split(".")[0];
-                      setFocusedDevice({ entityId: item.primaryEntityId, domain, name: item.name });
-                      if (domain === "switch") {
-                        callService("switch", "toggle", {}, { entity_id: item.primaryEntityId });
-                      }
-                    }}
-                  />
-                ))}
-              </View>
-              {room.items.length > 4 && (
-                <Pressable onPress={() => setExpandedRoom(room)} style={{ marginTop: 4 }}>
-                  <Text style={{ color: C.textSec, fontSize: 10, fontWeight: "500" }}>
-                    +{room.items.length - 4} more {"\u203A"}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          );
-        })}
-
-        {/* Schedules */}
-        {schedules.length > 0 && (
-          <View style={{ marginTop: 20 }}>
-            <Text
-              style={{
-                color: C.textSec,
-                fontSize: 10,
-                fontWeight: "600",
-                letterSpacing: 0.5,
-                textTransform: "uppercase",
-                marginBottom: 8,
-              }}
-            >
-              Automations
-            </Text>
-            <View style={{ gap: 6 }}>
-              {schedules.map((sched) => (
-                <ScheduleRow key={sched.id} schedule={sched} onToggle={handleScheduleToggle} />
-              ))}
-            </View>
-          </View>
-        )}
-      </ScrollView>
-
-      {/* Room Detail Modal */}
-      <RoomDetailModal
-        room={expandedRoom}
-        visible={!!expandedRoom}
-        onClose={() => setExpandedRoom(null)}
-        onFocusDevice={setFocusedDevice}
-      />
+      {/* Now Playing mini bar */}
+      <NowPlayingBar />
 
       {/* Gesture feedback */}
       {lastGestureAction && (
@@ -708,7 +191,7 @@ export default function HomeScreen() {
             alignSelf: "center",
             backgroundColor: "rgba(0,0,0,0.85)",
             borderWidth: 1,
-            borderColor: C.borderActive,
+            borderColor: "rgba(255,255,255,0.18)",
             borderRadius: 12,
             paddingVertical: 8,
             paddingHorizontal: 16,

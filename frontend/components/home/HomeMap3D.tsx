@@ -1,7 +1,8 @@
-// HomeMap3D.tsx — Interactive 3D apartment map from LiDAR GLB scan
-// Touch controls: drag to rotate, pinch to zoom, two-finger drag to pan
+// HomeMap3D.tsx — Fullscreen interactive 3D apartment with device markers
+// Touch: drag to rotate, pinch to zoom, two-finger pan
+// Devices placed at real physical positions, tappable for controls
 import { Suspense, useRef, useMemo, useEffect, useState, useCallback } from "react";
-import { View, Text, PanResponder, Dimensions, Platform } from "react-native";
+import { View, Text, PanResponder, Pressable, Modal, ScrollView, Platform } from "react-native";
 import { Canvas, useFrame, useThree } from "@react-three/fiber/native";
 import * as THREE from "three";
 import { Asset } from "expo-asset";
@@ -19,62 +20,105 @@ interface PositionData {
   furniture?: string;
 }
 
+interface DeviceMarker {
+  id: string;
+  name: string;
+  icon: string;
+  entityId: string;
+  domain: string;
+  position: [number, number]; // [x, z] in floor plan coords
+  color: string;
+  room: string;
+}
+
 interface Props {
   position?: PositionData | null;
   activeRoom?: string | null;
-  onRoomPress?: (roomId: string) => void;
-  compact?: boolean;
+  deviceStates?: Record<string, { state: string; attributes?: any }>;
+  onDeviceTap?: (device: DeviceMarker) => void;
+  onDeviceToggle?: (entityId: string, domain: string) => void;
 }
 
-// ── Touch-controlled camera state (shared via ref) ──
+// ── Device positions mapped to real apartment coordinates ──
+// Only devices with visible physical locations in the LiDAR scan
+export const DEVICE_MARKERS: DeviceMarker[] = [
+  // Living Room — TV is against the south wall near the couch
+  {
+    id: "main_tv", name: "Main TV", icon: "📺",
+    entityId: "media_player.main_tv", domain: "media_player",
+    position: [2.20, -4.80], color: "#CE93D8", room: "living",
+  },
+  // Living Room — Spotify plays through the TV area
+  {
+    id: "spotify", name: "Spotify", icon: "🎵",
+    entityId: "media_player.spotify_king_kazuma", domain: "media_player",
+    position: [1.15, -3.33], color: "#1DB954", room: "living",
+  },
+  // Living Room — AC unit on south wall
+  {
+    id: "ac", name: "AC", icon: "❄️",
+    entityId: "climate.living_room_ac", domain: "climate",
+    position: [0.30, -5.10], color: "#4FC3F7", room: "living",
+  },
+  // Kitchen — Washing machine (appliance visible in scan)
+  {
+    id: "midea_washer", name: "Washer", icon: "🫧",
+    entityId: "switch.151732606804847_power", domain: "switch",
+    position: [-3.97, -0.74], color: "#3B82F6", room: "kitchen",
+  },
+];
+
+// Unassigned devices — no visible physical spot in LiDAR scan
+// Future: user can manually assign positions via drag-and-drop
+export const UNASSIGNED_DEVICES = [
+  { id: "living_room_cam", name: "LR Camera", entityId: "switch.living_room_cam_power" },
+  { id: "security_cam", name: "Security Camera", entityId: "switch.cam1_power" },
+  { id: "sous_vide", name: "Sous Vide", entityId: "switch.s_vide_switch" },
+  { id: "dusk_vader", name: "Dusk Vader", entityId: "vacuum.dusk_vader" },
+  { id: "kazuma_iphone", name: "Kazuma iPhone", entityId: "device_tracker.kazuma_iphone" },
+  { id: "king_kazuma", name: "King Kazuma", entityId: "person.king_kazuma" },
+  { id: "shopping_list", name: "Shopping List", entityId: "todo.shopping_list" },
+];
+
+// ── Camera state ──
 interface CameraState {
-  theta: number;    // horizontal angle (radians)
-  phi: number;      // vertical angle (radians)
-  radius: number;   // distance from target
+  theta: number;
+  phi: number;
+  radius: number;
   targetX: number;
   targetZ: number;
 }
 
-// ── GLB Model Loader ──
+// ── GLB Model ──
 function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
   const [model, setModel] = useState<THREE.Group | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadModel() {
       try {
         const asset = Asset.fromModule(require("../../assets/home-map/apartment.glb"));
         await asset.downloadAsync();
         const uri = asset.localUri || asset.uri;
-
         const base64 = await FileSystem.readAsStringAsync(uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
         const binary = atob(base64);
         const buffer = new ArrayBuffer(binary.length);
         const view = new Uint8Array(buffer);
-        for (let i = 0; i < binary.length; i++) {
-          view[i] = binary.charCodeAt(i);
-        }
-
+        for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
         const loader = new GLTFLoader();
-        loader.parse(buffer, "", (gltf) => {
-          if (!cancelled) setModel(gltf.scene);
-        });
+        loader.parse(buffer, "", (gltf) => { if (!cancelled) setModel(gltf.scene); });
       } catch (err) {
-        console.warn("Failed to load apartment GLB:", err);
+        console.warn("Failed to load GLB:", err);
       }
     }
-
     loadModel();
     return () => { cancelled = true; };
   }, []);
 
-  // Apply room highlighting
   useEffect(() => {
     if (!model) return;
-
     model.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
         const mat = child.material as THREE.MeshStandardMaterial;
@@ -85,7 +129,6 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
         mat.metalness = 0.05;
       }
     });
-
     if (activeRoom) {
       const room = roomData.rooms.find((r) => r.id === activeRoom);
       if (room) {
@@ -110,6 +153,84 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
   return <primitive object={model} />;
 }
 
+// ── Device Marker 3D ──
+function DeviceMarker3D({
+  device,
+  isOn,
+  onTap,
+}: {
+  device: DeviceMarker;
+  isOn: boolean;
+  onTap: () => void;
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
+
+  useFrame(({ clock }) => {
+    if (!meshRef.current) return;
+    if (isOn) {
+      // Gentle float animation when active
+      const t = clock.getElapsedTime();
+      meshRef.current.position.y = -1.15 + Math.sin(t * 2 + device.position[0]) * 0.04;
+      // Glow pulse
+      if (glowRef.current) {
+        const pulse = 0.8 + Math.sin(t * 3) * 0.2;
+        (glowRef.current.material as THREE.MeshBasicMaterial).opacity = 0.25 * pulse;
+        glowRef.current.scale.setScalar(1 + Math.sin(t * 2) * 0.15);
+      }
+    } else {
+      meshRef.current.position.y = -1.20;
+      if (glowRef.current) {
+        (glowRef.current.material as THREE.MeshBasicMaterial).opacity = 0.08;
+      }
+    }
+  });
+
+  return (
+    <group position={[device.position[0], 0, device.position[1]]}>
+      {/* Marker sphere */}
+      <mesh
+        ref={meshRef}
+        position={[0, -1.20, 0]}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onTap();
+        }}
+      >
+        <sphereGeometry args={[isOn ? 0.16 : 0.12, 16, 16]} />
+        <meshBasicMaterial
+          color={isOn ? device.color : "#525252"}
+          transparent
+          opacity={isOn ? 0.95 : 0.5}
+        />
+      </mesh>
+      {/* Glow ring on floor */}
+      <mesh
+        ref={glowRef}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, -1.54, 0]}
+      >
+        <circleGeometry args={[0.3, 24]} />
+        <meshBasicMaterial
+          color={device.color}
+          transparent
+          opacity={isOn ? 0.25 : 0.08}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* Vertical line connecting marker to floor */}
+      <mesh position={[0, -1.37, 0]}>
+        <cylinderGeometry args={[0.008, 0.008, 0.34, 4]} />
+        <meshBasicMaterial
+          color={device.color}
+          transparent
+          opacity={isOn ? 0.4 : 0.15}
+        />
+      </mesh>
+    </group>
+  );
+}
+
 // ── Position Beacon ──
 function PositionBeacon({ position }: { position: PositionData }) {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -120,9 +241,7 @@ function PositionBeacon({ position }: { position: PositionData }) {
       return new THREE.Vector3(position.x, -1.55, position.z);
     }
     const room = roomData.rooms.find((r) => r.id === position.room);
-    if (room) {
-      return new THREE.Vector3(room.center[0], -1.55, room.center[1]);
-    }
+    if (room) return new THREE.Vector3(room.center[0], -1.55, room.center[1]);
     return new THREE.Vector3(0, -1.55, 0);
   }, [position]);
 
@@ -138,21 +257,17 @@ function PositionBeacon({ position }: { position: PositionData }) {
     }
   });
 
-  const beaconColor = position.method?.includes("ble") ? "#22C55E" : "#06B6D4";
+  const color = position.method?.includes("ble") ? "#22C55E" : "#06B6D4";
 
   return (
     <group position={pos}>
       <mesh ref={meshRef}>
         <sphereGeometry args={[0.12, 16, 16]} />
-        <meshBasicMaterial color={beaconColor} />
+        <meshBasicMaterial color={color} />
       </mesh>
       <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.15, 0.18, 32]} />
-        <meshBasicMaterial color={beaconColor} transparent opacity={0.6} side={THREE.DoubleSide} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
-        <circleGeometry args={[0.3 * (1 - position.confidence / 100) + 0.15, 32]} />
-        <meshBasicMaterial color={beaconColor} transparent opacity={0.15} side={THREE.DoubleSide} />
+        <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} />
       </mesh>
     </group>
   );
@@ -160,10 +275,9 @@ function PositionBeacon({ position }: { position: PositionData }) {
 
 // ── ESP32 Node Markers ──
 function NodeMarkers() {
-  const nodes = roomData.esp32_nodes;
   return (
     <>
-      {Object.entries(nodes).map(([id, node]) => (
+      {Object.entries(roomData.esp32_nodes).map(([id, node]) => (
         <mesh key={id} position={[node.position[0], -1.0, node.position[1]]}>
           <boxGeometry args={[0.06, 0.06, 0.06]} />
           <meshBasicMaterial color="#EF4444" />
@@ -173,25 +287,21 @@ function NodeMarkers() {
   );
 }
 
-// ── Camera Controller (reads shared state ref) ──
+// ── Camera Controller ──
 function CameraController({ stateRef }: { stateRef: React.MutableRefObject<CameraState> }) {
   const { camera } = useThree();
-
   useFrame(() => {
     const s = stateRef.current;
     const x = s.targetX + s.radius * Math.sin(s.phi) * Math.cos(s.theta);
     const y = s.radius * Math.cos(s.phi);
     const z = s.targetZ + s.radius * Math.sin(s.phi) * Math.sin(s.theta);
-
     camera.position.set(x, y, z);
     camera.lookAt(s.targetX, -1, s.targetZ);
-
     if (camera instanceof THREE.PerspectiveCamera) {
       camera.fov = 30;
       camera.updateProjectionMatrix();
     }
   });
-
   return null;
 }
 
@@ -206,14 +316,169 @@ function Lighting() {
   );
 }
 
+// ── Device Popup ──
+function DevicePopup({
+  device,
+  state,
+  visible,
+  onClose,
+  onToggle,
+}: {
+  device: DeviceMarker | null;
+  state?: { state: string; attributes?: any };
+  visible: boolean;
+  onClose: () => void;
+  onToggle: () => void;
+}) {
+  if (!device) return null;
+
+  const entityState = state?.state ?? "unavailable";
+  const isOn = ["on", "playing", "cool", "heat", "auto", "cleaning", "returning"].includes(entityState);
+  const isUnavailable = entityState === "unavailable";
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1 }} onPress={onClose}>
+        <View style={{ flex: 1, justifyContent: "flex-end", paddingBottom: 100 }}>
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={{
+              marginHorizontal: 24,
+              backgroundColor: "rgba(20,20,20,0.95)",
+              borderRadius: 20,
+              borderWidth: 1,
+              borderColor: isOn ? `${device.color}40` : "rgba(255,255,255,0.1)",
+              overflow: "hidden",
+            }}
+          >
+            {/* Header */}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                padding: 16,
+                gap: 12,
+                borderBottomWidth: 1,
+                borderColor: "rgba(255,255,255,0.06)",
+              }}
+            >
+              <View
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: isOn ? `${device.color}25` : "rgba(255,255,255,0.06)",
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ fontSize: 20 }}>{device.icon}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: "#FFF", fontSize: 16, fontWeight: "600" }}>
+                  {device.name}
+                </Text>
+                <Text style={{ color: isOn ? device.color : "rgba(255,255,255,0.4)", fontSize: 12 }}>
+                  {isUnavailable ? "Offline" : entityState}
+                </Text>
+              </View>
+              {/* Status dot */}
+              <View
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 5,
+                  backgroundColor: isOn ? device.color : "rgba(255,255,255,0.15)",
+                  ...(isOn && Platform.OS === "ios" ? {
+                    shadowColor: device.color,
+                    shadowRadius: 6,
+                    shadowOpacity: 0.6,
+                    shadowOffset: { width: 0, height: 0 },
+                  } : {}),
+                }}
+              />
+            </View>
+
+            {/* AC temperature display */}
+            {device.domain === "climate" && state?.attributes?.current_temperature && (
+              <View style={{ padding: 16, alignItems: "center" }}>
+                <Text
+                  style={{
+                    color: isOn ? device.color : "rgba(255,255,255,0.3)",
+                    fontSize: 48,
+                    fontWeight: "200",
+                    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                  }}
+                >
+                  {Math.round(state.attributes.current_temperature)}{"\u00B0"}
+                </Text>
+                {state.attributes.temperature && (
+                  <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 12 }}>
+                    Target: {state.attributes.temperature}{"\u00B0"}
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {/* Vacuum info */}
+            {device.domain === "vacuum" && (
+              <View style={{ padding: 16, gap: 8 }}>
+                {state?.attributes?.battery_level != null && (
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12 }}>Battery</Text>
+                    <Text style={{ color: "#FFF", fontSize: 12, fontWeight: "600" }}>
+                      {state.attributes.battery_level}%
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Action button */}
+            {!isUnavailable && (
+              <View style={{ padding: 16, paddingTop: device.domain === "climate" || device.domain === "vacuum" ? 0 : 16 }}>
+                <Pressable
+                  onPress={onToggle}
+                  style={({ pressed }) => ({
+                    backgroundColor: isOn ? `${device.color}20` : "rgba(255,255,255,0.08)",
+                    borderWidth: 1,
+                    borderColor: isOn ? `${device.color}40` : "rgba(255,255,255,0.12)",
+                    borderRadius: 12,
+                    paddingVertical: 12,
+                    alignItems: "center",
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <Text style={{ color: isOn ? device.color : "rgba(255,255,255,0.7)", fontSize: 14, fontWeight: "600" }}>
+                    {isOn ? "Turn Off" : "Turn On"}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+
+            {/* Room label */}
+            <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+              <Text style={{ color: "rgba(255,255,255,0.2)", fontSize: 10, fontFamily: "monospace" }}>
+                {device.room.toUpperCase()} {"\u00B7"} {device.position[0].toFixed(1)}, {device.position[1].toFixed(1)}
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // ── Main Component ──
-export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }: Props) {
+export default function HomeMap3D({ position, activeRoom, deviceStates, onDeviceTap, onDeviceToggle }: Props) {
   const effectiveActiveRoom = activeRoom || position?.room;
+  const [selectedDevice, setSelectedDevice] = useState<DeviceMarker | null>(null);
+  const [popupVisible, setPopupVisible] = useState(false);
 
   // Camera orbit state
   const cameraState = useRef<CameraState>({
-    theta: 0.72,      // ~41 degrees
-    phi: 0.95,         // ~54 degrees from top
+    theta: 0.72,
+    phi: 0.95,
     radius: 18,
     targetX: 0,
     targetZ: 0,
@@ -229,9 +494,21 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
     fingers: 0,
   });
 
+  const handleDeviceTap = useCallback((device: DeviceMarker) => {
+    setSelectedDevice(device);
+    setPopupVisible(true);
+    onDeviceTap?.(device);
+  }, [onDeviceTap]);
+
+  const handleToggle = useCallback(() => {
+    if (selectedDevice) {
+      onDeviceToggle?.(selectedDevice.entityId, selectedDevice.domain);
+    }
+  }, [selectedDevice, onDeviceToggle]);
+
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 3 || Math.abs(gs.dy) > 3,
     onPanResponderGrant: (evt) => {
       const touches = evt.nativeEvent.touches;
       touchState.current.fingers = touches.length;
@@ -252,7 +529,6 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
       const ts = touchState.current;
 
       if (touches.length === 1 && ts.fingers === 1) {
-        // Single finger: rotate
         const dx = touches[0].pageX - ts.lastX;
         const dy = touches[0].pageY - ts.lastY;
         cs.theta -= dx * 0.008;
@@ -260,7 +536,6 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
         ts.lastX = touches[0].pageX;
         ts.lastY = touches[0].pageY;
       } else if (touches.length >= 2) {
-        // Pinch: zoom
         const dx = touches[1].pageX - touches[0].pageX;
         const dy = touches[1].pageY - touches[0].pageY;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -268,14 +543,11 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
           const scale = ts.lastDist / dist;
           cs.radius = Math.max(8, Math.min(35, cs.radius * scale));
         }
-        // Two-finger drag: pan
         const midX = (touches[0].pageX + touches[1].pageX) / 2;
         const midY = (touches[0].pageY + touches[1].pageY) / 2;
         if (ts.lastMidX > 0) {
-          const panDx = midX - ts.lastMidX;
-          const panDy = midY - ts.lastMidY;
-          cs.targetX -= panDx * 0.03;
-          cs.targetZ -= panDy * 0.03;
+          cs.targetX -= (midX - ts.lastMidX) * 0.03;
+          cs.targetZ -= (midY - ts.lastMidY) * 0.03;
         }
         ts.lastDist = dist;
         ts.lastMidX = midX;
@@ -289,12 +561,12 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
     },
   }), []);
 
-  const mapHeight = compact ? 280 : 380;
+  const states = deviceStates || {};
 
   return (
-    <View style={{ height: mapHeight, backgroundColor: "#0A0A0A" }}>
-      {/* 3D Canvas with touch handler */}
-      <View style={{ flex: 1, borderRadius: 16, overflow: "hidden" }} {...panResponder.panHandlers}>
+    <View style={{ flex: 1, backgroundColor: "#0A0A0A" }}>
+      {/* Fullscreen 3D Canvas */}
+      <View style={{ flex: 1 }} {...panResponder.panHandlers}>
         <Canvas
           style={{ flex: 1 }}
           gl={{ antialias: true }}
@@ -305,12 +577,27 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
           <Suspense fallback={null}>
             <ApartmentModel activeRoom={effectiveActiveRoom} />
           </Suspense>
+
+          {/* Device markers */}
+          {DEVICE_MARKERS.map((device) => {
+            const s = states[device.entityId];
+            const isOn = s ? ["on", "playing", "cool", "heat", "auto", "cleaning", "returning"].includes(s.state) : false;
+            return (
+              <DeviceMarker3D
+                key={device.id}
+                device={device}
+                isOn={isOn}
+                onTap={() => handleDeviceTap(device)}
+              />
+            );
+          })}
+
           <NodeMarkers />
           {position && <PositionBeacon position={position} />}
         </Canvas>
       </View>
 
-      {/* Room pills overlay at bottom of map */}
+      {/* Room pills overlay — bottom of screen */}
       <View
         style={{
           position: "absolute",
@@ -332,17 +619,13 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
               alignItems: "center",
               gap: 3,
               backgroundColor:
-                effectiveActiveRoom === room.id
-                  ? `${room.color}40`
-                  : "rgba(0,0,0,0.65)",
+                effectiveActiveRoom === room.id ? `${room.color}40` : "rgba(0,0,0,0.6)",
               borderRadius: 8,
               paddingHorizontal: 6,
               paddingVertical: 3,
               borderWidth: 1,
               borderColor:
-                effectiveActiveRoom === room.id
-                  ? `${room.color}60`
-                  : "rgba(255,255,255,0.08)",
+                effectiveActiveRoom === room.id ? `${room.color}60` : "rgba(255,255,255,0.06)",
             }}
           >
             <Text style={{ fontSize: 9 }}>{room.emoji}</Text>
@@ -352,7 +635,6 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
                 fontSize: 8,
                 fontWeight: effectiveActiveRoom === room.id ? "700" : "400",
                 color: effectiveActiveRoom === room.id ? room.color : "#94A3B8",
-                letterSpacing: 0.3,
               }}
             >
               {room.name.toUpperCase()}
@@ -361,7 +643,7 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
         ))}
       </View>
 
-      {/* Position info overlay */}
+      {/* Position info overlay — top right */}
       {position && (
         <View
           style={{
@@ -387,6 +669,15 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }
           )}
         </View>
       )}
+
+      {/* Device popup */}
+      <DevicePopup
+        device={selectedDevice}
+        state={selectedDevice ? states[selectedDevice.entityId] : undefined}
+        visible={popupVisible}
+        onClose={() => setPopupVisible(false)}
+        onToggle={handleToggle}
+      />
     </View>
   );
 }
