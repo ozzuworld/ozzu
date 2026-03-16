@@ -1,7 +1,7 @@
-// HomeMap3D.tsx — 3D apartment map rendered from LiDAR GLB scan
-// Uses @react-three/fiber for React Native 3D rendering
-import { Suspense, useRef, useMemo, useEffect, useState } from "react";
-import { View, Text, Platform } from "react-native";
+// HomeMap3D.tsx — Interactive 3D apartment map from LiDAR GLB scan
+// Touch controls: drag to rotate, pinch to zoom, two-finger drag to pan
+import { Suspense, useRef, useMemo, useEffect, useState, useCallback } from "react";
+import { View, Text, PanResponder, Dimensions, Platform } from "react-native";
 import { Canvas, useFrame, useThree } from "@react-three/fiber/native";
 import * as THREE from "three";
 import { Asset } from "expo-asset";
@@ -16,18 +16,23 @@ interface PositionData {
   method: string;
   x?: number;
   z?: number;
+  furniture?: string;
 }
 
 interface Props {
   position?: PositionData | null;
   activeRoom?: string | null;
   onRoomPress?: (roomId: string) => void;
+  compact?: boolean;
 }
 
-// ── Room colors ──
-const ROOM_COLORS: Record<string, string> = {};
-for (const room of roomData.rooms) {
-  ROOM_COLORS[room.id] = room.color;
+// ── Touch-controlled camera state (shared via ref) ──
+interface CameraState {
+  theta: number;    // horizontal angle (radians)
+  phi: number;      // vertical angle (radians)
+  radius: number;   // distance from target
+  targetX: number;
+  targetZ: number;
 }
 
 // ── GLB Model Loader ──
@@ -39,12 +44,10 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
 
     async function loadModel() {
       try {
-        // Load GLB from asset
         const asset = Asset.fromModule(require("../../assets/home-map/apartment.glb"));
         await asset.downloadAsync();
         const uri = asset.localUri || asset.uri;
 
-        // Read as base64 and convert to ArrayBuffer
         const base64 = await FileSystem.readAsStringAsync(uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
@@ -57,9 +60,7 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
 
         const loader = new GLTFLoader();
         loader.parse(buffer, "", (gltf) => {
-          if (!cancelled) {
-            setModel(gltf.scene);
-          }
+          if (!cancelled) setModel(gltf.scene);
         });
       } catch (err) {
         console.warn("Failed to load apartment GLB:", err);
@@ -77,7 +78,6 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
     model.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
         const mat = child.material as THREE.MeshStandardMaterial;
-        // Default: light gray with slight transparency
         mat.color.set("#d4d4d8");
         mat.transparent = true;
         mat.opacity = 0.85;
@@ -86,7 +86,6 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
       }
     });
 
-    // Highlight active room's floor
     if (activeRoom) {
       const room = roomData.rooms.find((r) => r.id === activeRoom);
       if (room) {
@@ -96,7 +95,6 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
           mat.color.set(room.color);
           mat.opacity = 0.6;
         }
-        // Also highlight duplicate floor (shadow)
         const shadowIdx = parseInt(room.floor_mesh.replace("GLTF_", "")) + 1;
         const shadowMesh = model.getObjectByName(`GLTF_${shadowIdx}`);
         if (shadowMesh instanceof THREE.Mesh && shadowMesh.material) {
@@ -109,7 +107,6 @@ function ApartmentModel({ activeRoom }: { activeRoom?: string | null }) {
   }, [model, activeRoom]);
 
   if (!model) return null;
-
   return <primitive object={model} />;
 }
 
@@ -118,7 +115,6 @@ function PositionBeacon({ position }: { position: PositionData }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const ringRef = useRef<THREE.Mesh>(null);
 
-  // Determine position from room center or explicit coordinates
   const pos = useMemo(() => {
     if (position.x != null && position.z != null) {
       return new THREE.Vector3(position.x, -1.55, position.z);
@@ -130,7 +126,6 @@ function PositionBeacon({ position }: { position: PositionData }) {
     return new THREE.Vector3(0, -1.55, 0);
   }, [position]);
 
-  // Pulse animation
   useFrame(({ clock }) => {
     if (meshRef.current) {
       const pulse = Math.sin(clock.getElapsedTime() * 3) * 0.03 + 0.12;
@@ -147,17 +142,14 @@ function PositionBeacon({ position }: { position: PositionData }) {
 
   return (
     <group position={pos}>
-      {/* Main dot */}
       <mesh ref={meshRef}>
         <sphereGeometry args={[0.12, 16, 16]} />
         <meshBasicMaterial color={beaconColor} />
       </mesh>
-      {/* Expanding ring */}
       <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.15, 0.18, 32]} />
         <meshBasicMaterial color={beaconColor} transparent opacity={0.6} side={THREE.DoubleSide} />
       </mesh>
-      {/* Confidence circle on floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
         <circleGeometry args={[0.3 * (1 - position.confidence / 100) + 0.15, 32]} />
         <meshBasicMaterial color={beaconColor} transparent opacity={0.15} side={THREE.DoubleSide} />
@@ -169,14 +161,10 @@ function PositionBeacon({ position }: { position: PositionData }) {
 // ── ESP32 Node Markers ──
 function NodeMarkers() {
   const nodes = roomData.esp32_nodes;
-
   return (
     <>
       {Object.entries(nodes).map(([id, node]) => (
-        <mesh
-          key={id}
-          position={[node.position[0], -1.0, node.position[1]]}
-        >
+        <mesh key={id} position={[node.position[0], -1.0, node.position[1]]}>
           <boxGeometry args={[0.06, 0.06, 0.06]} />
           <meshBasicMaterial color="#EF4444" />
         </mesh>
@@ -185,19 +173,24 @@ function NodeMarkers() {
   );
 }
 
-// ── Camera Setup ──
-function IsometricCamera() {
+// ── Camera Controller (reads shared state ref) ──
+function CameraController({ stateRef }: { stateRef: React.MutableRefObject<CameraState> }) {
   const { camera } = useThree();
 
-  useEffect(() => {
-    // Isometric-ish view looking down at the apartment
-    camera.position.set(12, 10, 12);
-    camera.lookAt(0, -1, 0);
+  useFrame(() => {
+    const s = stateRef.current;
+    const x = s.targetX + s.radius * Math.sin(s.phi) * Math.cos(s.theta);
+    const y = s.radius * Math.cos(s.phi);
+    const z = s.targetZ + s.radius * Math.sin(s.phi) * Math.sin(s.theta);
+
+    camera.position.set(x, y, z);
+    camera.lookAt(s.targetX, -1, s.targetZ);
+
     if (camera instanceof THREE.PerspectiveCamera) {
       camera.fov = 30;
       camera.updateProjectionMatrix();
     }
-  }, [camera]);
+  });
 
   return null;
 }
@@ -207,34 +200,107 @@ function Lighting() {
   return (
     <>
       <ambientLight intensity={0.7} />
-      <directionalLight position={[8, 12, 5]} intensity={0.8} castShadow />
+      <directionalLight position={[8, 12, 5]} intensity={0.8} />
       <directionalLight position={[-5, 8, -3]} intensity={0.3} />
     </>
   );
 }
 
-// ── Room Labels Overlay (2D on top of 3D) ──
-function RoomLabels({ activeRoom }: { activeRoom?: string | null }) {
-  // Room labels rendered as RN Text overlay
-  // Positions are approximate screen coordinates - would need projection for accuracy
-  // For now, show as a legend below the 3D view
-  return null;
-}
-
 // ── Main Component ──
-export default function HomeMap3D({ position, activeRoom, onRoomPress }: Props) {
+export default function HomeMap3D({ position, activeRoom, onRoomPress, compact }: Props) {
   const effectiveActiveRoom = activeRoom || position?.room;
 
+  // Camera orbit state
+  const cameraState = useRef<CameraState>({
+    theta: 0.72,      // ~41 degrees
+    phi: 0.95,         // ~54 degrees from top
+    radius: 18,
+    targetX: 0,
+    targetZ: 0,
+  });
+
+  // Touch tracking
+  const touchState = useRef({
+    lastX: 0,
+    lastY: 0,
+    lastDist: 0,
+    lastMidX: 0,
+    lastMidY: 0,
+    fingers: 0,
+  });
+
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (evt) => {
+      const touches = evt.nativeEvent.touches;
+      touchState.current.fingers = touches.length;
+      if (touches.length === 1) {
+        touchState.current.lastX = touches[0].pageX;
+        touchState.current.lastY = touches[0].pageY;
+      } else if (touches.length >= 2) {
+        const dx = touches[1].pageX - touches[0].pageX;
+        const dy = touches[1].pageY - touches[0].pageY;
+        touchState.current.lastDist = Math.sqrt(dx * dx + dy * dy);
+        touchState.current.lastMidX = (touches[0].pageX + touches[1].pageX) / 2;
+        touchState.current.lastMidY = (touches[0].pageY + touches[1].pageY) / 2;
+      }
+    },
+    onPanResponderMove: (evt) => {
+      const touches = evt.nativeEvent.touches;
+      const cs = cameraState.current;
+      const ts = touchState.current;
+
+      if (touches.length === 1 && ts.fingers === 1) {
+        // Single finger: rotate
+        const dx = touches[0].pageX - ts.lastX;
+        const dy = touches[0].pageY - ts.lastY;
+        cs.theta -= dx * 0.008;
+        cs.phi = Math.max(0.3, Math.min(1.45, cs.phi - dy * 0.006));
+        ts.lastX = touches[0].pageX;
+        ts.lastY = touches[0].pageY;
+      } else if (touches.length >= 2) {
+        // Pinch: zoom
+        const dx = touches[1].pageX - touches[0].pageX;
+        const dy = touches[1].pageY - touches[0].pageY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (ts.lastDist > 0) {
+          const scale = ts.lastDist / dist;
+          cs.radius = Math.max(8, Math.min(35, cs.radius * scale));
+        }
+        // Two-finger drag: pan
+        const midX = (touches[0].pageX + touches[1].pageX) / 2;
+        const midY = (touches[0].pageY + touches[1].pageY) / 2;
+        if (ts.lastMidX > 0) {
+          const panDx = midX - ts.lastMidX;
+          const panDy = midY - ts.lastMidY;
+          cs.targetX -= panDx * 0.03;
+          cs.targetZ -= panDy * 0.03;
+        }
+        ts.lastDist = dist;
+        ts.lastMidX = midX;
+        ts.lastMidY = midY;
+        ts.fingers = touches.length;
+      }
+    },
+    onPanResponderRelease: () => {
+      touchState.current.fingers = 0;
+      touchState.current.lastDist = 0;
+    },
+  }), []);
+
+  const mapHeight = compact ? 280 : 380;
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#0A0A0A" }}>
-      {/* 3D Canvas */}
-      <View style={{ flex: 1, borderRadius: 12, overflow: "hidden" }}>
+    <View style={{ height: mapHeight, backgroundColor: "#0A0A0A" }}>
+      {/* 3D Canvas with touch handler */}
+      <View style={{ flex: 1, borderRadius: 16, overflow: "hidden" }} {...panResponder.panHandlers}>
         <Canvas
           style={{ flex: 1 }}
           gl={{ antialias: true }}
           camera={{ position: [12, 10, 12], fov: 30, near: 0.1, far: 100 }}
         >
-          <IsometricCamera />
+          <CameraController stateRef={cameraState} />
           <Lighting />
           <Suspense fallback={null}>
             <ApartmentModel activeRoom={effectiveActiveRoom} />
@@ -244,14 +310,18 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress }: Props) 
         </Canvas>
       </View>
 
-      {/* Room legend */}
+      {/* Room pills overlay at bottom of map */}
       <View
         style={{
+          position: "absolute",
+          bottom: 8,
+          left: 0,
+          right: 0,
           flexDirection: "row",
           flexWrap: "wrap",
-          gap: 6,
-          paddingHorizontal: 12,
-          paddingVertical: 8,
+          gap: 4,
+          paddingHorizontal: 8,
+          justifyContent: "center",
         }}
       >
         {roomData.rooms.map((room) => (
@@ -260,48 +330,63 @@ export default function HomeMap3D({ position, activeRoom, onRoomPress }: Props) 
             style={{
               flexDirection: "row",
               alignItems: "center",
-              gap: 4,
+              gap: 3,
               backgroundColor:
                 effectiveActiveRoom === room.id
-                  ? `${room.color}30`
-                  : "rgba(255,255,255,0.03)",
-              borderRadius: 6,
-              paddingHorizontal: 8,
-              paddingVertical: 4,
+                  ? `${room.color}40`
+                  : "rgba(0,0,0,0.65)",
+              borderRadius: 8,
+              paddingHorizontal: 6,
+              paddingVertical: 3,
               borderWidth: 1,
               borderColor:
                 effectiveActiveRoom === room.id
                   ? `${room.color}60`
-                  : "rgba(255,255,255,0.06)",
+                  : "rgba(255,255,255,0.08)",
             }}
           >
-            <Text style={{ fontSize: 12 }}>{room.emoji}</Text>
+            <Text style={{ fontSize: 9 }}>{room.emoji}</Text>
             <Text
               style={{
                 fontFamily: "monospace",
-                fontSize: 9,
+                fontSize: 8,
                 fontWeight: effectiveActiveRoom === room.id ? "700" : "400",
-                color:
-                  effectiveActiveRoom === room.id ? room.color : "#64748B",
-                letterSpacing: 0.5,
+                color: effectiveActiveRoom === room.id ? room.color : "#94A3B8",
+                letterSpacing: 0.3,
               }}
             >
               {room.name.toUpperCase()}
             </Text>
-            {room.area && (
-              <Text
-                style={{
-                  fontFamily: "monospace",
-                  fontSize: 7,
-                  color: "#525252",
-                }}
-              >
-                {room.area}m²
-              </Text>
-            )}
           </View>
         ))}
       </View>
+
+      {/* Position info overlay */}
+      {position && (
+        <View
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            backgroundColor: "rgba(0,0,0,0.7)",
+            borderRadius: 8,
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            borderWidth: 1,
+            borderColor: "rgba(34,197,94,0.3)",
+          }}
+        >
+          <Text style={{ color: "#22C55E", fontSize: 9, fontFamily: "monospace", fontWeight: "600" }}>
+            {position.room?.toUpperCase()}
+            {position.x != null ? ` (${position.x.toFixed(1)},${position.z?.toFixed(1)})` : ""}
+          </Text>
+          {position.furniture && (
+            <Text style={{ color: "#94A3B8", fontSize: 8, fontFamily: "monospace" }}>
+              near {position.furniture}
+            </Text>
+          )}
+        </View>
+      )}
     </View>
   );
 }
