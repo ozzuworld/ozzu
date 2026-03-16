@@ -238,17 +238,17 @@ function PositionBeacon({ position }: { position: PositionData }) {
 
   const pos = useMemo(() => {
     if (position.x != null && position.z != null) {
-      return new THREE.Vector3(position.x, -1.55, position.z);
+      return new THREE.Vector3(position.x, 0, position.z);
     }
     const room = roomData.rooms.find((r) => r.id === position.room);
-    if (room) return new THREE.Vector3(room.center[0], -1.55, room.center[1]);
-    return new THREE.Vector3(0, -1.55, 0);
+    if (room) return new THREE.Vector3(room.center[0], 0, room.center[1]);
+    return new THREE.Vector3(0, 0, 0);
   }, [position]);
 
   useFrame(({ clock }) => {
     if (meshRef.current) {
-      const pulse = Math.sin(clock.getElapsedTime() * 3) * 0.03 + 0.12;
-      meshRef.current.scale.setScalar(pulse / 0.12);
+      const pulse = Math.sin(clock.getElapsedTime() * 3) * 0.05 + 0.25;
+      meshRef.current.scale.setScalar(pulse / 0.25);
     }
     if (ringRef.current) {
       const expand = (clock.getElapsedTime() % 2) / 2;
@@ -261,12 +261,19 @@ function PositionBeacon({ position }: { position: PositionData }) {
 
   return (
     <group position={pos}>
+      {/* Vertical pillar from floor to beacon */}
+      <mesh position={[0, -0.75, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 1.5, 8]} />
+        <meshBasicMaterial color={color} transparent opacity={0.4} />
+      </mesh>
+      {/* Main beacon sphere — larger and above floor */}
       <mesh ref={meshRef}>
-        <sphereGeometry args={[0.12, 16, 16]} />
+        <sphereGeometry args={[0.25, 16, 16]} />
         <meshBasicMaterial color={color} />
       </mesh>
-      <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.15, 0.18, 32]} />
+      {/* Pulsing ring at floor level */}
+      <mesh ref={ringRef} position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.25, 0.35, 32]} />
         <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} />
       </mesh>
     </group>
