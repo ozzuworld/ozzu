@@ -66,7 +66,7 @@ export class GestureCommandManager {
     }
 
     // Swipes trigger immediately (motion-based, no hold needed)
-    if (gesture === "swipe_left" || gesture === "swipe_right") {
+    if (gesture === "swipe_left" || gesture === "swipe_right" || gesture === "swipe_down") {
       if (!this.isOnCooldown(gesture, now)) {
         this.trigger({ gesture, timestamp: now });
       }

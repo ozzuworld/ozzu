@@ -11,6 +11,7 @@ export type GestureType =
   | "finger_count"
   | "swipe_left"
   | "swipe_right"
+  | "swipe_down"
   | "none";
 
 export interface GestureResult {
@@ -265,43 +266,73 @@ function detectFingerCount(landmarks: HandLandmark[]): GestureResult | null {
 // ── Swipe detection (requires tracking wrist position across frames) ──
 
 let prevWristX: number | null = null;
+let prevWristY: number | null = null;
 let prevWristTime = 0;
 
 export function resetSwipeTracking(): void {
   prevWristX = null;
+  prevWristY = null;
   prevWristTime = 0;
 }
 
 function detectSwipe(landmarks: HandLandmark[]): GestureResult | null {
   const now = Date.now();
   const wristX = landmarks[WRIST].x;
+  const wristY = landmarks[WRIST].y;
 
-  if (prevWristX !== null && now - prevWristTime < 500) {
+  if (prevWristX !== null && prevWristY !== null && now - prevWristTime < 500) {
     const dx = wristX - prevWristX;
+    const dy = wristY - prevWristY;
     const dt = now - prevWristTime;
 
-    // Velocity threshold: must move >0.15 normalized units in <500ms
-    if (Math.abs(dx) > 0.15 && dt > 50) {
-      prevWristX = wristX;
-      prevWristTime = now;
+    if (dt > 50) {
+      // Check vertical swipe first (two-finger swipe down = target lock)
+      // y increases downward in image space, so dy > 0 = swipe down
+      if (dy > 0.12 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+        // Swipe down — check if two fingers are extended (index + middle)
+        const indexUp = isFingerExtended(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP);
+        const middleUp = isFingerExtended(landmarks, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP);
+        const ringCurled = isFingerCurled(landmarks, RING_TIP, RING_PIP);
+        const pinkyCurled = isFingerCurled(landmarks, PINKY_TIP, PINKY_PIP);
 
-      if (dx < 0) {
-        return {
-          gesture: "swipe_left",
-          confidence: Math.min(1, Math.abs(dx) / 0.2),
-          activeFingers: [WRIST],
-        };
-      } else {
-        return {
-          gesture: "swipe_right",
-          confidence: Math.min(1, dx / 0.2),
-          activeFingers: [WRIST],
-        };
+        if (indexUp && middleUp && ringCurled && pinkyCurled) {
+          prevWristX = wristX;
+          prevWristY = wristY;
+          prevWristTime = now;
+          return {
+            gesture: "swipe_down",
+            confidence: Math.min(1, dy / 0.18),
+            activeFingers: [INDEX_TIP, MIDDLE_TIP],
+            fingerCount: 2,
+          };
+        }
+      }
+
+      // Horizontal swipes
+      if (Math.abs(dx) > 0.15) {
+        prevWristX = wristX;
+        prevWristY = wristY;
+        prevWristTime = now;
+
+        if (dx < 0) {
+          return {
+            gesture: "swipe_left",
+            confidence: Math.min(1, Math.abs(dx) / 0.2),
+            activeFingers: [WRIST],
+          };
+        } else {
+          return {
+            gesture: "swipe_right",
+            confidence: Math.min(1, dx / 0.2),
+            activeFingers: [WRIST],
+          };
+        }
       }
     }
   }
 
   prevWristX = wristX;
+  prevWristY = wristY;
   prevWristTime = now;
   return null;
 }
@@ -367,6 +398,8 @@ export function gestureEmoji(gesture: GestureType): string {
       return "\u{1F448}";
     case "swipe_right":
       return "\u{1F449}";
+    case "swipe_down":
+      return "\u{1F447}";
     default:
       return "";
   }

@@ -12,6 +12,7 @@ import { GestureCommandManager, type GestureCommand } from "./gesture-commands";
 import { BridgeSession, type BridgeCallbacks } from "./bridge-session";
 import PhotoCaptureOverlay, { type CapturedPhoto } from "../components/glasses/PhotoCaptureOverlay";
 import { useHA } from "./ha-context";
+import { findDeviceForObject, type DeviceTarget } from "./device-map";
 
 type ConnectionState = Glasses.ConnectionState;
 
@@ -79,11 +80,19 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
   const connectedRef = useRef(false);
   const gestureManager = useRef(new GestureCommandManager());
   const mediapipeReady = useRef(false);
+  const objectDetectionReady = useRef(false);
   const processingFrame = useRef(false);
+  const processingObjects = useRef(false);
   const frameCountRef = useRef(0);
   const lastFrameTimeRef = useRef(0);
+  const lastObjectDetectTime = useRef(0);
   const connectionStateRef = useRef<ConnectionState>("disconnected");
   const streamingRef = useRef(false);
+  // What the camera currently sees — updated by object detection
+  const visibleDeviceRef = useRef<DeviceTarget | null>(null);
+  const visibleDeviceLabelRef = useRef<string | null>(null);
+  // Auto-dismiss focus after inactivity
+  const focusDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isConnected = connectionState === "connected";
   const isStreaming = streamState === "started" || streamState === "streaming";
@@ -153,18 +162,24 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         break;
       }
       case "pinch": {
-        // Toggle
-        if (device.domain === "climate") {
+        // Media player: play/pause. Others: toggle on/off.
+        if (device.domain === "media_player") {
+          callServiceRef.current("media_player", "media_play_pause", {}, { entity_id: device.entityId });
+          action = `${device.name} ${isOn ? "Pause" : "Play"}`;
+          feedbackText = isOn ? "Pause" : "Play";
+        } else if (device.domain === "climate") {
           callServiceRef.current("climate", isOn ? "turn_off" : "turn_on", {}, { entity_id: device.entityId });
+          action = `${device.name} ${isOn ? "OFF" : "ON"}`;
+          feedbackText = `${device.name} ${isOn ? "off" : "on"}`;
         } else if (device.domain === "vacuum") {
           callServiceRef.current("vacuum", isOn ? "return_to_base" : "start", {}, { entity_id: device.entityId });
-        } else if (device.domain === "media_player") {
-          callServiceRef.current("media_player", "toggle", {}, { entity_id: device.entityId });
+          action = `${device.name} ${isOn ? "Dock" : "Clean"}`;
+          feedbackText = isOn ? "Docking" : "Cleaning";
         } else {
           callServiceRef.current("switch", "toggle", {}, { entity_id: device.entityId });
+          action = `${device.name} ${isOn ? "OFF" : "ON"}`;
+          feedbackText = `${device.name} ${isOn ? "off" : "on"}`;
         }
-        action = `${device.name} ${isOn ? "OFF" : "ON"}`;
-        feedbackText = `${device.name} ${isOn ? "off" : "on"}`;
         break;
       }
       case "peace": {
@@ -179,30 +194,30 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         break;
       }
       case "swipe_right": {
-        // Increase (temp up / volume up)
-        if (device.domain === "climate") {
+        // Media player: next track. Climate: temp up.
+        if (device.domain === "media_player") {
+          callServiceRef.current("media_player", "media_next_track", {}, { entity_id: device.entityId });
+          action = `${device.name} Next`;
+          feedbackText = "Next";
+        } else if (device.domain === "climate") {
           const currentTemp = e.attributes?.temperature || 24;
           callServiceRef.current("climate", "set_temperature", { temperature: currentTemp + 1 }, { entity_id: device.entityId });
           action = `${device.name} → ${currentTemp + 1}°`;
           feedbackText = `${currentTemp + 1} degrees`;
-        } else if (device.domain === "media_player") {
-          callServiceRef.current("media_player", "volume_up", {}, { entity_id: device.entityId });
-          action = `${device.name} volume up`;
-          feedbackText = "Volume up";
         }
         break;
       }
       case "swipe_left": {
-        // Decrease (temp down / volume down)
-        if (device.domain === "climate") {
+        // Media player: prev track. Climate: temp down.
+        if (device.domain === "media_player") {
+          callServiceRef.current("media_player", "media_previous_track", {}, { entity_id: device.entityId });
+          action = `${device.name} Previous`;
+          feedbackText = "Previous";
+        } else if (device.domain === "climate") {
           const currentTemp = e.attributes?.temperature || 24;
           callServiceRef.current("climate", "set_temperature", { temperature: currentTemp - 1 }, { entity_id: device.entityId });
           action = `${device.name} → ${currentTemp - 1}°`;
           feedbackText = `${currentTemp - 1} degrees`;
-        } else if (device.domain === "media_player") {
-          callServiceRef.current("media_player", "volume_down", {}, { entity_id: device.entityId });
-          action = `${device.name} volume down`;
-          feedbackText = "Volume down";
         }
         break;
       }
@@ -244,17 +259,71 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
     return () => bridgeRef.current.close();
   }, []);
 
+  // ── Lock visible device as focused (swipe_down trigger) ──
+  const lockVisibleDevice = useCallback(() => {
+    const target = visibleDeviceRef.current;
+    const label = visibleDeviceLabelRef.current;
+    if (!target) {
+      try { Glasses.speakFeedback("No device detected"); } catch {}
+      return;
+    }
+
+    // Set as focused device
+    const device: FocusedDevice = {
+      entityId: target.entityId,
+      domain: target.domain as any,
+      name: target.name,
+    };
+    setFocusedDevice(device);
+    setLastGestureAction(`${target.name} targeted`);
+    try { Glasses.speakFeedback(`${target.name}`); } catch {}
+
+    // Auto-dismiss after 15 seconds of no gesture activity
+    if (focusDismissTimer.current) clearTimeout(focusDismissTimer.current);
+    focusDismissTimer.current = setTimeout(() => {
+      setFocusedDevice(null);
+      setLastGestureAction(null);
+      try { Glasses.speakFeedback("Released"); } catch {}
+    }, 15000);
+  }, []);
+
+  // ── Dismiss focused device (open_palm when focused) ──
+  const dismissFocusedDevice = useCallback(() => {
+    if (focusDismissTimer.current) clearTimeout(focusDismissTimer.current);
+    setFocusedDevice(null);
+    setLastGestureAction(null);
+    try { Glasses.speakFeedback("Released"); } catch {}
+  }, []);
+
   // Gesture command handler
   useEffect(() => {
     gestureManager.current.setCallback((command: GestureCommand) => {
-      if (command.gesture === "open_palm") {
-        handleCapture();
+      // Two-finger swipe down = target lock
+      if (command.gesture === "swipe_down") {
+        lockVisibleDevice();
         return;
       }
 
-      // Home device control gestures
+      // Open palm: if focused → dismiss, otherwise capture photo
+      if (command.gesture === "open_palm") {
+        if (focusedDeviceRef.current) {
+          dismissFocusedDevice();
+        } else {
+          handleCapture();
+        }
+        return;
+      }
+
+      // Home device control gestures (when a device is focused)
       const controlGestures = new Set(["thumbs_up", "grab", "pinch", "peace", "swipe_left", "swipe_right"]);
       if (controlGestures.has(command.gesture) && focusedDeviceRef.current) {
+        // Reset auto-dismiss timer on each gesture
+        if (focusDismissTimer.current) clearTimeout(focusDismissTimer.current);
+        focusDismissTimer.current = setTimeout(() => {
+          setFocusedDevice(null);
+          setLastGestureAction(null);
+          try { Glasses.speakFeedback("Released"); } catch {}
+        }, 15000);
         executeGestureAction(command);
         return;
       }
@@ -270,7 +339,7 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
       }
     });
     gestureManager.current.setEnabled(true);
-  }, [executeGestureAction]);
+  }, [executeGestureAction, lockVisibleDevice, dismissFocusedDevice]);
 
   // Native event listeners
   useEffect(() => {
@@ -287,7 +356,7 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         }
       }),
       Glasses.onVideoFrame((event) => {
-        // No frame display — just process for gestures
+        // No frame display — just process for gestures + object detection
         frameCountRef.current++;
 
         // FPS counter
@@ -313,6 +382,39 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
             .catch(() => {})
             .finally(() => {
               processingFrame.current = false;
+            });
+        }
+
+        // Object detection — run every 500ms to track what camera sees
+        if (objectDetectionReady.current && !processingObjects.current && now - lastObjectDetectTime.current >= 500) {
+          processingObjects.current = true;
+          lastObjectDetectTime.current = now;
+          MediaPipe.detectObjects(event.data)
+            .then((objects) => {
+              if (objects.length > 0) {
+                // Find the highest-confidence object that maps to a device
+                let bestTarget: DeviceTarget | null = null;
+                let bestLabel: string | null = null;
+                let bestScore = 0;
+                for (const obj of objects) {
+                  if (obj.score < 0.4) continue; // skip low confidence
+                  const target = findDeviceForObject(obj.label);
+                  if (target && obj.score > bestScore) {
+                    bestTarget = target;
+                    bestLabel = obj.label;
+                    bestScore = obj.score;
+                  }
+                }
+                visibleDeviceRef.current = bestTarget;
+                visibleDeviceLabelRef.current = bestLabel;
+              } else {
+                visibleDeviceRef.current = null;
+                visibleDeviceLabelRef.current = null;
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              processingObjects.current = false;
             });
         }
       }),
@@ -350,6 +452,15 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
     } catch (e: any) {
       // MediaPipe init failure is non-fatal — gestures won't work but photos still will
       console.warn("MediaPipe init failed:", e.message);
+    }
+    // Initialize object detection for spatial targeting (non-blocking)
+    try {
+      if (MediaPipe.isAvailable() && !objectDetectionReady.current) {
+        const ok = await MediaPipe.initializeObjects();
+        if (ok) objectDetectionReady.current = true;
+      }
+    } catch (e: any) {
+      console.warn("Object detection init failed:", e.message);
     }
   }, []);
 
@@ -390,9 +501,19 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         mediapipeReady.current = false;
         await MediaPipe.dispose();
       }
+      if (objectDetectionReady.current) {
+        objectDetectionReady.current = false;
+        await MediaPipe.disposeObjects();
+      }
+      if (focusDismissTimer.current) {
+        clearTimeout(focusDismissTimer.current);
+        focusDismissTimer.current = null;
+      }
       await Glasses.stopVideoStream();
       await Glasses.unregisterDevice();
       setFps(0);
+      setFocusedDevice(null);
+      visibleDeviceRef.current = null;
       resetSwipeTracking();
       gestureManager.current.reset();
     } catch (e: any) {

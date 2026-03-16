@@ -22,6 +22,7 @@ const GESTURE_ACTIONS: Record<string, GestureAction> = {
   point: { label: "SELECT", icon: "\u{1F4CD}" },
   swipe_left: { label: "PREV", icon: "\u{23EE}" },
   swipe_right: { label: "NEXT", icon: "\u{23ED}" },
+  swipe_down: { label: "TARGET", icon: "\u{1F3AF}" },
   // Compound gestures
   "point+pinch": { label: "ACTIVATE", icon: "\u{26A1}" },
 };
