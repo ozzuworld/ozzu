@@ -32,9 +32,12 @@ export function usePosition(): PositionState {
 
   // Fetch position via HTTP
   const fetchState = useCallback(async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
     try {
       const url = `${getBridgeUrl()}/positioning/state`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
       if (!res.ok) return;
       const data = await res.json();
       if (!mountedRef.current) return;
@@ -43,7 +46,10 @@ export function usePosition(): PositionState {
         setLastUpdate(data.lastUpdate);
       }
     } catch (e) {
-      console.warn("usePosition fetch error:", e);
+      clearTimeout(timer);
+      if ((e as Error).name !== "AbortError") {
+        console.warn("usePosition fetch error:", e);
+      }
     }
   }, []);
 
