@@ -395,6 +395,12 @@ export class BridgeSession {
     }
   }
 
+  sendDebug(tag: string, data: Record<string, any>): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "gestureDebug", tag, ...data }));
+    }
+  }
+
   sendGestureCommand(data: { gesture: string; action: string; fingerCount?: number; timestamp: number }): void {
     const msg = JSON.stringify({ type: "gestureCommand", ...data });
     if (this.ws?.readyState === WebSocket.OPEN) {

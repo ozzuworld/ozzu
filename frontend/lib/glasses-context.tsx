@@ -89,6 +89,7 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
   const connectionStateRef = useRef<ConnectionState>("disconnected");
   const streamingRef = useRef(false);
   // What the camera currently sees — updated by object detection
+  const lastObjDebugTime = useRef(0);
   const visibleDeviceRef = useRef<DeviceTarget | null>(null);
   const visibleDeviceLabelRef = useRef<string | null>(null);
   // Auto-dismiss focus after inactivity
@@ -298,8 +299,25 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
   // Gesture command handler
   useEffect(() => {
     gestureManager.current.setCallback((command: GestureCommand) => {
+      const dbg = (tag: string, data: Record<string, any>) => {
+        if (connectedRef.current) bridgeRef.current.sendDebug(tag, data);
+      };
+
+      dbg("CMD", {
+        gesture: command.gesture,
+        fingers: command.fingerCount,
+        compound: command.compound,
+        focused: focusedDeviceRef.current?.name || null,
+        visible: visibleDeviceRef.current?.name || null,
+        visibleLabel: visibleDeviceLabelRef.current,
+      });
+
       // Two-finger swipe down = target lock
       if (command.gesture === "swipe_down") {
+        dbg("SWIPE_DOWN", {
+          visibleDevice: visibleDeviceRef.current,
+          visibleLabel: visibleDeviceLabelRef.current,
+        });
         lockVisibleDevice();
         return;
       }
@@ -317,6 +335,11 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
       // Home device control gestures (when a device is focused)
       const controlGestures = new Set(["thumbs_up", "grab", "pinch", "peace", "swipe_left", "swipe_right"]);
       if (controlGestures.has(command.gesture) && focusedDeviceRef.current) {
+        dbg("TARGETED", {
+          gesture: command.gesture,
+          device: focusedDeviceRef.current.name,
+          domain: focusedDeviceRef.current.domain,
+        });
         // Reset auto-dismiss timer on each gesture
         if (focusDismissTimer.current) clearTimeout(focusDismissTimer.current);
         focusDismissTimer.current = setTimeout(() => {
@@ -391,6 +414,14 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
           lastObjectDetectTime.current = now;
           MediaPipe.detectObjects(event.data)
             .then((objects) => {
+              // Debug: log all detected objects every 2s
+              if (connectedRef.current && now - (lastObjDebugTime.current || 0) >= 2000) {
+                lastObjDebugTime.current = now;
+                bridgeRef.current.sendDebug("OBJECTS", {
+                  count: objects.length,
+                  items: objects.slice(0, 5).map(o => ({ label: o.label, score: Math.round(o.score * 100) })),
+                });
+              }
               if (objects.length > 0) {
                 // Find the highest-confidence object that maps to a device
                 let bestTarget: DeviceTarget | null = null;

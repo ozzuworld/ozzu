@@ -6141,6 +6141,13 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
+      // ── Gesture debug stream ──
+      if (msg.type === "gestureDebug") {
+        const { tag, type: _, ...rest } = msg;
+        console.log(`[GESTURE-DBG] ${tag}: ${JSON.stringify(rest)}`);
+        return;
+      }
+
       // ── Gesture command from AR hand tracking ──
       if (msg.type === "gestureCommand") {
         const info = devices.get(ws);
