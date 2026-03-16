@@ -198,8 +198,8 @@ class LocationEstimate:
 
 
 # ── Transition model ──
-DEFAULT_SELF_TRANSITION = 0.92
-DEFAULT_NEIGHBOR_TRANSITION = 0.025
+DEFAULT_SELF_TRANSITION = 0.96
+DEFAULT_NEIGHBOR_TRANSITION = 0.012
 
 # ── EKF belief parameters ──
 EKF_PROCESS_NOISE = 0.008       # How fast beliefs can change per step
@@ -537,47 +537,35 @@ class PositionSolver:
         likelihoods = {}
         measurement_noise = {}
 
-        if len(active_rooms) >= 2:
-            # Use Kalman-smoothed motion levels for comparison
-            smooth_motions = {nid: r.smooth_motion for nid, r in active_rooms.items()}
-            max_motion = max(smooth_motions.values())
-            min_motion = min(smooth_motions.values())
-            motion_range = max_motion - min_motion
+        for nid in nids:
+            room = self.rooms[nid]
+            if room.stale:
+                likelihoods[nid] = 0.02
+                measurement_noise[nid] = 0.3
+                continue
 
+            conf = room.smooth_confidence / 100.0
+            measurement_noise[nid] = max(EKF_MIN_MEASUREMENT_NOISE, 0.4 * (1.0 - conf))
+
+            # Presence state is the strongest signal — use it aggressively
+            if room.presence == 2:  # MOVING — strong claim
+                likelihoods[nid] = 0.6 + 0.4 * conf
+                measurement_noise[nid] *= 0.3  # high trust
+            elif room.presence == 1:  # STATIC — moderate claim
+                likelihoods[nid] = 0.3 + 0.4 * conf
+                measurement_noise[nid] *= 0.5
+            else:  # EMPTY — strong negative
+                likelihoods[nid] = 0.05 + 0.05 * (1.0 - conf)
+                measurement_noise[nid] *= 0.4  # also trust "empty" strongly
+
+        # Boost: if only one room reports MOVING, amplify it
+        moving_nids = [nid for nid in nids if not self.rooms[nid].stale
+                       and self.rooms[nid].presence == 2]
+        if len(moving_nids) == 1:
+            likelihoods[moving_nids[0]] *= 2.0
             for nid in nids:
-                room = self.rooms[nid]
-                if room.stale:
-                    likelihoods[nid] = 0.02  # push stale rooms toward 0
-                    measurement_noise[nid] = 0.3  # moderate noise — decay slowly
-                    continue
-
-                conf = room.smooth_confidence / 100.0
-                # Measurement noise inversely proportional to confidence
-                measurement_noise[nid] = max(EKF_MIN_MEASUREMENT_NOISE, 0.5 * (1.0 - conf))
-
-                if room.presence == 0:  # EMPTY
-                    likelihoods[nid] = 0.1 * (1.0 - conf) + 0.05
-                elif motion_range > 3:
-                    rel_motion = (room.smooth_motion - min_motion) / motion_range
-                    likelihoods[nid] = 0.2 + 0.7 * rel_motion * conf
-                else:
-                    likelihoods[nid] = 1.0  # uninformative
-                    measurement_noise[nid] = 1.0  # high noise
-        else:
-            for nid in nids:
-                room = self.rooms[nid]
-                if room.stale:
-                    likelihoods[nid] = 0.02
-                    measurement_noise[nid] = 0.3
-                    continue
-                conf = room.smooth_confidence / 100.0
-                measurement_noise[nid] = max(EKF_MIN_MEASUREMENT_NOISE, 0.5 * (1.0 - conf))
-                if room.presence == 2:
-                    likelihoods[nid] = 0.5 + 0.5 * conf
-                elif room.presence == 1:
-                    likelihoods[nid] = 0.3 + 0.4 * conf
-                else:
-                    likelihoods[nid] = 0.1 * (1.0 - conf) + 0.05
+                if nid != moving_nids[0] and self.rooms[nid].presence != 2:
+                    likelihoods[nid] *= 0.5
 
         # ── Step 3: BLE observation ──
         ble_room_nid = None
@@ -597,12 +585,13 @@ class PositionSolver:
                 break
 
         if ble_room_nid is not None:
+            # BLE best-node is a strong room indicator — amplify aggressively
             for nid in likelihoods:
                 if nid == ble_room_nid:
-                    likelihoods[nid] *= (0.5 + 0.5 * ble_confidence)
-                    measurement_noise[nid] *= 0.5  # BLE reduces uncertainty
+                    likelihoods[nid] *= (1.0 + 1.5 * ble_confidence)
+                    measurement_noise[nid] *= 0.3  # high trust in BLE
                 else:
-                    likelihoods[nid] *= (0.3 * (1.0 - ble_confidence) + 0.1)
+                    likelihoods[nid] *= max(0.1, 0.4 * (1.0 - ble_confidence))
 
         # ── Step 4: Check if informative ──
         active_likelihoods = [likelihoods.get(nid, 1.0) for nid in active_rooms]
