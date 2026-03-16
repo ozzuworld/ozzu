@@ -1,9 +1,5 @@
-// Device Map — maps COCO object detection labels to Home Assistant entities
-// Supports calibration overrides stored via expo-file-system
-
-import * as FileSystem from "expo-file-system/legacy";
-
-const STORAGE_FILE = `${FileSystem.documentDirectory}gesture-device-map.json`;
+// Device Map — maps rooms to controllable Home Assistant devices
+// Swipe-down cycles through devices in the current room (from positioning system)
 
 export type DeviceDomain = "media_player" | "climate" | "switch" | "vacuum";
 
@@ -18,116 +14,104 @@ export interface DeviceTarget {
   max?: number; // continuous max value
 }
 
-// Default COCO class → HA device mappings
-const DEFAULT_MAP: Record<string, DeviceTarget> = {
-  tv: {
-    id: "main_tv",
-    name: "Main TV",
-    entityId: "media_player.main_tv",
-    domain: "media_player",
-    continuous: true,
-    attribute: "volume_level",
-    min: 0,
-    max: 1,
-  },
-  laptop: {
-    id: "spotify",
-    name: "Spotify",
-    entityId: "media_player.spotify_king_kazuma",
-    domain: "media_player",
-    continuous: true,
-    attribute: "volume_level",
-    min: 0,
-    max: 1,
-  },
-  refrigerator: {
-    id: "living_room_ac",
-    name: "AC",
-    entityId: "climate.living_room_ac",
-    domain: "climate",
-    continuous: true,
-    attribute: "temperature",
-    min: 16,
-    max: 30,
-  },
-  "cell phone": {
-    id: "living_room_cam",
-    name: "Camera",
-    entityId: "switch.living_room_cam_power",
-    domain: "switch",
-    continuous: false,
-  },
-  microwave: {
-    id: "sous_vide",
-    name: "Sous Vide",
-    entityId: "switch.s_vide_switch",
-    domain: "switch",
-    continuous: false,
-  },
+// Room → devices available for gesture control
+// Order matters: first device is the default target for each room
+const ROOM_DEVICES: Record<string, DeviceTarget[]> = {
+  living_room: [
+    {
+      id: "living_room_ac",
+      name: "AC",
+      entityId: "climate.living_room_ac",
+      domain: "climate",
+      continuous: true,
+      attribute: "temperature",
+      min: 16,
+      max: 30,
+    },
+    {
+      id: "main_tv",
+      name: "Main TV",
+      entityId: "media_player.main_tv",
+      domain: "media_player",
+      continuous: true,
+      attribute: "volume_level",
+      min: 0,
+      max: 1,
+    },
+    {
+      id: "spotify",
+      name: "Spotify",
+      entityId: "media_player.spotify_king_kazuma",
+      domain: "media_player",
+      continuous: true,
+      attribute: "volume_level",
+      min: 0,
+      max: 1,
+    },
+    {
+      id: "living_room_cam",
+      name: "Camera",
+      entityId: "switch.living_room_cam_power",
+      domain: "switch",
+      continuous: false,
+    },
+  ],
+  kitchen: [
+    {
+      id: "sous_vide",
+      name: "Sous Vide",
+      entityId: "switch.s_vide_switch",
+      domain: "switch",
+      continuous: false,
+    },
+  ],
+  office: [
+    {
+      id: "living_room_ac",
+      name: "AC",
+      entityId: "climate.living_room_ac",
+      domain: "climate",
+      continuous: true,
+      attribute: "temperature",
+      min: 16,
+      max: 30,
+    },
+  ],
+  bedroom: [],
 };
 
-// Runtime map: defaults + calibration overrides
-let deviceMap: Record<string, DeviceTarget> = { ...DEFAULT_MAP };
+/** Get devices for a room */
+export function getDevicesForRoom(room: string): DeviceTarget[] {
+  const normalized = room.toLowerCase().replace(/[\s-]+/g, "_");
+  return ROOM_DEVICES[normalized] || [];
+}
 
-/** Load calibration overrides from file storage */
-export async function loadCalibration(): Promise<void> {
-  try {
-    const info = await FileSystem.getInfoAsync(STORAGE_FILE);
-    if (info.exists) {
-      const stored = await FileSystem.readAsStringAsync(STORAGE_FILE);
-      const overrides: Record<string, DeviceTarget> = JSON.parse(stored);
-      deviceMap = { ...DEFAULT_MAP, ...overrides };
-    }
-  } catch {
-    // Use defaults on error
+/** Get next device in room (for cycling with swipe-down) */
+export function getNextDevice(
+  room: string,
+  currentDeviceId: string | null
+): DeviceTarget | null {
+  const devices = getDevicesForRoom(room);
+  if (devices.length === 0) return null;
+  if (!currentDeviceId) return devices[0];
+  const idx = devices.findIndex((d) => d.id === currentDeviceId);
+  return devices[(idx + 1) % devices.length];
+}
+
+/** Get all rooms that have devices */
+export function getRoomsWithDevices(): string[] {
+  return Object.keys(ROOM_DEVICES).filter(
+    (r) => ROOM_DEVICES[r].length > 0
+  );
+}
+
+/** Find device by entity ID across all rooms */
+export function findDeviceByEntityId(
+  entityId: string
+): DeviceTarget | null {
+  for (const devices of Object.values(ROOM_DEVICES)) {
+    const found = devices.find((d) => d.entityId === entityId);
+    if (found) return found;
   }
-}
-
-/** Save a calibration override: assign a COCO label to a device target */
-export async function saveCalibration(
-  cocoLabel: string,
-  target: DeviceTarget
-): Promise<void> {
-  deviceMap[cocoLabel] = target;
-  try {
-    // Only save overrides (non-default entries)
-    const overrides: Record<string, DeviceTarget> = {};
-    for (const [label, device] of Object.entries(deviceMap)) {
-      if (!DEFAULT_MAP[label] || DEFAULT_MAP[label].entityId !== device.entityId) {
-        overrides[label] = device;
-      }
-    }
-    await FileSystem.writeAsStringAsync(STORAGE_FILE, JSON.stringify(overrides));
-  } catch {
-    // Silent fail — mapping still active in memory
-  }
-}
-
-/** Clear all calibration overrides */
-export async function clearCalibration(): Promise<void> {
-  deviceMap = { ...DEFAULT_MAP };
-  try {
-    await FileSystem.deleteAsync(STORAGE_FILE, { idempotent: true });
-  } catch {}
-}
-
-/** Find a device target for a detected COCO object label */
-export function findDeviceForObject(cocoLabel: string): DeviceTarget | null {
-  return deviceMap[cocoLabel.toLowerCase()] || null;
-}
-
-/** Get all available device targets (for calibration UI) */
-export function getAllDeviceTargets(): DeviceTarget[] {
-  return [
-    DEFAULT_MAP.tv!,
-    DEFAULT_MAP.laptop!,
-    DEFAULT_MAP.refrigerator!,
-    DEFAULT_MAP["cell phone"]!,
-    DEFAULT_MAP.microwave!,
-  ];
-}
-
-/** Get current mapping table (for debug/calibration display) */
-export function getCurrentMap(): Record<string, DeviceTarget> {
-  return { ...deviceMap };
+  return null;
 }

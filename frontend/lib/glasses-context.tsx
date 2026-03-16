@@ -1,7 +1,7 @@
 // GlassesProvider — background glasses engine
 // Runs connection, streaming, gesture detection, and device control.
 // Photo capture overlay renders globally on top of whatever screen is active.
-// Gesture → Home Control: thumbs_up=ON, grab=OFF, pinch=toggle, swipe=analog
+// Gesture → Home Control: swipe_down=cycle devices, pinch=toggle, thumbs_up=ON, grab=OFF
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { AppState } from "react-native";
@@ -12,7 +12,8 @@ import { GestureCommandManager, type GestureCommand } from "./gesture-commands";
 import { BridgeSession, type BridgeCallbacks } from "./bridge-session";
 import PhotoCaptureOverlay, { type CapturedPhoto } from "../components/glasses/PhotoCaptureOverlay";
 import { useHA } from "./ha-context";
-import { findDeviceForObject, type DeviceTarget } from "./device-map";
+import { usePosition } from "./usePosition";
+import { getNextDevice, getDevicesForRoom, type DeviceTarget } from "./device-map";
 
 type ConnectionState = Glasses.ConnectionState;
 
@@ -67,31 +68,27 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
   const [lastGestureAction, setLastGestureAction] = useState<string | null>(null);
 
   const { callService, entities } = useHA();
+  const { position } = usePosition();
   const callServiceRef = useRef(callService);
   const entitiesRef = useRef(entities);
   const focusedDeviceRef = useRef<FocusedDevice | null>(null);
+  const currentRoomRef = useRef<string | null>(null);
 
   // Keep refs in sync to avoid stale closures in gesture callback
   useEffect(() => { callServiceRef.current = callService; }, [callService]);
   useEffect(() => { entitiesRef.current = entities; }, [entities]);
   useEffect(() => { focusedDeviceRef.current = focusedDevice; }, [focusedDevice]);
+  useEffect(() => { currentRoomRef.current = position?.room || null; }, [position?.room]);
 
   const bridgeRef = useRef(new BridgeSession());
   const connectedRef = useRef(false);
   const gestureManager = useRef(new GestureCommandManager());
   const mediapipeReady = useRef(false);
-  const objectDetectionReady = useRef(false);
   const processingFrame = useRef(false);
-  const processingObjects = useRef(false);
   const frameCountRef = useRef(0);
   const lastFrameTimeRef = useRef(0);
-  const lastObjectDetectTime = useRef(0);
   const connectionStateRef = useRef<ConnectionState>("disconnected");
   const streamingRef = useRef(false);
-  // What the camera currently sees — updated by object detection
-  const lastObjDebugTime = useRef(0);
-  const visibleDeviceRef = useRef<DeviceTarget | null>(null);
-  const visibleDeviceLabelRef = useRef<string | null>(null);
   // Auto-dismiss focus after inactivity
   const focusDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -125,7 +122,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
 
     switch (command.gesture) {
       case "thumbs_up": {
-        // Turn ON
         if (isOn) {
           feedbackText = `${device.name} already on`;
         } else {
@@ -144,7 +140,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         break;
       }
       case "grab": {
-        // Turn OFF (fist)
         if (!isOn) {
           feedbackText = `${device.name} already off`;
         } else {
@@ -163,7 +158,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         break;
       }
       case "pinch": {
-        // Media player: play/pause. Others: toggle on/off.
         if (device.domain === "media_player") {
           callServiceRef.current("media_player", "media_play_pause", {}, { entity_id: device.entityId });
           action = `${device.name} ${isOn ? "Pause" : "Play"}`;
@@ -184,7 +178,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         break;
       }
       case "peace": {
-        // AC specific: toggle cool/heat mode
         if (device.domain === "climate" && isOn) {
           const currentMode = e.attributes?.hvac_action || e.state;
           const newMode = currentMode === "cooling" ? "heat" : "cool";
@@ -195,7 +188,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         break;
       }
       case "swipe_right": {
-        // Media player: next track. Climate: temp up.
         if (device.domain === "media_player") {
           callServiceRef.current("media_player", "media_next_track", {}, { entity_id: device.entityId });
           action = `${device.name} Next`;
@@ -209,7 +201,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         break;
       }
       case "swipe_left": {
-        // Media player: prev track. Climate: temp down.
         if (device.domain === "media_player") {
           callServiceRef.current("media_player", "media_previous_track", {}, { entity_id: device.entityId });
           action = `${device.name} Previous`;
@@ -226,7 +217,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
 
     if (action) {
       setLastGestureAction(action);
-      // Audio feedback through glasses speaker
       try { Glasses.speakFeedback(feedbackText); } catch {}
     } else if (feedbackText) {
       try { Glasses.speakFeedback(feedbackText); } catch {}
@@ -260,24 +250,37 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
     return () => bridgeRef.current.close();
   }, []);
 
-  // ── Lock visible device as focused (swipe_down trigger) ──
-  const lockVisibleDevice = useCallback(() => {
-    const target = visibleDeviceRef.current;
-    const label = visibleDeviceLabelRef.current;
-    if (!target) {
-      try { Glasses.speakFeedback("No device detected"); } catch {}
+  // ── Cycle to next device in current room (swipe_down trigger) ──
+  const cycleRoomDevice = useCallback(() => {
+    const room = currentRoomRef.current;
+    if (!room) {
+      try { Glasses.speakFeedback("No room detected"); } catch {}
       return;
     }
 
-    // Set as focused device
+    const devices = getDevicesForRoom(room);
+    if (devices.length === 0) {
+      try { Glasses.speakFeedback(`No devices in ${room.replace(/_/g, " ")}`); } catch {}
+      return;
+    }
+
+    // Get next device (cycles through the list)
+    const currentId = focusedDeviceRef.current?.entityId
+      ? devices.find(d => d.entityId === focusedDeviceRef.current?.entityId)?.id || null
+      : null;
+    const next = getNextDevice(room, currentId);
+    if (!next) return;
+
     const device: FocusedDevice = {
-      entityId: target.entityId,
-      domain: target.domain as any,
-      name: target.name,
+      entityId: next.entityId,
+      domain: next.domain,
+      name: next.name,
     };
     setFocusedDevice(device);
-    setLastGestureAction(`${target.name} targeted`);
-    try { Glasses.speakFeedback(`${target.name}`); } catch {}
+    const count = devices.length;
+    const idx = devices.findIndex(d => d.id === next.id) + 1;
+    setLastGestureAction(`${next.name} (${idx}/${count})`);
+    try { Glasses.speakFeedback(next.name); } catch {}
 
     // Auto-dismiss after 15 seconds of no gesture activity
     if (focusDismissTimer.current) clearTimeout(focusDismissTimer.current);
@@ -308,17 +311,16 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         fingers: command.fingerCount,
         compound: command.compound,
         focused: focusedDeviceRef.current?.name || null,
-        visible: visibleDeviceRef.current?.name || null,
-        visibleLabel: visibleDeviceLabelRef.current,
+        room: currentRoomRef.current,
       });
 
-      // Two-finger swipe down = target lock
+      // Two-finger swipe down = cycle through room devices
       if (command.gesture === "swipe_down") {
         dbg("SWIPE_DOWN", {
-          visibleDevice: visibleDeviceRef.current,
-          visibleLabel: visibleDeviceLabelRef.current,
+          room: currentRoomRef.current,
+          currentFocus: focusedDeviceRef.current?.name || null,
         });
-        lockVisibleDevice();
+        cycleRoomDevice();
         return;
       }
 
@@ -362,7 +364,7 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
       }
     });
     gestureManager.current.setEnabled(true);
-  }, [executeGestureAction, lockVisibleDevice, dismissFocusedDevice]);
+  }, [executeGestureAction, cycleRoomDevice, dismissFocusedDevice]);
 
   // Native event listeners
   useEffect(() => {
@@ -379,7 +381,7 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         }
       }),
       Glasses.onVideoFrame((event) => {
-        // No frame display — just process for gestures + object detection
+        // Process frames for hand gesture detection only (no object detection needed)
         frameCountRef.current++;
 
         // FPS counter
@@ -405,47 +407,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
             .catch(() => {})
             .finally(() => {
               processingFrame.current = false;
-            });
-        }
-
-        // Object detection — run every 500ms to track what camera sees
-        if (objectDetectionReady.current && !processingObjects.current && now - lastObjectDetectTime.current >= 500) {
-          processingObjects.current = true;
-          lastObjectDetectTime.current = now;
-          MediaPipe.detectObjects(event.data)
-            .then((objects) => {
-              // Debug: log all detected objects every 2s
-              if (connectedRef.current && now - (lastObjDebugTime.current || 0) >= 2000) {
-                lastObjDebugTime.current = now;
-                bridgeRef.current.sendDebug("OBJECTS", {
-                  count: objects.length,
-                  items: objects.slice(0, 5).map(o => ({ label: o.label, score: Math.round(o.score * 100) })),
-                });
-              }
-              if (objects.length > 0) {
-                // Find the highest-confidence object that maps to a device
-                let bestTarget: DeviceTarget | null = null;
-                let bestLabel: string | null = null;
-                let bestScore = 0;
-                for (const obj of objects) {
-                  if (obj.score < 0.4) continue; // skip low confidence
-                  const target = findDeviceForObject(obj.label);
-                  if (target && obj.score > bestScore) {
-                    bestTarget = target;
-                    bestLabel = obj.label;
-                    bestScore = obj.score;
-                  }
-                }
-                visibleDeviceRef.current = bestTarget;
-                visibleDeviceLabelRef.current = bestLabel;
-              } else {
-                visibleDeviceRef.current = null;
-                visibleDeviceLabelRef.current = null;
-              }
-            })
-            .catch(() => {})
-            .finally(() => {
-              processingObjects.current = false;
             });
         }
       }),
@@ -481,17 +442,7 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         if (ok) mediapipeReady.current = true;
       }
     } catch (e: any) {
-      // MediaPipe init failure is non-fatal — gestures won't work but photos still will
       console.warn("MediaPipe init failed:", e.message);
-    }
-    // Initialize object detection for spatial targeting (non-blocking)
-    try {
-      if (MediaPipe.isAvailable() && !objectDetectionReady.current) {
-        const ok = await MediaPipe.initializeObjects();
-        if (ok) objectDetectionReady.current = true;
-      }
-    } catch (e: any) {
-      console.warn("Object detection init failed:", e.message);
     }
   }, []);
 
@@ -513,10 +464,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
         mediapipeReady.current = false;
         await MediaPipe.dispose();
       }
-      if (objectDetectionReady.current) {
-        objectDetectionReady.current = false;
-        await MediaPipe.disposeObjects();
-      }
       if (focusDismissTimer.current) {
         clearTimeout(focusDismissTimer.current);
         focusDismissTimer.current = null;
@@ -525,7 +472,6 @@ export function GlassesProvider({ children }: { children: React.ReactNode }) {
       await Glasses.unregisterDevice();
       setFps(0);
       setFocusedDevice(null);
-      visibleDeviceRef.current = null;
       resetSwipeTracking();
       gestureManager.current.reset();
     } catch (e: any) {
