@@ -1,5 +1,5 @@
 // usePosition — Real-time indoor positioning from bridge
-// Fetches initial state via HTTP, then listens for WebSocket positionUpdate events
+// Polls HTTP endpoint every 2s + listens for WebSocket positionUpdate events
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getBridgeUrl } from "./bridge-api";
@@ -21,22 +21,20 @@ interface PositionState {
   connected: boolean;
 }
 
-const WS_URL = (process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge")
-  .replace(/^https/, "wss")
-  .replace(/^http/, "ws");
-
 export function usePosition(): PositionState {
   const [position, setPosition] = useState<PositionData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
+  const wsRef = useRef<WebSocket | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initial fetch
+  // Fetch position via HTTP
   const fetchState = useCallback(async () => {
     try {
-      const res = await fetch(`${getBridgeUrl()}/positioning/state`, { signal: AbortSignal.timeout(5000) });
+      const url = `${getBridgeUrl()}/positioning/state`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return;
       const data = await res.json();
       if (!mountedRef.current) return;
@@ -44,14 +42,20 @@ export function usePosition(): PositionState {
         setPosition(data.location);
         setLastUpdate(data.lastUpdate);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("usePosition fetch error:", e);
+    }
   }, []);
 
   // WebSocket connection
   const connectWs = useCallback(() => {
     if (!mountedRef.current) return;
     try {
-      const ws = new WebSocket(WS_URL);
+      const bridgeUrl = getBridgeUrl();
+      const wsUrl = bridgeUrl
+        .replace(/^https/, "wss")
+        .replace(/^http/, "ws");
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -85,12 +89,20 @@ export function usePosition(): PositionState {
 
   useEffect(() => {
     mountedRef.current = true;
+
+    // Initial fetch
     fetchState();
+
+    // Poll every 3 seconds as reliable fallback
+    pollRef.current = setInterval(fetchState, 3000);
+
+    // Also try WebSocket for real-time updates
     connectWs();
 
     return () => {
       mountedRef.current = false;
       if (wsRef.current) wsRef.current.close();
+      if (pollRef.current) clearInterval(pollRef.current);
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     };
   }, [fetchState, connectWs]);
