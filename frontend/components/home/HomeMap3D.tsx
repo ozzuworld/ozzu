@@ -1,8 +1,8 @@
 // HomeMap3D.tsx — Fullscreen interactive 3D apartment with device markers
 // Touch: drag to rotate, pinch to zoom, two-finger pan
-// Devices placed at real physical positions, tappable for controls
+// Edit mode: long-press to place items, drag to reposition
 import { Suspense, useRef, useMemo, useEffect, useState, useCallback } from "react";
-import { View, Text, PanResponder, Pressable, Modal, ScrollView, Platform } from "react-native";
+import { View, Text, PanResponder, Pressable, Modal, ScrollView, Platform, Dimensions } from "react-native";
 import { Canvas, useFrame, useThree } from "@react-three/fiber/native";
 import * as THREE from "three";
 import { Asset } from "expo-asset";
@@ -20,7 +20,7 @@ interface PositionData {
   furniture?: string;
 }
 
-interface DeviceMarker {
+export interface DeviceMarker {
   id: string;
   name: string;
   icon: string;
@@ -37,47 +37,28 @@ interface Props {
   deviceStates?: Record<string, { state: string; attributes?: any }>;
   onDeviceTap?: (device: DeviceMarker) => void;
   onDeviceToggle?: (entityId: string, domain: string) => void;
+  // Edit mode
+  editMode?: boolean;
+  placedDevices?: DeviceMarker[];
+  onPlaceDevice?: (device: DeviceMarker) => void;
+  onMoveDevice?: (deviceId: string, newPos: [number, number]) => void;
+  onRemoveDevice?: (deviceId: string) => void;
+  onRequestPlaceAt?: (worldX: number, worldZ: number) => void;
 }
 
-// ── Device positions mapped to real apartment coordinates ──
-// Only devices with visible physical locations in the LiDAR scan
-export const DEVICE_MARKERS: DeviceMarker[] = [
-  // Living Room — TV is against the south wall near the couch
-  {
-    id: "main_tv", name: "Main TV", icon: "📺",
-    entityId: "media_player.main_tv", domain: "media_player",
-    position: [2.20, -4.80], color: "#CE93D8", room: "living",
-  },
-  // Living Room — Spotify plays through the TV area
-  {
-    id: "spotify", name: "Spotify", icon: "🎵",
-    entityId: "media_player.spotify_king_kazuma", domain: "media_player",
-    position: [1.15, -3.33], color: "#1DB954", room: "living",
-  },
-  // Living Room — AC unit on south wall
-  {
-    id: "ac", name: "AC", icon: "❄️",
-    entityId: "climate.living_room_ac", domain: "climate",
-    position: [0.30, -5.10], color: "#4FC3F7", room: "living",
-  },
-  // Kitchen — Washing machine (appliance visible in scan)
-  {
-    id: "midea_washer", name: "Washer", icon: "🫧",
-    entityId: "switch.151732606804847_power", domain: "switch",
-    position: [-3.97, -0.74], color: "#3B82F6", room: "kitchen",
-  },
-];
-
-// Unassigned devices — no visible physical spot in LiDAR scan
-// Future: user can manually assign positions via drag-and-drop
-export const UNASSIGNED_DEVICES = [
-  { id: "living_room_cam", name: "LR Camera", entityId: "switch.living_room_cam_power" },
-  { id: "security_cam", name: "Security Camera", entityId: "switch.cam1_power" },
-  { id: "sous_vide", name: "Sous Vide", entityId: "switch.s_vide_switch" },
-  { id: "dusk_vader", name: "Dusk Vader", entityId: "vacuum.dusk_vader" },
-  { id: "kazuma_iphone", name: "Kazuma iPhone", entityId: "device_tracker.kazuma_iphone" },
-  { id: "king_kazuma", name: "King Kazuma", entityId: "person.king_kazuma" },
-  { id: "shopping_list", name: "Shopping List", entityId: "todo.shopping_list" },
+// ── All available devices that can be placed ──
+export const ALL_DEVICES: Omit<DeviceMarker, "position">[] = [
+  { id: "main_tv", name: "Main TV", icon: "📺", entityId: "media_player.main_tv", domain: "media_player", color: "#CE93D8", room: "living" },
+  { id: "spotify", name: "Spotify", icon: "🎵", entityId: "media_player.spotify_king_kazuma", domain: "media_player", color: "#1DB954", room: "living" },
+  { id: "ac", name: "AC", icon: "❄️", entityId: "climate.living_room_ac", domain: "climate", color: "#4FC3F7", room: "living" },
+  { id: "midea_washer", name: "Washer", icon: "🫧", entityId: "switch.151732606804847_power", domain: "switch", color: "#3B82F6", room: "kitchen" },
+  { id: "living_room_cam", name: "LR Camera", icon: "📹", entityId: "switch.living_room_cam_power", domain: "switch", color: "#F59E0B", room: "living" },
+  { id: "security_cam", name: "Security Cam", icon: "📹", entityId: "switch.cam1_power", domain: "switch", color: "#EF4444", room: "security" },
+  { id: "sous_vide", name: "Sous Vide", icon: "🍳", entityId: "switch.s_vide_switch", domain: "switch", color: "#F97316", room: "kitchen" },
+  { id: "dusk_vader", name: "Dusk Vader", icon: "🤖", entityId: "vacuum.dusk_vader", domain: "vacuum", color: "#8B5CF6", room: "cleaning" },
+  { id: "node_1", name: "ESP32 Node 1", icon: "📡", entityId: "_node_1", domain: "sensor", color: "#EF4444", room: "living" },
+  { id: "node_2", name: "ESP32 Node 2", icon: "📡", entityId: "_node_2", domain: "sensor", color: "#EF4444", room: "master" },
+  { id: "node_3", name: "ESP32 Node 3", icon: "📡", entityId: "_node_3", domain: "sensor", color: "#EF4444", room: "office" },
 ];
 
 // ── Camera state ──
@@ -158,21 +139,29 @@ function DeviceMarker3D({
   device,
   isOn,
   onTap,
+  editMode,
 }: {
   device: DeviceMarker;
   isOn: boolean;
   onTap: () => void;
+  editMode?: boolean;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
 
   useFrame(({ clock }) => {
     if (!meshRef.current) return;
-    if (isOn) {
-      // Gentle float animation when active
+    if (editMode) {
+      // Bounce animation in edit mode
+      const t = clock.getElapsedTime();
+      meshRef.current.position.y = -1.10 + Math.sin(t * 4 + device.position[0] * 2) * 0.06;
+      if (glowRef.current) {
+        (glowRef.current.material as THREE.MeshBasicMaterial).opacity = 0.35;
+        glowRef.current.scale.setScalar(1.2 + Math.sin(t * 3) * 0.2);
+      }
+    } else if (isOn) {
       const t = clock.getElapsedTime();
       meshRef.current.position.y = -1.15 + Math.sin(t * 2 + device.position[0]) * 0.04;
-      // Glow pulse
       if (glowRef.current) {
         const pulse = 0.8 + Math.sin(t * 3) * 0.2;
         (glowRef.current.material as THREE.MeshBasicMaterial).opacity = 0.25 * pulse;
@@ -188,7 +177,6 @@ function DeviceMarker3D({
 
   return (
     <group position={[device.position[0], 0, device.position[1]]}>
-      {/* Marker sphere */}
       <mesh
         ref={meshRef}
         position={[0, -1.20, 0]}
@@ -197,14 +185,13 @@ function DeviceMarker3D({
           onTap();
         }}
       >
-        <sphereGeometry args={[isOn ? 0.16 : 0.12, 16, 16]} />
+        <sphereGeometry args={[isOn || editMode ? 0.16 : 0.12, 16, 16]} />
         <meshBasicMaterial
-          color={isOn ? device.color : "#525252"}
+          color={editMode ? "#06B6D4" : (isOn ? device.color : "#525252")}
           transparent
-          opacity={isOn ? 0.95 : 0.5}
+          opacity={isOn || editMode ? 0.95 : 0.5}
         />
       </mesh>
-      {/* Glow ring on floor */}
       <mesh
         ref={glowRef}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -212,19 +199,18 @@ function DeviceMarker3D({
       >
         <circleGeometry args={[0.3, 24]} />
         <meshBasicMaterial
-          color={device.color}
+          color={editMode ? "#06B6D4" : device.color}
           transparent
           opacity={isOn ? 0.25 : 0.08}
           side={THREE.DoubleSide}
         />
       </mesh>
-      {/* Vertical line connecting marker to floor */}
       <mesh position={[0, -1.37, 0]}>
         <cylinderGeometry args={[0.008, 0.008, 0.34, 4]} />
         <meshBasicMaterial
-          color={device.color}
+          color={editMode ? "#06B6D4" : device.color}
           transparent
-          opacity={isOn ? 0.4 : 0.15}
+          opacity={isOn || editMode ? 0.4 : 0.15}
         />
       </mesh>
     </group>
@@ -261,17 +247,14 @@ function PositionBeacon({ position }: { position: PositionData }) {
 
   return (
     <group position={pos}>
-      {/* Vertical pillar from floor to beacon */}
       <mesh position={[0, -0.75, 0]}>
         <cylinderGeometry args={[0.03, 0.03, 1.5, 8]} />
         <meshBasicMaterial color={color} transparent opacity={0.4} />
       </mesh>
-      {/* Main beacon sphere — larger and above floor */}
       <mesh ref={meshRef}>
         <sphereGeometry args={[0.25, 16, 16]} />
         <meshBasicMaterial color={color} />
       </mesh>
-      {/* Pulsing ring at floor level */}
       <mesh ref={ringRef} position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.25, 0.35, 32]} />
         <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} />
@@ -280,17 +263,20 @@ function PositionBeacon({ position }: { position: PositionData }) {
   );
 }
 
-// ── ESP32 Node Markers ──
-function NodeMarkers() {
+// ── Edit Mode Drop Target — invisible plane for raycasting ──
+function DropPlane({ onDrop }: { onDrop: (x: number, z: number) => void }) {
   return (
-    <>
-      {Object.entries(roomData.esp32_nodes).map(([id, node]) => (
-        <mesh key={id} position={[node.position[0], -1.0, node.position[1]]}>
-          <boxGeometry args={[0.06, 0.06, 0.06]} />
-          <meshBasicMaterial color="#EF4444" />
-        </mesh>
-      ))}
-    </>
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, -1.54, 0]}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onDrop(e.point.x, e.point.z);
+      }}
+    >
+      <planeGeometry args={[20, 20]} />
+      <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
+    </mesh>
   );
 }
 
@@ -330,12 +316,16 @@ function DevicePopup({
   visible,
   onClose,
   onToggle,
+  editMode,
+  onRemove,
 }: {
   device: DeviceMarker | null;
   state?: { state: string; attributes?: any };
   visible: boolean;
   onClose: () => void;
   onToggle: () => void;
+  editMode?: boolean;
+  onRemove?: () => void;
 }) {
   if (!device) return null;
 
@@ -354,7 +344,7 @@ function DevicePopup({
               backgroundColor: "rgba(20,20,20,0.95)",
               borderRadius: 20,
               borderWidth: 1,
-              borderColor: isOn ? `${device.color}40` : "rgba(255,255,255,0.1)",
+              borderColor: editMode ? "rgba(6,182,212,0.4)" : (isOn ? `${device.color}40` : "rgba(255,255,255,0.1)"),
               overflow: "hidden",
             }}
           >
@@ -386,28 +376,29 @@ function DevicePopup({
                   {device.name}
                 </Text>
                 <Text style={{ color: isOn ? device.color : "rgba(255,255,255,0.4)", fontSize: 12 }}>
-                  {isUnavailable ? "Offline" : entityState}
+                  {editMode ? `Position: (${device.position[0].toFixed(1)}, ${device.position[1].toFixed(1)})` : (isUnavailable ? "Offline" : entityState)}
                 </Text>
               </View>
-              {/* Status dot */}
-              <View
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: 5,
-                  backgroundColor: isOn ? device.color : "rgba(255,255,255,0.15)",
-                  ...(isOn && Platform.OS === "ios" ? {
-                    shadowColor: device.color,
-                    shadowRadius: 6,
-                    shadowOpacity: 0.6,
-                    shadowOffset: { width: 0, height: 0 },
-                  } : {}),
-                }}
-              />
+              {!editMode && (
+                <View
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: isOn ? device.color : "rgba(255,255,255,0.15)",
+                    ...(isOn && Platform.OS === "ios" ? {
+                      shadowColor: device.color,
+                      shadowRadius: 6,
+                      shadowOpacity: 0.6,
+                      shadowOffset: { width: 0, height: 0 },
+                    } : {}),
+                  }}
+                />
+              )}
             </View>
 
             {/* AC temperature display */}
-            {device.domain === "climate" && state?.attributes?.current_temperature && (
+            {!editMode && device.domain === "climate" && state?.attributes?.current_temperature && (
               <View style={{ padding: 16, alignItems: "center" }}>
                 <Text
                   style={{
@@ -428,7 +419,7 @@ function DevicePopup({
             )}
 
             {/* Vacuum info */}
-            {device.domain === "vacuum" && (
+            {!editMode && device.domain === "vacuum" && (
               <View style={{ padding: 16, gap: 8 }}>
                 {state?.attributes?.battery_level != null && (
                   <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
@@ -441,9 +432,9 @@ function DevicePopup({
               </View>
             )}
 
-            {/* Action button */}
-            {!isUnavailable && (
-              <View style={{ padding: 16, paddingTop: device.domain === "climate" || device.domain === "vacuum" ? 0 : 16 }}>
+            {/* Action buttons */}
+            <View style={{ padding: 16, gap: 8 }}>
+              {!editMode && !isUnavailable && (
                 <Pressable
                   onPress={onToggle}
                   style={({ pressed }) => ({
@@ -460,8 +451,26 @@ function DevicePopup({
                     {isOn ? "Turn Off" : "Turn On"}
                   </Text>
                 </Pressable>
-              </View>
-            )}
+              )}
+              {editMode && onRemove && (
+                <Pressable
+                  onPress={onRemove}
+                  style={({ pressed }) => ({
+                    backgroundColor: "rgba(239,68,68,0.15)",
+                    borderWidth: 1,
+                    borderColor: "rgba(239,68,68,0.3)",
+                    borderRadius: 12,
+                    paddingVertical: 12,
+                    alignItems: "center",
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <Text style={{ color: "#EF4444", fontSize: 14, fontWeight: "600" }}>
+                    Remove from Map
+                  </Text>
+                </Pressable>
+              )}
+            </View>
 
             {/* Room label */}
             <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
@@ -476,8 +485,132 @@ function DevicePopup({
   );
 }
 
+// ── Item Picker Modal ──
+export function ItemPicker({
+  visible,
+  placedDeviceIds,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  placedDeviceIds: string[];
+  onSelect: (device: Omit<DeviceMarker, "position">) => void;
+  onClose: () => void;
+}) {
+  const unplaced = ALL_DEVICES.filter((d) => !placedDeviceIds.includes(d.id));
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1 }} onPress={onClose}>
+        <View style={{ flex: 1, justifyContent: "flex-end" }}>
+          <Pressable onPress={(e) => e.stopPropagation()}>
+            <View
+              style={{
+                backgroundColor: "rgba(17,17,17,0.98)",
+                borderTopLeftRadius: 20,
+                borderTopRightRadius: 20,
+                borderWidth: 1,
+                borderColor: "rgba(6,182,212,0.3)",
+                borderBottomWidth: 0,
+                maxHeight: Dimensions.get("window").height * 0.5,
+              }}
+            >
+              {/* Header */}
+              <View style={{ padding: 16, borderBottomWidth: 1, borderColor: "rgba(255,255,255,0.06)" }}>
+                <Text style={{ color: "#06B6D4", fontSize: 13, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2, textAlign: "center" }}>
+                  PLACE ITEM
+                </Text>
+                <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, textAlign: "center", marginTop: 4 }}>
+                  {unplaced.length} item{unplaced.length !== 1 ? "s" : ""} available
+                </Text>
+              </View>
+
+              <ScrollView style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+                {unplaced.length === 0 && (
+                  <Text style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, textAlign: "center", padding: 24 }}>
+                    All items placed
+                  </Text>
+                )}
+                {unplaced.map((device) => (
+                  <Pressable
+                    key={device.id}
+                    onPress={() => onSelect(device)}
+                    style={({ pressed }) => ({
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                      paddingVertical: 12,
+                      paddingHorizontal: 12,
+                      borderRadius: 10,
+                      backgroundColor: pressed ? "rgba(6,182,212,0.1)" : "transparent",
+                    })}
+                  >
+                    <View
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 20,
+                        backgroundColor: `${device.color}20`,
+                        justifyContent: "center",
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text style={{ fontSize: 18 }}>{device.icon}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: "#FFF", fontSize: 14, fontWeight: "600" }}>{device.name}</Text>
+                      <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 11 }}>{device.room}</Text>
+                    </View>
+                    <View
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 5,
+                        backgroundColor: device.color,
+                        opacity: 0.6,
+                      }}
+                    />
+                  </Pressable>
+                ))}
+              </ScrollView>
+
+              {/* Cancel */}
+              <View style={{ padding: 12, paddingBottom: 32 }}>
+                <Pressable
+                  onPress={onClose}
+                  style={({ pressed }) => ({
+                    paddingVertical: 12,
+                    alignItems: "center",
+                    borderRadius: 12,
+                    backgroundColor: "rgba(255,255,255,0.06)",
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: "600" }}>Cancel</Text>
+                </Pressable>
+              </View>
+            </View>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // ── Main Component ──
-export default function HomeMap3D({ position, activeRoom, deviceStates, onDeviceTap, onDeviceToggle }: Props) {
+export default function HomeMap3D({
+  position,
+  activeRoom,
+  deviceStates,
+  onDeviceTap,
+  onDeviceToggle,
+  editMode,
+  placedDevices = [],
+  onPlaceDevice,
+  onMoveDevice,
+  onRemoveDevice,
+  onRequestPlaceAt,
+}: Props) {
   const effectiveActiveRoom = activeRoom || position?.room;
   const [selectedDevice, setSelectedDevice] = useState<DeviceMarker | null>(null);
   const [popupVisible, setPopupVisible] = useState(false);
@@ -499,6 +632,8 @@ export default function HomeMap3D({ position, activeRoom, deviceStates, onDevice
     lastMidX: 0,
     lastMidY: 0,
     fingers: 0,
+    longPressTimer: null as ReturnType<typeof setTimeout> | null,
+    didLongPress: false,
   });
 
   const handleDeviceTap = useCallback((device: DeviceMarker) => {
@@ -513,21 +648,45 @@ export default function HomeMap3D({ position, activeRoom, deviceStates, onDevice
     }
   }, [selectedDevice, onDeviceToggle]);
 
+  const handleRemove = useCallback(() => {
+    if (selectedDevice && onRemoveDevice) {
+      onRemoveDevice(selectedDevice.id);
+      setPopupVisible(false);
+      setSelectedDevice(null);
+    }
+  }, [selectedDevice, onRemoveDevice]);
+
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 3 || Math.abs(gs.dy) > 3,
     onPanResponderGrant: (evt) => {
       const touches = evt.nativeEvent.touches;
-      touchState.current.fingers = touches.length;
+      const ts = touchState.current;
+      ts.fingers = touches.length;
+      ts.didLongPress = false;
+
       if (touches.length === 1) {
-        touchState.current.lastX = touches[0].pageX;
-        touchState.current.lastY = touches[0].pageY;
+        ts.lastX = touches[0].pageX;
+        ts.lastY = touches[0].pageY;
+
+        // Long press detection for edit mode
+        if (editMode) {
+          const startX = touches[0].pageX;
+          const startY = touches[0].pageY;
+          ts.longPressTimer = setTimeout(() => {
+            ts.didLongPress = true;
+            // The actual placement happens via the DropPlane in 3D
+            // Notify parent to show item picker
+            // We use a raycast approach: the DropPlane's onPointerDown fires
+          }, 600);
+        }
       } else if (touches.length >= 2) {
+        if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
         const dx = touches[1].pageX - touches[0].pageX;
         const dy = touches[1].pageY - touches[0].pageY;
-        touchState.current.lastDist = Math.sqrt(dx * dx + dy * dy);
-        touchState.current.lastMidX = (touches[0].pageX + touches[1].pageX) / 2;
-        touchState.current.lastMidY = (touches[0].pageY + touches[1].pageY) / 2;
+        ts.lastDist = Math.sqrt(dx * dx + dy * dy);
+        ts.lastMidX = (touches[0].pageX + touches[1].pageX) / 2;
+        ts.lastMidY = (touches[0].pageY + touches[1].pageY) / 2;
       }
     },
     onPanResponderMove: (evt) => {
@@ -535,7 +694,17 @@ export default function HomeMap3D({ position, activeRoom, deviceStates, onDevice
       const cs = cameraState.current;
       const ts = touchState.current;
 
-      if (touches.length === 1 && ts.fingers === 1) {
+      // Cancel long press if finger moved
+      if (ts.longPressTimer && touches.length === 1) {
+        const dx = Math.abs(touches[0].pageX - ts.lastX);
+        const dy = Math.abs(touches[0].pageY - ts.lastY);
+        if (dx > 8 || dy > 8) {
+          clearTimeout(ts.longPressTimer);
+          ts.longPressTimer = null;
+        }
+      }
+
+      if (touches.length === 1 && ts.fingers === 1 && !ts.didLongPress) {
         const dx = touches[0].pageX - ts.lastX;
         const dy = touches[0].pageY - ts.lastY;
         cs.theta -= dx * 0.008;
@@ -563,10 +732,13 @@ export default function HomeMap3D({ position, activeRoom, deviceStates, onDevice
       }
     },
     onPanResponderRelease: () => {
-      touchState.current.fingers = 0;
-      touchState.current.lastDist = 0;
+      const ts = touchState.current;
+      if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
+      ts.fingers = 0;
+      ts.lastDist = 0;
+      ts.didLongPress = false;
     },
-  }), []);
+  }), [editMode]);
 
   const states = deviceStates || {};
 
@@ -586,7 +758,7 @@ export default function HomeMap3D({ position, activeRoom, deviceStates, onDevice
           </Suspense>
 
           {/* Device markers */}
-          {DEVICE_MARKERS.map((device) => {
+          {placedDevices.map((device) => {
             const s = states[device.entityId];
             const isOn = s ? ["on", "playing", "cool", "heat", "auto", "cleaning", "returning"].includes(s.state) : false;
             return (
@@ -595,85 +767,43 @@ export default function HomeMap3D({ position, activeRoom, deviceStates, onDevice
                 device={device}
                 isOn={isOn}
                 onTap={() => handleDeviceTap(device)}
+                editMode={editMode}
               />
             );
           })}
 
-          <NodeMarkers />
-          {position && <PositionBeacon position={position} />}
+          {!editMode && position && <PositionBeacon position={position} />}
+
+          {/* Edit mode: invisible drop plane for placement */}
+          {editMode && onRequestPlaceAt && (
+            <DropPlane onDrop={(x, z) => onRequestPlaceAt(x, z)} />
+          )}
         </Canvas>
       </View>
 
-      {/* Room pills overlay — bottom of screen */}
-      <View
-        style={{
-          position: "absolute",
-          bottom: 8,
-          left: 0,
-          right: 0,
-          flexDirection: "row",
-          flexWrap: "wrap",
-          gap: 4,
-          paddingHorizontal: 8,
-          justifyContent: "center",
-        }}
-      >
-        {roomData.rooms.map((room) => (
-          <View
-            key={room.id}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 3,
-              backgroundColor:
-                effectiveActiveRoom === room.id ? `${room.color}40` : "rgba(0,0,0,0.6)",
-              borderRadius: 8,
-              paddingHorizontal: 6,
-              paddingVertical: 3,
-              borderWidth: 1,
-              borderColor:
-                effectiveActiveRoom === room.id ? `${room.color}60` : "rgba(255,255,255,0.06)",
-            }}
-          >
-            <Text style={{ fontSize: 9 }}>{room.emoji}</Text>
-            <Text
-              style={{
-                fontFamily: "monospace",
-                fontSize: 8,
-                fontWeight: effectiveActiveRoom === room.id ? "700" : "400",
-                color: effectiveActiveRoom === room.id ? room.color : "#94A3B8",
-              }}
-            >
-              {room.name.toUpperCase()}
-            </Text>
-          </View>
-        ))}
-      </View>
-
-      {/* Position info overlay — top right */}
-      {position && (
+      {/* Edit mode banner */}
+      {editMode && (
         <View
           style={{
             position: "absolute",
-            top: 8,
-            right: 8,
-            backgroundColor: "rgba(0,0,0,0.7)",
-            borderRadius: 8,
-            paddingHorizontal: 8,
-            paddingVertical: 4,
+            bottom: 24,
+            left: 16,
+            right: 16,
+            backgroundColor: "rgba(6,182,212,0.15)",
+            borderRadius: 12,
             borderWidth: 1,
-            borderColor: "rgba(34,197,94,0.3)",
+            borderColor: "rgba(6,182,212,0.3)",
+            paddingVertical: 10,
+            paddingHorizontal: 16,
+            alignItems: "center",
           }}
         >
-          <Text style={{ color: "#22C55E", fontSize: 9, fontFamily: "monospace", fontWeight: "600" }}>
-            {position.room?.toUpperCase()}
-            {position.x != null ? ` (${position.x.toFixed(1)},${position.z?.toFixed(1)})` : ""}
+          <Text style={{ color: "#06B6D4", fontSize: 12, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 }}>
+            TAP MAP TO PLACE ITEMS
           </Text>
-          {position.furniture && (
-            <Text style={{ color: "#94A3B8", fontSize: 8, fontFamily: "monospace" }}>
-              near {position.furniture}
-            </Text>
-          )}
+          <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 10, marginTop: 2 }}>
+            Tap a placed item to remove it
+          </Text>
         </View>
       )}
 
@@ -684,6 +814,8 @@ export default function HomeMap3D({ position, activeRoom, deviceStates, onDevice
         visible={popupVisible}
         onClose={() => setPopupVisible(false)}
         onToggle={handleToggle}
+        editMode={editMode}
+        onRemove={editMode ? handleRemove : undefined}
       />
     </View>
   );

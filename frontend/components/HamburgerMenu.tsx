@@ -10,6 +10,10 @@ type MenuItem =
   | { icon: string; label: string; action: () => void };
 
 const staticMenuItems: MenuItem[] = [
+  { icon: "🕵️", label: "INTEL", route: "/osint" },
+  { icon: "🚀", label: "VENTURES", route: "/business" },
+  { icon: "📦", label: "FILES", route: "/files" },
+  { icon: "🎵", label: "MUSIC", route: "/music" },
   { icon: "⚔️", label: "INVENTORY", route: "/equipment" },
   { icon: "📋", label: "DIRECTIVES", route: "/directives" },
   { icon: "📊", label: "METRICS", route: "/metrics" },

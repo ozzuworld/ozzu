@@ -1,28 +1,32 @@
-// Home Dashboard — Fullscreen 3D apartment map with interactive device markers
-// Devices placed at real positions, tappable for controls
+// Home — Fullscreen 3D apartment map
+// Cipher bubble (top right), Ops icon below it
+// Long-press to place items in edit mode
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { View, Text, Pressable, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { StatusBadge } from "../../components/StatusBadge";
 import { HamburgerMenu } from "../../components/HamburgerMenu";
 import { useHA } from "../../lib/ha-context";
 import { useEntity } from "../../lib/useEntity";
-import { useMediaPlayer } from "../../lib/useMediaPlayer";
-import HomeMap3D, { DEVICE_MARKERS } from "../../components/home/HomeMap3D";
+import HomeMap3D, { ALL_DEVICES, ItemPicker, DeviceMarker } from "../../components/home/HomeMap3D";
 import { getBridgeUrl } from "../../lib/bridge-api";
 import { useGlasses } from "../../lib/glasses-context";
 import { usePosition } from "../../lib/usePosition";
 import { BLEPairingModal } from "../../components/home/BLEPairingModal";
+import * as FileSystem from "expo-file-system/legacy";
 
-// ── Design System ──
+const STORAGE_FILE = FileSystem.documentDirectory + "device_placements.json";
+
 const C = {
   bg: "#000000",
   text: "#FFFFFF",
   textSec: "rgba(255,255,255,0.55)",
   textDim: "rgba(255,255,255,0.3)",
   climate: "#4FC3F7",
+  cyan: "#06B6D4",
 };
 
 function getGreeting(): string {
@@ -33,74 +37,90 @@ function getGreeting(): string {
   return "Good evening";
 }
 
-// ── Now Playing Mini Bar ──
-function NowPlayingBar() {
-  const { state } = useMediaPlayer();
-  if (!state.available || !state.isPlaying) return null;
+// Default placements (what was previously hardcoded)
+const DEFAULT_PLACEMENTS: DeviceMarker[] = [
+  { ...ALL_DEVICES.find((d) => d.id === "main_tv")!, position: [2.20, -4.80] },
+  { ...ALL_DEVICES.find((d) => d.id === "spotify")!, position: [1.15, -3.33] },
+  { ...ALL_DEVICES.find((d) => d.id === "ac")!, position: [0.30, -5.10] },
+  { ...ALL_DEVICES.find((d) => d.id === "midea_washer")!, position: [-3.97, -0.74] },
+];
 
-  return (
-    <View
-      style={{
-        position: "absolute",
-        bottom: 52,
-        left: 12,
-        right: 12,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        backgroundColor: "rgba(29,185,84,0.15)",
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: "rgba(29,185,84,0.25)",
-      }}
-    >
-      <Text style={{ fontSize: 12 }}>{"\uD83C\uDFB5"}</Text>
-      <Text numberOfLines={1} style={{ flex: 1, color: "#1DB954", fontSize: 11, fontWeight: "600" }}>
-        {state.trackName}
-      </Text>
-      <Text numberOfLines={1} style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>
-        {state.artist}
-      </Text>
-    </View>
-  );
-}
-
-// ── Home Screen ──
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { entities, callService } = useHA();
   const { lastGestureAction } = useGlasses();
   const { position } = usePosition();
   const acEntity = useEntity("climate.living_room_ac");
   const [pairingVisible, setPairingVisible] = useState(false);
 
+  // Edit mode
+  const [editMode, setEditMode] = useState(false);
+  const [itemPickerVisible, setItemPickerVisible] = useState(false);
+  const [pendingPlacePos, setPendingPlacePos] = useState<[number, number] | null>(null);
+
+  // Device placements — loaded from AsyncStorage
+  const [placedDevices, setPlacedDevices] = useState<DeviceMarker[]>(DEFAULT_PLACEMENTS);
+  const loadedRef = useRef(false);
+
+  // Load saved placements
+  useEffect(() => {
+    async function load() {
+      try {
+        const info = await FileSystem.getInfoAsync(STORAGE_FILE);
+        if (info.exists) {
+          const saved = await FileSystem.readAsStringAsync(STORAGE_FILE);
+          const parsed: Array<{ id: string; position: [number, number] }> = JSON.parse(saved);
+          const devices: DeviceMarker[] = [];
+          for (const p of parsed) {
+            const template = ALL_DEVICES.find((d) => d.id === p.id);
+            if (template) {
+              devices.push({ ...template, position: p.position });
+            }
+          }
+          if (devices.length > 0) {
+            setPlacedDevices(devices);
+          }
+        }
+      } catch {}
+      loadedRef.current = true;
+    }
+    load();
+  }, []);
+
+  // Save placements when they change
+  const savePlacements = useCallback(async (devices: DeviceMarker[]) => {
+    try {
+      const minimal = devices.map((d) => ({ id: d.id, position: d.position }));
+      await FileSystem.writeAsStringAsync(STORAGE_FILE, JSON.stringify(minimal));
+    } catch {}
+  }, []);
+
   // Count active devices
   const activeDeviceCount = useMemo(() => {
     let count = 0;
-    for (const marker of DEVICE_MARKERS) {
+    for (const marker of placedDevices) {
       const e = entities[marker.entityId];
       if (e && ["on", "playing", "cleaning", "cool", "heat", "auto"].includes(e.state)) count++;
     }
     return count;
-  }, [entities]);
+  }, [entities, placedDevices]);
 
   const currentTemp = acEntity?.attributes?.current_temperature
     ? Math.round(acEntity.attributes.current_temperature)
     : null;
 
-  // Build device states map for the 3D scene
+  // Build device states map
   const deviceStates = useMemo(() => {
     const states: Record<string, { state: string; attributes?: any }> = {};
-    for (const marker of DEVICE_MARKERS) {
+    for (const marker of placedDevices) {
       const e = entities[marker.entityId];
       if (e) states[marker.entityId] = { state: e.state, attributes: e.attributes };
     }
     return states;
-  }, [entities]);
+  }, [entities, placedDevices]);
 
-  // Handle device toggle from popup
+  // Device toggle
   const handleDeviceToggle = useCallback((entityId: string, domain: string) => {
     if (domain === "switch") {
       callService("switch", "toggle", {}, { entity_id: entityId });
@@ -117,6 +137,30 @@ export default function HomeScreen() {
     }
   }, [entities, callService]);
 
+  // Place device at position
+  const handlePlaceDevice = useCallback((device: Omit<DeviceMarker, "position">) => {
+    if (!pendingPlacePos) return;
+    const newDevice: DeviceMarker = { ...device, position: pendingPlacePos } as DeviceMarker;
+    const updated = [...placedDevices, newDevice];
+    setPlacedDevices(updated);
+    savePlacements(updated);
+    setItemPickerVisible(false);
+    setPendingPlacePos(null);
+  }, [pendingPlacePos, placedDevices, savePlacements]);
+
+  // Remove device
+  const handleRemoveDevice = useCallback((deviceId: string) => {
+    const updated = placedDevices.filter((d) => d.id !== deviceId);
+    setPlacedDevices(updated);
+    savePlacements(updated);
+  }, [placedDevices, savePlacements]);
+
+  // Handle tap on 3D map in edit mode → open item picker
+  const handleRequestPlaceAt = useCallback((worldX: number, worldZ: number) => {
+    setPendingPlacePos([Math.round(worldX * 100) / 100, Math.round(worldZ * 100) / 100]);
+    setItemPickerVisible(true);
+  }, []);
+
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       {/* Fullscreen 3D Map */}
@@ -124,6 +168,10 @@ export default function HomeScreen() {
         position={position}
         deviceStates={deviceStates}
         onDeviceToggle={handleDeviceToggle}
+        editMode={editMode}
+        placedDevices={placedDevices}
+        onRemoveDevice={handleRemoveDevice}
+        onRequestPlaceAt={handleRequestPlaceAt}
       />
 
       {/* Floating Header Overlay */}
@@ -136,7 +184,6 @@ export default function HomeScreen() {
           paddingTop: insets.top + 4,
           paddingBottom: 8,
           paddingHorizontal: 16,
-          // Gradient-like fade from top
           backgroundColor: "rgba(0,0,0,0.5)",
         }}
         pointerEvents="box-none"
@@ -177,13 +224,81 @@ export default function HomeScreen() {
                 </Text>
               </View>
             )}
+            {/* Edit mode toggle */}
+            <Pressable
+              onPress={() => setEditMode(!editMode)}
+              style={({ pressed }) => ({
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                borderRadius: 8,
+                backgroundColor: editMode ? "rgba(6,182,212,0.2)" : "rgba(0,0,0,0.4)",
+                borderWidth: 1,
+                borderColor: editMode ? "rgba(6,182,212,0.5)" : "rgba(255,255,255,0.1)",
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Text style={{ color: editMode ? C.cyan : "rgba(255,255,255,0.5)", fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>
+                {editMode ? "DONE" : "EDIT"}
+              </Text>
+            </Pressable>
             <StatusBadge />
           </View>
         </View>
       </View>
 
-      {/* Now Playing mini bar */}
-      <NowPlayingBar />
+      {/* Right side floating icons — Cipher + Ops */}
+      <View
+        style={{
+          position: "absolute",
+          right: 12,
+          top: insets.top + 60,
+          gap: 10,
+          alignItems: "center",
+        }}
+        pointerEvents="box-none"
+      >
+        {/* Cipher bubble */}
+        <Pressable
+          onPress={() => router.push("/cipher")}
+          style={({ pressed }) => ({
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: "rgba(6,182,212,0.15)",
+            borderWidth: 1,
+            borderColor: "rgba(6,182,212,0.35)",
+            justifyContent: "center",
+            alignItems: "center",
+            opacity: pressed ? 0.7 : 1,
+            ...(Platform.OS === "ios" ? {
+              shadowColor: C.cyan,
+              shadowRadius: 8,
+              shadowOpacity: 0.3,
+              shadowOffset: { width: 0, height: 0 },
+            } : { elevation: 4 }),
+          })}
+        >
+          <Text style={{ fontSize: 20 }}>{"🤖"}</Text>
+        </Pressable>
+
+        {/* Ops icon */}
+        <Pressable
+          onPress={() => router.push("/ops")}
+          style={({ pressed }) => ({
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: "rgba(0,0,0,0.6)",
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.12)",
+            justifyContent: "center",
+            alignItems: "center",
+            opacity: pressed ? 0.7 : 1,
+          })}
+        >
+          <Text style={{ fontSize: 16 }}>{"📡"}</Text>
+        </Pressable>
+      </View>
 
       {/* Gesture feedback */}
       {lastGestureAction && (
@@ -206,6 +321,14 @@ export default function HomeScreen() {
           </Text>
         </View>
       )}
+
+      {/* Item Picker for edit mode */}
+      <ItemPicker
+        visible={itemPickerVisible}
+        placedDeviceIds={placedDevices.map((d) => d.id)}
+        onSelect={handlePlaceDevice}
+        onClose={() => { setItemPickerVisible(false); setPendingPlacePos(null); }}
+      />
 
       {/* BLE Pairing Modal */}
       <BLEPairingModal
