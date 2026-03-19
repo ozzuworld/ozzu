@@ -151,6 +151,42 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "update_venture",
+      description: "Update a business venture/project's details (name, description, status, emoji, color, budget).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "Venture/project ID" },
+          name: { type: "string", description: "New venture name" },
+          description: { type: "string", description: "New description" },
+          status: { type: "string", enum: ["active", "paused", "completed", "archived"], description: "Venture status" },
+          emoji: { type: "string", description: "Single emoji" },
+          color: { type: "string", description: "Hex color" },
+          budget: { type: "number", description: "Budget amount" },
+          currency: { type: "string", description: "Currency code (e.g. COP, USD)" },
+        },
+        required: ["project_id"],
+      },
+    },
+    {
+      name: "update_venture_task",
+      description: "Update a venture task's details (title, description, status, priority, phase, due_date, notes).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          task_id: { type: "number", description: "Task ID" },
+          title: { type: "string", description: "New task title" },
+          description: { type: "string", description: "New task description/details" },
+          status: { type: "string", enum: ["todo", "in_progress", "done"], description: "Task status" },
+          priority: { type: "string", enum: ["low", "medium", "high"], description: "Priority level" },
+          phase: { type: "string", description: "Phase grouping label" },
+          due_date: { type: "string", description: "Due date (YYYY-MM-DD)" },
+          notes: { type: "string", description: "Additional notes" },
+        },
+        required: ["task_id"],
+      },
+    },
+    {
       name: "get_infra_state",
       description: "Get live infrastructure state. TOPOLOGY: Rock Pi (172.168.0.55) is the ESP32 hub — it runs the ozzu-nodes WiFi AP and the positioning service. ESP32 nodes connect to the Rock Pi, NOT to dev-01. dev-01 (172.168.0.57) is a separate x86 Linux workstation. Sections: network (VPN, routes, LAN), devices (Rock Pi, dev-01 with reachability/services/resources), esp32 (nodes connected to Rock Pi AP), gcp (Docker, disk, memory), hub (positioning service status), router (ER605 DHCP/WAN/VPN). Cached 60s, use refresh=true for fresh probe.",
       inputSchema: {
@@ -477,6 +513,38 @@ module.exports = function mcpRoutes(ctx) {
         if (result.error) return { content: [{ type: "text", text: `Failed: ${result.error}` }], isError: true };
         const t = result.task;
         return { content: [{ type: "text", text: `Added task #${t.id} to venture #${args.project_id}: "${t.title}" [${t.priority}]${t.due_date ? ` due ${t.due_date.slice(0,10)}` : ""}` }] };
+      }
+
+      case "update_venture": {
+        const http = require("http");
+        const { project_id, ...updates } = args;
+        const payload = JSON.stringify(updates);
+        const result = await new Promise((resolve) => {
+          const req = http.request({ hostname: "localhost", port: 3333, path: `/business/projects/${project_id}`, method: "PATCH",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+          }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
+          req.on("error", e => resolve({ error: e.message }));
+          req.write(payload); req.end();
+        });
+        if (result.error) return { content: [{ type: "text", text: `Failed to update venture: ${result.error}` }], isError: true };
+        const p = result.project;
+        return { content: [{ type: "text", text: `Updated venture #${p.id}: ${p.emoji} ${p.name} [${p.status}]` }] };
+      }
+
+      case "update_venture_task": {
+        const http = require("http");
+        const { task_id, ...updates } = args;
+        const payload = JSON.stringify(updates);
+        const result = await new Promise((resolve) => {
+          const req = http.request({ hostname: "localhost", port: 3333, path: `/business/tasks/${task_id}`, method: "PATCH",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+          }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
+          req.on("error", e => resolve({ error: e.message }));
+          req.write(payload); req.end();
+        });
+        if (result.error) return { content: [{ type: "text", text: `Failed to update task: ${result.error}` }], isError: true };
+        const t = result.task;
+        return { content: [{ type: "text", text: `Updated task #${t.id}: "${t.title}" [${t.status}] ${t.priority}${t.due_date ? ` due ${t.due_date.toString().slice(0,10)}` : ""}` }] };
       }
 
       case "get_infra_state": {
