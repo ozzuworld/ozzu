@@ -88,7 +88,7 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "send_email",
-      description: "Send an email from eng.ozzu@gmail.com (Skyline Capital). Use for contacting suppliers, buyers, business communications. Always draft first and show to King Kazuma before sending unless he says otherwise.",
+      description: "Send an email. Two accounts available: 'personal' = eng.hsuarezp@gmail.com (Hebert Suarez — for formal/government/university outreach), 'ozzu' = eng.ozzu@gmail.com (Skyline Capital — for Ozzu project, suppliers, technical). Default: personal. Always CC eng.ozzu@icloud.com. Always draft first and show to King Kazuma before sending unless he says otherwise.",
       inputSchema: {
         type: "object",
         properties: {
@@ -96,7 +96,8 @@ module.exports = function mcpRoutes(ctx) {
           subject: { type: "string", description: "Email subject line" },
           text: { type: "string", description: "Plain text body" },
           html: { type: "string", description: "HTML body (optional, for professional formatting)" },
-          cc: { type: "string", description: "CC recipients (comma-separated)" },
+          cc: { type: "string", description: "CC recipients (comma-separated). Always include eng.ozzu@icloud.com" },
+          from_account: { type: "string", enum: ["personal", "ozzu"], description: "Which email account to send from. personal = eng.hsuarezp@gmail.com, ozzu = eng.ozzu@gmail.com. Default: personal" },
           contactId: { type: "number", description: "Link to a business contact ID" },
           directiveId: { type: "string", description: "Link to a directive ID" },
         },
@@ -390,7 +391,7 @@ module.exports = function mcpRoutes(ctx) {
         const http = require("http");
         const payload = JSON.stringify({
           to: args.to, subject: args.subject, text: args.text,
-          html: args.html, cc: args.cc,
+          html: args.html, cc: args.cc, from_account: args.from_account || "personal",
           contactId: args.contactId, directiveId: args.directiveId,
         });
         const result = await new Promise((resolve) => {
@@ -401,7 +402,8 @@ module.exports = function mcpRoutes(ctx) {
           req.write(payload); req.end();
         });
         if (result.error) return { content: [{ type: "text", text: `Email send failed: ${result.error}` }], isError: true };
-        return { content: [{ type: "text", text: `Email sent to ${args.to}. Subject: "${args.subject}". MessageId: ${result.messageId}` }] };
+        const acctUsed = args.from_account || "personal";
+        return { content: [{ type: "text", text: `Email sent via ${acctUsed} account to ${args.to}. Subject: "${args.subject}". MessageId: ${result.messageId}` }] };
       }
 
       case "list_emails": {

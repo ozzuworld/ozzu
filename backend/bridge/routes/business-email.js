@@ -6,18 +6,45 @@ module.exports = function businessEmailRoutes(ctx) {
   const { sendJSON, parseBody, db, log: logObj } = ctx;
   const log = typeof logObj === "function" ? logObj : (...args) => (logObj?.bridge?.info?.(...args) || console.log(...args));
 
-  // ── Gmail SMTP transporter (lazy init) ──
-  let _transporter = null;
-  function getTransporter() {
-    if (_transporter) return _transporter;
-    const user = process.env.GMAIL_USER;
-    const pass = process.env.GMAIL_APP_PASSWORD;
-    if (!user || !pass) return null;
-    _transporter = nodemailer.createTransport({
+  // ── Email accounts ──
+  const ACCOUNTS = {
+    personal: {
+      user: process.env.GMAIL_USER || "",
+      pass: process.env.GMAIL_APP_PASSWORD || "",
+      label: "Hebert Suarez",
+    },
+    ozzu: {
+      user: process.env.GMAIL_USER_OZZU || "",
+      pass: process.env.GMAIL_APP_PASSWORD_OZZU || "",
+      label: "Skyline Capital",
+    },
+  };
+
+  // Lazy-init transporters per account
+  const _transporters = {};
+  function getTransporter(account) {
+    const key = account || "personal";
+    if (_transporters[key]) return _transporters[key];
+    const acct = ACCOUNTS[key];
+    if (!acct || !acct.user || !acct.pass) {
+      // Fallback: try any configured account
+      if (key !== "personal" && ACCOUNTS.personal.user && ACCOUNTS.personal.pass) return getTransporter("personal");
+      if (key !== "ozzu" && ACCOUNTS.ozzu.user && ACCOUNTS.ozzu.pass) return getTransporter("ozzu");
+      return null;
+    }
+    _transporters[key] = nodemailer.createTransport({
       service: "gmail",
-      auth: { user, pass },
+      auth: { user: acct.user, pass: acct.pass },
     });
-    return _transporter;
+    _transporters[key]._account = acct;
+    return _transporters[key];
+  }
+
+  function resolveAccount(fromAccount) {
+    if (fromAccount === "ozzu") return "ozzu";
+    if (fromAccount === "personal") return "personal";
+    // Default: personal for business emails
+    return "personal";
   }
 
   // ── DB: ensure emails table exists ──
@@ -57,20 +84,22 @@ module.exports = function businessEmailRoutes(ctx) {
       try {
         await ensureTable();
         const body = await parseBody(req);
-        const { to, subject, text, html, cc, bcc, replyTo, contactId, directiveId, tags } = body;
+        const { to, subject, text, html, cc, bcc, replyTo, contactId, directiveId, tags, from_account } = body;
 
         if (!to || !subject) {
           sendJSON(res, 400, { error: "to and subject are required" });
           return true;
         }
 
-        const transporter = getTransporter();
+        const acctKey = resolveAccount(from_account);
+        const transporter = getTransporter(acctKey);
         if (!transporter) {
-          sendJSON(res, 500, { error: "Email not configured — GMAIL_USER and GMAIL_APP_PASSWORD required in .env" });
+          sendJSON(res, 500, { error: "Email not configured — GMAIL_USER and GMAIL_APP_PASSWORD required in env" });
           return true;
         }
 
-        const from = `Skyline Capital <${process.env.GMAIL_USER}>`;
+        const acct = transporter._account;
+        const from = `${acct.label} <${acct.user}>`;
         const mailOpts = {
           from,
           to,
@@ -79,11 +108,11 @@ module.exports = function businessEmailRoutes(ctx) {
           html: html || undefined,
           cc: cc || undefined,
           bcc: bcc || undefined,
-          replyTo: replyTo || process.env.GMAIL_USER,
+          replyTo: replyTo || acct.user,
         };
 
         const info = await transporter.sendMail(mailOpts);
-        log(`Email sent to ${to}: ${subject} (messageId: ${info.messageId})`);
+        log(`Email sent via ${acctKey} (${acct.user}) to ${to}: ${subject} (messageId: ${info.messageId})`);
 
         // Store in DB
         const result = await db.query(
@@ -91,7 +120,7 @@ module.exports = function businessEmailRoutes(ctx) {
             (direction, from_addr, to_addr, cc, bcc, subject, body_text, body_html, status, sent_at, message_id, contact_id, directive_id, tags)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),$10,$11,$12,$13)
            RETURNING *`,
-          ["outbound", process.env.GMAIL_USER, to, cc || null, bcc || null, subject,
+          ["outbound", acct.user, to, cc || null, bcc || null, subject,
            text || null, html || null, "sent", info.messageId,
            contactId || null, directiveId || null, tags || []]
         );
@@ -121,7 +150,7 @@ module.exports = function businessEmailRoutes(ctx) {
             (direction, from_addr, to_addr, cc, bcc, subject, body_text, body_html, status, contact_id, directive_id, tags)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
            RETURNING *`,
-          ["outbound", process.env.GMAIL_USER || "eng.ozzu@gmail.com", to, cc || null, bcc || null,
+          ["outbound", (ACCOUNTS.personal.user || ACCOUNTS.ozzu.user || "eng.hsuarezp@gmail.com"), to, cc || null, bcc || null,
            subject, text || null, html || null, "draft",
            contactId || null, directiveId || null, tags || []]
         );
@@ -141,14 +170,17 @@ module.exports = function businessEmailRoutes(ctx) {
         if (!draft.rows.length) { sendJSON(res, 404, { error: "Draft not found" }); return true; }
 
         const d = draft.rows[0];
-        const transporter = getTransporter();
+        // Determine account from the stored from_addr
+        const draftAcctKey = d.from_addr === ACCOUNTS.ozzu.user ? "ozzu" : "personal";
+        const transporter = getTransporter(draftAcctKey);
         if (!transporter) {
           sendJSON(res, 500, { error: "Email not configured" });
           return true;
         }
+        const draftAcct = transporter._account;
 
         const info = await transporter.sendMail({
-          from: `Skyline Capital <${process.env.GMAIL_USER}>`,
+          from: `${draftAcct.label} <${draftAcct.user}>`,
           to: d.to_addr,
           subject: d.subject,
           text: d.body_text || undefined,
@@ -212,17 +244,15 @@ module.exports = function businessEmailRoutes(ctx) {
 
     // ── GET /business/email/status — Check email config status ──
     if (req.method === "GET" && pathname === "/business/email/status") {
-      const transporter = getTransporter();
-      if (!transporter) {
-        sendJSON(res, 200, { configured: false, reason: "GMAIL_USER or GMAIL_APP_PASSWORD not set" });
-        return true;
+      const accounts = {};
+      for (const [key, acct] of Object.entries(ACCOUNTS)) {
+        if (acct.user && acct.pass) {
+          accounts[key] = { configured: true, user: acct.user, label: acct.label };
+        } else {
+          accounts[key] = { configured: false };
+        }
       }
-      try {
-        await transporter.verify();
-        sendJSON(res, 200, { configured: true, user: process.env.GMAIL_USER });
-      } catch (err) {
-        sendJSON(res, 200, { configured: false, reason: err.message });
-      }
+      sendJSON(res, 200, { accounts });
       return true;
     }
 
