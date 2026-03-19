@@ -115,6 +115,41 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "create_venture",
+      description: "Create a business venture/project on the Ventures dashboard tab. Use this for business plans, grant applications, partnerships — NOT for code changes (use create_directive for code).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Venture name" },
+          description: { type: "string", description: "What this venture is about" },
+          emoji: { type: "string", description: "Single emoji" },
+          color: { type: "string", description: "Hex color (default #06B6D4)" },
+        },
+        required: ["name", "description", "emoji"],
+      },
+    },
+    {
+      name: "list_ventures",
+      description: "List all business ventures/projects from the Ventures dashboard.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "add_venture_task",
+      description: "Add a task to a business venture/project.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "Venture/project ID" },
+          title: { type: "string", description: "Task title" },
+          description: { type: "string", description: "Task details" },
+          priority: { type: "string", enum: ["low", "medium", "high"], description: "Priority level" },
+          due_date: { type: "string", description: "Due date (YYYY-MM-DD)" },
+          phase: { type: "string", description: "Phase grouping label" },
+        },
+        required: ["project_id", "title"],
+      },
+    },
+    {
       name: "get_infra_state",
       description: "Get live infrastructure state. TOPOLOGY: Rock Pi (172.168.0.55) is the ESP32 hub — it runs the ozzu-nodes WiFi AP and the positioning service. ESP32 nodes connect to the Rock Pi, NOT to dev-01. dev-01 (172.168.0.57) is a separate x86 Linux workstation. Sections: network (VPN, routes, LAN), devices (Rock Pi, dev-01 with reachability/services/resources), esp32 (nodes connected to Rock Pi AP), gcp (Docker, disk, memory), hub (positioning service status), router (ER605 DHCP/WAN/VPN). Cached 60s, use refresh=true for fresh probe.",
       inputSchema: {
@@ -386,6 +421,60 @@ module.exports = function mcpRoutes(ctx) {
           sent_at: e.sent_at, created_at: e.created_at,
         }));
         return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+      }
+
+      case "create_venture": {
+        const http = require("http");
+        const payload = JSON.stringify({
+          name: args.name, description: args.description,
+          emoji: args.emoji, color: args.color || "#06B6D4",
+        });
+        const result = await new Promise((resolve) => {
+          const req = http.request({ hostname: "localhost", port: 3333, path: "/business/projects", method: "POST",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+          }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
+          req.on("error", e => resolve({ error: e.message }));
+          req.write(payload); req.end();
+        });
+        if (result.error) return { content: [{ type: "text", text: `Failed to create venture: ${result.error}` }], isError: true };
+        const p = result.project;
+        return { content: [{ type: "text", text: `Created venture #${p.id}: ${p.emoji} ${p.name}\nStatus: ${p.status}` }] };
+      }
+
+      case "list_ventures": {
+        const http = require("http");
+        const result = await new Promise((resolve) => {
+          http.get("http://localhost:3333/business/projects", (res) => {
+            let d = ""; res.on("data", c => d += c);
+            res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } });
+          }).on("error", e => resolve({ error: e.message }));
+        });
+        if (result.error) return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
+        const projects = Array.isArray(result) ? result : (result.projects || []);
+        const summary = projects.map(p => ({
+          id: p.id, name: p.name, emoji: p.emoji, status: p.status,
+          tasks: p.task_count, done: p.done_count, in_progress: p.in_progress_count,
+        }));
+        return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+      }
+
+      case "add_venture_task": {
+        const http = require("http");
+        const payload = JSON.stringify({
+          title: args.title, description: args.description || "",
+          priority: args.priority || "medium", due_date: args.due_date,
+          phase: args.phase,
+        });
+        const result = await new Promise((resolve) => {
+          const req = http.request({ hostname: "localhost", port: 3333, path: `/business/projects/${args.project_id}/tasks`, method: "POST",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+          }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
+          req.on("error", e => resolve({ error: e.message }));
+          req.write(payload); req.end();
+        });
+        if (result.error) return { content: [{ type: "text", text: `Failed: ${result.error}` }], isError: true };
+        const t = result.task;
+        return { content: [{ type: "text", text: `Added task #${t.id} to venture #${args.project_id}: "${t.title}" [${t.priority}]${t.due_date ? ` due ${t.due_date.slice(0,10)}` : ""}` }] };
       }
 
       case "get_infra_state": {
