@@ -486,6 +486,18 @@ def export_model(args, device=None, num_classes=None, classes=None):
         opset_version=17,
     )
 
+    # Convert external data to inline (prevents .onnx.data file dependency)
+    try:
+        import onnx
+        from onnx.external_data_helper import convert_model_to_external_data
+        model_onnx = onnx.load(str(onnx_path), load_external_data=True)
+        onnx.save_model(model_onnx, str(onnx_path),
+                        save_as_external_data=False,
+                        size_threshold=float('inf'))
+        print(f"[export] ONNX saved with inline weights — {onnx_path.stat().st_size / 1e6:.1f}MB")
+    except ImportError:
+        print("[export] onnx package not installed, weights may be external")
+
     # Verify ONNX
     try:
         import onnxruntime as ort

@@ -8,7 +8,8 @@ RUN pip install --no-cache-dir \
     onnxruntime==1.21.* \
     qdrant-client==1.17.* \
     numpy==2.* \
-    Pillow==11.*
+    Pillow==11.* \
+    python-multipart==0.0.*
 
 COPY server.py .
 COPY disease_metadata.json .
