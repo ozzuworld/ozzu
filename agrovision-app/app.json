@@ -16,7 +16,9 @@
         "backgroundColor": "#1B5E20",
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
-      "package": "com.skylinecapital.agrovision"
+      "package": "com.skylinecapital.agrovision",
+      "navigationBarVisible": false,
+      "immersiveMode": true
     },
     "plugins": [
       [

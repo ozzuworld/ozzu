@@ -17,10 +17,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useTensorflowModel } from "react-native-fast-tflite";
 import * as jpeg from "jpeg-js";
 
@@ -88,8 +85,7 @@ const CLASS_NAMES_ES: Record<string, string> = {
   Blueberry___healthy: "Ar\u00e1ndano Sano",
   "Cherry_(including_sour)___Powdery_mildew": "O\u00eddio del Cerezo",
   "Cherry_(including_sour)___healthy": "Cerezo Sano",
-  "Corn_(maize)___Cercospora_leaf_spot_Gray_leaf_spot":
-    "Mancha Gris del Ma\u00edz",
+  "Corn_(maize)___Cercospora_leaf_spot_Gray_leaf_spot": "Mancha Gris del Ma\u00edz",
   "Corn_(maize)___Common_rust_": "Roya Com\u00fan del Ma\u00edz",
   "Corn_(maize)___Northern_Leaf_Blight": "Tiz\u00f3n del Ma\u00edz",
   "Corn_(maize)___healthy": "Ma\u00edz Sano",
@@ -98,12 +94,10 @@ const CLASS_NAMES_ES: Record<string, string> = {
   Gall_Midge: "Mosquita de las Agallas",
   "Grape___Black_rot": "Pudrici\u00f3n Negra de la Uva",
   "Grape___Esca_(Black_Measles)": "Esca de la Uva",
-  "Grape___Leaf_blight_(Isariopsis_Leaf_Spot)":
-    "Tiz\u00f3n de la Hoja de la Uva",
+  "Grape___Leaf_blight_(Isariopsis_Leaf_Spot)": "Tiz\u00f3n de la Hoja de la Uva",
   Grape___healthy: "Uva Sana",
   Healthy: "Planta Sana",
-  "Orange___Haunglongbing_(Citrus_greening)":
-    "HLB / Enverdecimiento de C\u00edtricos",
+  "Orange___Haunglongbing_(Citrus_greening)": "HLB / Enverdecimiento de C\u00edtricos",
   Peach___Bacterial_spot: "Mancha Bacteriana del Durazno",
   Peach___healthy: "Durazno Sano",
   "Pepper,_bell___Bacterial_spot": "Mancha Bacteriana del Pimiento",
@@ -125,8 +119,7 @@ const CLASS_NAMES_ES: Record<string, string> = {
   Tomato___Septoria_leaf_spot: "Septoriosis del Tomate",
   "Tomato___Spider_mites_Two-spotted_spider_mite": "Ara\u00f1a Roja del Tomate",
   Tomato___Target_Spot: "Mancha Diana del Tomate",
-  Tomato___Tomato_Yellow_Leaf_Curl_Virus:
-    "Virus del Rizado Amarillo del Tomate",
+  Tomato___Tomato_Yellow_Leaf_Curl_Virus: "Virus del Rizado Amarillo del Tomate",
   Tomato___Tomato_mosaic_virus: "Virus del Mosaico del Tomate",
   Tomato___healthy: "Tomate Sano",
 };
@@ -159,8 +152,14 @@ interface DiagnosisResult {
   isHealthy: boolean;
 }
 
+// Annotation position: dot at center of image, label to the right
+const DOT_X = SCREEN_W * 0.5;
+const DOT_Y = SCREEN_H * 0.45;
+const LABEL_X = DOT_X + 20;
+const LABEL_Y = DOT_Y - 70;
+const LINE_LEN = 80;
+
 function MainScreen() {
-  const insets = useSafeAreaInsets();
   const cameraRef = useRef<any>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
@@ -179,13 +178,12 @@ function MainScreen() {
     if (model.state === "loaded") setModelReady(true);
   }, [model.state]);
 
-  // Pulse animation for the annotation dot
   useEffect(() => {
     if (diagnosis) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 1.4,
+            toValue: 1.5,
             duration: 800,
             useNativeDriver: true,
           }),
@@ -305,19 +303,17 @@ function MainScreen() {
     setShowDetail(false);
   }, []);
 
-  // Permission not granted yet
+  // Permission screen
   if (!permission?.granted) {
     return (
-      <View style={[s.permScreen, { paddingTop: insets.top + 40 }]}>
-        <StatusBar style="light" />
-        <Text style={s.permIcon}>🌿</Text>
-        <Text style={s.permTitle}>AgroVisi\u00f3n</Text>
+      <View style={s.permScreen}>
+        <StatusBar style="light" hidden />
+        <Text style={s.permTitle}>{"AgroVisi\u00f3n"}</Text>
         <Text style={s.permSub}>
-          Se necesita acceso a la c\u00e1mara para detectar enfermedades en
-          cultivos
+          {"Se necesita acceso a la c\u00e1mara para detectar enfermedades en cultivos"}
         </Text>
         <Pressable style={s.permBtn} onPress={requestPermission}>
-          <Text style={s.permBtnText}>Activar C\u00e1mara</Text>
+          <Text style={s.permBtnText}>{"Activar C\u00e1mara"}</Text>
         </Pressable>
       </View>
     );
@@ -329,18 +325,18 @@ function MainScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar style="light" />
+      {/* Hide system bars for full immersive */}
+      <StatusBar style="light" hidden />
 
-      {/* Camera / Captured image — full screen background */}
+      {/* Camera / Captured image — full screen */}
       {capturedUri ? (
-        <Image source={{ uri: capturedUri }} style={s.fullScreenBg} />
+        <Image source={{ uri: capturedUri }} style={s.fullScreenBg} resizeMode="cover" />
       ) : (
         <CameraView ref={cameraRef} style={s.fullScreenBg} facing="back" />
       )}
 
-      {/* Dark gradient overlay at top */}
-      <View style={[s.topGradient, { paddingTop: insets.top + 8 }]}>
-        {/* Hamburger menu */}
+      {/* Top overlay — just title + hamburger, no background bar */}
+      <View style={s.topOverlay}>
         <Pressable
           style={s.hamburger}
           onPress={() => setMenuOpen(!menuOpen)}
@@ -350,10 +346,8 @@ function MainScreen() {
           <View style={s.hamburgerLine} />
         </Pressable>
 
-        {/* Title */}
-        <Text style={s.title}>AgroVisi\u00f3n</Text>
+        <Text style={s.title}>{"AgroVisi\u00f3n"}</Text>
 
-        {/* Model status indicator */}
         <View
           style={[
             s.statusDot,
@@ -362,41 +356,34 @@ function MainScreen() {
         />
       </View>
 
-      {/* Hamburger menu dropdown */}
+      {/* Hamburger dropdown */}
       {menuOpen && (
-        <View style={[s.menuDropdown, { top: insets.top + 56 }]}>
-          <Pressable style={s.menuItem} onPress={pickFromGallery}>
-            <Text style={s.menuItemText}>Abrir Galer\u00eda</Text>
-          </Pressable>
+        <>
           <Pressable
-            style={s.menuItem}
-            onPress={() => {
-              setMenuOpen(false);
-              Alert.alert(
-                "AgroVisi\u00f3n",
-                `Modelo: DINOv2 + ArcFace\nPrecisi\u00f3n: ${classifierMeta.model_accuracy}%\nClases: ${classifierMeta.num_classes}\n\n100% offline — sin internet\n\nSkyline Capital SAS`
-              );
-            }}
-          >
-            <Text style={s.menuItemText}>Acerca de</Text>
-          </Pressable>
-        </View>
-      )}
-
-      {/* Scanning crosshair (when camera is live) */}
-      {!capturedUri && !loading && (
-        <View style={s.crosshairContainer}>
-          <View style={s.crosshairBox}>
-            <View style={[s.corner, s.cornerTL]} />
-            <View style={[s.corner, s.cornerTR]} />
-            <View style={[s.corner, s.cornerBL]} />
-            <View style={[s.corner, s.cornerBR]} />
+            style={StyleSheet.absoluteFill}
+            onPress={() => setMenuOpen(false)}
+          />
+          <View style={s.menuDropdown}>
+            <Pressable style={s.menuItem} onPress={pickFromGallery}>
+              <Text style={s.menuItemText}>{"Abrir Galer\u00eda"}</Text>
+            </Pressable>
+            <Pressable
+              style={[s.menuItem, { borderBottomWidth: 0 }]}
+              onPress={() => {
+                setMenuOpen(false);
+                Alert.alert(
+                  "AgroVisi\u00f3n",
+                  `Modelo: DINOv2 + ArcFace\nPrecisi\u00f3n: ${classifierMeta.model_accuracy}%\nClases: ${classifierMeta.num_classes}\n\n100% offline \u2014 sin internet\n\nSkyline Capital SAS`
+                );
+              }}
+            >
+              <Text style={s.menuItemText}>Acerca de</Text>
+            </Pressable>
           </View>
-          <Text style={s.crosshairText}>Apunte hacia la planta</Text>
-        </View>
+        </>
       )}
 
-      {/* Loading spinner overlay */}
+      {/* Loading overlay */}
       {loading && (
         <View style={s.loadingOverlay}>
           <ActivityIndicator color="#4CAF50" size="large" />
@@ -404,36 +391,53 @@ function MainScreen() {
         </View>
       )}
 
-      {/* AR Annotation — dot + line + label */}
+      {/* AR Annotation — dot centered on image + line + label */}
       {diagnosis && capturedUri && !loading && (
         <View style={s.annotationContainer} pointerEvents="box-none">
-          {/* Pulsing dot at center of image */}
+          {/* Pulsing outer ring */}
           <Animated.View
             style={[
-              s.annotDot,
+              s.annotRing,
               {
-                backgroundColor: diagnosis.isHealthy ? "#4CAF50" : "#FF1744",
+                top: DOT_Y - 18,
+                left: DOT_X - 18,
+                borderColor: diagnosis.isHealthy ? "#4CAF50" : "#FF1744",
                 transform: [{ scale: pulseAnim }],
               },
             ]}
           />
+          {/* Solid dot */}
           <View
             style={[
-              s.annotDotInner,
+              s.annotDot,
               {
-                backgroundColor: diagnosis.isHealthy ? "#fff" : "#fff",
+                top: DOT_Y - 6,
+                left: DOT_X - 6,
+                backgroundColor: diagnosis.isHealthy ? "#4CAF50" : "#FF1744",
               },
             ]}
           />
 
-          {/* Line from dot going right-up */}
-          <View style={s.annotLine} />
+          {/* Line from dot to label */}
+          <View
+            style={[
+              s.annotLine,
+              {
+                top: DOT_Y - LINE_LEN + 10,
+                left: DOT_X,
+                height: LINE_LEN,
+                backgroundColor: "#fff",
+              },
+            ]}
+          />
 
-          {/* Disease label at end of line */}
+          {/* Disease label */}
           <Pressable
             style={[
               s.annotLabel,
               {
+                top: DOT_Y - LINE_LEN - 50,
+                left: DOT_X - 100,
                 backgroundColor: diagnosis.isHealthy
                   ? "rgba(46,125,50,0.92)"
                   : "rgba(183,28,28,0.92)",
@@ -441,37 +445,30 @@ function MainScreen() {
             ]}
             onPress={() => setShowDetail(true)}
           >
-            <Text style={s.annotLabelText}>{diagnosis.classNameEs}</Text>
-            <Text style={s.annotConfText}>
-              {(diagnosis.confidence * 100).toFixed(1)}%
-            </Text>
-          </Pressable>
-
-          {/* Severity badge below label */}
-          {!diagnosis.isHealthy && (
-            <View style={[s.annotSeverity, { backgroundColor: sevColor }]}>
-              <Text style={s.annotSeverityText}>{sevLabel}</Text>
+            <Text style={s.annotLabelName}>{diagnosis.classNameEs}</Text>
+            <View style={s.annotLabelRow}>
+              <Text style={s.annotConfText}>
+                {(diagnosis.confidence * 100).toFixed(1)}%
+              </Text>
+              {!diagnosis.isHealthy && (
+                <View style={[s.annotSevBadge, { backgroundColor: sevColor }]}>
+                  <Text style={s.annotSevText}>{sevLabel}</Text>
+                </View>
+              )}
             </View>
-          )}
-
-          {/* Tap hint */}
-          <Pressable style={s.tapHint} onPress={() => setShowDetail(true)}>
-            <Text style={s.tapHintText}>Toca para ver detalles</Text>
           </Pressable>
         </View>
       )}
 
-      {/* Bottom controls */}
-      <View style={[s.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
+      {/* Bottom — capture or reset */}
+      <View style={s.bottomBar}>
         {capturedUri ? (
-          /* After capture: reset button */
           <Pressable style={s.resetBtn} onPress={resetScan}>
             <Text style={s.resetBtnText}>Nueva Foto</Text>
           </Pressable>
         ) : (
-          /* Live camera: capture button */
           <Pressable
-            style={[s.captureBtn, (!modelReady || loading) && s.captureBtnDisabled]}
+            style={[s.captureBtn, (!modelReady || loading) && { opacity: 0.4 }]}
             onPress={captureAndAnalyze}
             disabled={!modelReady || loading}
           >
@@ -480,11 +477,12 @@ function MainScreen() {
         )}
       </View>
 
-      {/* Detail popup modal */}
+      {/* Detail modal */}
       <Modal
         visible={showDetail && !!diagnosis}
         animationType="slide"
         transparent
+        statusBarTranslucent
         onRequestClose={() => setShowDetail(false)}
       >
         <Pressable
@@ -493,11 +491,7 @@ function MainScreen() {
         >
           <Pressable style={s.modalCard} onPress={() => {}}>
             {diagnosis && (
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-              >
-                {/* Header */}
+              <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
                 <View
                   style={[
                     s.modalHeader,
@@ -511,27 +505,22 @@ function MainScreen() {
                   <View style={s.modalDragBar} />
                   <Text style={s.modalTitle}>{diagnosis.classNameEs}</Text>
                   <Text style={s.modalConf}>
-                    Confianza: {(diagnosis.confidence * 100).toFixed(1)}%
+                    {"Confianza: " + (diagnosis.confidence * 100).toFixed(1) + "%"}
                   </Text>
                 </View>
 
                 {diagnosis.isHealthy ? (
                   <View style={s.modalSection}>
                     <Text style={s.modalBody}>
-                      La planta se ve saludable. No se detectaron signos de
-                      enfermedad. Contin\u00fae monitoreando regularmente.
+                      {"La planta se ve saludable. No se detectaron signos de enfermedad. Contin\u00fae monitoreando regularmente."}
                     </Text>
                   </View>
                 ) : (
                   <>
-                    {/* Severity */}
                     <View style={s.modalRow}>
                       <Text style={s.modalLabel}>Severidad</Text>
                       <View
-                        style={[
-                          s.modalSevBadge,
-                          { backgroundColor: sevColor },
-                        ]}
+                        style={[s.modalSevBadge, { backgroundColor: sevColor }]}
                       >
                         <Text style={s.modalSevText}>{sevLabel}</Text>
                       </View>
@@ -539,7 +528,7 @@ function MainScreen() {
 
                     {diagnosis.diseaseInfo.scientific && (
                       <View style={s.modalRow}>
-                        <Text style={s.modalLabel}>Nombre cient\u00edfico</Text>
+                        <Text style={s.modalLabel}>{"Nombre cient\u00edfico"}</Text>
                         <Text style={s.modalValue}>
                           {diagnosis.diseaseInfo.scientific}
                         </Text>
@@ -548,7 +537,7 @@ function MainScreen() {
 
                     {diagnosis.diseaseInfo.description && (
                       <View style={s.modalSection}>
-                        <Text style={s.modalSectionTitle}>Descripci\u00f3n</Text>
+                        <Text style={s.modalSectionTitle}>{"Descripci\u00f3n"}</Text>
                         <Text style={s.modalBody}>
                           {diagnosis.diseaseInfo.description}
                         </Text>
@@ -566,7 +555,7 @@ function MainScreen() {
 
                     {diagnosis.diseaseInfo.prevention && (
                       <View style={s.modalSection}>
-                        <Text style={s.modalSectionTitle}>Prevenci\u00f3n</Text>
+                        <Text style={s.modalSectionTitle}>{"Prevenci\u00f3n"}</Text>
                         <Text style={s.modalBody}>
                           {diagnosis.diseaseInfo.prevention}
                         </Text>
@@ -615,7 +604,6 @@ const s = StyleSheet.create({
     padding: 40,
     gap: 16,
   },
-  permIcon: { fontSize: 80 },
   permTitle: { fontSize: 32, fontWeight: "900", color: "#fff" },
   permSub: {
     fontSize: 16,
@@ -632,111 +620,77 @@ const s = StyleSheet.create({
   },
   permBtnText: { color: "#1B5E20", fontSize: 18, fontWeight: "800" },
 
-  // Top bar
-  topGradient: {
+  // Top overlay — floating, no background bar
+  topOverlay: {
     position: "absolute",
-    top: 0,
+    top: 12,
     left: 0,
     right: 0,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 20,
     zIndex: 10,
   },
   hamburger: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     justifyContent: "center",
     gap: 5,
   },
   hamburgerLine: {
-    width: 24,
-    height: 2.5,
+    width: 26,
+    height: 3,
     backgroundColor: "#fff",
     borderRadius: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.8,
+    shadowRadius: 3,
+    elevation: 5,
   },
   title: {
     flex: 1,
     textAlign: "center",
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: "900",
     color: "#fff",
-    letterSpacing: 1,
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    letterSpacing: 1.5,
+    textShadowColor: "rgba(0,0,0,0.7)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
   },
   statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     borderWidth: 2,
-    borderColor: "#fff",
+    borderColor: "rgba(255,255,255,0.8)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
+    elevation: 5,
   },
 
   // Hamburger menu
   menuDropdown: {
     position: "absolute",
+    top: 55,
     left: 16,
-    backgroundColor: "rgba(0,0,0,0.85)",
+    backgroundColor: "rgba(0,0,0,0.88)",
     borderRadius: 12,
     overflow: "hidden",
-    zIndex: 20,
-    minWidth: 180,
+    zIndex: 30,
+    minWidth: 200,
+    elevation: 10,
   },
   menuItem: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.1)",
   },
-  menuItemText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-
-  // Crosshair
-  crosshairContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 5,
-  },
-  crosshairBox: {
-    width: SCREEN_W * 0.65,
-    height: SCREEN_W * 0.65,
-  },
-  corner: {
-    position: "absolute",
-    width: 30,
-    height: 30,
-    borderColor: "#4CAF50",
-  },
-  cornerTL: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3 },
-  cornerTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3 },
-  cornerBL: {
-    bottom: 0,
-    left: 0,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
-  },
-  cornerBR: {
-    bottom: 0,
-    right: 0,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
-  },
-  crosshairText: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 14,
-    marginTop: 16,
-    textShadowColor: "rgba(0,0,0,0.6)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
+  menuItemText: { color: "#fff", fontSize: 17, fontWeight: "600" },
 
   // Loading
   loadingOverlay: {
@@ -747,131 +701,120 @@ const s = StyleSheet.create({
     zIndex: 15,
     gap: 12,
   },
-  loadingText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-  },
+  loadingText: { color: "#fff", fontSize: 18, fontWeight: "700" },
 
   // AR Annotation
   annotationContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
     zIndex: 8,
+  },
+  annotRing: {
+    position: "absolute",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    opacity: 0.5,
   },
   annotDot: {
     position: "absolute",
-    top: SCREEN_H * 0.4 - 12,
-    left: SCREEN_W * 0.35 - 12,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    opacity: 0.6,
-  },
-  annotDotInner: {
-    position: "absolute",
-    top: SCREEN_H * 0.4 - 5,
-    left: SCREEN_W * 0.35 - 5,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
+    elevation: 5,
   },
   annotLine: {
     position: "absolute",
-    top: SCREEN_H * 0.4 - 50,
-    left: SCREEN_W * 0.35,
-    width: SCREEN_W * 0.3,
-    height: 2,
-    backgroundColor: "#fff",
-    transform: [{ rotate: "-30deg" }],
-    transformOrigin: "left center",
+    width: 2,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.5,
     shadowRadius: 2,
+    elevation: 3,
   },
   annotLabel: {
     position: "absolute",
-    top: SCREEN_H * 0.4 - 100,
-    left: SCREEN_W * 0.5,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    maxWidth: SCREEN_W * 0.48,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    minWidth: 200,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 8,
   },
-  annotLabelText: {
+  annotLabelName: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "800",
+    textAlign: "center",
+  },
+  annotLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 4,
   },
   annotConfText: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 12,
-    marginTop: 2,
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 14,
+    fontWeight: "600",
   },
-  annotSeverity: {
-    position: "absolute",
-    top: SCREEN_H * 0.4 - 55,
-    left: SCREEN_W * 0.5,
-    paddingVertical: 3,
+  annotSevBadge: {
+    paddingVertical: 2,
     paddingHorizontal: 10,
     borderRadius: 10,
   },
-  annotSeverityText: {
+  annotSevText: {
     color: "#fff",
     fontSize: 11,
     fontWeight: "800",
-  },
-  tapHint: {
-    position: "absolute",
-    top: SCREEN_H * 0.4 - 28,
-    left: SCREEN_W * 0.5,
-  },
-  tapHintText: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 11,
-    fontStyle: "italic",
   },
 
   // Bottom bar
   bottomBar: {
     position: "absolute",
-    bottom: 0,
+    bottom: 30,
     left: 0,
     right: 0,
     alignItems: "center",
-    paddingTop: 16,
-    backgroundColor: "rgba(0,0,0,0.35)",
     zIndex: 10,
   },
   captureBtn: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 4,
-    borderColor: "#fff",
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 5,
+    borderColor: "rgba(255,255,255,0.9)",
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 8,
   },
-  captureBtnDisabled: { opacity: 0.4 },
   captureBtnInner: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: "#4CAF50",
   },
   resetBtn: {
-    backgroundColor: "rgba(255,255,255,0.2)",
-    paddingVertical: 14,
-    paddingHorizontal: 40,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingVertical: 16,
+    paddingHorizontal: 48,
     borderRadius: 30,
     borderWidth: 2,
-    borderColor: "#fff",
+    borderColor: "rgba(255,255,255,0.7)",
   },
-  resetBtnText: { color: "#fff", fontSize: 17, fontWeight: "700" },
+  resetBtnText: { color: "#fff", fontSize: 18, fontWeight: "700" },
 
   // Detail modal
   modalBackdrop: {
@@ -895,10 +838,7 @@ const s = StyleSheet.create({
     marginTop: 10,
     marginBottom: 8,
   },
-  modalHeader: {
-    padding: 20,
-    paddingTop: 8,
-  },
+  modalHeader: { padding: 20, paddingTop: 8 },
   modalTitle: { fontSize: 22, fontWeight: "900", color: "#fff" },
   modalConf: {
     fontSize: 14,
@@ -934,9 +874,6 @@ const s = StyleSheet.create({
     marginBottom: 8,
   },
   modalBody: { fontSize: 15, color: "#333", lineHeight: 22 },
-  modalClose: {
-    alignItems: "center",
-    paddingVertical: 18,
-  },
+  modalClose: { alignItems: "center", paddingVertical: 18 },
   modalCloseText: { fontSize: 17, color: "#1B5E20", fontWeight: "700" },
 });
