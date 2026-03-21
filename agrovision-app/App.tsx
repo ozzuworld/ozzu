@@ -206,18 +206,15 @@ function MainScreen() {
       });
 
       // Decode base64 → Uint8Array using atob (works in Hermes)
-      console.log("AgroVision: decoding base64, length:", b64.length);
       const binaryStr = atob(b64);
       const jpegBytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) {
         jpegBytes[i] = binaryStr.charCodeAt(i);
       }
-      console.log("AgroVision: JPEG bytes:", jpegBytes.length);
 
       // Decode JPEG to raw RGBA pixels
       const decoded = jpeg.decode(jpegBytes, { useTArray: true, formatAsRGBA: true });
       const pixels = decoded.data; // Uint8Array RGBA
-      console.log("AgroVision: decoded pixels:", pixels.length, "w:", decoded.width, "h:", decoded.height);
 
       // 3. Convert RGBA → RGB float32 (0-255 range, model handles normalization)
       const inputData = new Float32Array(1 * 224 * 224 * 3);
@@ -228,7 +225,6 @@ function MainScreen() {
       }
 
       // 4. Run inference
-      console.log("AgroVision: running inference, model state:", model.state);
       if (!model.model) throw new Error("Model not loaded");
       const output = model.model.runSync([inputData]);
       const probs = output[0] as Float32Array;
@@ -255,8 +251,7 @@ function MainScreen() {
         isHealthy,
       });
     } catch (err: any) {
-      console.error("AgroVision diagnosis error:", err.message, err.stack);
-      Alert.alert("Error de diagnóstico", `${err.message}\n\n${err.stack?.split('\n').slice(0,3).join('\n') || ''}`);
+      Alert.alert("Error", `No se pudo analizar la imagen: ${err.message}`);
     } finally {
       setLoading(false);
     }
