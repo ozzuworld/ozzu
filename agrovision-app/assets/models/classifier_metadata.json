@@ -50,6 +50,11 @@
   ],
   "input_size": 224,
   "model_accuracy": 99.81,
+  "patch_grid": 16,
+  "outputs": [
+    "probabilities",
+    "attention_map"
+  ],
   "normalization": {
     "mean": [
       0.485,

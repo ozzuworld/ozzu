@@ -152,12 +152,29 @@ interface DiagnosisResult {
   isHealthy: boolean;
 }
 
-// Annotation position: dot at center of image, label to the right
-const DOT_X = SCREEN_W * 0.5;
-const DOT_Y = SCREEN_H * 0.45;
-const LABEL_X = DOT_X + 20;
-const LABEL_Y = DOT_Y - 70;
+const PATCH_GRID = 16; // DINOv2 ViT-S/14: 224/14 = 16 patches per side
 const LINE_LEN = 80;
+
+/** Find the attention-weighted centroid in screen coordinates */
+function attnCentroid(attnMap: Float32Array): { x: number; y: number } {
+  let sumW = 0, sumX = 0, sumY = 0;
+  for (let row = 0; row < PATCH_GRID; row++) {
+    for (let col = 0; col < PATCH_GRID; col++) {
+      const w = attnMap[row * PATCH_GRID + col];
+      sumW += w;
+      sumX += col * w;
+      sumY += row * w;
+    }
+  }
+  if (sumW < 1e-8) return { x: SCREEN_W * 0.5, y: SCREEN_H * 0.45 };
+  // Map from 0..15 patch grid to screen coordinates
+  const px = (sumX / sumW) / (PATCH_GRID - 1);
+  const py = (sumY / sumW) / (PATCH_GRID - 1);
+  // Clamp to keep annotation visible (avoid edges)
+  const x = Math.max(60, Math.min(SCREEN_W - 60, px * SCREEN_W));
+  const y = Math.max(120, Math.min(SCREEN_H - 200, py * SCREEN_H));
+  return { x, y };
+}
 
 function MainScreen() {
   const cameraRef = useRef<any>(null);
@@ -165,6 +182,7 @@ function MainScreen() {
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
+  const [dotPos, setDotPos] = useState({ x: SCREEN_W * 0.5, y: SCREEN_H * 0.45 });
   const [modelReady, setModelReady] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
@@ -231,6 +249,12 @@ function MainScreen() {
         if (!model.model) throw new Error("Model not loaded");
         const output = model.model.runSync([inputData]);
         const probs = output[0] as Float32Array;
+
+        // Second output: attention map [1, 16, 16] = 256 values
+        const attnMap = output.length > 1
+          ? output[1] as Float32Array
+          : null;
+
         let maxIdx = 0;
         let maxProb = 0;
         for (let i = 0; i < probs.length; i++) {
@@ -245,6 +269,15 @@ function MainScreen() {
         const isHealthy =
           className.toLowerCase().includes("healthy") ||
           diseaseKey === "healthy";
+
+        // Position dot at attention centroid
+        if (attnMap && attnMap.length === PATCH_GRID * PATCH_GRID) {
+          setDotPos(attnCentroid(attnMap));
+        } else {
+          // Fallback: center of screen
+          setDotPos({ x: SCREEN_W * 0.5, y: SCREEN_H * 0.45 });
+        }
+
         setDiagnosis({
           className,
           classNameEs:
@@ -391,16 +424,16 @@ function MainScreen() {
         </View>
       )}
 
-      {/* AR Annotation — dot centered on image + line + label */}
+      {/* AR Annotation — dot at attention centroid + line + label */}
       {diagnosis && capturedUri && !loading && (
         <View style={s.annotationContainer} pointerEvents="box-none">
-          {/* Pulsing outer ring */}
+          {/* Pulsing outer ring at attention hotspot */}
           <Animated.View
             style={[
               s.annotRing,
               {
-                top: DOT_Y - 18,
-                left: DOT_X - 18,
+                top: dotPos.y - 18,
+                left: dotPos.x - 18,
                 borderColor: diagnosis.isHealthy ? "#4CAF50" : "#FF1744",
                 transform: [{ scale: pulseAnim }],
               },
@@ -411,33 +444,33 @@ function MainScreen() {
             style={[
               s.annotDot,
               {
-                top: DOT_Y - 6,
-                left: DOT_X - 6,
+                top: dotPos.y - 6,
+                left: dotPos.x - 6,
                 backgroundColor: diagnosis.isHealthy ? "#4CAF50" : "#FF1744",
               },
             ]}
           />
 
-          {/* Line from dot to label */}
+          {/* Line from dot going up */}
           <View
             style={[
               s.annotLine,
               {
-                top: DOT_Y - LINE_LEN + 10,
-                left: DOT_X,
+                top: dotPos.y - LINE_LEN + 10,
+                left: dotPos.x,
                 height: LINE_LEN,
                 backgroundColor: "#fff",
               },
             ]}
           />
 
-          {/* Disease label */}
+          {/* Disease label — centered above line */}
           <Pressable
             style={[
               s.annotLabel,
               {
-                top: DOT_Y - LINE_LEN - 50,
-                left: DOT_X - 100,
+                top: dotPos.y - LINE_LEN - 50,
+                left: Math.max(10, Math.min(SCREEN_W - 210, dotPos.x - 100)),
                 backgroundColor: diagnosis.isHealthy
                   ? "rgba(46,125,50,0.92)"
                   : "rgba(183,28,28,0.92)",
