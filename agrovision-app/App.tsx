@@ -155,15 +155,22 @@ interface DiagnosisResult {
 const PATCH_GRID = 16; // DINOv2 ViT-S/14: 224/14 = 16 patches per side
 const LINE_LEN = 80;
 
-/** Find the attention-weighted centroid in screen coordinates */
+/** Find the attention-weighted centroid in screen coordinates.
+ *  Uses top-25% attention values only so the dot moves away from center. */
 function attnCentroid(attnMap: Float32Array): { x: number; y: number } {
+  // Find threshold at 75th percentile — only keep the hottest patches
+  const sorted = Float32Array.from(attnMap).sort();
+  const p75 = sorted[Math.floor(sorted.length * 0.75)];
+
   let sumW = 0, sumX = 0, sumY = 0;
   for (let row = 0; row < PATCH_GRID; row++) {
     for (let col = 0; col < PATCH_GRID; col++) {
       const w = attnMap[row * PATCH_GRID + col];
-      sumW += w;
-      sumX += col * w;
-      sumY += row * w;
+      if (w < p75) continue; // ignore low-attention patches
+      const s = w * w; // square to sharpen peaks
+      sumW += s;
+      sumX += col * s;
+      sumY += row * s;
     }
   }
   if (sumW < 1e-8) return { x: SCREEN_W * 0.5, y: SCREEN_H * 0.45 };
