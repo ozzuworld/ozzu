@@ -154,6 +154,25 @@ services:
       - MODEL_DIR=/models
       - QDRANT_URL=http://127.0.0.1:6333
 
+  agrovision:
+    build: ./agrovision
+    container_name: agrovision
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - agrovision-models:/models
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '1.5'
+    environment:
+      - AGROVISION_MODEL=/models/agrovision_embed.onnx
+      - AGROVISION_METADATA=/app/disease_metadata.json
+      - QDRANT_URL=http://127.0.0.1:6333
+    depends_on:
+      - qdrant
+
   browser:
     build: ./browser
     container_name: browser
@@ -187,4 +206,5 @@ volumes:
   redis-data:
   postgres-data:
   face-models:
+  agrovision-models:
   qdrant-data:

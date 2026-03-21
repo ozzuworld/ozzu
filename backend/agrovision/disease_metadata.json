@@ -1,0 +1,386 @@
+{
+  "diseases": {
+    "apple_scab": {
+      "name": "Apple Scab",
+      "scientific": "Venturia inaequalis",
+      "crop": "Apple",
+      "severity": "moderate",
+      "description": "Fungal disease causing dark, scabby lesions on leaves and fruit.",
+      "treatment": "Apply fungicides (captan, mancozeb) during spring. Remove fallen leaves. Prune for air circulation.",
+      "prevention": "Plant resistant varieties. Maintain good sanitation. Apply preventive fungicide sprays."
+    },
+    "apple_black_rot": {
+      "name": "Apple Black Rot",
+      "scientific": "Botryosphaeria obtusa",
+      "crop": "Apple",
+      "severity": "high",
+      "description": "Causes leaf spots, fruit rot, and cankers on branches.",
+      "treatment": "Prune infected branches. Remove mummified fruit. Apply captan or thiophanate-methyl.",
+      "prevention": "Remove dead wood and mummified fruit. Maintain tree vigor through proper fertilization."
+    },
+    "apple_cedar_rust": {
+      "name": "Cedar Apple Rust",
+      "scientific": "Gymnosporangium juniperi-virginianae",
+      "crop": "Apple",
+      "severity": "moderate",
+      "description": "Orange-yellow spots on leaves, requires both apple and cedar/juniper hosts.",
+      "treatment": "Apply myclobutanil or mancozeb at pink bud stage. Remove nearby juniper hosts if possible.",
+      "prevention": "Plant resistant varieties. Remove eastern red cedar within 2 miles if feasible."
+    },
+    "cherry_powdery_mildew": {
+      "name": "Cherry Powdery Mildew",
+      "scientific": "Podosphaera clandestina",
+      "crop": "Cherry",
+      "severity": "moderate",
+      "description": "White powdery coating on leaves, can cause leaf curl and fruit cracking.",
+      "treatment": "Apply sulfur-based fungicides or myclobutanil. Improve air circulation.",
+      "prevention": "Avoid overhead irrigation. Prune for airflow. Apply preventive sprays."
+    },
+    "corn_cercospora": {
+      "name": "Gray Leaf Spot",
+      "scientific": "Cercospora zeae-maydis",
+      "crop": "Corn",
+      "severity": "high",
+      "description": "Rectangular gray-brown lesions on leaves, major yield reducer.",
+      "treatment": "Apply strobilurin or triazole fungicides at VT-R1. Rotate crops.",
+      "prevention": "Plant resistant hybrids. Rotate with non-host crops. Reduce residue through tillage."
+    },
+    "corn_common_rust": {
+      "name": "Common Rust",
+      "scientific": "Puccinia sorghi",
+      "crop": "Corn",
+      "severity": "moderate",
+      "description": "Small, circular to elongated brown pustules on both leaf surfaces.",
+      "treatment": "Apply fungicides if detected before tasseling. Usually not economically damaging.",
+      "prevention": "Plant resistant hybrids. Early planting reduces risk."
+    },
+    "corn_northern_leaf_blight": {
+      "name": "Northern Leaf Blight",
+      "scientific": "Exserohilum turcicum",
+      "crop": "Corn",
+      "severity": "high",
+      "description": "Long, elliptical gray-green lesions on leaves, can reduce yield 30-50%.",
+      "treatment": "Apply foliar fungicides (azoxystrobin, propiconazole) at first sign.",
+      "prevention": "Plant resistant hybrids. Rotate crops. Manage crop residue."
+    },
+    "grape_black_rot": {
+      "name": "Grape Black Rot",
+      "scientific": "Guignardia bidwellii",
+      "crop": "Grape",
+      "severity": "high",
+      "description": "Brown circular lesions on leaves, fruit shrivels into hard black mummies.",
+      "treatment": "Apply mancozeb or myclobutanil from bud break. Remove mummified fruit.",
+      "prevention": "Sanitation — remove all mummies and infected debris. Canopy management for airflow."
+    },
+    "grape_esca": {
+      "name": "Grape Esca (Black Measles)",
+      "scientific": "Complex (Phaeomoniella, Phaeoacremonium, Fomitiporia)",
+      "crop": "Grape",
+      "severity": "high",
+      "description": "Tiger-stripe pattern on leaves, dark spots on berries. Chronic trunk disease.",
+      "treatment": "No cure. Trunk surgery and wound protection. Remove severely affected vines.",
+      "prevention": "Protect pruning wounds with fungicide paste. Avoid large pruning cuts. Late pruning."
+    },
+    "grape_leaf_blight": {
+      "name": "Grape Leaf Blight (Isariopsis)",
+      "scientific": "Pseudocercospora vitis",
+      "crop": "Grape",
+      "severity": "moderate",
+      "description": "Angular dark brown spots on leaves, premature defoliation.",
+      "treatment": "Apply mancozeb or copper-based fungicides. Remove infected leaves.",
+      "prevention": "Good canopy management. Avoid overhead irrigation. Sanitation."
+    },
+    "peach_bacterial_spot": {
+      "name": "Peach Bacterial Spot",
+      "scientific": "Xanthomonas arboricola pv. pruni",
+      "crop": "Peach",
+      "severity": "high",
+      "description": "Water-soaked lesions on leaves, cracked/pitted fruit.",
+      "treatment": "Copper sprays in dormant season. Oxytetracycline during growing season.",
+      "prevention": "Plant resistant varieties. Avoid overhead irrigation. Windbreaks reduce spread."
+    },
+    "pepper_bacterial_spot": {
+      "name": "Pepper Bacterial Spot",
+      "scientific": "Xanthomonas campestris pv. vesicatoria",
+      "crop": "Pepper",
+      "severity": "high",
+      "description": "Small, water-soaked spots on leaves and fruit, raised and scabby.",
+      "treatment": "Copper-based bactericides. Remove infected plants. Avoid working in wet fields.",
+      "prevention": "Use disease-free seed/transplants. Crop rotation (2-3 years). Avoid overhead irrigation."
+    },
+    "potato_early_blight": {
+      "name": "Potato Early Blight",
+      "scientific": "Alternaria solani",
+      "crop": "Potato",
+      "severity": "moderate",
+      "description": "Concentric ring 'target' lesions on lower leaves first.",
+      "treatment": "Apply chlorothalonil or mancozeb. Maintain plant vigor with adequate fertilization.",
+      "prevention": "Crop rotation. Adequate irrigation. Plant certified disease-free seed."
+    },
+    "potato_late_blight": {
+      "name": "Potato Late Blight",
+      "scientific": "Phytophthora infestans",
+      "crop": "Potato",
+      "severity": "critical",
+      "description": "Water-soaked lesions, white mold on underside. The Irish Famine disease. Spreads rapidly.",
+      "treatment": "Apply metalaxyl or cymoxanil IMMEDIATELY. Destroy infected plants. Protect neighbors.",
+      "prevention": "Plant resistant varieties. Eliminate cull piles. Monitor weather forecasts for blight conditions."
+    },
+    "squash_powdery_mildew": {
+      "name": "Squash Powdery Mildew",
+      "scientific": "Podosphaera xanthii",
+      "crop": "Squash",
+      "severity": "moderate",
+      "description": "White powdery spots on upper leaf surface, can cover entire leaf.",
+      "treatment": "Apply potassium bicarbonate, sulfur, or myclobutanil. Neem oil for organic management.",
+      "prevention": "Plant resistant varieties. Space plants for airflow. Avoid overhead watering."
+    },
+    "strawberry_leaf_scorch": {
+      "name": "Strawberry Leaf Scorch",
+      "scientific": "Diplocarpon earlianum",
+      "crop": "Strawberry",
+      "severity": "moderate",
+      "description": "Small purple spots that enlarge and merge, giving scorched appearance.",
+      "treatment": "Apply fungicides after harvest. Remove old leaves. Renovate beds.",
+      "prevention": "Plant resistant varieties. Proper spacing. Remove infected leaves promptly."
+    },
+    "tomato_bacterial_spot": {
+      "name": "Tomato Bacterial Spot",
+      "scientific": "Xanthomonas vesicatoria",
+      "crop": "Tomato",
+      "severity": "high",
+      "description": "Small, dark, water-soaked spots on leaves, stems, and fruit.",
+      "treatment": "Copper sprays + mancozeb. Remove severely infected plants.",
+      "prevention": "Use disease-free transplants. Avoid overhead irrigation. Rotate crops 2-3 years."
+    },
+    "tomato_early_blight": {
+      "name": "Tomato Early Blight",
+      "scientific": "Alternaria solani",
+      "crop": "Tomato",
+      "severity": "moderate",
+      "description": "Dark concentric ring lesions starting on lower leaves.",
+      "treatment": "Apply chlorothalonil or mancozeb. Stake plants. Remove lower infected leaves.",
+      "prevention": "Mulch to prevent soil splash. Crop rotation. Adequate spacing."
+    },
+    "tomato_late_blight": {
+      "name": "Tomato Late Blight",
+      "scientific": "Phytophthora infestans",
+      "crop": "Tomato",
+      "severity": "critical",
+      "description": "Large, dark, water-soaked lesions. White mold on leaf underside in humid conditions.",
+      "treatment": "Apply metalaxyl or cymoxanil immediately. Remove and destroy infected plants.",
+      "prevention": "Avoid planting near potatoes. Use resistant varieties. Monitor weather conditions."
+    },
+    "tomato_leaf_mold": {
+      "name": "Tomato Leaf Mold",
+      "scientific": "Passalora fulva",
+      "crop": "Tomato",
+      "severity": "moderate",
+      "description": "Pale green-yellow spots on upper leaf, olive-green mold on underside.",
+      "treatment": "Improve ventilation. Apply fungicides. Reduce humidity in greenhouses.",
+      "prevention": "Resistant varieties. Proper greenhouse ventilation. Avoid leaf wetness."
+    },
+    "tomato_septoria": {
+      "name": "Septoria Leaf Spot",
+      "scientific": "Septoria lycopersici",
+      "crop": "Tomato",
+      "severity": "moderate",
+      "description": "Small circular spots with dark borders and tan centers, tiny black dots visible.",
+      "treatment": "Apply chlorothalonil or mancozeb. Remove infected lower leaves.",
+      "prevention": "Mulch. Avoid overhead watering. Crop rotation. Sanitize tools."
+    },
+    "tomato_spider_mites": {
+      "name": "Spider Mite Damage",
+      "scientific": "Tetranychus urticae",
+      "crop": "Tomato",
+      "severity": "moderate",
+      "description": "Fine stippling/yellowing of leaves. Tiny mites and webbing on leaf underside.",
+      "treatment": "Spray with miticides (abamectin) or insecticidal soap. Strong water spray to dislodge.",
+      "prevention": "Avoid dusty conditions. Maintain humidity. Encourage predatory mites."
+    },
+    "tomato_target_spot": {
+      "name": "Tomato Target Spot",
+      "scientific": "Corynespora cassiicola",
+      "crop": "Tomato",
+      "severity": "moderate",
+      "description": "Brown spots with concentric rings on leaves, fruit, and stems.",
+      "treatment": "Apply azoxystrobin or chlorothalonil. Remove lower infected foliage.",
+      "prevention": "Staking. Mulching. Crop rotation. Adequate plant spacing."
+    },
+    "tomato_yellow_leaf_curl": {
+      "name": "Tomato Yellow Leaf Curl Virus",
+      "scientific": "TYLCV (Begomovirus)",
+      "crop": "Tomato",
+      "severity": "critical",
+      "description": "Severe leaf curling, yellowing, stunting. Transmitted by whiteflies. No cure.",
+      "treatment": "Remove infected plants immediately. Control whitefly vectors with imidacloprid or reflective mulch.",
+      "prevention": "Plant resistant varieties (Ty genes). Whitefly management. Use insect-proof netting in nurseries."
+    },
+    "tomato_mosaic_virus": {
+      "name": "Tomato Mosaic Virus",
+      "scientific": "ToMV (Tobamovirus)",
+      "crop": "Tomato",
+      "severity": "high",
+      "description": "Mottled light/dark green mosaic pattern on leaves. Distorted growth.",
+      "treatment": "No cure. Remove infected plants. Disinfect tools with 10% bleach between plants.",
+      "prevention": "Use resistant varieties (Tm-2 gene). Disease-free seed. Sanitize hands and tools."
+    },
+    "cassava_mosaic": {
+      "name": "Cassava Mosaic Disease",
+      "scientific": "CMV (Begomovirus)",
+      "crop": "Cassava/Yuca",
+      "severity": "critical",
+      "description": "Yellow-green mosaic pattern, leaf distortion, stunted growth. Major threat to food security.",
+      "treatment": "No cure. Remove infected plants. Use clean planting material from certified sources.",
+      "prevention": "Plant resistant varieties (TME 419, IITA improved). Whitefly control. Phytosanitation."
+    },
+    "cassava_bacterial_blight": {
+      "name": "Cassava Bacterial Blight",
+      "scientific": "Xanthomonas axonopodis pv. manihotis",
+      "crop": "Cassava/Yuca",
+      "severity": "high",
+      "description": "Angular leaf spots, wilting, stem exudate. Can cause complete defoliation.",
+      "treatment": "Remove and burn infected plants. Use disease-free cuttings.",
+      "prevention": "Resistant varieties. Crop rotation. Avoid planting during wet season onset."
+    },
+    "cassava_green_mottle": {
+      "name": "Cassava Green Mottle",
+      "scientific": "CsGMV",
+      "crop": "Cassava/Yuca",
+      "severity": "moderate",
+      "description": "Mild green mottling of leaves. Less severe than mosaic but reduces yield.",
+      "treatment": "Remove severely affected plants. Use clean planting material.",
+      "prevention": "Use virus-free cuttings. Monitor for whiteflies."
+    },
+    "cassava_brown_streak": {
+      "name": "Cassava Brown Streak Disease",
+      "scientific": "CBSV (Ipomovirus)",
+      "crop": "Cassava/Yuca",
+      "severity": "critical",
+      "description": "Yellow patches on leaves, brown necrotic rot in roots. The 'silent killer' — roots rot from inside.",
+      "treatment": "No cure. Harvest early before root necrosis advances. Use clean planting material.",
+      "prevention": "Plant tolerant varieties. Use virus-indexed planting material. Whitefly management."
+    },
+    "mango_anthracnose": {
+      "name": "Mango Anthracnose",
+      "scientific": "Colletotrichum gloeosporioides",
+      "crop": "Mango",
+      "severity": "high",
+      "description": "Black spots on leaves, flowers, and fruit. Major post-harvest disease worldwide.",
+      "treatment": "Apply copper fungicides or mancozeb during flowering. Hot water treatment post-harvest (52°C, 5 min).",
+      "prevention": "Prune for airflow. Avoid overhead irrigation. Harvest during dry weather."
+    },
+    "mango_powdery_mildew": {
+      "name": "Mango Powdery Mildew",
+      "scientific": "Oidium mangiferae",
+      "crop": "Mango",
+      "severity": "high",
+      "description": "White powdery growth on leaves, flowers, and young fruit. Causes flower/fruit drop.",
+      "treatment": "Apply sulfur or triazole fungicides at first sign. Spray during flowering season.",
+      "prevention": "Plant resistant varieties. Good spacing for airflow. Timely fungicide application."
+    },
+    "mango_sooty_mold": {
+      "name": "Mango Sooty Mold",
+      "scientific": "Capnodium mangiferum",
+      "crop": "Mango",
+      "severity": "moderate",
+      "description": "Black sooty coating on leaves and fruit, grows on honeydew from sap-sucking insects.",
+      "treatment": "Control the insects (scale, mealybugs, hoppers) first. Wash off mold with water + mild soap.",
+      "prevention": "Control sap-sucking insects. Prune dense canopy. Ant management (ants farm the insects)."
+    },
+    "banana_sigatoka": {
+      "name": "Black Sigatoka",
+      "scientific": "Mycosphaerella fijiensis",
+      "crop": "Banana/Plátano",
+      "severity": "critical",
+      "description": "Dark leaf streaks that expand and kill leaves. Reduces photosynthesis, premature ripening.",
+      "treatment": "Systemic fungicides (propiconazole, azoxystrobin) in rotation. Remove infected leaves.",
+      "prevention": "Resistant varieties (FHIA hybrids). Deleafing. Proper drainage. Avoid overcrowding."
+    },
+    "banana_fusarium_wilt": {
+      "name": "Fusarium Wilt (Panama Disease TR4)",
+      "scientific": "Fusarium oxysporum f.sp. cubense TR4",
+      "crop": "Banana/Plátano",
+      "severity": "critical",
+      "description": "Yellowing and wilting of older leaves. Internal vascular browning. NO CURE. Soil persists 30+ years.",
+      "treatment": "NO CHEMICAL TREATMENT EXISTS. Destroy infected plants + surrounding 5m. Quarantine the area.",
+      "prevention": "Biosecurity — clean boots, tools, machinery. Plant resistant varieties. Do NOT move soil."
+    },
+    "banana_bunchy_top": {
+      "name": "Banana Bunchy Top Virus",
+      "scientific": "BBTV (Babuvirus)",
+      "crop": "Banana/Plátano",
+      "severity": "critical",
+      "description": "Leaves become progressively shorter, bunched at top. Dark green streaks on petioles. No fruit.",
+      "treatment": "No cure. Remove and destroy infected plants + all suckers. Inject with herbicide to ensure death.",
+      "prevention": "Use virus-free planting material. Control aphid vector (Pentalonia nigronervosa). Quarantine."
+    },
+    "coffee_rust": {
+      "name": "Coffee Leaf Rust (Roya)",
+      "scientific": "Hemileia vastatrix",
+      "crop": "Coffee",
+      "severity": "critical",
+      "description": "Orange-yellow powdery spots on leaf underside. Causes premature defoliation, 70-80% yield loss in epidemics.",
+      "treatment": "Apply copper fungicides or triazoles (cyproconazole). Start at first sign. 3-4 applications per season.",
+      "prevention": "Plant resistant varieties (Castillo, Colombia, Cenicafe 1). Shade management. Balanced fertilization."
+    },
+    "coffee_cercospora": {
+      "name": "Coffee Brown Eye Spot",
+      "scientific": "Cercospora coffeicola",
+      "crop": "Coffee",
+      "severity": "moderate",
+      "description": "Circular spots with gray center and brown border on leaves. Affects cherries too.",
+      "treatment": "Copper-based fungicides. Improve nutrition (especially nitrogen).",
+      "prevention": "Adequate shade. Balanced fertilization. Good drainage."
+    },
+    "healthy": {
+      "name": "Healthy",
+      "scientific": null,
+      "crop": "Various",
+      "severity": "none",
+      "description": "No disease detected. The leaf appears healthy.",
+      "treatment": "No treatment needed.",
+      "prevention": "Continue good agricultural practices: proper nutrition, irrigation, and monitoring."
+    }
+  },
+  "plantvillage_class_map": {
+    "Apple___Apple_scab": "apple_scab",
+    "Apple___Black_rot": "apple_black_rot",
+    "Apple___Cedar_apple_rust": "apple_cedar_rust",
+    "Apple___healthy": "healthy",
+    "Blueberry___healthy": "healthy",
+    "Cherry_(including_sour)___Powdery_mildew": "cherry_powdery_mildew",
+    "Cherry_(including_sour)___healthy": "healthy",
+    "Corn_(maize)___Cercospora_leaf_spot Gray_leaf_spot": "corn_cercospora",
+    "Corn_(maize)___Common_rust_": "corn_common_rust",
+    "Corn_(maize)___Northern_Leaf_Blight": "corn_northern_leaf_blight",
+    "Corn_(maize)___healthy": "healthy",
+    "Grape___Black_rot": "grape_black_rot",
+    "Grape___Esca_(Black_Measles)": "grape_esca",
+    "Grape___Leaf_blight_(Isariopsis_Leaf_Spot)": "grape_leaf_blight",
+    "Grape___healthy": "healthy",
+    "Orange___Haunglongbing_(Citrus_greening)": "citrus_greening",
+    "Peach___Bacterial_spot": "peach_bacterial_spot",
+    "Peach___healthy": "healthy",
+    "Pepper,_bell___Bacterial_spot": "pepper_bacterial_spot",
+    "Pepper,_bell___healthy": "healthy",
+    "Potato___Early_blight": "potato_early_blight",
+    "Potato___Late_blight": "potato_late_blight",
+    "Potato___healthy": "healthy",
+    "Raspberry___healthy": "healthy",
+    "Soybean___healthy": "healthy",
+    "Squash___Powdery_mildew": "squash_powdery_mildew",
+    "Strawberry___Leaf_scorch": "strawberry_leaf_scorch",
+    "Strawberry___healthy": "healthy",
+    "Tomato___Bacterial_spot": "tomato_bacterial_spot",
+    "Tomato___Early_blight": "tomato_early_blight",
+    "Tomato___Late_blight": "tomato_late_blight",
+    "Tomato___Leaf_Mold": "tomato_leaf_mold",
+    "Tomato___Septoria_leaf_spot": "tomato_septoria",
+    "Tomato___Spider_mites Two-spotted_spider_mite": "tomato_spider_mites",
+    "Tomato___Target_Spot": "tomato_target_spot",
+    "Tomato___Tomato_Yellow_Leaf_Curl_Virus": "tomato_yellow_leaf_curl",
+    "Tomato___Tomato_mosaic_virus": "tomato_mosaic_virus",
+    "Tomato___healthy": "healthy"
+  }
+}

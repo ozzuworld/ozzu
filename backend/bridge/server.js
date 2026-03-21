@@ -130,6 +130,7 @@ const positioningRoutes = require("./routes/positioning");
 const mcpRoutes = require("./routes/mcp");
 const infraRoutes = require("./routes/infra");
 const businessEmailRoutes = require("./routes/business-email");
+const agrovisionRoutes = require("./routes/agrovision");
 const watchdog = require("./watchdog");
 const recoveryEngine = require("./recovery-engine");
 const cipherDaemon = require("./cipher-agent");
@@ -1561,6 +1562,7 @@ function getRouteHandlers() {
       mcp: mcpRoutes(routeCtx),
       infra: infraRoutes(routeCtx),
       businessEmail: businessEmailRoutes(routeCtx),
+      agrovision: agrovisionRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1606,6 +1608,7 @@ async function handleRequest(req, res) {
   if (await r.mcp(req, res, pathname, url)) return;
   if (await r.infra(req, res, pathname, url)) return;
   if (await r.businessEmail(req, res, pathname, url)) return;
+  if (await r.agrovision(req, res, pathname, url)) return;
 
   // GET /api/training-stats — Face DB training pipeline stats
   if (req.method === "GET" && pathname === "/api/training-stats") {
