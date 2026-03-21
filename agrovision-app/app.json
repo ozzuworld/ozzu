@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "AgroVisión",
+    "slug": "agrovision",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1B5E20"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1B5E20",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "package": "com.skylinecapital.agrovision"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "AgroVisión necesita acceso a la cámara para fotografiar cultivos."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "AgroVisión necesita acceso a la galería para seleccionar fotos de cultivos."
+        }
+      ],
+      "react-native-fast-tflite"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "agrovision-demo"
+      }
+    }
+  }
+}
