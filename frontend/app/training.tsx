@@ -84,6 +84,28 @@ interface DatasetProgress {
   error?: string;
 }
 
+interface AgrovisionState {
+  phase: string;
+  epoch: number | null;
+  totalEpochs: number | null;
+  batch: number | null;
+  totalBatches: number | null;
+  loss: number | null;
+  acc: number | null;
+  valLoss: number | null;
+  valAcc: number | null;
+  bestAcc: number | null;
+  rate: number | null;
+  gpuUtil: number | null;
+  gpuMemUsed: number | null;
+  gpuMemTotal: number | null;
+  gpuTemp: number | null;
+  modelReady: boolean;
+  stale: boolean;
+  error?: string;
+  timestamp: number;
+}
+
 interface TrainingStats {
   qdrant: {
     status: string;
@@ -93,6 +115,7 @@ interface TrainingStats {
   };
   sources?: Record<string, number>;
   datasetProgress?: Record<string, DatasetProgress>;
+  agrovision?: AgrovisionState | null;
   pipeline?: {
     activeDataset: string | null;
     model: string;
@@ -1150,6 +1173,120 @@ export default function TrainingScreen() {
             </View>
           )}
         </View>
+
+        {/* ── AgroVisión Training ─────────────────────────────────── */}
+        {stats?.agrovision && (
+          <>
+            <SectionDivider title="AGROVISION TRAINING" icon="🌿" />
+            <View style={[s.panel, stats.agrovision.phase === "training" && { borderColor: GREEN + "15" }]}>
+              <View style={s.panelHeader}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <PulsingGlow
+                    active={stats.agrovision.phase === "training"}
+                    color={
+                      stats.agrovision.phase === "complete" ? GREEN
+                      : stats.agrovision.phase === "training" ? CYAN
+                      : stats.agrovision.phase === "unreachable" ? RED
+                      : AMBER
+                    }
+                  />
+                  <Text
+                    style={{
+                      color:
+                        stats.agrovision.phase === "complete" ? GREEN
+                        : stats.agrovision.phase === "training" ? CYAN
+                        : stats.agrovision.phase === "unreachable" ? RED
+                        : AMBER,
+                      fontSize: 11,
+                      fontFamily: "monospace",
+                      fontWeight: "bold",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {stats.agrovision.phase === "training"
+                      ? `EPOCH ${stats.agrovision.epoch}/${stats.agrovision.totalEpochs}`
+                      : stats.agrovision.phase}
+                  </Text>
+                </View>
+                {stats.agrovision.bestAcc !== null && (
+                  <Text style={{ color: GREEN + "80", fontSize: 9, fontFamily: "monospace" }}>
+                    BEST: {stats.agrovision.bestAcc.toFixed(1)}%
+                  </Text>
+                )}
+              </View>
+
+              {/* Epoch progress bar */}
+              {stats.agrovision.epoch !== null && stats.agrovision.totalEpochs !== null && (
+                <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
+                  <NeonProgressBar
+                    current={
+                      stats.agrovision.batch && stats.agrovision.totalBatches
+                        ? (stats.agrovision.epoch - 1) + (stats.agrovision.batch / stats.agrovision.totalBatches)
+                        : stats.agrovision.epoch
+                    }
+                    target={stats.agrovision.totalEpochs}
+                    color={CYAN}
+                    label={
+                      stats.agrovision.batch
+                        ? `BATCH ${stats.agrovision.batch}/${stats.agrovision.totalBatches}`
+                        : `EPOCH ${stats.agrovision.epoch}/${stats.agrovision.totalEpochs}`
+                    }
+                  />
+                </View>
+              )}
+
+              <InfoRow label="Model" value="DINOv2-Small + ArcFace" color={CYAN} />
+              <InfoRow label="Task" value="Plant Disease Detection (46 classes)" />
+              {stats.agrovision.acc !== null && (
+                <InfoRow
+                  label="Train Acc"
+                  value={`${stats.agrovision.acc.toFixed(1)}%`}
+                  color={stats.agrovision.acc > 90 ? GREEN : stats.agrovision.acc > 70 ? AMBER : RED}
+                />
+              )}
+              {stats.agrovision.valAcc !== null && (
+                <InfoRow
+                  label="Val Acc"
+                  value={`${stats.agrovision.valAcc.toFixed(1)}%`}
+                  color={stats.agrovision.valAcc > 90 ? GREEN : stats.agrovision.valAcc > 70 ? AMBER : RED}
+                />
+              )}
+              {stats.agrovision.loss !== null && (
+                <InfoRow label="Loss" value={stats.agrovision.loss.toFixed(4)} />
+              )}
+              {stats.agrovision.rate !== null && (
+                <InfoRow label="Speed" value={`${stats.agrovision.rate} img/s`} color={CYAN} />
+              )}
+              {stats.agrovision.gpuUtil !== null && (
+                <InfoRow
+                  label="GPU Util"
+                  value={`${stats.agrovision.gpuUtil}%`}
+                  color={stats.agrovision.gpuUtil > 50 ? GREEN : stats.agrovision.gpuUtil > 0 ? AMBER : RED}
+                />
+              )}
+              {stats.agrovision.gpuTemp !== null && (
+                <InfoRow
+                  label="GPU Temp"
+                  value={`${stats.agrovision.gpuTemp}°C`}
+                  color={stats.agrovision.gpuTemp > 80 ? RED : stats.agrovision.gpuTemp > 65 ? AMBER : GREEN}
+                />
+              )}
+              {stats.agrovision.gpuMemUsed !== null && stats.agrovision.gpuMemTotal !== null && (
+                <InfoRow
+                  label="VRAM"
+                  value={`${(stats.agrovision.gpuMemUsed / 1024).toFixed(1)}G / ${(stats.agrovision.gpuMemTotal / 1024).toFixed(0)}G`}
+                  color={CYAN}
+                />
+              )}
+              {stats.agrovision.modelReady && (
+                <InfoRow label="ONNX Model" value="READY" color={GREEN} />
+              )}
+              {stats.agrovision.error && (
+                <InfoRow label="Error" value={stats.agrovision.error} color={RED} />
+              )}
+            </View>
+          </>
+        )}
 
         {/* ── Qdrant ──────────────────────────────────────────────── */}
         <SectionDivider title="VECTOR DATABASE" icon="◆" />

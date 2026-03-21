@@ -247,7 +247,7 @@ def train(args):
     print(f"[train] Device: {device}")
     if device.type == "cuda":
         print(f"[train] GPU: {torch.cuda.get_device_name()}")
-        print(f"[train] VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+        print(f"[train] VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
     # Collect dataset directories
     data_root = Path(args.data)

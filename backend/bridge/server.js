@@ -1610,6 +1610,99 @@ async function handleRequest(req, res) {
   if (await r.businessEmail(req, res, pathname, url)) return;
   if (await r.agrovision(req, res, pathname, url)) return;
 
+  // ── AgroVisión training state poller (SSH to GPU, parse training log) ──
+  async function refreshAgrovisionState(vastInstance) {
+    if (!vastInstance || vastInstance.actual_status !== "running") return;
+    const { execSync } = require("child_process");
+    const fs = require("fs");
+    // Get direct SSH port from instance
+    const ports = vastInstance.ports || {};
+    const sshMapping = ports["22/tcp"];
+    let sshHost, sshPort;
+    if (vastInstance.public_ipaddr && sshMapping && sshMapping[0]) {
+      sshHost = vastInstance.public_ipaddr;
+      sshPort = sshMapping[0].HostPort;
+    } else {
+      sshHost = vastInstance.ssh_host;
+      sshPort = vastInstance.ssh_port;
+    }
+    try {
+      const sshCmd = `tail -50 /root/training.log 2>/dev/null; echo ___NVIDIA___; nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader 2>/dev/null; echo ___FILES___; ls /root/models/*.onnx /root/models/class_map.json 2>/dev/null; true`;
+      const raw = execSync(
+        `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p ${sshPort} root@${sshHost} ${JSON.stringify(sshCmd)} 2>/dev/null`,
+        { timeout: 10000, maxBuffer: 1024 * 1024 }
+      ).toString();
+      const [logPart, nvPart, filesPart] = raw.split(/___NVIDIA___|___FILES___/);
+      // Parse training log for epoch/batch progress
+      const lines = (logPart || "").trim().split("\n").filter(l => l.trim());
+      let epoch = null, totalEpochs = null, batch = null, totalBatches = null;
+      let loss = null, acc = null, rate = null;
+      let valLoss = null, valAcc = null, bestAcc = null;
+      let phase = "unknown"; // downloading, training, exporting, complete
+      for (const line of lines) {
+        // Epoch summary: [Epoch 2/30] train_loss: 0.6388 train_acc: 93.4% | val_loss: 0.5880 val_acc: 94.4% | 153s
+        const epochMatch = line.match(/\[Epoch (\d+)\/(\d+)\] train_loss: ([\d.]+) train_acc: ([\d.]+)%.*val_loss: ([\d.]+) val_acc: ([\d.]+)%/);
+        if (epochMatch) {
+          epoch = parseInt(epochMatch[1]);
+          totalEpochs = parseInt(epochMatch[2]);
+          loss = parseFloat(epochMatch[3]);
+          acc = parseFloat(epochMatch[4]);
+          valLoss = parseFloat(epochMatch[5]);
+          valAcc = parseFloat(epochMatch[6]);
+          phase = "training";
+        }
+        // Batch progress: [1/30] batch 350/819 | loss: 0.7910 | acc: 66.6% | 360 img/s
+        const batchMatch = line.match(/\[(\d+)\/(\d+)\] batch (\d+)\/(\d+) \| loss: ([\d.]+) \| acc: ([\d.]+)% \| (\d+) img\/s/);
+        if (batchMatch) {
+          epoch = parseInt(batchMatch[1]);
+          totalEpochs = parseInt(batchMatch[2]);
+          batch = parseInt(batchMatch[3]);
+          totalBatches = parseInt(batchMatch[4]);
+          loss = parseFloat(batchMatch[5]);
+          acc = parseFloat(batchMatch[6]);
+          rate = parseInt(batchMatch[7]);
+          phase = "training";
+        }
+        // Best model: ★ New best! val_acc=94.4%
+        const bestMatch = line.match(/New best!.*val_acc=([\d.]+)%/);
+        if (bestMatch) bestAcc = parseFloat(bestMatch[1]);
+        // Export phase
+        if (line.includes("Exporting ONNX") || line.includes("export")) phase = "exporting";
+        if (line.includes("Training complete") || line.includes("ONNX saved")) phase = "complete";
+        // Download phase
+        if (line.includes("Downloading") && !line.includes("dinov2")) phase = "downloading";
+        // Class count
+      }
+      // Parse nvidia-smi
+      let gpuUtil = null, gpuMemUsed = null, gpuMemTotal = null, gpuTemp = null;
+      if (nvPart && nvPart.trim()) {
+        const nvParts = nvPart.trim().split(",").map(s => s.trim());
+        if (nvParts.length >= 4) {
+          gpuUtil = parseInt(nvParts[0]);
+          gpuMemUsed = parseInt(nvParts[1]);
+          gpuMemTotal = parseInt(nvParts[2]);
+          gpuTemp = parseInt(nvParts[3]);
+        }
+      }
+      // Check if model files exist
+      const modelReady = (filesPart || "").includes(".onnx");
+      const state = {
+        phase, epoch, totalEpochs, batch, totalBatches,
+        loss, acc, valLoss, valAcc, bestAcc, rate,
+        gpuUtil, gpuMemUsed, gpuMemTotal, gpuTemp,
+        modelReady, timestamp: Date.now(),
+      };
+      fs.writeFileSync("/tmp/agrovision-training-state.json", JSON.stringify(state));
+    } catch (e) {
+      // SSH failed — write error state
+      try {
+        fs.writeFileSync("/tmp/agrovision-training-state.json", JSON.stringify({
+          phase: "unreachable", error: e.message, timestamp: Date.now(),
+        }));
+      } catch {}
+    }
+  }
+
   // GET /api/training-stats — Face DB training pipeline stats
   if (req.method === "GET" && pathname === "/api/training-stats") {
     try {
@@ -1625,8 +1718,11 @@ async function handleRequest(req, res) {
         req.on("timeout", () => { req.destroy(); resolve(null); });
       });
 
-      // Vast.ai API key
-      const vastKey = process.env.VAST_API_KEY || "";
+      // Vast.ai API key — from env or file
+      let vastKey = process.env.VAST_API_KEY || "";
+      if (!vastKey) {
+        try { vastKey = require("fs").readFileSync("/root/.config/vastai/vast_api_key", "utf8").trim(); } catch {}
+      }
 
       // Parallel fetches: collection info + vast.ai (skip per-source counts — too slow under load)
       const [qdrant] = await Promise.all([
@@ -1719,6 +1815,25 @@ async function handleRequest(req, res) {
         : null;
       const heartbeatAlive = heartbeatAge !== null && heartbeatAge < 30;
 
+      // AgroVisión training state — read cached state file (updated by SSH poll)
+      let agrovision = null;
+      try {
+        const fs = require("fs");
+        const avFile = "/tmp/agrovision-training-state.json";
+        if (fs.existsSync(avFile)) {
+          const av = JSON.parse(fs.readFileSync(avFile, "utf8"));
+          const age = (Date.now() - (av.timestamp || 0)) / 1000;
+          agrovision = { ...av, stale: age > 30 };
+          // Trigger async refresh if stale (>15s)
+          if (age > 15) {
+            refreshAgrovisionState(vastInstance).catch(() => {});
+          }
+        } else if (vastInstance?.actual_status === "running") {
+          // First load — trigger async refresh
+          refreshAgrovisionState(vastInstance).catch(() => {});
+        }
+      } catch {}
+
       sendJSON(res, 200, {
         qdrant: {
           status: qdrantResult.status || "unknown",
@@ -1769,6 +1884,7 @@ async function handleRequest(req, res) {
           disk_space_gb: vastInstance.disk_space || null,
           geolocation: vastInstance.geolocation || null,
         } : null,
+        agrovision,
         timestamp: Date.now(),
       });
     } catch (e) {

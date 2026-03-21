@@ -187,6 +187,19 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "search_uc_docs",
+      description: "Search the Cisco UC documentation knowledge base (RAG). Returns relevant troubleshooting guides, CLI commands, and procedures for CUCM, CUBE, Expressway, and other Cisco UC products. Use this when diagnosing UC issues — paste error messages, symptoms, or questions to get grounded answers from indexed documentation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query — error message, symptom, or question (e.g. 'LDAP authentication error valid server not configured', 'phone stuck on registering', 'database replication state 4')" },
+          product: { type: "string", enum: ["cucm", "cube", "expressway", "all"], description: "Filter by product. Default: all" },
+          limit: { type: "number", description: "Max results (default 5, max 10)" },
+        },
+        required: ["query"],
+      },
+    },
+    {
       name: "get_infra_state",
       description: "Get live infrastructure state. TOPOLOGY: Rock Pi (172.168.0.55) is the ESP32 hub — it runs the ozzu-nodes WiFi AP and the positioning service. ESP32 nodes connect to the Rock Pi, NOT to dev-01. dev-01 (172.168.0.57) is a separate x86 Linux workstation. Sections: network (VPN, routes, LAN), devices (Rock Pi, dev-01 with reachability/services/resources), esp32 (nodes connected to Rock Pi AP), gcp (Docker, disk, memory), hub (positioning service status), router (ER605 DHCP/WAN/VPN). Cached 60s, use refresh=true for fresh probe.",
       inputSchema: {
@@ -195,6 +208,48 @@ module.exports = function mcpRoutes(ctx) {
           refresh: { type: "boolean", description: "Force fresh probe instead of using cache (takes ~15s)" },
           section: { type: "string", enum: ["network", "devices", "esp32", "gcp", "hub", "router", "all"], description: "Return only a specific section. Default: all" },
         },
+      },
+    },
+    {
+      name: "gpu_status",
+      description: "Get Vast.ai GPU instance status — running instances, SSH connection details, GPU utilization, cost. Use this to check if a GPU is available or to get SSH connection info.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+    {
+      name: "gpu_create",
+      description: "Rent a new Vast.ai GPU instance. Searches for cheapest offers matching criteria and creates an instance. Returns instance ID and SSH details once ready.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          gpu_model: { type: "string", description: "GPU model (e.g. RTX_3090, RTX_4090, A100). Default: RTX_3090" },
+          disk_gb: { type: "number", description: "Disk space in GB. Default: 80" },
+          max_cost: { type: "number", description: "Max $/hr. Default: 0.30" },
+        },
+      },
+    },
+    {
+      name: "gpu_destroy",
+      description: "Destroy/terminate a Vast.ai GPU instance to stop billing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          instance_id: { type: "number", description: "Instance ID to destroy. If omitted, destroys all running instances." },
+        },
+      },
+    },
+    {
+      name: "gpu_ssh_exec",
+      description: "Execute a command on the running Vast.ai GPU instance via SSH. Use for setup, monitoring, or running training jobs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "Shell command to execute on the GPU instance" },
+          instance_id: { type: "number", description: "Instance ID. If omitted, uses the first running instance." },
+        },
+        required: ["command"],
       },
     },
   ];
@@ -547,6 +602,56 @@ module.exports = function mcpRoutes(ctx) {
         return { content: [{ type: "text", text: `Updated task #${t.id}: "${t.title}" [${t.status}] ${t.priority}${t.due_date ? ` due ${t.due_date.toString().slice(0,10)}` : ""}` }] };
       }
 
+      case "search_uc_docs": {
+        const http = require("http");
+        const limit = Math.min(args.limit || 5, 10);
+        const product = args.product || "all";
+
+        try {
+          // Get embedding from sentence-transformers running on host via a simple HTTP call to Qdrant's built-in search
+          // We'll use Qdrant's recommend/discover API or call the embedding service
+          // Since we can't run Python inside Docker, call the host's embedding + search endpoint
+
+          // Step 1: Get embedding by calling a lightweight HTTP endpoint on the host
+          // We expose a tiny Flask/FastAPI on the host for this, OR we use the Qdrant text search
+          // For now: call the search.py as an HTTP service on the host
+
+          const qdrantHost = "host.docker.internal";
+          const hostIp = "172.17.0.1"; // Docker bridge gateway to host
+
+          // Call the search script via a simple HTTP wrapper on the host
+          const searchUrl = `http://${hostIp}:8765/search`;
+          const payload = JSON.stringify({ query: args.query, product: product === "all" ? null : product, limit });
+          const result = await new Promise((resolve, reject) => {
+            const req = http.request(searchUrl, {
+              method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }, timeout: 15000,
+            }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
+            req.on("error", e => resolve({ error: e.message }));
+            req.on("timeout", () => { req.destroy(); resolve({ error: "Search timed out" }); });
+            req.write(payload); req.end();
+          });
+
+          if (result.error) {
+            return { content: [{ type: "text", text: `RAG search error: ${result.error}` }], isError: true };
+          }
+
+          const results = result.results || result;
+          if (!Array.isArray(results) || results.length === 0) {
+            return { content: [{ type: "text", text: `No results found for: "${args.query}"\n\nAvailable topics: LDAP, certificates, replication, services, phone registration.` }] };
+          }
+
+          let text = `Found ${results.length} relevant doc sections for: "${args.query}"\n${"─".repeat(60)}\n\n`;
+          for (const r of results) {
+            text += `### ${r.title} (relevance: ${(r.score * 100).toFixed(0)}%)\n`;
+            text += `Source: ${r.source} | Product: ${r.product}\n\n`;
+            text += `${r.text}\n\n${"─".repeat(60)}\n\n`;
+          }
+          return { content: [{ type: "text", text }] };
+        } catch (err) {
+          return { content: [{ type: "text", text: `RAG search error: ${err.message}` }], isError: true };
+        }
+      }
+
       case "get_infra_state": {
         if (!infraMonitor) return { content: [{ type: "text", text: "Infra monitor not available" }], isError: true };
         const state = args.refresh ? await infraMonitor.refresh() : infraMonitor.getState();
@@ -567,6 +672,162 @@ module.exports = function mcpRoutes(ctx) {
         }
 
         return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }] };
+      }
+
+      case "gpu_status": {
+        const https = require("https");
+        try {
+          const vastKey = require("fs").readFileSync("/root/.config/vastai/vast_api_key", "utf8").trim();
+          const data = await new Promise((resolve, reject) => {
+            const req = https.get("https://console.vast.ai/api/v0/instances/?owner=me", {
+              headers: { Authorization: `Bearer ${vastKey}` }, timeout: 15000,
+            }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch(e) { reject(new Error(d)); } }); });
+            req.on("error", reject); req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+          });
+          const instances = data.instances || [];
+          if (instances.length === 0) return { content: [{ type: "text", text: "No running GPU instances." }] };
+          const summary = instances.map(i => {
+            // Prefer direct SSH over proxy
+            const ports = i.ports || {};
+            const sshMapping = ports["22/tcp"];
+            let sHost = i.ssh_host, sPort = i.ssh_port;
+            if (i.public_ipaddr && sshMapping && sshMapping[0]) {
+              sHost = i.public_ipaddr; sPort = sshMapping[0].HostPort;
+            }
+            return {
+              id: i.id, status: i.actual_status, gpu: i.gpu_name,
+              gpu_util: `${i.gpu_util || 0}%`, gpu_temp: `${Math.round(i.gpu_temp || 0)}°C`,
+              vram: `${i.gpu_ram || 0}MB`,
+              ssh: `ssh -p ${sPort} root@${sHost}`, ssh_host: sHost, ssh_port: sPort,
+              cost_hr: `$${(i.dph_total || 0).toFixed(3)}/hr`,
+              disk_used: `${((i.disk_usage || 0) * 100).toFixed(1)}%`, geo: i.geolocation,
+            };
+          });
+          return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `Failed to query Vast.ai: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "gpu_create": {
+        const https = require("https");
+        const gpu = args.gpu_model || "RTX_3090";
+        const disk = args.disk_gb || 80;
+        const maxCost = args.max_cost || 0.30;
+        try {
+          const vastKey = require("fs").readFileSync("/root/.config/vastai/vast_api_key", "utf8").trim();
+          const vastGet = (path) => new Promise((resolve, reject) => {
+            const req = https.get(`https://console.vast.ai/api/v0${path}`, {
+              headers: { Authorization: `Bearer ${vastKey}` }, timeout: 15000,
+            }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch(e) { reject(new Error(d)); } }); });
+            req.on("error", reject);
+          });
+          const vastPut = (path, body) => new Promise((resolve, reject) => {
+            const payload = JSON.stringify(body);
+            const req = https.request(`https://console.vast.ai/api/v0${path}`, {
+              method: "PUT", headers: { Authorization: `Bearer ${vastKey}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }, timeout: 30000,
+            }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({ raw: d }); } }); });
+            req.on("error", reject); req.write(payload); req.end();
+          });
+          // Search offers
+          const q = encodeURIComponent(JSON.stringify({ gpu_name: { eq: gpu }, rentable: { eq: true }, num_gpus: { eq: 1 }, inet_down: { gte: 100 }, disk_space: { gte: disk }, dph_total: { lte: maxCost } }));
+          const offers = await vastGet(`/bundles?q=${q}&order=[[%22dph_total%22,%22asc%22]]&limit=5`);
+          const offerList = offers.offers || [];
+          if (offerList.length === 0) return { content: [{ type: "text", text: `No ${gpu} offers found under $${maxCost}/hr with ${disk}GB disk.` }], isError: true };
+          const best = offerList[0];
+          // Create instance
+          const result = await vastPut(`/asks/${best.id}/`, { client_id: "me", image: "vastai/base-image:cuda-13.0.2-auto", disk: disk });
+          const instId = result.new_contract;
+          if (!instId) return { content: [{ type: "text", text: `Failed to create instance: ${JSON.stringify(result)}` }], isError: true };
+          // Wait for running (poll up to 3 min)
+          let sshInfo = null;
+          for (let i = 0; i < 18; i++) {
+            await new Promise(r => setTimeout(r, 10000));
+            try {
+              const info = await vastGet(`/instances/${instId}`);
+              const inst = info.instances ? info.instances[0] : info;
+              if (inst.actual_status === "running" && inst.ssh_port) {
+                sshInfo = { id: instId, ssh: `ssh -p ${inst.ssh_port} root@${inst.ssh_host}`, ssh_host: inst.ssh_host, ssh_port: inst.ssh_port, gpu: inst.gpu_name, cost: `$${inst.dph_total.toFixed(3)}/hr` };
+                break;
+              }
+            } catch {}
+          }
+          if (!sshInfo) return { content: [{ type: "text", text: `Instance ${instId} created but not ready yet. Check with gpu_status.` }] };
+          return { content: [{ type: "text", text: `GPU instance created!\n${JSON.stringify(sshInfo, null, 2)}` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `Failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "gpu_destroy": {
+        const https = require("https");
+        try {
+          const vastKey = require("fs").readFileSync("/root/.config/vastai/vast_api_key", "utf8").trim();
+          const vastDel = (path) => new Promise((resolve, reject) => {
+            const req = https.request(`https://console.vast.ai/api/v0${path}`, {
+              method: "DELETE", headers: { Authorization: `Bearer ${vastKey}` }, timeout: 15000,
+            }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => resolve(d)); });
+            req.on("error", reject); req.end();
+          });
+          if (args.instance_id) {
+            await vastDel(`/instances/${args.instance_id}/`);
+            return { content: [{ type: "text", text: `Destroyed instance ${args.instance_id}` }] };
+          }
+          const vastGet = (path) => new Promise((resolve, reject) => {
+            https.get(`https://console.vast.ai/api/v0${path}`, {
+              headers: { Authorization: `Bearer ${vastKey}` }, timeout: 15000,
+            }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({}); } }); }).on("error", reject);
+          });
+          const data = await vastGet("/instances/?owner=me");
+          const instances = data.instances || [];
+          if (instances.length === 0) return { content: [{ type: "text", text: "No instances to destroy." }] };
+          for (const inst of instances) await vastDel(`/instances/${inst.id}/`);
+          return { content: [{ type: "text", text: `Destroyed ${instances.length} instance(s): ${instances.map(i => i.id).join(", ")}` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `Failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "gpu_ssh_exec": {
+        const { execSync } = require("child_process");
+        const https = require("https");
+        try {
+          const vastKey = require("fs").readFileSync("/root/.config/vastai/vast_api_key", "utf8").trim();
+          let sshHost, sshPort;
+          const vastGet = (path) => new Promise((resolve, reject) => {
+            https.get(`https://console.vast.ai/api/v0${path}`, {
+              headers: { Authorization: `Bearer ${vastKey}` }, timeout: 15000,
+            }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({}); } }); }).on("error", reject);
+          });
+          let inst;
+          if (args.instance_id) {
+            const info = await vastGet(`/instances/${args.instance_id}/`);
+            inst = info.instances || info;
+            if (Array.isArray(inst)) inst = inst[0];
+          } else {
+            const data = await vastGet("/instances/?owner=me");
+            const instances = data.instances || [];
+            if (instances.length === 0) return { content: [{ type: "text", text: "No running instances." }], isError: true };
+            inst = instances[0];
+          }
+          // Prefer direct SSH (public_ipaddr + port 22 mapping) over SSH proxy
+          const ports = inst.ports || {};
+          const sshMapping = ports["22/tcp"];
+          if (inst.public_ipaddr && sshMapping && sshMapping[0]) {
+            sshHost = inst.public_ipaddr;
+            sshPort = sshMapping[0].HostPort;
+          } else {
+            sshHost = inst.ssh_host;
+            sshPort = inst.ssh_port;
+          }
+          if (!sshHost || !sshPort) return { content: [{ type: "text", text: "Could not determine SSH connection details." }], isError: true };
+          const cmd = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p ${sshPort} root@${sshHost} ${JSON.stringify(args.command)}`;
+          const output = execSync(cmd, { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }).toString();
+          return { content: [{ type: "text", text: output || "(no output)" }] };
+        } catch (e) {
+          const stderr = e.stderr ? e.stderr.toString() : "";
+          return { content: [{ type: "text", text: `SSH exec failed: ${e.message}\n${stderr}`.trim() }], isError: true };
+        }
       }
 
       default:
