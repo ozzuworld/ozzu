@@ -202,7 +202,7 @@ function MainScreen() {
 
       // 2. Read image as base64 and decode to raw pixels
       const b64 = await FileSystem.readAsStringAsync(resized.uri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: "base64",
       });
 
       // Decode base64 → Uint8Array using atob (works in Hermes)
