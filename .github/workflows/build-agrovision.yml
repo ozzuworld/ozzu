@@ -32,7 +32,11 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean --no-install
 
-      - name: Build debug APK
+      - name: Force JS bundle in debug APK
+        run: |
+          sed -i 's|// debuggableVariants = .*|debuggableVariants = []|' android/app/build.gradle
+
+      - name: Build debug APK with bundled JS
         run: |
           cd android
           ./gradlew assembleDebug \
