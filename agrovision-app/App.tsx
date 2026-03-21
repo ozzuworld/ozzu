@@ -19,7 +19,6 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { useTensorflowModel } from "react-native-fast-tflite";
-import { Buffer } from "buffer";
 import * as jpeg from "jpeg-js";
 
 import classifierMeta from "./assets/models/classifier_metadata.json";
@@ -201,15 +200,23 @@ function MainScreen() {
         { format: ImageManipulator.SaveFormat.JPEG, compress: 1.0 }
       );
 
-      // 2. Read as base64, decode JPEG to raw RGBA pixels
+      // 2. Read image as base64 and decode to raw pixels
       const b64 = await FileSystem.readAsStringAsync(resized.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      const buf = Buffer.from(b64, "base64");
-      const decoded = jpeg.decode(buf, { useTArray: true, formatAsRGBA: true });
+
+      // Decode base64 → Uint8Array using atob (works in Hermes)
+      const binaryStr = atob(b64);
+      const jpegBytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        jpegBytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      // Decode JPEG to raw RGBA pixels
+      const decoded = jpeg.decode(jpegBytes, { useTArray: true, formatAsRGBA: true });
+      const pixels = decoded.data; // Uint8Array RGBA
 
       // 3. Convert RGBA → RGB float32 (0-255 range, model handles normalization)
-      const pixels = decoded.data; // Uint8Array RGBA
       const inputData = new Float32Array(1 * 224 * 224 * 3);
       for (let i = 0; i < 224 * 224; i++) {
         inputData[i * 3 + 0] = pixels[i * 4 + 0]; // R
