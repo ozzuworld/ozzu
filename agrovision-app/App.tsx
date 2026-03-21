@@ -248,12 +248,28 @@ function MainScreen() {
         }
         if (!model.model) throw new Error("Model not loaded");
         const output = model.model.runSync([inputData]);
-        const probs = output[0] as Float32Array;
 
-        // Second output: attention map [1, 16, 16] = 256 values
-        const attnMap = output.length > 1
-          ? output[1] as Float32Array
-          : null;
+        // Debug: log output structure
+        console.log("AV: outputs:", output.length,
+          "shapes:", output.map((o: any) => o.length));
+
+        // Determine which output is probs (length 46) vs attn (length 256)
+        let probs: Float32Array;
+        let attnMap: Float32Array | null = null;
+        if (output.length >= 2) {
+          if (output[0].length === 46) {
+            probs = output[0] as Float32Array;
+            attnMap = output[1] as Float32Array;
+          } else if (output[1].length === 46) {
+            probs = output[1] as Float32Array;
+            attnMap = output[0] as Float32Array;
+          } else {
+            probs = output[0] as Float32Array;
+          }
+        } else {
+          probs = output[0] as Float32Array;
+        }
+        console.log("AV: probs len:", probs.length, "attn:", attnMap?.length);
 
         let maxIdx = 0;
         let maxProb = 0;
