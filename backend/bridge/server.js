@@ -2099,6 +2099,47 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // POST /api/devices/register — Register a device push token
+  if (req.method === "POST" && pathname === "/api/devices/register") {
+    try {
+      const body = await parseBody(req);
+      const { token, deviceId, platform, deviceName } = body;
+      if (!token || !token.startsWith("ExponentPushToken[")) {
+        return sendJSON(res, 400, { error: "Invalid Expo push token" });
+      }
+      // Upsert into DB
+      await db.query(
+        `INSERT INTO device_push_tokens (token, device_id, platform, device_name, updated_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (token) DO UPDATE SET device_id=$2, platform=$3, device_name=$4, updated_at=NOW()`,
+        [token, deviceId || null, platform || "ios", deviceName || null]
+      );
+      log.bridge.info(`Push token registered: ${deviceId || "unknown"} (${platform})`);
+      return sendJSON(res, 200, { ok: true });
+    } catch (err) {
+      // Table might not exist yet — return ok anyway so app doesn't crash
+      log.bridge.warn(`Push token registration failed: ${err.message}`);
+      return sendJSON(res, 200, { ok: true, warning: "token storage unavailable" });
+    }
+  }
+
+  // POST /api/push/send — Send a push notification (internal use)
+  if (req.method === "POST" && pathname === "/api/push/send") {
+    try {
+      const body = await parseBody(req);
+      const { token, tokens, title, body: msgBody, data } = body;
+      const { sendPush } = require("./push-notifications");
+      const allTokens = tokens || (token ? [token] : []);
+      if (allTokens.length === 0) {
+        return sendJSON(res, 400, { error: "No tokens provided" });
+      }
+      const result = await sendPush(allTokens, { title, body: msgBody, data });
+      return sendJSON(res, 200, result);
+    } catch (err) {
+      return sendJSON(res, 500, { error: err.message });
+    }
+  }
+
   // POST /notify — Push a notification to June (used by cipher-watcher, deploy scripts, etc.)
   if (req.method === "POST" && pathname === "/notify") {
     const data = await parseBody(req);

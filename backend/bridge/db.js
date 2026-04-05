@@ -736,7 +736,16 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_token_usage_recorded ON token_usage(recorded_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_token_usage_source ON token_usage(source, recorded_at DESC)`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage)");
+    await pool.query(`CREATE TABLE IF NOT EXISTS device_push_tokens (
+      token TEXT PRIMARY KEY,
+      device_id TEXT,
+      platform TEXT DEFAULT 'ios',
+      device_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;

@@ -8,6 +8,7 @@ import { GlassesProvider } from "../lib/glasses-context";
 import { setImmersiveCallback } from "../lib/immersive-events";
 import { probeBridgeUrl, resetBridgeUrl } from "../lib/bridge-api";
 import * as BleBeacon from "../modules/ble-beacon";
+import { registerForPushNotifications } from "../lib/push-notifications";
 
 if (!__DEV__) {
   LogBox.ignoreAllLogs();
@@ -130,6 +131,11 @@ export default function RootLayout() {
     // Start BLE beacon on iPhone for indoor positioning
     if (Platform.OS === "ios" && BleBeacon.nativeAvailable && BleBeacon.isAvailable()) {
       BleBeacon.startAdvertising("kazuma-iphone");
+    }
+
+    // Register for push notifications (requires expo-notifications native build)
+    if (Platform.OS === "ios") {
+      registerForPushNotifications("kazuma-iphone").catch(() => {});
     }
 
     return () => sub.remove();
