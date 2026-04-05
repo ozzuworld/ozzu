@@ -28,6 +28,7 @@ import {
   type StoredFile,
 } from "../../lib/bridge-api";
 import { getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
+import HamburgerMenu from "../../components/HamburgerMenu";
 
 const ACCENT = "#06B6D4";
 const DIM = "#525252";
@@ -411,6 +412,7 @@ export default function FilesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#111", paddingTop: insets.top }}>
+      <HamburgerMenu />
       {/* Header */}
       <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>
         {/* Breadcrumbs */}
