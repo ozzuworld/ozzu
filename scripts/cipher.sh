@@ -15,14 +15,20 @@ else
   echo "Pipeline enforcement: git hooks active"
 fi
 
-# Pull Cipher context from bridge
+# ── SYSTEM_PROMPT_DYNAMIC_BOUNDARY pattern (from Claude Code leak) ──
+# Static identity/rules live in CLAUDE.md (stable → always cached by Claude Code).
+# CLAUDE.local.md holds only dynamic state: current date, directives, last conversation.
+# Structure: stable header → slowly-changing state → fast-changing history (tail).
+# This maximizes prompt cache hits — only the tail changes session to session.
+
+# Pull Cipher context from bridge (dynamic state: directives, services, action queue)
 CONTEXT=$(curl -sf "${BRIDGE_URL}/cipher/context" 2>/dev/null)
 
 if [[ -n "$CONTEXT" ]]; then
   echo "$CONTEXT" > "$LOCAL_MD"
   echo "Cipher context loaded ($(echo "$CONTEXT" | wc -l) lines)"
 
-  # ── Append TAIL of last conversation (capped to prevent bloat) ──
+  # ── Append TAIL of last conversation (most dynamic — goes last for cache efficiency) ──
   # Full transcripts are in postgres — use /cipher/search?q= to find anything.
   # Only the last ~30K chars go here so CLAUDE.local.md stays under 40K total.
   sleep 3
@@ -40,6 +46,13 @@ if [[ -n "$CONTEXT" ]]; then
     FINAL_SIZE=$(wc -c < "$LOCAL_MD")
     echo "Conversation tail appended (${FINAL_SIZE} bytes total CLAUDE.local.md)"
   fi
+
+  # ── Prompt injection guard (from Claude Code leak) ──
+  # Appended last so it's fresh in context before Claude reads anything else.
+  # Prevents file/tool content from being treated as instructions after compaction.
+  echo "" >> "$LOCAL_MD"
+  echo "# currentDate" >> "$LOCAL_MD"
+  echo "Today's date is $(date +%Y-%m-%d)." >> "$LOCAL_MD"
 else
   cat > "$LOCAL_MD" <<'EOF'
 # Cipher Context (bridge unreachable)
