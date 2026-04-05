@@ -45,6 +45,24 @@ export default function RouterCard({ router }: Props) {
   const [expanded, setExpanded] = useState(false);
   if (!router) return null;
 
+  // Decommissioned device — render tombstone
+  if ((router as any).decommissioned) {
+    return (
+      <View style={{ backgroundColor: "rgba(255,255,255,0.02)", borderWidth: 1, borderColor: "rgba(255,255,255,0.04)", borderRadius: 10, padding: 12, marginBottom: 8, flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Text style={{ fontSize: 16, opacity: 0.4 }}>📡</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: "monospace", fontWeight: "700", fontSize: 12, color: "#3f3f46", letterSpacing: 0.5 }}>
+            {(router as any).model || "Router"}
+          </Text>
+          <Text style={{ fontFamily: "monospace", fontSize: 9, color: "#27272a" }}>{(router as any).reason}</Text>
+        </View>
+        <View style={{ backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.15)", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+          <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: "#7f1d1d", letterSpacing: 1 }}>DECOMM</Text>
+        </View>
+      </View>
+    );
+  }
+
   const hasData = !!router.model;
   const clientCount = router.dhcp?.clients?.length || 0;
   const hasError = !!router.error;
