@@ -13,6 +13,7 @@ const staticMenuItems: MenuItem[] = [
   { icon: "🕵️", label: "INTEL", route: "/osint" },
   { icon: "🚀", label: "VENTURES", route: "/business" },
   { icon: "📦", label: "FILES", route: "/files" },
+  { icon: "🪪", label: "IDENTITY", route: "/identity" },
   { icon: "🎵", label: "MUSIC", route: "/music" },
   { icon: "📋", label: "DIRECTIVES", route: "/directives" },
   { icon: "📤", label: "UPLOAD", route: "/upload" },

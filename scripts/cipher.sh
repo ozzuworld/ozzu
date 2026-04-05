@@ -66,6 +66,11 @@ fi
 # Enable pipeline enforcement — cipher-guard.sh PreToolUse hook checks this
 export CIPHER_MODE=1
 
+# ── KAIROS session lock — prevents autonomous spawning while human is active ──
+KAIROS_LOCK="/tmp/cipher-session.lock"
+echo "$$" > "$KAIROS_LOCK"
+trap 'rm -f "$KAIROS_LOCK"' EXIT INT TERM
+
 # Launch Claude Code — permissions managed via .claude/settings.local.json allow patterns
 # NOTE: --dangerously-skip-permissions was removed because it's blocked when running as root.
 # The settings.local.json broad allow patterns (Bash(*), Edit(*), etc.) provide equivalent autonomy.

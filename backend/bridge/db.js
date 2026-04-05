@@ -756,7 +756,47 @@ async function init() {
     EXCEPTION WHEN duplicate_column THEN NULL;
     END $$`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders)");
+    // Migration: identity vault
+    await pool.query(`CREATE TABLE IF NOT EXISTS identity_profile (
+      id SERIAL PRIMARY KEY,
+      owner_key VARCHAR(100) NOT NULL DEFAULT 'kazuma' UNIQUE,
+      full_name TEXT,
+      date_of_birth DATE,
+      place_of_birth TEXT,
+      nationality TEXT,
+      cedula TEXT,
+      passport_number TEXT,
+      passport_issued DATE,
+      passport_expires DATE,
+      passport_issuing_authority TEXT,
+      visas JSONB DEFAULT '[]',
+      emergency_contact JSONB DEFAULT '{}',
+      extra JSONB DEFAULT '{}',
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS identity_travel_history (
+      id SERIAL PRIMARY KEY,
+      owner_key VARCHAR(100) NOT NULL DEFAULT 'kazuma',
+      event_date DATE NOT NULL,
+      country TEXT NOT NULL,
+      city TEXT,
+      port TEXT,
+      direction VARCHAR(10) CHECK (direction IN ('entry','exit','transit','stamp')),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_travel_history_date ON identity_travel_history(event_date DESC)`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS identity_documents (
+      id SERIAL PRIMARY KEY,
+      owner_key VARCHAR(100) NOT NULL DEFAULT 'kazuma',
+      doc_type VARCHAR(50) NOT NULL,
+      label TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      filepath TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;

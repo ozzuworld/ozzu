@@ -562,6 +562,22 @@ async function kairosTickSafe() {
   }
 }
 
+// Session lock — written by cipher.sh, removed on exit
+const KAIROS_SESSION_LOCK = "/tmp/cipher-session.lock";
+
+function isHumanSessionActive() {
+  try {
+    if (fs.existsSync(KAIROS_SESSION_LOCK)) return true;
+  } catch {}
+  // Fallback: check if a claude process is running
+  try {
+    const { execSync } = require("child_process");
+    const out = execSync("pgrep -f 'claude ' 2>/dev/null || true", { encoding: "utf8" }).trim();
+    return out.length > 0;
+  } catch {}
+  return false;
+}
+
 async function kairosTick() {
   if (_kairosRunning || !_ctx) return;
   _kairosRunning = true;
@@ -573,8 +589,16 @@ async function kairosTick() {
     kairosAuditLog(`URGENT: ${urgent.type} — ${urgent.message}`);
     log(`[KAIROS] Urgent detected: ${urgent.type}`);
 
-    // Always send push notification (non-destructive)
+    // Always send push notification (non-destructive, even during human session)
     await kairosPush(urgent);
+
+    // Only spawn autonomous fix when NO human session is active
+    const humanActive = isHumanSessionActive();
+    if (humanActive) {
+      log(`[KAIROS] Human session active — push sent, auto-fix deferred`);
+      kairosAuditLog(`DEFERRED (human session active): ${urgent.type}`);
+      return;
+    }
 
     // Spawn autonomous fix for critical issues (rate-limited to 1/hr)
     if (urgent.severity === "critical" && Date.now() - _lastKairosActionAt > KAIROS_ACT_COOLDOWN_MS) {
