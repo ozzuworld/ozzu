@@ -3,12 +3,13 @@ import { Tabs } from "expo-router";
 export default function TabLayout() {
   return (
     <Tabs
-      initialRouteName="index"
+      initialRouteName="directives"
       screenOptions={{
         headerShown: false,
         tabBarStyle: { display: "none" },
       }}
     >
+      <Tabs.Screen name="directives" />
       <Tabs.Screen name="index" />
       <Tabs.Screen name="cipher" />
       <Tabs.Screen name="osint" />
