@@ -46,9 +46,9 @@ export function getAuthHeaders(): Record<string, string> {
   return {};
 }
 
-function fetchWithTimeout(url: string, opts?: RequestInit): Promise<Response> {
+function fetchWithTimeout(url: string, opts?: RequestInit, timeoutMs?: number): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs ?? FETCH_TIMEOUT_MS);
   // Inject auth headers for public requests
   const authHeaders = getAuthHeaders();
   const mergedHeaders = { ...authHeaders, ...(opts?.headers || {}) };
@@ -2106,7 +2106,7 @@ export async function triggerBackup(): Promise<{ ok: boolean; file: string; size
   const res = await fetchWithTimeout(`${BRIDGE_URL}/api/backups`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-  });
+  }, 120000);
   if (!res.ok) throw new Error(`Trigger backup error: ${res.status}`);
   return res.json();
 }
