@@ -37,6 +37,7 @@ import {
 import { DirectiveCard } from "../components/directives/DirectiveCard";
 import { PlanReviewModal } from "../components/directives/PlanReviewModal";
 import { StatusChangeSheet } from "../components/directives/StatusChangeSheet";
+import HamburgerMenu from "../components/HamburgerMenu";
 
 if (
   Platform.OS === "android" &&
@@ -243,6 +244,7 @@ export default function DirectivesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#0A0A0A" }}>
+      <HamburgerMenu />
       {/* Top Bar */}
       <View style={{
         paddingTop: insets.top,
@@ -256,9 +258,6 @@ export default function DirectivesScreen() {
           OZZU
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-          <TVPressable onPress={() => router.back()} style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6 }}>
-            <Text style={{ color: "#525252", fontSize: 12, fontWeight: "bold", letterSpacing: 1 }}>BACK</Text>
-          </TVPressable>
           <StatusBadge />
         </View>
       </View>
