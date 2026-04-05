@@ -1,5 +1,10 @@
-// Landing — redirect to Directives
-import { Redirect } from "expo-router";
+import { useEffect } from "react";
+import { useRouter } from "expo-router";
+
 export default function Index() {
-  return <Redirect href="/directives" />;
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/directives");
+  }, []);
+  return null;
 }
