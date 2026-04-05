@@ -304,6 +304,19 @@ module.exports = function opsRoutes(ctx) {
       return true;
     }
 
+    // GET /ops/kairos — KAIROS + autoDream status
+    if (req.method === "GET" && pathname === "/ops/kairos") {
+      try {
+        const daemon = require("../cipher-daemon");
+        return sendJSON(res, 200, {
+          kairos: daemon.getKairosStatus(),
+          autoDream: daemon.getAutoDreamStatus(),
+        });
+      } catch (err) {
+        return sendJSON(res, 500, { error: err.message });
+      }
+    }
+
     return false;
   };
 };

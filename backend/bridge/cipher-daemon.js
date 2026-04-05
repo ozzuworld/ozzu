@@ -283,6 +283,9 @@ function start(ctx) {
 
   // Start autoDream idle consolidation
   startAutoDream();
+
+  // Start KAIROS autonomous tick
+  startKairos();
 }
 
 function stop() {
@@ -297,6 +300,7 @@ function stop() {
   _activeRuns.clear();
 
   stopAutoDream();
+  stopKairos();
   log("Stopped");
 }
 
@@ -520,4 +524,153 @@ function getAutoDreamStatus() {
   };
 }
 
-module.exports = { start, stop, pause, resume, getStatus, getHistory, onDirectiveStatusChange, getAutoDreamStatus, runAutoDream };
+// ── KAIROS — 24/7 autonomous tick ──
+// Inspired by Claude Code leak: every 15 min, checks system state and acts on urgent issues.
+// Has 15-second blocking budget. Sends push notifications. Append-only audit log.
+
+const KAIROS_INTERVAL_MS = 15 * 60 * 1000;
+const KAIROS_ACT_COOLDOWN_MS = 60 * 60 * 1000;   // min 1hr between autonomous actions
+const KAIROS_AUDIT_LOG = "/home/gcp/ozzu/logs/kairos-audit.log";
+
+let _kairosTimer = null;
+let _kairosRunning = false;
+let _lastKairosActionAt = 0;
+
+function startKairos() {
+  const fs = require("fs");
+  const path = require("path");
+  try { fs.mkdirSync(path.dirname(KAIROS_AUDIT_LOG), { recursive: true }); } catch {}
+  _kairosTimer = setInterval(kairosTickSafe, KAIROS_INTERVAL_MS);
+  kairosAuditLog("KAIROS started");
+  log("[KAIROS] Started — ticking every 15 min");
+}
+
+function stopKairos() {
+  if (_kairosTimer) { clearInterval(_kairosTimer); _kairosTimer = null; }
+  kairosAuditLog("KAIROS stopped");
+}
+
+function kairosAuditLog(msg) {
+  const fs = require("fs");
+  try { fs.appendFileSync(KAIROS_AUDIT_LOG, `[${new Date().toISOString()}] ${msg}\n`); } catch {}
+}
+
+async function kairosTickSafe() {
+  try { await kairosTick(); } catch (err) {
+    log(`[KAIROS] Tick error: ${err.message}`);
+    kairosAuditLog(`TICK_ERROR: ${err.message}`);
+  }
+}
+
+async function kairosTick() {
+  if (_kairosRunning || !_ctx) return;
+  _kairosRunning = true;
+  try {
+    const snapshot = await buildKairosSnapshot();
+    const urgent = detectUrgent(snapshot);
+    if (!urgent) return;
+
+    kairosAuditLog(`URGENT: ${urgent.type} — ${urgent.message}`);
+    log(`[KAIROS] Urgent detected: ${urgent.type}`);
+
+    // Always send push notification (non-destructive)
+    await kairosPush(urgent);
+
+    // Spawn autonomous fix for critical issues (rate-limited to 1/hr)
+    if (urgent.severity === "critical" && Date.now() - _lastKairosActionAt > KAIROS_ACT_COOLDOWN_MS) {
+      _lastKairosActionAt = Date.now();
+      spawnKairosAction(urgent);
+    }
+  } finally {
+    _kairosRunning = false;
+  }
+}
+
+async function buildKairosSnapshot() {
+  const issues = [];
+
+  // Check directives — stuck or deploy_failed
+  try {
+    const directives = _ctx.getDirectives ? _ctx.getDirectives() : [];
+    const stuck = directives.filter(d =>
+      d.status === "deploy_failed" ||
+      (d.status === "in_progress" && d.updatedAt && Date.now() - new Date(d.updatedAt).getTime() > 4 * 60 * 60 * 1000)
+    );
+    if (stuck.length > 0) issues.push({ type: "stuck_directives", count: stuck.length, items: stuck.map(d => d.title).slice(0, 3) });
+  } catch {}
+
+  // Check service health via watchdog
+  try {
+    const watchdog = require("./watchdog");
+    const status = watchdog.getStatus();
+    const down = Object.entries(status).filter(([, v]) => v?.status === "down").map(([k]) => k);
+    if (down.length > 0) issues.push({ type: "services_down", services: down });
+  } catch {}
+
+  // Check backup age
+  try {
+    const fs = require("fs");
+    const backupDir = "/home/gcp/ozzu/backups";
+    const files = fs.readdirSync(backupDir).filter(f => f.startsWith("ozzu-backup-")).sort().reverse();
+    if (files.length > 0) {
+      const ageHours = (Date.now() - fs.statSync(`${backupDir}/${files[0]}`).mtime.getTime()) / 3600000;
+      if (ageHours > 26) issues.push({ type: "backup_overdue", ageHours: Math.round(ageHours) });
+    }
+  } catch {}
+
+  return { ts: Date.now(), issues };
+}
+
+function detectUrgent(snapshot) {
+  const servicesDown = snapshot.issues.find(i => i.type === "services_down");
+  if (servicesDown) {
+    const critical = ["postgres", "redis", "nginx"].filter(s => servicesDown.services.includes(s));
+    if (critical.length > 0) return { type: "services_down", severity: "critical", message: `Critical services down: ${critical.join(", ")}`, services: servicesDown.services };
+  }
+
+  const backup = snapshot.issues.find(i => i.type === "backup_overdue");
+  if (backup?.ageHours > 48) return { type: "backup_overdue", severity: "high", message: `Backup overdue by ${backup.ageHours - 24}h` };
+
+  const stuck = snapshot.issues.find(i => i.type === "stuck_directives");
+  if (stuck) return { type: "stuck_directives", severity: "medium", message: `${stuck.count} directive(s) stuck: ${(stuck.items || []).join(", ")}` };
+
+  return null;
+}
+
+async function kairosPush(urgent) {
+  try {
+    if (!_ctx?.db) return;
+    const { sendPush } = require("./push-notifications");
+    const result = await _ctx.db.query("SELECT token FROM device_push_tokens WHERE platform = 'ios' ORDER BY updated_at DESC LIMIT 5");
+    const tokens = result.rows.map(r => r.token);
+    if (tokens.length === 0) return;
+
+    const titles = { services_down: "⚠️ Service Alert", backup_overdue: "💾 Backup Overdue", stuck_directives: "🔧 Pipeline Alert" };
+    await sendPush(tokens, { title: titles[urgent.type] || "⚡ Ozzu Alert", body: urgent.message, data: { type: urgent.type } });
+    kairosAuditLog(`PUSH_SENT: ${urgent.type} → ${tokens.length} device(s)`);
+    log(`[KAIROS] Push sent: ${urgent.message}`);
+  } catch (err) {
+    log(`[KAIROS] Push failed: ${err.message}`);
+    kairosAuditLog(`PUSH_FAILED: ${err.message}`);
+  }
+}
+
+function spawnKairosAction(urgent) {
+  const prompt = urgent.type === "services_down"
+    ? `KAIROS autonomous action: Services DOWN: ${urgent.services?.join(", ")}. Check docker compose ps, logs, attempt restart. Report findings.`
+    : `KAIROS autonomous action: ${urgent.message}. Investigate and fix if possible.`;
+
+  spawnClaude({ eventKey: `kairos:${urgent.type}`, prompt, reason: `KAIROS: ${urgent.type}`, model: MODEL_SONNET });
+  kairosAuditLog(`ACTION_SPAWNED: ${urgent.type}`);
+}
+
+function getKairosStatus() {
+  return {
+    running: !_kairosRunning,
+    lastActionAt: _lastKairosActionAt ? new Date(_lastKairosActionAt).toISOString() : null,
+    auditLog: KAIROS_AUDIT_LOG,
+    intervalMinutes: KAIROS_INTERVAL_MS / 60000,
+  };
+}
+
+module.exports = { start, stop, pause, resume, getStatus, getHistory, onDirectiveStatusChange, getAutoDreamStatus, runAutoDream, getKairosStatus };
