@@ -87,8 +87,11 @@ const DIRECTION_COLOR: Record<string, string> = {
   stamp: "#94a3b8",
 };
 
-function daysUntil(dateStr: string): number {
-  return Math.floor((new Date(dateStr).getTime() - Date.now()) / 86400000);
+function daysUntil(dateStr?: string | null): number {
+  if (!dateStr) return 9999;
+  const t = new Date(dateStr).getTime();
+  if (isNaN(t)) return 9999;
+  return Math.floor((t - Date.now()) / 86400000);
 }
 
 function formatDate(dateStr: string) {
@@ -136,7 +139,8 @@ export default function IdentityScreen() {
   const [authenticated, setAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [data, setData] = useState<VaultData | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Start loading=true so we never render the authenticated view with null data
+  const [loading, setLoading] = useState(true);
   const [section, setSection] = useState<"overview" | "travel" | "documents">("overview");
   const [viewingDoc, setViewingDoc] = useState<Document | null>(null);
 
@@ -144,27 +148,15 @@ export default function IdentityScreen() {
   const authenticate = useCallback(async () => {
     setAuthChecking(true);
     try {
-      const hasBio = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!hasBio || !isEnrolled) {
-        // No biometrics — prompt for PIN fallback
-        const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: "Verify identity to access vault",
-          fallbackLabel: "Use Passcode",
-        });
-        setAuthenticated(result.success);
-      } else {
-        const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: "Face ID required to access Identity Vault",
-          biometricsSecurityLevel: "strong",
-          disableDeviceFallback: false,
-          fallbackLabel: "Use Passcode",
-        });
-        setAuthenticated(result.success);
-        if (!result.success) Alert.alert("Access Denied", "Biometric authentication failed.");
-      }
-    } catch {
-      Alert.alert("Error", "Authentication unavailable.");
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: "Face ID required to access Identity Vault",
+        disableDeviceFallback: false,
+        fallbackLabel: "Use Passcode",
+      });
+      setAuthenticated(result.success);
+      if (!result.success) Alert.alert("Access Denied", "Biometric authentication required.");
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "Authentication unavailable.");
     } finally {
       setAuthChecking(false);
     }
@@ -177,7 +169,7 @@ export default function IdentityScreen() {
     if (!authenticated) return;
     setLoading(true);
     apiFetch("/api/vault/profile")
-      .then((d) => setData(d))
+      .then((d) => { if (d?.ok) setData(d); })
       .catch(() => Alert.alert("Error", "Could not load identity vault."))
       .finally(() => setLoading(false));
   }, [authenticated]);
@@ -205,10 +197,13 @@ export default function IdentityScreen() {
     );
   }
 
-  const { profile, travelHistory, documents } = data ?? {};
+  const profile = data?.profile ?? null;
+  const travelHistory: TravelEntry[] = data?.travelHistory ?? [];
+  const documents: Document[] = data?.documents ?? [];
+  const visas: Visa[] = Array.isArray(profile?.visas) ? profile!.visas : [];
 
   // ── Countries visited ─────────────────────────────────────────────────
-  const countriesVisited = [...new Set((travelHistory ?? []).map((t) => t.country))];
+  const countriesVisited = [...new Set(travelHistory.map((t) => t.country))];
 
   return (
     <View style={styles.root}>
@@ -227,14 +222,14 @@ export default function IdentityScreen() {
       </View>
 
       {/* ── Expiry alerts ── */}
-      {profile && (
+      {profile?.passport_expires ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.expiryRow}>
           <ExpiryBadge dateStr={profile.passport_expires} label="Passport" />
-          {(profile.visas ?? []).filter((v) => v.status === "active").map((v, i) => (
+          {visas.filter((v) => v.status === "active").map((v, i) => (
             <ExpiryBadge key={i} dateStr={v.expires} label={v.type} />
           ))}
         </ScrollView>
-      )}
+      ) : null}
 
       {/* ── Section tabs ── */}
       <View style={styles.tabs}>
@@ -269,7 +264,7 @@ export default function IdentityScreen() {
                 <InfoRow label="Expires" value={formatDate(profile.passport_expires)} urgent={daysUntil(profile.passport_expires) < 180} />
               </InfoCard>
 
-              {(profile.visas ?? []).map((v, i) => (
+              {visas.map((v, i) => (
                 <InfoCard key={i} title={v.status === "cancelled" ? `${v.type} (Cancelled)` : v.type}>
                   <InfoRow label="Country" value={v.country} />
                   <InfoRow label="Control No." value={v.number} mono />
@@ -279,7 +274,7 @@ export default function IdentityScreen() {
                 </InfoCard>
               ))}
 
-              <InfoCard title={`Countries Visited (${countriesVisited.length})`}>
+              <InfoCard title={`Countries Visited (${countriesVisited.length})`} >
                 <View style={styles.flagGrid}>
                   {countriesVisited.map((c) => (
                     <View key={c} style={styles.flagItem}>
@@ -295,8 +290,8 @@ export default function IdentityScreen() {
           {/* ── TRAVEL HISTORY ── */}
           {section === "travel" && (
             <>
-              <Text style={styles.sectionNote}>{(travelHistory ?? []).length} stamp events · {countriesVisited.length} countries</Text>
-              {(travelHistory ?? []).map((t) => (
+              <Text style={styles.sectionNote}>{travelHistory.length} stamp events · {countriesVisited.length} countries</Text>
+              {travelHistory.map((t) => (
                 <View key={t.id} style={styles.travelEntry}>
                   <View style={[styles.travelDot, { backgroundColor: DIRECTION_COLOR[t.direction] ?? "#94a3b8" }]} />
                   <View style={styles.travelBody}>
@@ -322,7 +317,7 @@ export default function IdentityScreen() {
           {section === "documents" && (
             <>
               <Text style={styles.sectionNote}>Tap any document to view · Face ID required once per session</Text>
-              {(documents ?? []).map((doc) => (
+              {documents.map((doc) => (
                 <Pressable key={doc.id} style={styles.docCard} onPress={() => setViewingDoc(doc)}>
                   <Text style={styles.docIcon}>{doc.doc_type === "passport_bio" ? "🛂" : doc.doc_type === "us_visa" ? "🇺🇸" : "📷"}</Text>
                   <View style={styles.docInfo}>

@@ -3,7 +3,7 @@ import { Tabs } from "expo-router";
 export default function TabLayout() {
   return (
     <Tabs
-      initialRouteName="business"
+      initialRouteName="index"
       screenOptions={{
         headerShown: false,
         tabBarStyle: { display: "none" },
