@@ -16,6 +16,26 @@ const MAX_SPAWNS_PER_HOUR = 5;
 const SPAWN_TIMEOUT_MS = 10 * 60 * 1000;      // kill after 10 min
 const PROJECT_DIR = "/home/gcp/ozzu";
 
+// ── COORDINATOR pattern — model routing (from Claude Code leak) ──
+// Haiku for investigation/status tasks ($0.25/MTok)
+// Sonnet for complex fixes and decisions ($3/MTok) — 12x cost reduction on grunt work
+const MODEL_HAIKU = "claude-haiku-4-5-20251001";
+const MODEL_SONNET = "claude-sonnet-4-6";
+
+function selectModel(eventKey) {
+  // Critical fixes need full reasoning → Sonnet
+  if (eventKey.startsWith("service_down:postgres") ||
+      eventKey.startsWith("service_down:redis") ||
+      eventKey.startsWith("service_down:nginx") ||
+      eventKey.startsWith("deploy_failed:") ||
+      eventKey.startsWith("blocked:") ||
+      eventKey.startsWith("kairos:")) {
+    return MODEL_SONNET;
+  }
+  // Investigation, status checks, idle monitoring → Haiku
+  return MODEL_HAIKU;
+}
+
 // Events that trigger a spawn
 const EVENT_HANDLERS = {
   // Watchdog: critical/high service goes down
@@ -125,8 +145,6 @@ function spawnClaude(action) {
   const runId = `daemon_${++_runCounter}_${Date.now()}`;
   const startedAt = Date.now();
 
-  log(`Spawning Claude for: ${action.reason} (run: ${runId})`);
-
   // Record rate limit state
   _lastSpawnByType.set(action.eventKey, startedAt);
   _spawnHistory.push(startedAt);
@@ -147,7 +165,10 @@ function spawnClaude(action) {
   let stdout = "";
   let stderr = "";
 
-  const proc = spawn("claude", ["-p", fullPrompt, "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep"], {
+  const model = action.model || selectModel(action.eventKey);
+  log(`Spawning Claude for: ${action.reason} (run: ${runId}, model: ${model})`);
+
+  const proc = spawn("claude", ["-p", fullPrompt, "--model", model, "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep"], {
     cwd: PROJECT_DIR,
     env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cipher-daemon" },
     stdio: ["ignore", "pipe", "pipe"],
