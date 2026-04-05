@@ -259,6 +259,9 @@ function start(ctx) {
 
   // Create DB table if needed
   ensureTable();
+
+  // Start autoDream idle consolidation
+  startAutoDream();
 }
 
 function stop() {
@@ -272,6 +275,7 @@ function stop() {
   }
   _activeRuns.clear();
 
+  stopAutoDream();
   log("Stopped");
 }
 
@@ -345,4 +349,154 @@ function log(msg) {
   console.log(`[cipher-daemon] ${msg}`);
 }
 
-module.exports = { start, stop, pause, resume, getStatus, getHistory, onDirectiveStatusChange };
+// ── autoDream — idle-period memory consolidation ──
+// Inspired by Claude Code leak: during idle periods, consolidate session
+// transcripts into persistent memory files. Self-improving memory between sessions.
+// 4 phases: Orient → Gather → Consolidate → Prune
+
+const AUTODREAM_IDLE_THRESHOLD_MS = 30 * 60 * 1000;  // 30 min idle before dreaming
+const AUTODREAM_CHECK_INTERVAL_MS = 5 * 60 * 1000;   // check every 5 min
+const AUTODREAM_COOLDOWN_MS = 6 * 60 * 60 * 1000;    // max once per 6 hours
+const MEMORY_DIR = "/root/.claude/projects/-home-gcp-ozzu/memory";
+
+let _lastDreamAt = 0;
+let _dreamTimer = null;
+let _dreamRunning = false;
+
+function startAutoDream() {
+  _dreamTimer = setInterval(checkIdleAndDream, AUTODREAM_CHECK_INTERVAL_MS);
+  log("[autoDream] Started — checking every 5 min for idle periods");
+}
+
+function stopAutoDream() {
+  if (_dreamTimer) { clearInterval(_dreamTimer); _dreamTimer = null; }
+}
+
+async function checkIdleAndDream() {
+  if (_dreamRunning) return;
+  if (Date.now() - _lastDreamAt < AUTODREAM_COOLDOWN_MS) return;
+  if (!_ctx?.db) return;
+
+  try {
+    // Check last session activity — uses cipher_sessions table
+    const result = await _ctx.db.query(
+      `SELECT MAX(created_at) as last_active FROM cipher_sessions WHERE created_at > NOW() - INTERVAL '24 hours'`
+    );
+    const lastActive = result.rows[0]?.last_active;
+    if (!lastActive) return;
+
+    const idleMs = Date.now() - new Date(lastActive).getTime();
+    if (idleMs < AUTODREAM_IDLE_THRESHOLD_MS) return;
+
+    log(`[autoDream] Idle ${Math.round(idleMs / 60000)}m — starting dream cycle`);
+    runAutoDream();
+  } catch (err) {
+    if (!err.message?.includes("does not exist")) {
+      log(`[autoDream] Idle check error: ${err.message}`);
+    }
+  }
+}
+
+async function runAutoDream() {
+  if (_dreamRunning) return;
+  _dreamRunning = true;
+  _lastDreamAt = Date.now();
+
+  try {
+    const fs = require("fs");
+    const path = require("path");
+
+    // Phase 1: Orient — read existing memory files
+    let existingMemory = "";
+    try {
+      const files = fs.readdirSync(MEMORY_DIR).filter(f => f.endsWith(".md") && f !== "MEMORY.md");
+      for (const f of files.slice(0, 8)) {
+        const content = fs.readFileSync(path.join(MEMORY_DIR, f), "utf8");
+        existingMemory += `\n### ${f}\n${content.slice(0, 1500)}\n`;
+      }
+    } catch {}
+
+    // Phase 2: Gather — last 5 session summaries from postgres
+    let recentTranscripts = "";
+    try {
+      const sessions = await _ctx.db.query(
+        `SELECT summary, created_at FROM cipher_sessions
+         WHERE created_at > NOW() - INTERVAL '48 hours'
+         ORDER BY created_at DESC LIMIT 5`
+      );
+      for (const row of sessions.rows) {
+        recentTranscripts += `\n[${new Date(row.created_at).toISOString()}]\n${(row.summary || "").slice(0, 800)}\n`;
+      }
+    } catch {}
+
+    if (!recentTranscripts && !existingMemory) {
+      log("[autoDream] Nothing to consolidate — skipping");
+      return;
+    }
+
+    // Phase 3: Consolidate — call Haiku to extract patterns
+    const prompt = [
+      "You are consolidating memory for Cipher, the ozzu dev agent.",
+      "Review recent session summaries and existing memory. Extract what's new and worth remembering.",
+      "Output ONLY valid JSON: {\"feedback\": \"...\", \"project\": \"...\"}",
+      "Max 200 chars per field. Only include fields with genuinely new info. Output {} if nothing new.",
+      "",
+      "## Recent Sessions",
+      recentTranscripts || "(none)",
+      "",
+      "## Existing Memory (dedup against this)",
+      existingMemory.slice(0, 2000) || "(none)",
+    ].join("\n");
+
+    const { execSync } = require("child_process");
+    let output = "";
+    try {
+      output = execSync(
+        `claude -p ${JSON.stringify(prompt)} --model claude-haiku-4-5-20251001 --output-format text`,
+        { cwd: "/home/gcp/ozzu", encoding: "utf8", timeout: 60000, env: { ...process.env } }
+      );
+    } catch (err) {
+      log(`[autoDream] Haiku call failed: ${err.message}`);
+      return;
+    }
+
+    // Phase 4: Prune — parse and write memory files
+    try {
+      const match = output.match(/\{[\s\S]*\}/);
+      if (!match) return;
+      const insights = JSON.parse(match[0]);
+      const ts = new Date().toISOString().slice(0, 10);
+
+      if (insights.feedback?.trim()) {
+        fs.appendFileSync(path.join(MEMORY_DIR, "autodream_feedback.md"), `\n## ${ts}\n${insights.feedback}\n`);
+        log("[autoDream] Updated feedback memory");
+      }
+      if (insights.project?.trim()) {
+        fs.appendFileSync(path.join(MEMORY_DIR, "autodream_project.md"), `\n## ${ts}\n${insights.project}\n`);
+        log("[autoDream] Updated project memory");
+      }
+
+      await _ctx.db.query(
+        `INSERT INTO cipher_autonomous_runs (run_id, event_key, reason, prompt, exit_code, stdout, duration_ms, created_at)
+         VALUES ($1, 'autodream', 'idle consolidation', $2, 0, $3, 0, NOW())`,
+        [`dream_${Date.now()}`, prompt.slice(0, 500), output.slice(0, 2000)]
+      ).catch(() => {});
+
+      log("[autoDream] Dream cycle complete");
+    } catch (err) {
+      log(`[autoDream] Write failed: ${err.message}`);
+    }
+  } finally {
+    _dreamRunning = false;
+  }
+}
+
+function getAutoDreamStatus() {
+  return {
+    running: _dreamRunning,
+    lastDreamAt: _lastDreamAt ? new Date(_lastDreamAt).toISOString() : null,
+    nextEligibleAt: _lastDreamAt ? new Date(_lastDreamAt + AUTODREAM_COOLDOWN_MS).toISOString() : "now",
+  };
+}
+
+module.exports = { start, stop, pause, resume, getStatus, getHistory, onDirectiveStatusChange, getAutoDreamStatus, runAutoDream };
