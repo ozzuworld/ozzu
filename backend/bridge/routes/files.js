@@ -57,24 +57,36 @@ module.exports = function createFileRoutes(ctx) {
       try {
         const cat = url.searchParams.get("category");
         const src = url.searchParams.get("source");
-        const limit = parseInt(url.searchParams.get("limit") || "50");
+        const folderId = url.searchParams.get("folder_id");
+        const limit = parseInt(url.searchParams.get("limit") || "100");
         const offset = parseInt(url.searchParams.get("offset") || "0");
 
-        let query = "SELECT id, filename, mime_type, size_bytes, source, category, metadata, is_temp, created_at FROM files WHERE 1=1";
+        let query = "SELECT id, filename, mime_type, size_bytes, source, category, metadata, is_temp, created_at, folder_id FROM files WHERE is_temp IS NOT TRUE";
         const params = [];
         let idx = 1;
 
         if (cat) { query += ` AND category = $${idx++}`; params.push(cat); }
         if (src) { query += ` AND source = $${idx++}`; params.push(src); }
+        if (folderId === "null" || folderId === "") {
+          query += ` AND folder_id IS NULL`;
+        } else if (folderId) {
+          query += ` AND folder_id = $${idx++}`;
+          params.push(folderId);
+        }
         query += ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
         params.push(limit, offset);
 
         const result = await db.query(query, params);
-        const countResult = await db.query("SELECT COUNT(*) FROM files");
+        const countResult = await db.query("SELECT COUNT(*) FROM files WHERE is_temp IS NOT TRUE");
+
+        // Get storage total
+        const storageResult = await db.query("SELECT COALESCE(SUM(size_bytes), 0) as total FROM files WHERE is_temp IS NOT TRUE");
+        const storageTotalBytes = parseInt(storageResult.rows[0].total);
 
         return sendJSON(res, 200, {
           files: result.rows,
           total: parseInt(countResult.rows[0].count),
+          storageTotalBytes,
         });
       } catch (e) {
         return sendJSON(res, 500, { error: e.message });
@@ -250,6 +262,65 @@ module.exports = function createFileRoutes(ctx) {
         });
       } catch (e) {
         log.bridge.error(`Intel upload error: ${e.message}`);
+        return sendJSON(res, 500, { error: e.message });
+      }
+    }
+
+    // GET /files/folders — List folders in a parent folder (null = root)
+    if (req.method === "GET" && pathname === "/files/folders") {
+      try {
+        const parentId = url.searchParams.get("parent_id") || null;
+        const query = parentId
+          ? "SELECT * FROM file_folders WHERE parent_id = $1 ORDER BY name"
+          : "SELECT * FROM file_folders WHERE parent_id IS NULL ORDER BY name";
+        const params = parentId ? [parentId] : [];
+        const result = await db.query(query, params);
+        return sendJSON(res, 200, { folders: result.rows });
+      } catch (e) {
+        return sendJSON(res, 500, { error: e.message });
+      }
+    }
+
+    // POST /files/folders — Create a folder
+    if (req.method === "POST" && pathname === "/files/folders") {
+      try {
+        const body = await parseBody(req);
+        const { name, parent_id } = body;
+        if (!name || !name.trim()) return sendJSON(res, 400, { error: "Folder name required" });
+        const result = await db.query(
+          "INSERT INTO file_folders (name, parent_id) VALUES ($1, $2) RETURNING *",
+          [name.trim(), parent_id || null]
+        );
+        return sendJSON(res, 201, { folder: result.rows[0] });
+      } catch (e) {
+        return sendJSON(res, 500, { error: e.message });
+      }
+    }
+
+    // DELETE /files/folders/:id — Delete a folder (and move its files to root)
+    const folderDelMatch = pathname.match(/^\/files\/folders\/(\d+)$/);
+    if (req.method === "DELETE" && folderDelMatch) {
+      const folderId = folderDelMatch[1];
+      try {
+        // Move files to root (null folder)
+        await db.query("UPDATE files SET folder_id = NULL WHERE folder_id = $1", [folderId]);
+        await db.query("DELETE FROM file_folders WHERE id = $1", [folderId]);
+        return sendJSON(res, 200, { ok: true });
+      } catch (e) {
+        return sendJSON(res, 500, { error: e.message });
+      }
+    }
+
+    // PATCH /files/:id/move — Move file to a folder
+    const moveMatch = pathname.match(/^\/files\/(\d+)\/move$/);
+    if (req.method === "PATCH" && moveMatch) {
+      const id = moveMatch[1];
+      try {
+        const body = await parseBody(req);
+        const folderId = body.folder_id || null;
+        await db.query("UPDATE files SET folder_id = $1 WHERE id = $2", [folderId, id]);
+        return sendJSON(res, 200, { ok: true });
+      } catch (e) {
         return sendJSON(res, 500, { error: e.message });
       }
     }

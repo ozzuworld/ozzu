@@ -745,7 +745,18 @@ async function init() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens)");
+    await pool.query(`CREATE TABLE IF NOT EXISTS file_folders (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      parent_id INTEGER REFERENCES file_folders(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`DO $$ BEGIN
+      ALTER TABLE files ADD COLUMN folder_id INTEGER REFERENCES file_folders(id) ON DELETE SET NULL;
+    EXCEPTION WHEN duplicate_column THEN NULL;
+    END $$`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;

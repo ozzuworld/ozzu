@@ -2165,12 +2165,14 @@ export async function fetchFiles(filters?: {
   source?: string;
   limit?: number;
   offset?: number;
-}): Promise<{ files: StoredFile[]; total: number }> {
+  folder_id?: string;
+}): Promise<{ files: StoredFile[]; total: number; storageTotalBytes?: number }> {
   const params = new URLSearchParams();
   if (filters?.category) params.set("category", filters.category);
   if (filters?.source) params.set("source", filters.source);
   if (filters?.limit) params.set("limit", String(filters.limit));
   if (filters?.offset) params.set("offset", String(filters.offset));
+  if (filters?.folder_id !== undefined) params.set("folder_id", filters.folder_id);
   const qs = params.toString() ? `?${params}` : "";
   const res = await fetchWithTimeout(`${BRIDGE_URL}/files${qs}`);
   if (!res.ok) throw new Error(`Fetch files error: ${res.status}`);
