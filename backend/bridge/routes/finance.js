@@ -2,7 +2,7 @@
 
 const Imap = require("imap");
 const { simpleParser } = require("mailparser");
-const { Client } = require("pg");
+const db = require("../db");
 
 const IMAP_CONFIG = {
   user: process.env.GMAIL_USER,
@@ -11,10 +11,6 @@ const IMAP_CONFIG = {
   port: 993,
   tls: true,
   tlsOptions: { rejectUnauthorized: false },
-};
-
-const PG_CONFIG = {
-  connectionString: process.env.DATABASE_URL,
 };
 
 // ── Transaction regex patterns ──────────────────────────────────────────────
@@ -124,9 +120,9 @@ async function fetchAndParseEmails(since, onTransaction) {
   });
 }
 
-async function insertTransaction(pg, txn) {
+async function insertTransaction(txn) {
   try {
-    await pg.query(`
+    await db.query(`
       INSERT INTO transactions (date, amount, merchant, type, account_last4, card_last4, balance, raw_text, source, email_uid)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'email_notification', $9)
       ON CONFLICT (email_uid) DO NOTHING
@@ -148,22 +144,19 @@ module.exports = function createFinanceRoutes(ctx) {
   async function pollNewTransactions() {
     if (_polling) return;
     _polling = true;
-    const pg = new Client(PG_CONFIG);
     try {
-      await pg.connect();
       const since = _lastPollTime ? new Date(_lastPollTime) : new Date(Date.now() - 10 * 60 * 1000);
       _lastPollTime = Date.now();
       const transactions = [];
-      const count = await fetchAndParseEmails(since, (txn) => transactions.push(txn));
+      await fetchAndParseEmails(since, (txn) => transactions.push(txn));
       let inserted = 0;
       for (const txn of transactions) {
-        if (await insertTransaction(pg, txn)) inserted++;
+        if (await insertTransaction(txn)) inserted++;
       }
       if (inserted > 0) log(`[finance] Polled ${inserted} new transaction(s)`);
     } catch (e) {
       log(`[finance] Poll error: ${e.message}`);
     } finally {
-      await pg.end().catch(() => {});
       _polling = false;
     }
   }
@@ -182,9 +175,7 @@ module.exports = function createFinanceRoutes(ctx) {
 
     // GET /api/finance/transactions — list transactions with filters
     if (req.method === "GET" && pathname === "/api/finance/transactions") {
-      const pg = new Client(PG_CONFIG);
       try {
-        await pg.connect();
         const url = new URL(req.url, "http://x");
         const limit = parseInt(url.searchParams.get("limit") || "50");
         const offset = parseInt(url.searchParams.get("offset") || "0");
@@ -201,26 +192,22 @@ module.exports = function createFinanceRoutes(ctx) {
         }
         query += ` ORDER BY date DESC LIMIT ${limit} OFFSET ${offset}`;
 
-        const result = await pg.query(query, params);
-        const total = await pg.query("SELECT COUNT(*) FROM transactions" + (type ? " WHERE type=$1" : ""), type ? [type] : []);
+        const result = await db.query(query, params);
+        const total = await db.query("SELECT COUNT(*) FROM transactions" + (type ? " WHERE type=$1" : ""), type ? [type] : []);
         sendJSON(res, 200, { transactions: result.rows, total: parseInt(total.rows[0].count) });
       } catch (e) {
         sendJSON(res, 500, { error: e.message });
-      } finally {
-        await pg.end().catch(() => {});
       }
       return true;
     }
 
     // GET /api/finance/summary — monthly summary
     if (req.method === "GET" && pathname === "/api/finance/summary") {
-      const pg = new Client(PG_CONFIG);
       try {
-        await pg.connect();
         const url = new URL(req.url, "http://x");
         const months = parseInt(url.searchParams.get("months") || "6");
 
-        const result = await pg.query(`
+        const result = await db.query(`
           SELECT
             to_char(date, 'YYYY-MM') as month,
             SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as income,
@@ -232,11 +219,11 @@ module.exports = function createFinanceRoutes(ctx) {
           ORDER BY month DESC
         `);
 
-        const latest = await pg.query(`
-          SELECT balance FROM transactions WHERE balance IS NOT NULL ORDER BY date DESC LIMIT 1
-        `);
+        const latest = await db.query(
+          `SELECT balance FROM transactions WHERE balance IS NOT NULL ORDER BY date DESC LIMIT 1`
+        );
 
-        const byType = await pg.query(`
+        const byType = await db.query(`
           SELECT type, COUNT(*) as count, SUM(ABS(amount)) as total
           FROM transactions
           WHERE date >= NOW() - INTERVAL '1 month'
@@ -250,29 +237,22 @@ module.exports = function createFinanceRoutes(ctx) {
         });
       } catch (e) {
         sendJSON(res, 500, { error: e.message });
-      } finally {
-        await pg.end().catch(() => {});
       }
       return true;
     }
 
     // POST /api/finance/import — run historical import of all Bancolombia emails
     if (req.method === "POST" && pathname === "/api/finance/import") {
-      const pg = new Client(PG_CONFIG);
       try {
-        await pg.connect();
-        let imported = 0;
         const transactions = [];
-        // Pass null as since to get ALL emails
         await fetchAndParseEmails(null, (txn) => transactions.push(txn));
+        let imported = 0;
         for (const txn of transactions) {
-          if (await insertTransaction(pg, txn)) imported++;
+          if (await insertTransaction(txn)) imported++;
         }
         sendJSON(res, 200, { imported, total_parsed: transactions.length });
       } catch (e) {
         sendJSON(res, 500, { error: e.message });
-      } finally {
-        await pg.end().catch(() => {});
       }
       return true;
     }
