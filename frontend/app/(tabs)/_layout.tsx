@@ -12,7 +12,6 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen name="directives" />
-      <Tabs.Screen name="index" />
       <Tabs.Screen name="cipher" />
       <Tabs.Screen name="osint" />
       <Tabs.Screen name="business" />
