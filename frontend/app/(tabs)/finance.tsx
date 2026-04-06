@@ -13,19 +13,24 @@ import { getBridgeUrl } from "../../lib/bridge-api";
 
 const TOP_BAR_HEIGHT = 48;
 
-type MonthSummary = {
-  month: string;
-  year: number;
-  totalExpenses: number;
-  totalIncome: number;
+// Matches actual API response from GET /api/finance/summary
+type MonthRow = {
+  month: string; // "YYYY-MM"
+  income: string;
+  expenses: string;
+  count: string;
 };
 
-type FinanceSummary = {
-  currentMonth: {
-    totalExpenses: number;
-    totalIncome: number;
-  };
-  last6Months: MonthSummary[];
+type TypeRow = {
+  type: string;
+  count: string;
+  total: string;
+};
+
+type SummaryResponse = {
+  monthly: MonthRow[];
+  last_known_balance: string | null;
+  this_month_by_type: TypeRow[];
 };
 
 type Transaction = {
@@ -57,20 +62,23 @@ function formatDate(dateStr: string): string {
   return `${months[d.getMonth()]} ${d.getDate()}`;
 }
 
-function BarChart({ months }: { months: MonthSummary[] }) {
+function BarChart({ months }: { months: MonthRow[] }) {
   if (!months || months.length === 0) return null;
 
-  const maxExpense = Math.max(...months.map((m) => m.totalExpenses), 1);
+  const values = months.map((m) => parseFloat(m.expenses) || 0);
+  const maxExpense = Math.max(...values, 1);
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   return (
     <View style={{ marginTop: 12, gap: 8 }}>
       {months.map((m, i) => {
-        const ratio = m.totalExpenses / maxExpense;
+        const expenses = parseFloat(m.expenses) || 0;
+        const ratio = expenses / maxExpense;
+        const monthIndex = new Date(`${m.month}-01`).getMonth();
         return (
           <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <Text style={{ color: "#525252", fontSize: 10, width: 28, fontFamily: "monospace" }}>
-              {monthNames[new Date(`${m.year}-${m.month}-01`).getMonth()]}
+              {monthNames[monthIndex]}
             </Text>
             <View style={{ flex: 1, height: 18, backgroundColor: "#1A1A1A", borderRadius: 4, overflow: "hidden" }}>
               <View
@@ -83,7 +91,7 @@ function BarChart({ months }: { months: MonthSummary[] }) {
               />
             </View>
             <Text style={{ color: "#525252", fontSize: 10, width: 72, textAlign: "right", fontFamily: "monospace" }}>
-              {formatCOP(m.totalExpenses)}
+              {formatCOP(expenses)}
             </Text>
           </View>
         );
@@ -94,7 +102,7 @@ function BarChart({ months }: { months: MonthSummary[] }) {
 
 export default function FinanceScreen() {
   const { insets } = usePhoneLayout();
-  const [summary, setSummary] = useState<FinanceSummary | null>(null);
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loadingSummary, setLoadingSummary] = useState(true);
   const [loadingTx, setLoadingTx] = useState(true);
@@ -144,6 +152,13 @@ export default function FinanceScreen() {
     await Promise.all([fetchSummary(), fetchTransactions()]);
     setRefreshing(false);
   }
+
+  // Derive current month stats from monthly array
+  const currentMonthStr = new Date().toISOString().substring(0, 7); // "YYYY-MM"
+  const currentMonthRow = summary?.monthly?.find((m) => m.month === currentMonthStr);
+  const currentExpenses = parseFloat(currentMonthRow?.expenses || "0");
+  const currentIncome = parseFloat(currentMonthRow?.income || "0");
+  const balance = summary?.last_known_balance ? parseFloat(summary.last_known_balance) : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#0A0A0A" }}>
@@ -206,26 +221,38 @@ export default function FinanceScreen() {
                     EXPENSES
                   </Text>
                   <Text style={{ color: "#EF4444", fontSize: 22, fontWeight: "bold", fontFamily: "monospace" }} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatCOP(summary.currentMonth.totalExpenses)}
+                    {formatCOP(currentExpenses)}
                   </Text>
                 </View>
-                {summary.currentMonth.totalIncome > 0 ? (
+                {currentIncome > 0 ? (
                   <View style={{ flex: 1, backgroundColor: "#1A1A1A", borderRadius: 10, padding: 12 }}>
                     <Text style={{ color: "#525252", fontSize: 10, fontWeight: "600", letterSpacing: 1, marginBottom: 4 }}>
                       INCOME
                     </Text>
                     <Text style={{ color: "#22C55E", fontSize: 22, fontWeight: "bold", fontFamily: "monospace" }} numberOfLines={1} adjustsFontSizeToFit>
-                      {formatCOP(summary.currentMonth.totalIncome)}
+                      {formatCOP(currentIncome)}
                     </Text>
                   </View>
                 ) : null}
               </View>
 
+              {/* Balance if known */}
+              {balance !== null ? (
+                <View style={{ backgroundColor: "#1A1A1A", borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                  <Text style={{ color: "#525252", fontSize: 10, fontWeight: "600", letterSpacing: 1, marginBottom: 4 }}>
+                    LAST KNOWN BALANCE
+                  </Text>
+                  <Text style={{ color: "#F59E0B", fontSize: 18, fontWeight: "bold", fontFamily: "monospace" }}>
+                    {formatCOP(balance)}
+                  </Text>
+                </View>
+              ) : null}
+
               {/* 6-month bar chart */}
               <Text style={{ color: "#3A3A3A", fontSize: 10, fontWeight: "600", letterSpacing: 1, marginBottom: 4 }}>
                 LAST 6 MONTHS — EXPENSES
               </Text>
-              <BarChart months={summary.last6Months} />
+              <BarChart months={summary.monthly || []} />
             </>
           ) : null}
         </View>
