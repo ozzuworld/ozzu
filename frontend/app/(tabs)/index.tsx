@@ -1,6 +1,12 @@
-import { Redirect } from "expo-router";
+import { useEffect } from "react";
+import { View } from "react-native";
+import { router } from "expo-router";
 
-// / maps here — redirect to directives tab (internal tab switch, safe on mount)
+// / maps here. Redirect to directives tab (sibling tab — safe after tab mount).
+// Do NOT use <Redirect> — Expo Router tab navigator crashes reading displayName on it.
 export default function Index() {
-  return <Redirect href="/directives" />;
+  useEffect(() => {
+    router.replace("/directives");
+  }, []);
+  return <View style={{ flex: 1, backgroundColor: "#0a0a0f" }} />;
 }
