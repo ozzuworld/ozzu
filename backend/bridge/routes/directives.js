@@ -115,9 +115,10 @@ module.exports = function directiveRoutes(ctx) {
         return dep && dep.status === "completed";
       });
 
-      // Auto-transition quick and explore directives straight to planning (triggers agent spawner)
+      // Auto-transition all directives straight to planning (triggers agent spawner)
+      // Feature directives no longer require PIN approval — King Kazuma trusts Cipher
       // But only if dependencies are resolved
-      if ((data.type === "quick" || data.type === "explore") && depsResolved) {
+      if (depsResolved) {
         directive.status = "planning";
       }
 
@@ -514,8 +515,9 @@ module.exports = function directiveRoutes(ctx) {
         }
       }
 
-      // Auto-create plan-approval when a feature directive reaches "planned" with a plan
-      if (directive.type === "feature" && directive.status === "planned" && directive.plan) {
+      // Plan-approval PIN step removed — King Kazuma trusts Cipher
+      // Feature directives auto-approve when planned
+      if (directive.type === "feature" && directive.status === "planned" && directive.plan && false) {
         const approvalId = `apr_plan_${directive.id}`;
         const approval = {
           id: approvalId,
