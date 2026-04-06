@@ -245,7 +245,6 @@ export default function DirectivesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#0A0A0A" }}>
-      <HamburgerMenu />
       {/* Top Bar */}
       <View style={{
         paddingTop: insets.top,
@@ -258,8 +257,9 @@ export default function DirectivesScreen() {
         <Text style={{ color: "#F59E0B", fontSize: 22, fontWeight: "bold", letterSpacing: 2 }}>
           OZZU
         </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusBadge />
+          <HamburgerMenu />
         </View>
       </View>
 
