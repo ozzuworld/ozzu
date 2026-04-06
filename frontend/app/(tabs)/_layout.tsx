@@ -19,6 +19,7 @@ export default function TabLayout() {
       <Tabs.Screen name="music" />
       <Tabs.Screen name="ops" />
       <Tabs.Screen name="identity" />
+      <Tabs.Screen name="finance" />
     </Tabs>
   );
 }
