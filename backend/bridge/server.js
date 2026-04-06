@@ -2260,6 +2260,31 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── Device logs (remote console from app) ──
+  if (pathname === "/api/device-logs") {
+    if (req.method === "POST") {
+      let body = "";
+      req.on("data", d => body += d);
+      req.on("end", () => {
+        try {
+          const entry = JSON.parse(body);
+          const line = `[${entry.device || "?"}][${entry.level || "log"}] ${entry.msg || ""}`;
+          console.log("[device-log]", line);
+          if (entry.stack) console.log("[device-log] STACK:", entry.stack);
+          if (!global._deviceLogs) global._deviceLogs = [];
+          global._deviceLogs.push({ ts: Date.now(), ...entry });
+          if (global._deviceLogs.length > 500) global._deviceLogs.shift();
+        } catch {}
+        sendJSON(res, 200, { ok: true });
+      });
+      return;
+    }
+    if (req.method === "GET") {
+      sendJSON(res, 200, { logs: global._deviceLogs || [] });
+      return;
+    }
+  }
+
   sendJSON(res, 404, { error: "Not found" });
 }
 

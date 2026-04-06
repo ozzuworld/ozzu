@@ -1,6 +1,8 @@
 import { Tabs } from "expo-router";
+import { useEffect } from "react";
 
 export default function TabLayout() {
+  useEffect(() => { console.log("[boot] TabLayout mounted — initialRouteName=directives"); }, []);
   return (
     <Tabs
       initialRouteName="directives"

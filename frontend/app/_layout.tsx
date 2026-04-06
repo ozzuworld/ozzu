@@ -121,8 +121,25 @@ function ImmersiveListener() {
   return null;
 }
 
+// ── Console redirect to bridge (for remote debugging) ──
+const _origLog = console.log.bind(console);
+const _origWarn = console.warn.bind(console);
+const _origError = console.error.bind(console);
+function remoteLog(level: string, ...args: any[]) {
+  const msg = args.map(a => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
+  fetch(`${BRIDGE_URL}/api/device-logs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device: `${Platform.OS}`, level, msg }),
+  }).catch(() => {});
+}
+console.log = (...a) => { _origLog(...a); remoteLog("log", ...a); };
+console.warn = (...a) => { _origWarn(...a); remoteLog("warn", ...a); };
+console.error = (...a) => { _origError(...a); remoteLog("error", ...a); };
+
 export default function RootLayout() {
   useEffect(() => {
+    remoteLog("boot", `[boot] RootLayout mounted — platform=${Platform.OS}`);
     probeBridgeUrl();
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") { resetBridgeUrl(); probeBridgeUrl(); }

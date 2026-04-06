@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -51,6 +51,7 @@ const TOP_BAR_HEIGHT = 48;
 type ViewMode = "overview" | "board" | "timeline" | "list";
 
 export default function DirectivesScreen() {
+  useEffect(() => { console.log("[boot] DirectivesScreen mounted"); }, []);
   const router = useRouter();
   const { insets, isPhone, screenWidth, screenHeight } = usePhoneLayout();
   const isTabletLandscape = !isPhone && screenWidth > screenHeight;
