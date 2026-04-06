@@ -132,6 +132,7 @@ const infraRoutes = require("./routes/infra");
 const businessEmailRoutes = require("./routes/business-email");
 const agrovisionRoutes = require("./routes/agrovision");
 const vaultRoutes = require("./routes/vault");
+const financeRoutes = require("./routes/finance");
 const watchdog = require("./watchdog");
 const recoveryEngine = require("./recovery-engine");
 const cipherDaemon = require("./cipher-agent");
@@ -1565,6 +1566,7 @@ function getRouteHandlers() {
       businessEmail: businessEmailRoutes(routeCtx),
       agrovision: agrovisionRoutes(routeCtx),
       vault: vaultRoutes(routeCtx),
+      finance: financeRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1612,6 +1614,7 @@ async function handleRequest(req, res) {
   if (await r.businessEmail(req, res, pathname, url)) return;
   if (await r.agrovision(req, res, pathname, url)) return;
   if (await r.vault(req, res, pathname, url)) return;
+  if (await r.finance(req, res, pathname, url)) return;
 
   // ── AgroVisión training state poller (SSH to GPU, parse training log) ──
   async function refreshAgrovisionState(vastInstance) {
