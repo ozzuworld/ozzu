@@ -75,12 +75,6 @@ async function fetchAndParseEmails(since, onTransaction) {
       imap.openBox("Ozzu/Finance", true, (err) => {
         if (err) { imap.end(); return reject(err); }
 
-        const criteria = [
-          ["FROM", "notificacionesbancolombia.com"],
-          since ? ["SINCE", since] : ["ALL"],
-        ].filter(Boolean);
-
-        // Flatten: since makes it [SINCE, date], otherwise just search all from bancolombia
         const searchCriteria = since
           ? [["FROM", "notificacionesbancolombia.com"], ["SINCE", since]]
           : [["FROM", "notificacionesbancolombia.com"]];
@@ -88,30 +82,36 @@ async function fetchAndParseEmails(since, onTransaction) {
         imap.search(searchCriteria, (err, uids) => {
           if (err || !uids || uids.length === 0) { imap.end(); return resolve(0); }
 
-          let processed = 0;
+          // Collect all raw messages first, parse after fetch completes
+          const pendingMessages = [];
           const fetch = imap.fetch(uids, { bodies: "" });
 
-          fetch.on("message", (msg, uid) => {
-            let buffer = "";
-            let attrs = {};
-            msg.on("attributes", (a) => { attrs = a; });
+          fetch.on("message", (msg) => {
+            const msgData = { buffer: "", uid: null };
+            pendingMessages.push(msgData);
+            msg.on("attributes", (a) => { msgData.uid = a.uid; });
             msg.on("body", (stream) => {
-              stream.on("data", (chunk) => { buffer += chunk.toString("utf8"); });
-            });
-            msg.once("end", () => {
-              simpleParser(buffer).then((parsed) => {
-                const text = parsed.text || "";
-                const txn = parseTransactionText(text);
-                if (txn) {
-                  const emailUid = `bancolombia_${attrs.uid || Date.now()}`;
-                  onTransaction({ ...txn, email_uid: emailUid, raw_text: text.substring(0, 500) });
-                  processed++;
-                }
-              }).catch(() => {});
+              stream.on("data", (chunk) => { msgData.buffer += chunk.toString("utf8"); });
             });
           });
 
-          fetch.once("end", () => { setTimeout(() => { imap.end(); resolve(processed); }, 2000); });
+          fetch.once("end", async () => {
+            // Now parse all messages
+            const parsePromises = pendingMessages.map(async (m) => {
+              try {
+                const parsed = await simpleParser(m.buffer);
+                const text = parsed.text || "";
+                const txn = parseTransactionText(text);
+                if (txn) {
+                  const emailUid = `bancolombia_${m.uid || Math.random()}`;
+                  onTransaction({ ...txn, email_uid: emailUid, raw_text: text.substring(0, 500) });
+                }
+              } catch (e) { /* skip unparseable */ }
+            });
+            await Promise.all(parsePromises);
+            imap.end();
+            resolve(pendingMessages.length);
+          });
         });
       });
     });
