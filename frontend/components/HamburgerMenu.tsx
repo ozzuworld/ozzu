@@ -203,3 +203,8 @@ export function HamburgerMenu() {
     </>
   );
 }
+
+// Support both import styles:
+// import HamburgerMenu from '...'        ← default
+// import { HamburgerMenu } from '...'   ← named
+export default HamburgerMenu;

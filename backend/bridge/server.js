@@ -2260,6 +2260,25 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── Crash reports from app ErrorBoundary / global handler ──
+  if (pathname === "/api/crash-reports" && req.method === "POST") {
+    let body = "";
+    req.on("data", d => body += d);
+    req.on("end", () => {
+      try {
+        const r = JSON.parse(body);
+        const msg = `[CRASH][${r.platform||"?"}][${r.context||"?"}] ${r.error || "unknown error"}`;
+        console.error("[crash-report]", msg);
+        if (r.stack) console.error("[crash-report] STACK:", r.stack.slice(0, 500));
+        if (!global._deviceLogs) global._deviceLogs = [];
+        global._deviceLogs.push({ ts: Date.now(), level: "crash", msg, stack: r.stack });
+        if (global._deviceLogs.length > 500) global._deviceLogs.shift();
+      } catch {}
+      sendJSON(res, 200, { ok: true });
+    });
+    return;
+  }
+
   // ── Device logs (remote console from app) ──
   if (pathname === "/api/device-logs") {
     if (req.method === "POST") {
