@@ -1,4 +1,6 @@
-import { View } from "react-native";
+import { Redirect } from "expo-router";
+
+// / maps here — redirect to directives tab (internal tab switch, safe on mount)
 export default function Index() {
-  return <View style={{ flex: 1, backgroundColor: "#0a0a0f" }} />;
+  return <Redirect href="/directives" />;
 }
