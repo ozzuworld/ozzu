@@ -42,6 +42,9 @@ function parseDate(dateStr, timeStr) {
 
 function parseTransactionText(text, emailDate) {
   const fallbackDate = emailDate || new Date();
+  // Normalize soft line wraps — emails wrap long lines with \n, rejoin them
+  text = text.replace(/\n([A-ZÁÉÍÓÚÑ*])/g, " $1");  // uppercase/special after newline = continuation
+  text = text.replace(/\n(\s)/g, " ");               // newline + whitespace = space
   let m;
 
   // ── 2026 NEW FORMAT ─────────────────────────────────────────────────────────
