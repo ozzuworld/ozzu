@@ -14,56 +14,90 @@ const IMAP_CONFIG = {
 };
 
 // ── Transaction regex patterns ──────────────────────────────────────────────
-// "Bancolombia: Compraste $15.350,00 en RAPPI COLOMBIA*DL con tu T.Deb *3070, el 27/02/2026 a las 06:48."
-// "Bancolombia: Transferiste $2,500,000 desde tu cuenta *7666 a la cuenta *08300020853 el 21/02/2026 a las 09:54."
-// "Bancolombia: Retiraste $200.000,00 en CAJERO BANCOLOMBIA con tu T.Deb *3070, el 01/03/2026 a las 10:00."
-// "Bancolombia: Recibiste $500.000,00 en tu cuenta *7666 el 10/03/2026 a las 08:00."
-// "Bancolombia: Pagaste $50.000,00 a NETFLIX con tu T.Cre *1234, el 05/03/2026 a las 00:00."
+// 2026 new format: "Bancolombia: Compraste $15.350,00 en RAPPI con tu T.Deb *3070, el 27/02/2026 a las 06:48."
+// 2023 mid format: "Bancolombia le informa Transferencia por $70,000 desde cta *7666 a cta *1234"
+// 2022 old format: "Bancolombia le informa Compra por $132.950,00 en MERCHANT 15:17."
 
 function parseAmount(str) {
-  // Handles both "15.350,00" and "2,500,000" formats
-  const cleaned = str.replace(/\./g, "").replace(/,/g, ".");
-  return parseFloat(cleaned);
+  // Handles "15.350,00" (Colombian) and "2,500,000" (US-style) and "2,500,000.00"
+  const s = str.trim();
+  // If it has a comma before 2 digits at the end → Colombian decimal: 15.350,00
+  if (/,\d{2}$/.test(s)) return parseFloat(s.replace(/\./g, "").replace(",", "."));
+  // Otherwise: dots are thousands separators, no decimal → "2,500,000" or "2.500.000"
+  return parseFloat(s.replace(/[.,]/g, "").replace(/(\d+)$/, (n) => n));
+}
+
+function parseAmountAny(str) {
+  // More robust: strip everything except digits and last separator
+  const cleaned = str.replace(/[^\d.,]/g, "");
+  if (/,\d{2}$/.test(cleaned)) return parseFloat(cleaned.replace(/\./g, "").replace(",", "."));
+  if (/\.\d{2}$/.test(cleaned)) return parseFloat(cleaned.replace(/,/g, ""));
+  return parseFloat(cleaned.replace(/[.,]/g, "")) || 0;
 }
 
 function parseDate(dateStr, timeStr) {
-  // "27/02/2026" + "06:48" → Date
   const [d, m, y] = dateStr.split("/");
-  return new Date(`${y}-${m}-${d}T${timeStr}:00-05:00`); // Colombia is UTC-5
+  return new Date(`${y}-${m}-${d}T${timeStr}:00-05:00`);
 }
 
-function parseTransactionText(text) {
-  // Purchase with debit card
-  let m = text.match(/Compraste \$([0-9.,]+) en (.+?) con tu T\.Deb \*(\d+),? el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
-  if (m) return { type: "purchase", amount: -parseAmount(m[1]), merchant: m[2].trim(), card_last4: m[3], date: parseDate(m[4], m[5]) };
+function parseTransactionText(text, emailDate) {
+  const fallbackDate = emailDate || new Date();
+  let m;
 
-  // Purchase with credit card
-  m = text.match(/Compraste \$([0-9.,]+) en (.+?) con tu T\.Cre \*(\d+),? el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
-  if (m) return { type: "purchase", amount: -parseAmount(m[1]), merchant: m[2].trim(), card_last4: m[3], date: parseDate(m[4], m[5]) };
+  // ── 2026 NEW FORMAT ─────────────────────────────────────────────────────────
+  // Purchase debit/credit
+  m = text.match(/Compraste \$([0-9.,]+) en (.+?) con tu T\.[A-Za-z]{3} \*(\d+),? el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
+  if (m) return { type: "purchase", amount: -parseAmountAny(m[1]), merchant: m[2].trim(), card_last4: m[3], date: parseDate(m[4], m[5]) };
 
-  // Payment (bill pay)
-  m = text.match(/Pagaste \$([0-9.,]+) a (.+?) con tu T\.(Deb|Cre) \*(\d+),? el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
-  if (m) return { type: "payment", amount: -parseAmount(m[1]), merchant: m[2].trim(), card_last4: m[4], date: parseDate(m[5], m[6]) };
+  // Payment bill
+  m = text.match(/Pagaste \$([0-9.,]+) a (.+?) con tu T\.[A-Za-z]{3} \*(\d+),? el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
+  if (m) return { type: "payment", amount: -parseAmountAny(m[1]), merchant: m[2].trim(), card_last4: m[3], date: parseDate(m[4], m[5]) };
 
   // Transfer out
   m = text.match(/Transferiste \$([0-9.,]+) desde tu cuenta \*(\d+) a la cuenta \*(\d+) el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
-  if (m) return { type: "transfer_out", amount: -parseAmount(m[1]), merchant: `Transfer → *${m[3]}`, account_last4: m[2], date: parseDate(m[4], m[5]) };
+  if (m) return { type: "transfer_out", amount: -parseAmountAny(m[1]), merchant: `Transfer → *${m[3]}`, account_last4: m[2], date: parseDate(m[4], m[5]) };
 
-  // Withdrawal ATM
-  m = text.match(/Retiraste \$([0-9.,]+) en (.+?) con tu T\.Deb \*(\d+),? el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
-  if (m) return { type: "withdrawal", amount: -parseAmount(m[1]), merchant: m[2].trim(), card_last4: m[3], date: parseDate(m[4], m[5]) };
+  // Withdrawal
+  m = text.match(/Retiraste \$([0-9.,]+) en (.+?) con tu T\.[A-Za-z]{3} \*(\d+),? el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
+  if (m) return { type: "withdrawal", amount: -parseAmountAny(m[1]), merchant: m[2].trim(), card_last4: m[3], date: parseDate(m[4], m[5]) };
 
-  // Received money (transfer in)
+  // Received / transfer in
   m = text.match(/Recibiste \$([0-9.,]+) en tu cuenta \*(\d+) el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
-  if (m) return { type: "transfer_in", amount: parseAmount(m[1]), merchant: "Transfer received", account_last4: m[2], date: parseDate(m[3], m[4]) };
+  if (m) return { type: "transfer_in", amount: parseAmountAny(m[1]), merchant: "Transferencia recibida", account_last4: m[2], date: parseDate(m[3], m[4]) };
 
   // Deposit
-  m = text.match(/Consignaste? \$([0-9.,]+) en tu cuenta \*(\d+) el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
-  if (m) return { type: "deposit", amount: parseAmount(m[1]), merchant: "Deposit", account_last4: m[2], date: parseDate(m[3], m[4]) };
+  m = text.match(/Consign[óo] \$([0-9.,]+) en tu cuenta \*(\d+) el (\d{2}\/\d{2}\/\d{4}) a las (\d{2}:\d{2})/i);
+  if (m) return { type: "deposit", amount: parseAmountAny(m[1]), merchant: "Consignación", account_last4: m[2], date: parseDate(m[3], m[4]) };
 
-  // Generic balance notification
-  m = text.match(/Saldo disponible[:\s]+\$([0-9.,]+)/i);
-  if (m) return { type: "balance_update", amount: 0, balance: parseAmount(m[1]), merchant: null, date: new Date() };
+  // ── 2023 MID FORMAT ─────────────────────────────────────────────────────────
+  // "Bancolombia le informa Transferencia por $70,000 desde cta *7666 a cta *1234"
+  m = text.match(/informa (?:un? )?Transferencia por \$([0-9.,]+) desde cta \*(\d+) a cta \*?(\d+)/i);
+  if (m) return { type: "transfer_out", amount: -parseAmountAny(m[1]), merchant: `Transfer → *${m[3]}`, account_last4: m[2], date: fallbackDate };
+
+  // "Bancolombia le informa Pago por $350,000.00 a BANCOLOMBIA desde producto"
+  m = text.match(/informa (?:un? )?Pago por \$([0-9.,]+) a ([^\n]+?) (?:desde|con)/i);
+  if (m) return { type: "payment", amount: -parseAmountAny(m[1]), merchant: m[2].trim(), date: fallbackDate };
+
+  // "Bancolombia le informa un Pago de Nomina de CENTER SOURCE C por $3,068,000.00"
+  m = text.match(/Pago de Nomina de (.+?) por \$([0-9.,]+)/i);
+  if (m) return { type: "transfer_in", amount: parseAmountAny(m[2]), merchant: `Nómina: ${m[1].trim()}`, date: fallbackDate };
+
+  // "Bancolombia le informa Compra por $350,000.00 desde producto"
+  m = text.match(/informa (?:un? )?Compra por \$([0-9.,]+) (?:en|desde|con) ([^\n.]+)/i);
+  if (m) return { type: "purchase", amount: -parseAmountAny(m[1]), merchant: m[2].trim(), date: fallbackDate };
+
+  // ── 2022 OLD FORMAT ─────────────────────────────────────────────────────────
+  // "Bancolombia le informa Compra por $132.950,00 en FERREMATERIALES SAN 15:17."
+  m = text.match(/informa Compra por \$([0-9.,]+) en (.+?) \d{2}:\d{2}/i);
+  if (m) return { type: "purchase", amount: -parseAmountAny(m[1]), merchant: m[2].trim(), date: fallbackDate };
+
+  // "Bancolombia le informa Retiro por $200.000,00 en BAR_SILENC1. Hora 14:55"
+  m = text.match(/informa Retiro por \$([0-9.,]+) en ([^.\n]+)/i);
+  if (m) return { type: "withdrawal", amount: -parseAmountAny(m[1]), merchant: m[2].trim(), date: fallbackDate };
+
+  // Generic recepción / consignación
+  m = text.match(/informa (?:Recepci[oó]n|Consignaci[oó]n) por \$([0-9.,]+)/i);
+  if (m) return { type: "transfer_in", amount: parseAmountAny(m[1]), merchant: "Consignación/Recepción", date: fallbackDate };
 
   return null;
 }
@@ -87,9 +121,9 @@ async function fetchAndParseEmails(since, onTransaction) {
           const fetch = imap.fetch(uids, { bodies: "" });
 
           fetch.on("message", (msg) => {
-            const msgData = { buffer: "", uid: null };
+            const msgData = { buffer: "", uid: null, date: null };
             pendingMessages.push(msgData);
-            msg.on("attributes", (a) => { msgData.uid = a.uid; });
+            msg.on("attributes", (a) => { msgData.uid = a.uid; msgData.date = a.date; });
             msg.on("body", (stream) => {
               stream.on("data", (chunk) => { msgData.buffer += chunk.toString("utf8"); });
             });
@@ -101,7 +135,8 @@ async function fetchAndParseEmails(since, onTransaction) {
               try {
                 const parsed = await simpleParser(m.buffer);
                 const text = parsed.text || "";
-                const txn = parseTransactionText(text);
+                const emailDate = parsed.date || m.date || new Date();
+                const txn = parseTransactionText(text, emailDate);
                 if (txn) {
                   const emailUid = `bancolombia_${m.uid || Math.random()}`;
                   onTransaction({ ...txn, email_uid: emailUid, raw_text: text.substring(0, 500) });
