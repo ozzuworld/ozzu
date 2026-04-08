@@ -231,6 +231,43 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "send_whatsapp",
+      description: "Send a WhatsApp message to a phone number on behalf of King Kazuma. ALWAYS show the message to King Kazuma and get approval before sending unless he explicitly said to proceed autonomously. If the contact is paused (human takeover active), this will fail — use request_human_takeover status to check.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          phone: { type: "string", description: "Phone number with country code, no + (e.g. 573187290206 for Colombia)" },
+          message: { type: "string", description: "Message text to send" },
+        },
+        required: ["phone", "message"],
+      },
+    },
+    {
+      name: "read_whatsapp",
+      description: "Read recent WhatsApp messages with a contact. Use to check their reply before crafting a response.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          phone: { type: "string", description: "Phone number with country code, no +" },
+          limit: { type: "number", description: "Max messages to return (default 30)" },
+        },
+        required: ["phone"],
+      },
+    },
+    {
+      name: "request_human_takeover",
+      description: "Pause AI messaging for a contact and send a push notification to King Kazuma to take over manually. Use when: the other party may have detected AI, a sensitive question is asked, or you need a human judgment call. AI cannot send messages to this contact until King Kazuma calls resume.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          phone: { type: "string", description: "Phone number of the contact to pause" },
+          reason: { type: "string", description: "Why human takeover is needed (shown in push notification)" },
+          preview: { type: "string", description: "The message that triggered the takeover (shown in push notification)" },
+        },
+        required: ["phone", "reason"],
+      },
+    },
+    {
       name: "gpu_destroy",
       description: "Destroy/terminate a Vast.ai GPU instance to stop billing.",
       inputSchema: {
@@ -514,6 +551,52 @@ module.exports = function mcpRoutes(ctx) {
           sent_at: e.sent_at, created_at: e.created_at,
         }));
         return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+      }
+
+      case "send_whatsapp": {
+        const http = require("http");
+        const payload = JSON.stringify({ to: args.phone, message: args.message });
+        const result = await new Promise((resolve) => {
+          const req = http.request({ hostname: "localhost", port: 3333, path: "/whatsapp/send", method: "POST",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+          }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
+          req.on("error", e => resolve({ error: e.message }));
+          req.write(payload); req.end();
+        });
+        if (result.error) return { content: [{ type: "text", text: `WhatsApp send failed: ${result.error}` }], isError: true };
+        return { content: [{ type: "text", text: `✅ WhatsApp sent to ${args.phone}: "${args.message}"` }] };
+      }
+
+      case "read_whatsapp": {
+        const http = require("http");
+        const limit = args.limit || 30;
+        const result = await new Promise((resolve) => {
+          http.get(`http://localhost:3333/whatsapp/messages/${encodeURIComponent(args.phone)}?limit=${limit}`, (res) => {
+            let d = ""; res.on("data", c => d += c);
+            res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } });
+          }).on("error", e => resolve({ error: e.message }));
+        });
+        if (result.error) return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
+        const msgs = (result.messages || []).map(m => {
+          const ts = new Date(m.timestamp).toISOString();
+          const who = m.direction === "out" ? "You" : args.phone;
+          return `[${ts}] ${who}: ${m.body}`;
+        }).join("\n");
+        return { content: [{ type: "text", text: msgs || "No messages found." }] };
+      }
+
+      case "request_human_takeover": {
+        const http = require("http");
+        const payload = JSON.stringify({ phone: args.phone, reason: args.reason, preview: args.preview });
+        const result = await new Promise((resolve) => {
+          const req = http.request({ hostname: "localhost", port: 3333, path: "/whatsapp/notify-human", method: "POST",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+          }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
+          req.on("error", e => resolve({ error: e.message }));
+          req.write(payload); req.end();
+        });
+        if (result.error) return { content: [{ type: "text", text: `Takeover failed: ${result.error}` }], isError: true };
+        return { content: [{ type: "text", text: `🔔 Human takeover requested for ${args.phone}. Push notification sent (${result.push?.sent ?? 0} devices). AI messaging paused until King Kazuma resumes.` }] };
       }
 
       case "create_venture": {
