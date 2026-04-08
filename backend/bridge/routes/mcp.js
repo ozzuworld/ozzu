@@ -100,6 +100,7 @@ module.exports = function mcpRoutes(ctx) {
           from_account: { type: "string", enum: ["personal", "ozzu"], description: "Which email account to send from. personal = eng.hsuarezp@gmail.com, ozzu = eng.ozzu@gmail.com. Default: personal" },
           contactId: { type: "number", description: "Link to a business contact ID" },
           directiveId: { type: "string", description: "Link to a directive ID" },
+          attachments: { type: "array", description: "File attachments. Each item: { filename, path } for server files (e.g. /home/gcp/ozzu/artifacts/file.ovpn) or { filename, content } for base64 content.", items: { type: "object" } },
         },
         required: ["to", "subject", "text"],
       },
@@ -521,6 +522,7 @@ module.exports = function mcpRoutes(ctx) {
           to: args.to, subject: args.subject, text: args.text,
           html: args.html, cc: args.cc, from_account: args.from_account || "personal",
           contactId: args.contactId, directiveId: args.directiveId,
+          attachments: args.attachments || undefined,
         });
         const result = await new Promise((resolve) => {
           const req = http.request({ hostname: "localhost", port: 3333, path: "/business/email/send", method: "POST",
@@ -531,7 +533,8 @@ module.exports = function mcpRoutes(ctx) {
         });
         if (result.error) return { content: [{ type: "text", text: `Email send failed: ${result.error}` }], isError: true };
         const acctUsed = args.from_account || "personal";
-        return { content: [{ type: "text", text: `Email sent via ${acctUsed} account to ${args.to}. Subject: "${args.subject}". MessageId: ${result.messageId}` }] };
+        const attachNote = args.attachments?.length ? ` Attachments: ${args.attachments.map(a => a.filename || a.path).join(", ")}.` : "";
+        return { content: [{ type: "text", text: `Email sent via ${acctUsed} account to ${args.to}. Subject: "${args.subject}".${attachNote} MessageId: ${result.messageId}` }] };
       }
 
       case "list_emails": {

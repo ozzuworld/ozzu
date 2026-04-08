@@ -84,7 +84,7 @@ module.exports = function businessEmailRoutes(ctx) {
       try {
         await ensureTable();
         const body = await parseBody(req);
-        const { to, subject, text, html, cc, bcc, replyTo, contactId, directiveId, tags, from_account } = body;
+        const { to, subject, text, html, cc, bcc, replyTo, contactId, directiveId, tags, from_account, attachments } = body;
 
         if (!to || !subject) {
           sendJSON(res, 400, { error: "to and subject are required" });
@@ -110,6 +110,21 @@ module.exports = function businessEmailRoutes(ctx) {
           bcc: bcc || undefined,
           replyTo: replyTo || acct.user,
         };
+
+        // Attachments: [{ filename, path }] or [{ filename, content (base64) }]
+        if (attachments && attachments.length > 0) {
+          const fs = require("fs");
+          mailOpts.attachments = attachments.map(a => {
+            if (a.path) {
+              if (!fs.existsSync(a.path)) throw new Error(`Attachment file not found: ${a.path}`);
+              return { filename: a.filename || require("path").basename(a.path), path: a.path };
+            }
+            if (a.content) {
+              return { filename: a.filename || "attachment", content: Buffer.from(a.content, "base64"), encoding: "base64" };
+            }
+            throw new Error(`Attachment must have path or content: ${JSON.stringify(a)}`);
+          });
+        }
 
         const info = await transporter.sendMail(mailOpts);
         log(`Email sent via ${acctKey} (${acct.user}) to ${to}: ${subject} (messageId: ${info.messageId})`);
