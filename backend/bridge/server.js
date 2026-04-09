@@ -6652,7 +6652,7 @@ wss.on("connection", (ws, req) => {
     recoveryEngine.start({ db, redis, broadcastToAll, sendNotification, watchdog });
     cipherDaemon.start({ db, redis, broadcastToAll, watchdog, recoveryEngine });
     proactiveReporter.start({ db, redis, broadcastToAll, sendNotification, getDirectives });
-    try { require("./wa-service").connect(); } catch (e) { log.bridge.error("wa-service start error:", e.message); }
+    // wa-service proxies to Android agent — no local connection needed on start
     metrics.startFlushTimer();
     // Initialize OSINT persistent scheduler + alert broadcast + monitoring
     osintEngine.setAlertBroadcast(broadcastToAll);
