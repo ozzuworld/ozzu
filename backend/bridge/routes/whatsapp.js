@@ -11,10 +11,14 @@ async function ensureTable(db) {
       phone TEXT NOT NULL,
       direction TEXT NOT NULL CHECK (direction IN ('in','out')),
       text TEXT,
+      wa_id TEXT,
       received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_wa_messages_phone ON whatsapp_messages(phone)`);
+  // Add wa_id column if table was created before this migration
+  await db.query(`ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS wa_id TEXT`);
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_messages_wa_id ON whatsapp_messages(wa_id) WHERE wa_id IS NOT NULL`);
 }
 
 let _tableReady = false;
@@ -128,19 +132,26 @@ module.exports = function whatsappRoutes(ctx) {
     // Persists to DB + sends push notification
     if (req.method === "POST" && pathname === "/whatsapp/incoming") {
       const body = await parseBody(req);
-      const { from, text, ts } = body;
+      const { from, text, ts, id: waId } = body;
       if (!from) { sendJSON(res, 400, { error: "from required" }); return true; }
 
       const phone = from.replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/\D/g, "");
       const msgText = text || "";
 
-      // Persist to DB
+      // Persist to DB — use wa_id for dedup so duplicate pushes don't create duplicate rows
       try {
         await getTable(db);
-        await db.query(
-          "INSERT INTO whatsapp_messages (phone, direction, text, received_at) VALUES ($1, 'in', $2, $3)",
-          [phone, msgText, ts ? new Date(ts) : new Date()]
-        );
+        if (waId) {
+          await db.query(
+            "INSERT INTO whatsapp_messages (phone, direction, text, wa_id, received_at) VALUES ($1, 'in', $2, $3, $4) ON CONFLICT (wa_id) DO NOTHING",
+            [phone, msgText, waId, ts ? new Date(ts) : new Date()]
+          );
+        } else {
+          await db.query(
+            "INSERT INTO whatsapp_messages (phone, direction, text, received_at) VALUES ($1, 'in', $2, $3)",
+            [phone, msgText, ts ? new Date(ts) : new Date()]
+          );
+        }
       } catch (err) {
         // DB failure is non-fatal — still send push
       }

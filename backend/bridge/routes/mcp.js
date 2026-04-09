@@ -573,7 +573,33 @@ module.exports = function mcpRoutes(ctx) {
       case "read_whatsapp": {
         const phone = String(args.phone).replace(/\D/g, "");
         const limit = args.limit || 30;
-        // Read from postgres — persistent across agent restarts
+
+        // Pull from phone's in-memory buffer first — catches messages missed by push
+        try {
+          const http = require("http");
+          const phoneData = await new Promise((resolve) => {
+            const req = http.request(
+              { hostname: "localhost", port: 8766, path: `/messages/${phone}`, method: "GET", timeout: 3000 },
+              (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } }); }
+            );
+            req.on("error", () => resolve(null));
+            req.on("timeout", () => { req.destroy(); resolve(null); });
+            req.end();
+          });
+          if (phoneData && Array.isArray(phoneData.messages)) {
+            for (const m of phoneData.messages) {
+              const msgPhone = String(m.from || "").replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/\D/g, "") || phone;
+              if (m.id) {
+                await ctx.db.query(
+                  "INSERT INTO whatsapp_messages (phone, direction, text, wa_id, received_at) VALUES ($1, 'in', $2, $3, $4) ON CONFLICT (wa_id) DO NOTHING",
+                  [msgPhone, m.text || "", m.id, m.ts ? new Date(m.ts) : new Date()]
+                );
+              }
+            }
+          }
+        } catch (_) { /* phone unreachable — continue with DB */ }
+
+        // Read from postgres — authoritative persistent store
         const rows = await ctx.db.query(
           "SELECT direction, text, received_at FROM whatsapp_messages WHERE phone = $1 ORDER BY received_at DESC LIMIT $2",
           [phone, limit]
