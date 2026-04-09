@@ -94,6 +94,36 @@ module.exports = function whatsappRoutes(ctx) {
       return true;
     }
 
+    // POST /whatsapp/incoming — called by Android WA agent when a message arrives
+    if (req.method === "POST" && pathname === "/whatsapp/incoming") {
+      const body = await parseBody(req);
+      const { from, text, ts } = body;
+      if (!from) { sendJSON(res, 400, { error: "from required" }); return true; }
+
+      const phone = from.replace("@s.whatsapp.net", "").replace("@g.us", "");
+      const preview = text ? (text.length > 80 ? text.slice(0, 80) + "…" : text) : "(media)";
+
+      // Send push notification to all registered iOS devices
+      try {
+        const { sendPush } = require("../push-notifications");
+        const db = ctx.db;
+        const result = await db.query("SELECT token FROM device_push_tokens WHERE platform = 'ios' ORDER BY updated_at DESC LIMIT 5");
+        const tokens = result.rows.map(r => r.token);
+        if (tokens.length > 0) {
+          await sendPush(tokens, {
+            title: `📲 WhatsApp — +${phone}`,
+            body: preview,
+            data: { type: "whatsapp_incoming", phone, text },
+          });
+        }
+      } catch (err) {
+        // Push failure is non-fatal
+      }
+
+      sendJSON(res, 200, { ok: true });
+      return true;
+    }
+
     return false;
   };
 };

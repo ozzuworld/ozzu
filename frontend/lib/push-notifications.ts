@@ -46,10 +46,15 @@ export async function registerForPushNotifications(deviceId: string): Promise<st
       return null;
     }
 
-    // Get push token
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: "ozzu", // replace with actual EAS project ID if needed
-    });
+    // Get push token — projectId must be the EAS UUID from `eas init`
+    // Run `eas init` in /frontend to generate it, then add to app.json extra.eas.projectId
+    const { default: Constants } = await import("expo-constants");
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    if (!projectId) {
+      console.warn("[push] No EAS projectId configured — run `eas init` in /frontend and add projectId to app.json extra.eas.projectId");
+      return null;
+    }
+    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     const token = tokenData.data;
 
     // Register with backend
