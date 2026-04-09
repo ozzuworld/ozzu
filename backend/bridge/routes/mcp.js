@@ -571,19 +571,17 @@ module.exports = function mcpRoutes(ctx) {
       }
 
       case "read_whatsapp": {
-        const http = require("http");
+        const phone = String(args.phone).replace(/\D/g, "");
         const limit = args.limit || 30;
-        const result = await new Promise((resolve) => {
-          http.get(`http://localhost:3333/whatsapp/messages/${encodeURIComponent(args.phone)}?limit=${limit}`, (res) => {
-            let d = ""; res.on("data", c => d += c);
-            res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } });
-          }).on("error", e => resolve({ error: e.message }));
-        });
-        if (result.error) return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-        const msgs = (result.messages || []).map(m => {
-          const ts = new Date(m.timestamp).toISOString();
-          const who = m.direction === "out" ? "You" : args.phone;
-          return `[${ts}] ${who}: ${m.body}`;
+        // Read from postgres — persistent across agent restarts
+        const rows = await ctx.db.query(
+          "SELECT direction, text, received_at FROM whatsapp_messages WHERE phone = $1 ORDER BY received_at DESC LIMIT $2",
+          [phone, limit]
+        );
+        const msgs = rows.rows.reverse().map(m => {
+          const ts = new Date(m.received_at).toLocaleString("en-US", { timeZone: "America/Bogota", hour12: false });
+          const who = m.direction === "out" ? "Ozzu" : `+${phone}`;
+          return `[${ts}] ${who}: ${m.text || "(media)"}`;
         }).join("\n");
         return { content: [{ type: "text", text: msgs || "No messages found." }] };
       }

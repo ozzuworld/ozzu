@@ -1,10 +1,29 @@
 // routes/whatsapp.js — WhatsApp REST API
 // Wraps wa-service.js singleton with HTTP endpoints
+// All incoming messages are persisted to postgres — phone is pure transport.
 
 "use strict";
 
+async function ensureTable(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_messages (
+      id SERIAL PRIMARY KEY,
+      phone TEXT NOT NULL,
+      direction TEXT NOT NULL CHECK (direction IN ('in','out')),
+      text TEXT,
+      received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_wa_messages_phone ON whatsapp_messages(phone)`);
+}
+
+let _tableReady = false;
+async function getTable(db) {
+  if (!_tableReady) { await ensureTable(db); _tableReady = true; }
+}
+
 module.exports = function whatsappRoutes(ctx) {
-  const { sendJSON, parseBody } = ctx;
+  const { sendJSON, parseBody, db } = ctx;
 
   let wa;
   function getWa() {
@@ -21,7 +40,7 @@ module.exports = function whatsappRoutes(ctx) {
       return true;
     }
 
-    // GET /whatsapp/qr — returns base64 PNG data URL for scanning
+    // GET /whatsapp/qr
     if (req.method === "GET" && pathname === "/whatsapp/qr") {
       const qr = getWa().qr();
       if (!qr) {
@@ -32,20 +51,24 @@ module.exports = function whatsappRoutes(ctx) {
           sendJSON(res, 503, { error: "QR not ready yet. WhatsApp is connecting..." });
         }
       } else {
-        // If it's a data URL serve as JSON; if raw string, convert
         sendJSON(res, 200, { qr });
       }
       return true;
     }
 
-    // GET /whatsapp/messages/:phone
+    // GET /whatsapp/messages/:phone — reads from DB
     if (req.method === "GET" && pathname.startsWith("/whatsapp/messages/")) {
-      const phone = pathname.replace("/whatsapp/messages/", "");
+      const phone = pathname.replace("/whatsapp/messages/", "").replace(/\D/g, "");
       if (!phone) { sendJSON(res, 400, { error: "phone required" }); return true; }
       const url = new URL(req.url, "http://localhost");
       const limit = parseInt(url.searchParams.get("limit") || "50");
-      const messages = getWa().getMessages(phone, limit);
-      sendJSON(res, 200, { phone: getWa().normalizePhone(phone), messages, count: messages.length });
+      await getTable(db);
+      const result = await db.query(
+        "SELECT direction, text, received_at FROM whatsapp_messages WHERE phone = $1 ORDER BY received_at DESC LIMIT $2",
+        [phone, limit]
+      );
+      const messages = result.rows.reverse();
+      sendJSON(res, 200, { phone, messages, count: messages.length });
       return true;
     }
 
@@ -56,6 +79,13 @@ module.exports = function whatsappRoutes(ctx) {
       if (!to || !message) { sendJSON(res, 400, { error: "to and message required" }); return true; }
       try {
         const result = await getWa().send(to, message);
+        // Persist outgoing message
+        const phone = String(to).replace(/\D/g, "");
+        await getTable(db);
+        await db.query(
+          "INSERT INTO whatsapp_messages (phone, direction, text) VALUES ($1, 'out', $2)",
+          [phone, message]
+        );
         sendJSON(res, 200, result);
       } catch (err) {
         sendJSON(res, 503, { error: err.message });
@@ -63,7 +93,7 @@ module.exports = function whatsappRoutes(ctx) {
       return true;
     }
 
-    // POST /whatsapp/pause — stop AI from sending to this contact
+    // POST /whatsapp/pause
     if (req.method === "POST" && pathname === "/whatsapp/pause") {
       const body = await parseBody(req);
       const { phone } = body;
@@ -73,7 +103,7 @@ module.exports = function whatsappRoutes(ctx) {
       return true;
     }
 
-    // POST /whatsapp/resume — allow AI to send again
+    // POST /whatsapp/resume
     if (req.method === "POST" && pathname === "/whatsapp/resume") {
       const body = await parseBody(req);
       const { phone } = body;
@@ -83,7 +113,7 @@ module.exports = function whatsappRoutes(ctx) {
       return true;
     }
 
-    // POST /whatsapp/notify-human — manually trigger push + pause
+    // POST /whatsapp/notify-human
     if (req.method === "POST" && pathname === "/whatsapp/notify-human") {
       const body = await parseBody(req);
       const { phone, reason, preview } = body;
@@ -94,26 +124,38 @@ module.exports = function whatsappRoutes(ctx) {
       return true;
     }
 
-    // POST /whatsapp/incoming — called by Android WA agent when a message arrives
+    // POST /whatsapp/incoming — Android WA agent calls this on every incoming message
+    // Persists to DB + sends push notification
     if (req.method === "POST" && pathname === "/whatsapp/incoming") {
       const body = await parseBody(req);
       const { from, text, ts } = body;
       if (!from) { sendJSON(res, 400, { error: "from required" }); return true; }
 
-      const phone = from.replace("@s.whatsapp.net", "").replace("@g.us", "");
-      const preview = text ? (text.length > 80 ? text.slice(0, 80) + "…" : text) : "(media)";
+      const phone = from.replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/\D/g, "");
+      const msgText = text || "";
 
-      // Send push notification to all registered iOS devices
+      // Persist to DB
+      try {
+        await getTable(db);
+        await db.query(
+          "INSERT INTO whatsapp_messages (phone, direction, text, received_at) VALUES ($1, 'in', $2, $3)",
+          [phone, msgText, ts ? new Date(ts) : new Date()]
+        );
+      } catch (err) {
+        // DB failure is non-fatal — still send push
+      }
+
+      // Push notification
       try {
         const { sendPush } = require("../push-notifications");
-        const db = ctx.db;
         const result = await db.query("SELECT token FROM device_push_tokens WHERE platform = 'ios' ORDER BY updated_at DESC LIMIT 5");
         const tokens = result.rows.map(r => r.token);
         if (tokens.length > 0) {
+          const preview = msgText.length > 80 ? msgText.slice(0, 80) + "…" : msgText || "(media)";
           await sendPush(tokens, {
             title: `📲 WhatsApp — +${phone}`,
             body: preview,
-            data: { type: "whatsapp_incoming", phone, text },
+            data: { type: "whatsapp_incoming", phone, text: msgText },
           });
         }
       } catch (err) {
