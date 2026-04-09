@@ -1,11 +1,56 @@
 # OZZU PROJECT INVENTORY
 # CHECK THIS BEFORE BUILDING ANYTHING. If it exists here, USE IT. Do NOT rebuild.
+# Last updated: 2026-04-09
+
+---
+
+## Active Infrastructure
+
+### GCP VM (34.135.158.92 / 10.128.0.4)
+Primary compute — always on. All services run here via Docker.
+
+| Container | Port | Purpose | Status |
+|-----------|------|---------|--------|
+| bridge | 3333 | Command bridge (API, directives, Cipher, MCP) | ✅ running |
+| postgres | 5432 | Main DB (memories, conversations, directives, finance) | ✅ running |
+| redis | 6379 | Session cache, ephemeral state | ✅ running |
+| qdrant | 6333 | Vector DB — 51M+ face embeddings | ✅ running |
+| nginx | 80/443 | SSL proxy (home.ozzu.world) | ✅ running |
+| openvpn | 1194/UDP | VPN tunnel — clients connect here | ✅ running |
+| anisette | 6969 | Apple auth for iOS sideloading | ✅ running |
+| face-recognition | 5555 | Face embedding + search API | ✅ running |
+| osint-tools | internal | OSINT scan engine | ✅ running |
+| browser | 3334 | Headless browser for web tasks | ✅ running |
+
+### VPN Clients (OpenVPN 10.8.0.0/24)
+| Client | IP | Device |
+|--------|----|--------|
+| kazuma-laptop | 10.8.0.2 | Windows laptop (primary) |
+| ozzu-android | 10.8.0.3 | CAT S41 Android — WhatsApp agent |
+
+### Android Phone — WhatsApp Agent
+| Item | Value |
+|------|-------|
+| Number | 3226033350 |
+| Device | CAT S41 (always on) |
+| Stack | Termux → Node.js → Baileys → WA Web |
+| SSH access | `ssh -p 8023 localhost` (via reverse tunnel GCP:8023→phone:8022) |
+| WA API | GCP:8766 → phone:8765 (reverse tunnel) |
+| Auto-start | Termux:Boot → `~/.termux/boot/start.sh` |
+| Auth | Saved to `~/wa-auth/` — survives restarts |
+
+### iPhone (King Kazuma)
+- Ozzu app installed via AltStore (sideload from Windows laptop)
+- **NEVER receives OTA** — all iOS changes require native build + sideload
+- Push notifications: APNs via bridge `push-notifications.js`
+
+---
 
 ## Scripts (/home/gcp/ozzu/scripts/)
 
 | Script | Purpose | Key flags/notes |
 |--------|---------|-----------------|
-| **embed-pipeline-v2.py** | Face embedding pipeline — 85K/min on 3090 | `--local-qdrant` (MANDATORY), `--all`, `--benchmark`, `--no-sync` |
+| **embed-pipeline-v2.py** | Face embedding — 85K/min on RTX 3090 | `--local-qdrant` (MANDATORY), `--all`, `--benchmark` |
 | **setup-vast-gpu.sh** | One-shot vast.ai GPU instance setup | `<host> <port> [--start]` — MUST include --local-qdrant |
 | embed-glint360k.py | Glint360K dataset (17.1M faces) | `[start_shard] [end_shard]` |
 | embed-hf-dataset.py | Any HuggingFace WebDataset → Qdrant | `<dataset_name> [start] [end]` |
@@ -13,55 +58,77 @@
 | face-clusterer.py | Identity clustering (Union-Find) | `--incremental`, `--stats` |
 | deploy.sh | Android APK deploy from CI | `[device-names]`, `--local` |
 | ota-deploy.sh | OTA JS update (Android ONLY) | `--restart` |
-| deploy-ios.sh | iOS IPA via dev-01 + AltServer | `--local /path`, `--check` |
+| deploy-ios.sh | iOS IPA via AltStore on Windows laptop | `--local /path`, `--check` |
 | cipher.sh | Launch Cipher with memory context | Loads from bridge /cipher/context |
 | cipher-guard.sh | PreToolUse hook — enforce pipeline | Blocks edits without directive |
 | cipher-session-save.sh | SessionEnd hook — save to postgres | |
 | inject-last-conversation.sh | UserPromptSubmit hook — inject context | Pre-flight checklist on first msg |
 | backup.sh | Encrypted backup of all data | `--no-encrypt` |
-| adb-discover.sh | Find ADB wireless debug ports | Scans 30000-50000 |
 | gpu-orchestrator.sh | Unattended multi-dataset GPU runner | Auto-recovery, heartbeat |
 
-## PROVEN OPTIMIZATIONS — DO NOT REDO
+---
 
-### embed-pipeline-v2.py (took 1 week to build and tune)
-1. **Local Qdrant** (`--local-qdrant`): 15K → 85K/min. Downloads Qdrant binary, runs on localhost. NEVER launch without it.
+## GPU Pipeline — Proven Optimizations (DO NOT REDO)
+
+These took 1 week to build and tune on embed-pipeline-v2.py:
+
+1. **`--local-qdrant`** (MANDATORY): Downloads Qdrant binary, runs localhost. 15K → 85K/min. NEVER launch without it.
 2. **Shared memory decode**: Zero pickle IPC. Workers write to pre-allocated shared numpy arrays.
 3. **IOBinding**: Pre-allocated GPU memory, avoids CPU↔GPU copies. +4% throughput.
 4. **Double-buffer**: Extract+decode next shard while GPU processes current. +12%.
-5. **QDRANT_BATCH=2000**: NOT 5000. 5000 exceeds 32MB JSON payload limit.
-6. **GPU_BATCH=512**: Saturates 3090 cores.
+5. **`QDRANT_BATCH=2000`**: NOT 5000. 5000 exceeds 32MB JSON payload limit.
+6. **`GPU_BATCH=512`**: Saturates 3090 cores.
+7. **tmux required on vast.ai**: nohup doesn't survive SSH disconnect.
+8. **PCIe 24+ preferred**: PCIe Gen 1 = 4 GB/s = severe bottleneck.
 
-### setup-vast-gpu.sh
-1. **CUDA 12/13 compat**: Installs libcufft-12-8, libcurand-12-8, etc. for onnxruntime.
-2. **tmux required**: nohup doesn't survive vast.ai SSH disconnect.
-3. **PCIe 24+ preferred**: PCIe Gen 1 = 4 GB/s = severe bottleneck.
+---
 
-## Services (Docker, network_mode: host)
+## Face DB
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| bridge | 3333 | Command bridge (API, directives, Cipher) |
-| postgres | 5432 | Main DB (memories, conversations, directives) |
-| redis | 6379 | Session cache, ephemeral state |
-| qdrant | 6333 | Vector DB (48M+ faces) |
-| nginx | 80/443 | SSL proxy (home.ozzu.world) |
-| openvpn | 1194 | VPN tunnel to home LAN |
-| anisette | 6969 | Apple auth for iOS sideloading |
+- **Live count**: always `curl -s http://localhost:6333/collections/faces` — NEVER guess
+- **Completed datasets**: Glint360K (17.1M), MS1MV3, WebFace4M, VGGFace2, MS1MV2, CASIA, CelebA
+- **Current**: ~51M vectors, HNSW indexed (m=16, ef_construct=100, on_disk=true)
 
-## Devices
+---
 
-| Name | IP | Type |
-|------|-----|------|
-| tab-roaming | 172.168.0.53 | Samsung tablet |
-| tab-lroom | 172.168.0.57 | Samsung tablet |
-| tv-lroom | 172.168.0.56 | 4K Smart TV |
-| dev-01 | 172.168.0.61 | Ubuntu Server (SSH: hadmin) |
-| iPhone | via dev-01 USB | iOS (AltStore sideload) |
+## Deploy Workflow
 
-## Facts (verified)
-- Face count: query `curl -s http://localhost:6333/collections/faces` — NEVER guess
-- Completed datasets: Glint360K, MS1MV3, WebFace4M, VGGFace2
-- iPhone NEVER receives OTA — always native build + sideload
-- App is React Native — NO website. "dashboard" = the RN app
-- smartDeploy auto-triggers builds after merge — NEVER manually trigger
+| Change type | Command |
+|-------------|---------|
+| Android OTA (JS only) | `./scripts/ota-deploy.sh --restart` |
+| Android APK (native) | CI auto-triggers after merge |
+| iOS | `gh workflow run build-ios.yml` → King Kazuma installs via AltStore |
+| Bridge restart | `docker compose restart bridge` (in `/home/gcp/ozzu/backend/`) |
+| Full redeploy | `POST /directives/{id}/merge-and-deploy` via MCP |
+
+smartDeploy auto-triggers after every merge — **NEVER manually trigger builds**.
+
+---
+
+## Decommissioned
+
+| Item | Date | Reason |
+|------|------|--------|
+| ER606 router | 2026-04-05 | Replaced / decomissioned |
+| agrovision container | 2026-04-09 | Feature cancelled |
+| homeassistant container | 2026-04-09 | LAN offline, moving to Spain |
+| Rock Pi 4B (172.168.0.55) | 2026-04-09 | LAN decomissioned, moving to Spain |
+| dev-01 workstation (172.168.0.57) | 2026-04-09 | LAN decomissioned, moving to Spain |
+| ESP32 nodes 1-3 (living/master/office) | 2026-04-09 | Hub (Rock Pi) offline |
+| ESP32 node 4 (rooftop) | 2026-04-09 | Never deployed, project paused |
+| Samsung tablets (tab-roaming, tab-lroom) | 2026-04-09 | LAN offline |
+| Smart TV (tv-lroom) | 2026-04-09 | LAN offline |
+| data/ms1mv2-embeddings (12GB) | 2026-04-09 | Already ingested into Qdrant |
+| data/agrovision (1.8GB) | 2026-04-09 | Agrovision decommissioned |
+| agrovision-app/ repo (476MB) | 2026-04-09 | Agrovision decommissioned |
+
+---
+
+## Key Facts
+
+- **Ozzu is a React Native app — NO website.** "dashboard" = the RN app in `frontend/`
+- **iPhone NEVER receives OTA** — always native build + sideload via AltStore
+- **Face count**: query Qdrant live — NEVER state from memory
+- **Moving to Spain soon** — no persistent LAN. Only always-on devices: iPhone, Android (3226033350), Windows laptop (sometimes)
+- **Disk**: 82% used after 2026-04-09 cleanup (44GB free, 111GB is Qdrant face DB)
+- **git-crypt**: repo uses git-crypt for secrets. `ca.key` (OpenVPN CA) is NOT encrypted — security gap, noted.
