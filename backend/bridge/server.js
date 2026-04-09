@@ -137,6 +137,7 @@ const whatsappRoutes = require("./routes/whatsapp");
 const watchdog = require("./watchdog");
 const recoveryEngine = require("./recovery-engine");
 const cipherDaemon = require("./cipher-agent");
+const kairosService = require("./cipher-daemon");
 const actionQueue = require("./action-queue");
 const proactiveReporter = require("./proactive-reporter");
 
@@ -6651,6 +6652,7 @@ wss.on("connection", (ws, req) => {
     try { require("./infra-monitor").start(); } catch (e) { log.bridge.error("infra-monitor start error:", e.message); }
     recoveryEngine.start({ db, redis, broadcastToAll, sendNotification, watchdog });
     cipherDaemon.start({ db, redis, broadcastToAll, watchdog, recoveryEngine });
+    kairosService.start({ db, redis, broadcastToAll, watchdog, recoveryEngine, sendNotification });
     proactiveReporter.start({ db, redis, broadcastToAll, sendNotification, getDirectives });
     // wa-service proxies to Android agent — no local connection needed on start
     metrics.startFlushTimer();
