@@ -21,7 +21,10 @@
         "NSMicrophoneUsageDescription": "Ozzu needs microphone access for voice communication",
         "NSSpeechRecognitionUsageDescription": "Ozzu uses on-device speech recognition for the Cipher voice pipeline",
         "NSBluetoothAlwaysUsageDescription": "Ozzu uses Bluetooth to pair with room positioning nodes for indoor tracking",
-        "UIBackgroundModes": ["audio", "bluetooth-peripheral"]
+        "UIBackgroundModes": [
+          "audio",
+          "bluetooth-peripheral"
+        ]
       }
     },
     "android": {
@@ -34,7 +37,10 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.ozzu"
     },
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "web": {
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
@@ -64,6 +70,12 @@
       "./plugins/disable-dev-support",
       "./plugins/meta-dat-config",
       "./plugins/mediapipe-config"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "58d714b7-ae20-4412-b3ba-f4f135adf38a"
+      }
+    }
   }
 }
