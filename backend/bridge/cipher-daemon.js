@@ -681,15 +681,27 @@ async function kairosPush(urgent) {
     // Use Person.owner() — the OZ Account model
     const { Person } = require("./person");
     const owner = await Person.owner(_ctx.db);
-    if (!owner || owner.devices.length === 0) {
-      log(`[KAIROS] No devices registered for owner — push skipped`);
-      return;
-    }
+    if (!owner) return;
 
     const titles = { services_down: "⚠️ Service Alert", backup_overdue: "💾 Backup Overdue", stuck_directives: "🔧 Pipeline Alert" };
-    const result = await owner.notify(titles[urgent.type] || "⚡ Ozzu Alert", urgent.message, { type: urgent.type });
-    kairosAuditLog(`PUSH_SENT: ${urgent.type} → ${owner.devices.length} device(s)`);
-    log(`[KAIROS] Push sent: ${urgent.message}`);
+    const title = titles[urgent.type] || "⚡ Ozzu Alert";
+
+    // Try APNs push first — falls back to WhatsApp if no devices registered
+    if (owner.devices.length > 0) {
+      await owner.notify(title, urgent.message, { type: urgent.type });
+      kairosAuditLog(`PUSH_SENT: ${urgent.type} → ${owner.devices.length} device(s)`);
+      log(`[KAIROS] Push sent: ${urgent.message}`);
+    } else {
+      // APNs unavailable (no signed build) — reach via WhatsApp
+      const waChannel = owner.channels.find(c => c.type === "whatsapp");
+      if (waChannel) {
+        await owner.reach(`${title}\n${urgent.message}`, "whatsapp");
+        kairosAuditLog(`WA_SENT: ${urgent.type} → ${waChannel.address}`);
+        log(`[KAIROS] WhatsApp alert sent: ${urgent.message}`);
+      } else {
+        log(`[KAIROS] No delivery channel available for owner`);
+      }
+    }
   } catch (err) {
     log(`[KAIROS] Push failed: ${err.message}`);
     kairosAuditLog(`PUSH_FAILED: ${err.message}`);
