@@ -2117,13 +2117,26 @@ async function handleRequest(req, res) {
       if (!token || !token.startsWith("ExponentPushToken[")) {
         return sendJSON(res, 400, { error: "Invalid Expo push token" });
       }
-      // Upsert into DB
+      // Upsert into legacy device_push_tokens (backwards compat)
       await db.query(
         `INSERT INTO device_push_tokens (token, device_id, platform, device_name, updated_at)
          VALUES ($1, $2, $3, $4, NOW())
          ON CONFLICT (token) DO UPDATE SET device_id=$2, platform=$3, device_name=$4, updated_at=NOW()`,
         [token, deviceId || null, platform || "ios", deviceName || null]
       );
+      // Also link to owner Person — so KAIROS can use Person.owner().notify()
+      try {
+        const { Person } = require("./person");
+        const owner = await Person.owner(db);
+        if (owner) {
+          await db.query(
+            `INSERT INTO person_devices (person_id, platform, push_token, device_name, device_type, last_seen)
+             VALUES ($1, $2, $3, $4, $5, NOW())
+             ON CONFLICT (push_token) DO UPDATE SET last_seen=NOW()`,
+            [owner.id, platform || "ios", token, deviceName || "iPhone", "iphone"]
+          );
+        }
+      } catch (e) { log.bridge.warn(`person_devices link failed: ${e.message}`); }
       log.bridge.info(`Push token registered: ${deviceId || "unknown"} (${platform})`);
       return sendJSON(res, 200, { ok: true });
     } catch (err) {
@@ -6654,6 +6667,8 @@ wss.on("connection", (ws, req) => {
     cipherDaemon.start({ db, redis, broadcastToAll, watchdog, recoveryEngine });
     kairosService.start({ db, redis, broadcastToAll, watchdog, recoveryEngine, sendNotification });
     proactiveReporter.start({ db, redis, broadcastToAll, sendNotification, getDirectives });
+    // Boot Person identity layer — ensure tables + seed owner
+    require("./person").ensureTables(db).catch(e => log.bridge.error("person ensureTables:", e.message));
     // wa-service proxies to Android agent — no local connection needed on start
     metrics.startFlushTimer();
     // Initialize OSINT persistent scheduler + alert broadcast + monitoring

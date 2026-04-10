@@ -661,17 +661,34 @@ function detectUrgent(snapshot) {
   return null;
 }
 
+// Dedup: track last push time per alert type — don't spam same alert every 15 min
+const _lastPushAt = {};
+const PUSH_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours per alert type
+
 async function kairosPush(urgent) {
   try {
     if (!_ctx?.db) return;
-    const { sendPush } = require("./push-notifications");
-    const result = await _ctx.db.query("SELECT token FROM device_push_tokens WHERE platform = 'ios' ORDER BY updated_at DESC LIMIT 5");
-    const tokens = result.rows.map(r => r.token);
-    if (tokens.length === 0) return;
+
+    // Cooldown check — don't re-push the same alert type within 4h
+    const now = Date.now();
+    const lastPush = _lastPushAt[urgent.type] || 0;
+    if (now - lastPush < PUSH_COOLDOWN_MS) {
+      log(`[KAIROS] Push suppressed (cooldown): ${urgent.type}`);
+      return;
+    }
+    _lastPushAt[urgent.type] = now;
+
+    // Use Person.owner() — the OZ Account model
+    const { Person } = require("./person");
+    const owner = await Person.owner(_ctx.db);
+    if (!owner || owner.devices.length === 0) {
+      log(`[KAIROS] No devices registered for owner — push skipped`);
+      return;
+    }
 
     const titles = { services_down: "⚠️ Service Alert", backup_overdue: "💾 Backup Overdue", stuck_directives: "🔧 Pipeline Alert" };
-    await sendPush(tokens, { title: titles[urgent.type] || "⚡ Ozzu Alert", body: urgent.message, data: { type: urgent.type } });
-    kairosAuditLog(`PUSH_SENT: ${urgent.type} → ${tokens.length} device(s)`);
+    const result = await owner.notify(titles[urgent.type] || "⚡ Ozzu Alert", urgent.message, { type: urgent.type });
+    kairosAuditLog(`PUSH_SENT: ${urgent.type} → ${owner.devices.length} device(s)`);
     log(`[KAIROS] Push sent: ${urgent.message}`);
   } catch (err) {
     log(`[KAIROS] Push failed: ${err.message}`);

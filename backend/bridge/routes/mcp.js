@@ -269,6 +269,52 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "list_persons",
+      description: "List all known persons in Ozzu — their name, relationship, channels (WhatsApp, email, push), devices, and linked faces.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "get_person",
+      description: "Get a specific person by name or ID. If no args given, returns King Kazuma (the owner).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Person name or nickname (partial match)" },
+          id: { type: "string", description: "Person UUID" },
+        },
+      },
+    },
+    {
+      name: "reach_person",
+      description: "Send a message to a person through their primary channel (WhatsApp, email, or push). Cipher uses this instead of raw send_whatsapp/send_email when talking to known contacts.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Person name (partial match)" },
+          id: { type: "string", description: "Person UUID" },
+          message: { type: "string", description: "Message to send" },
+          via: { type: "string", enum: ["whatsapp", "email", "push"], description: "Force a specific channel (optional — defaults to primary)" },
+        },
+        required: ["message"],
+      },
+    },
+    {
+      name: "create_person",
+      description: "Register a new person in Ozzu with their contact channels.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Full name" },
+          nickname: { type: "string", description: "Nickname or alias" },
+          relationship: { type: "string", enum: ["trusted", "contact", "recognized", "unknown"], description: "Relationship to King Kazuma" },
+          whatsapp: { type: "string", description: "WhatsApp phone number (digits only, with country code)" },
+          email: { type: "string", description: "Email address" },
+          notes: { type: "string", description: "Any notes about this person" },
+        },
+        required: ["name"],
+      },
+    },
+    {
       name: "gpu_destroy",
       description: "Destroy/terminate a Vast.ai GPU instance to stop billing.",
       inputSchema: {
@@ -938,6 +984,66 @@ module.exports = function mcpRoutes(ctx) {
           const stderr = e.stderr ? e.stderr.toString() : "";
           return { content: [{ type: "text", text: `SSH exec failed: ${e.message}\n${stderr}`.trim() }], isError: true };
         }
+      }
+
+      // ── Person / Identity tools ──────────────────────────────────────────────
+
+      case "list_persons": {
+        const { Person } = require("../person");
+        const persons = await Person.findAll(ctx.db);
+        if (persons.length === 0) return { content: [{ type: "text", text: "No persons registered yet." }] };
+        const lines = persons.map(p => {
+          const s = p.toSummary();
+          const channels = s.channels.join(", ") || "no channels";
+          return `• ${s.name}${s.nickname ? ` (${s.nickname})` : ""} [${s.relationship}] — ${channels} — ${s.devices} device(s), ${s.faces} face(s)`;
+        });
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      }
+
+      case "get_person": {
+        const { Person } = require("../person");
+        const p = args.name
+          ? await Person.findByName(ctx.db, args.name)
+          : args.id ? await Person.find(ctx.db, args.id) : await Person.owner(ctx.db);
+        if (!p) return { content: [{ type: "text", text: `Person not found: ${args.name || args.id}` }], isError: true };
+        const s = p.toSummary();
+        const lines = [
+          `**${s.name}**${s.nickname ? ` — "${s.nickname}"` : ""}`,
+          `Relationship: ${s.relationship}`,
+          `Channels: ${s.channels.join(", ") || "none"}`,
+          `Devices: ${s.devices}`,
+          `Faces linked: ${s.faces}`,
+          p.notes ? `Notes: ${p.notes}` : null,
+        ].filter(Boolean);
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      }
+
+      case "reach_person": {
+        const { Person } = require("../person");
+        const p = args.name
+          ? await Person.findByName(ctx.db, args.name)
+          : args.id ? await Person.find(ctx.db, args.id) : null;
+        if (!p) return { content: [{ type: "text", text: `Person not found: ${args.name || args.id}` }], isError: true };
+        if (!args.message) return { content: [{ type: "text", text: "message is required" }], isError: true };
+        await p.reach(args.message, args.via || null);
+        const channel = args.via || (p.channels.find(c => c.is_primary) || p.channels[0])?.type || "unknown";
+        return { content: [{ type: "text", text: `✓ Reached ${p.name} via ${channel}: "${args.message}"` }] };
+      }
+
+      case "create_person": {
+        const { Person } = require("../person");
+        if (!args.name) return { content: [{ type: "text", text: "name is required" }], isError: true };
+        const channels = [];
+        if (args.whatsapp) channels.push({ type: "whatsapp", address: args.whatsapp.replace(/\D/g, ""), is_primary: true });
+        if (args.email) channels.push({ type: "email", address: args.email, is_primary: !args.whatsapp });
+        const p = await Person.create(ctx.db, {
+          name: args.name,
+          nickname: args.nickname,
+          relationship: args.relationship || "contact",
+          notes: args.notes,
+          channels,
+        });
+        return { content: [{ type: "text", text: `✓ Created person: ${p.name} (${p.id})\nChannels: ${p.channels.map(c => `${c.type}:${c.address}`).join(", ") || "none"}` }] };
       }
 
       default:
