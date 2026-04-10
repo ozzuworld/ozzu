@@ -26,6 +26,7 @@
     "expo-linking": "~8.0.11",
     "expo-local-authentication": "~17.0.8",
     "expo-mediapipe": "file:./modules/expo-mediapipe",
+    "expo-notifications": "~0.32.16",
     "expo-router": "~6.0.23",
     "expo-sharing": "~14.0.8",
     "expo-speech": "~14.0.8",

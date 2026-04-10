@@ -69,7 +69,16 @@
       "./plugins/enable-updates",
       "./plugins/disable-dev-support",
       "./plugins/meta-dat-config",
-      "./plugins/mediapipe-config"
+      "./plugins/mediapipe-config",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#111111",
+          "sounds": [],
+          "mode": "production"
+        }
+      ]
     ],
     "extra": {
       "router": {},
