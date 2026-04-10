@@ -2189,7 +2189,7 @@ export async function deleteFile(fileId: number): Promise<{ ok: boolean }> {
   return res.json();
 }
 
-export async function bridgeShare(data: string, filename?: string): Promise<{
+export async function bridgeShare(data: string, filename?: string, mimeType?: string): Promise<{
   ok: boolean;
   shareUrl: string;
   fileId: number;
@@ -2198,7 +2198,7 @@ export async function bridgeShare(data: string, filename?: string): Promise<{
   const res = await fetchWithTimeout(`${BRIDGE_URL}/files/bridge-share`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ data, filename }),
+    body: JSON.stringify({ data, filename, mime_type: mimeType }),
   });
   if (!res.ok) throw new Error(`Bridge share error: ${res.status}`);
   return res.json();

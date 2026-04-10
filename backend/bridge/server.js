@@ -1347,9 +1347,10 @@ function expireApprovals(approvals) {
 // ── Request parsing ──
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1MB default
-const MAX_IMAGE_BODY_SIZE = 20 * 1024 * 1024; // 20MB for image uploads
+const MAX_IMAGE_BODY_SIZE = 20 * 1024 * 1024; // 20MB for image/file uploads
 function parseBody(req, maxSize) {
-  const limit = maxSize || (req.url && req.url.includes("/images/upload") ? MAX_IMAGE_BODY_SIZE : MAX_BODY_SIZE);
+  const isLargeUpload = req.url && (req.url.includes("/images/upload") || req.url.startsWith("/files"));
+  const limit = maxSize || (isLargeUpload ? MAX_IMAGE_BODY_SIZE : MAX_BODY_SIZE);
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (chunk) => {

@@ -153,11 +153,12 @@ module.exports = function createFileRoutes(ctx) {
     if (req.method === "POST" && pathname === "/files/bridge-share") {
       try {
         const body = await parseBody(req);
-        const { data, filename } = body;
+        const { data, filename, mime_type } = body;
         if (!data) return sendJSON(res, 400, { error: "Missing data (base64)" });
 
         const token = crypto.randomBytes(8).toString("hex");
-        const fname = filename || `share_${Date.now()}.jpg`;
+        const fname = filename || `share_${Date.now()}.bin`;
+        const mime = mime_type || "application/octet-stream";
         const savePath = path.join(TEMP_DIR, `${token}_${fname}`);
         const buf = Buffer.from(data, "base64");
         fs.writeFileSync(savePath, buf);
@@ -167,7 +168,7 @@ module.exports = function createFileRoutes(ctx) {
         const result = await db.query(
           `INSERT INTO files (filename, mime_type, size_bytes, source, category, storage_path, is_temp, expires_at)
            VALUES ($1, $2, $3, 'bridge', 'temp', $4, true, $5) RETURNING id`,
-          [fname, "image/jpeg", buf.length, savePath, expiresAt]
+          [fname, mime, buf.length, savePath, expiresAt]
         );
 
         const shareUrl = `/files/${result.rows[0].id}/data`;
