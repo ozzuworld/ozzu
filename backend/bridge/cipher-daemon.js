@@ -578,11 +578,70 @@ function isHumanSessionActive() {
   return false;
 }
 
+// Track WA restart attempts to avoid infinite loops
+let _waRestartAttempts = 0;
+const WA_RESTART_COOLDOWN_MS = 30 * 60 * 1000; // 30 min between restart attempts
+let _lastWaRestartAt = 0;
+
+async function restartWaAgent() {
+  const { execSync } = require("child_process");
+  try {
+    // Kill existing process
+    execSync("ssh -p 8023 -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes localhost 'pkill -f \"node index.js\" 2>/dev/null; true'", { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 2000));
+    // Restart agent
+    execSync("ssh -p 8023 -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes localhost 'cd ~/wa-agent && node index.js > ~/wa-agent.log 2>&1 &'", { timeout: 8000 });
+    // Wait for it to connect
+    await new Promise(r => setTimeout(r, 8000));
+    // Check if ready
+    const http = require("http");
+    const status = await new Promise((resolve) => {
+      const req = http.request({ hostname: "localhost", port: 8766, path: "/status", method: "GET", timeout: 5000 },
+        (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } }); });
+      req.on("error", () => resolve(null));
+      req.on("timeout", () => { req.destroy(); resolve(null); });
+      req.end();
+    });
+    return status?.ready === true;
+  } catch (err) {
+    log(`[KAIROS] WA restart SSH error: ${err.message}`);
+    return false;
+  }
+}
+
 async function kairosTick() {
   if (_kairosRunning || !_ctx) return;
   _kairosRunning = true;
   try {
     const snapshot = await buildKairosSnapshot();
+
+    // Auto-fix WA agent if disconnected — silently before checking other urgents
+    const waDisconnected = snapshot.issues.find(i => i.type === "wa_disconnected");
+    if (waDisconnected) {
+      const now = Date.now();
+      if (now - _lastWaRestartAt > WA_RESTART_COOLDOWN_MS) {
+        _lastWaRestartAt = now;
+        _waRestartAttempts++;
+        log(`[KAIROS] WA agent disconnected — attempting restart (attempt ${_waRestartAttempts})`);
+        kairosAuditLog(`WA_RESTART_ATTEMPT: #${_waRestartAttempts}`);
+        const recovered = await restartWaAgent();
+        if (recovered) {
+          log(`[KAIROS] WA agent recovered successfully`);
+          kairosAuditLog(`WA_RESTART_SUCCESS`);
+          _waRestartAttempts = 0;
+          // Remove wa_disconnected from issues since it's fixed
+          snapshot.issues.splice(snapshot.issues.indexOf(waDisconnected), 1);
+        } else {
+          log(`[KAIROS] WA agent restart failed`);
+          kairosAuditLog(`WA_RESTART_FAILED`);
+          // Alert King Kazuma directly via bridge HTTP (WA is down so we log only)
+          snapshot.issues.push({ type: "wa_failed", attempts: _waRestartAttempts });
+        }
+      }
+    } else {
+      _waRestartAttempts = 0; // reset counter when WA is healthy
+    }
+
     const urgent = detectUrgent(snapshot);
     if (!urgent) return;
 
@@ -631,6 +690,19 @@ async function buildKairosSnapshot() {
     if (down.length > 0) issues.push({ type: "services_down", services: down });
   } catch {}
 
+  // Check WA agent connectivity
+  try {
+    const http = require("http");
+    const waStatus = await new Promise((resolve) => {
+      const req = http.request({ hostname: "localhost", port: 8766, path: "/status", method: "GET", timeout: 3000 },
+        (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } }); });
+      req.on("error", () => resolve(null));
+      req.on("timeout", () => { req.destroy(); resolve(null); });
+      req.end();
+    });
+    if (!waStatus?.ready) issues.push({ type: "wa_disconnected" });
+  } catch {}
+
   // Check backup age
   try {
     const fs = require("fs");
@@ -658,6 +730,9 @@ function detectUrgent(snapshot) {
   const stuck = snapshot.issues.find(i => i.type === "stuck_directives");
   if (stuck) return { type: "stuck_directives", severity: "medium", message: `${stuck.count} directive(s) stuck: ${(stuck.items || []).join(", ")}` };
 
+  const waFailed = snapshot.issues.find(i => i.type === "wa_failed");
+  if (waFailed) return { type: "wa_failed", severity: "high", message: `WhatsApp agent down after ${waFailed.attempts} restart attempt(s) — manual intervention needed` };
+
   return null;
 }
 
@@ -683,7 +758,7 @@ async function kairosPush(urgent) {
     const owner = await Person.owner(_ctx.db);
     if (!owner) return;
 
-    const titles = { services_down: "⚠️ Service Alert", backup_overdue: "💾 Backup Overdue", stuck_directives: "🔧 Pipeline Alert" };
+    const titles = { services_down: "⚠️ Service Alert", backup_overdue: "💾 Backup Overdue", stuck_directives: "🔧 Pipeline Alert", wa_failed: "📵 WhatsApp Down" };
     const title = titles[urgent.type] || "⚡ Ozzu Alert";
 
     // Try APNs push first — falls back to WhatsApp if no devices registered
