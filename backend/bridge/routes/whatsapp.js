@@ -128,52 +128,84 @@ module.exports = function whatsappRoutes(ctx) {
       return true;
     }
 
-    // POST /whatsapp/incoming — Android WA agent calls this on every incoming message
-    // Persists to DB + sends push notification
+    // POST /whatsapp/incoming — Android WA agent calls this on every message (in or out)
+    // Persists to DB + sends push notification for incoming
     if (req.method === "POST" && pathname === "/whatsapp/incoming") {
       const body = await parseBody(req);
-      const { from, text, ts, id: waId } = body;
+      const { from, text, ts, id: waId, direction: dir } = body;
       if (!from) { sendJSON(res, 400, { error: "from required" }); return true; }
 
-      const phone = from.replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/\D/g, "");
+      const phone = String(from).replace(/\D/g, "");
       const msgText = text || "";
+      const direction = dir === "out" ? "out" : "in";
 
-      // Persist to DB — use wa_id for dedup so duplicate pushes don't create duplicate rows
       try {
         await getTable(db);
         if (waId) {
           await db.query(
-            "INSERT INTO whatsapp_messages (phone, direction, text, wa_id, received_at) VALUES ($1, 'in', $2, $3, $4) ON CONFLICT (wa_id) DO NOTHING",
-            [phone, msgText, waId, ts ? new Date(ts) : new Date()]
+            "INSERT INTO whatsapp_messages (phone, direction, text, wa_id, received_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (wa_id) DO NOTHING",
+            [phone, direction, msgText, waId, ts ? new Date(ts) : new Date()]
           );
         } else {
           await db.query(
-            "INSERT INTO whatsapp_messages (phone, direction, text, received_at) VALUES ($1, 'in', $2, $3)",
-            [phone, msgText, ts ? new Date(ts) : new Date()]
+            "INSERT INTO whatsapp_messages (phone, direction, text, received_at) VALUES ($1, $2, $3, $4)",
+            [phone, direction, msgText, ts ? new Date(ts) : new Date()]
           );
         }
-      } catch (err) {
-        // DB failure is non-fatal — still send push
-      }
+      } catch (err) {}
 
-      // Push notification
-      try {
-        const { sendPush } = require("../push-notifications");
-        const result = await db.query("SELECT token FROM device_push_tokens WHERE platform = 'ios' ORDER BY updated_at DESC LIMIT 5");
-        const tokens = result.rows.map(r => r.token);
-        if (tokens.length > 0) {
-          const preview = msgText.length > 80 ? msgText.slice(0, 80) + "…" : msgText || "(media)";
-          await sendPush(tokens, {
-            title: `📲 WhatsApp — +${phone}`,
-            body: preview,
-            data: { type: "whatsapp_incoming", phone, text: msgText },
-          });
-        }
-      } catch (err) {
-        // Push failure is non-fatal
+      // Push only for incoming
+      if (direction === "in") {
+        try {
+          const { sendPush } = require("../push-notifications");
+          const result = await db.query("SELECT token FROM device_push_tokens WHERE platform = 'ios' ORDER BY updated_at DESC LIMIT 5");
+          const tokens = result.rows.map(r => r.token);
+          if (tokens.length > 0) {
+            const preview = msgText.length > 80 ? msgText.slice(0, 80) + "…" : msgText || "(media)";
+            await sendPush(tokens, {
+              title: `📲 WhatsApp — +${phone}`,
+              body: preview,
+              data: { type: "whatsapp_incoming", phone, text: msgText },
+            });
+          }
+        } catch (err) {}
       }
 
       sendJSON(res, 200, { ok: true });
+      return true;
+    }
+
+    // POST /whatsapp/history — bulk insert from history sync (syncFullHistory)
+    if (req.method === "POST" && pathname === "/whatsapp/history") {
+      const body = await parseBody(req);
+      const { messages: msgs } = body;
+      if (!Array.isArray(msgs)) { sendJSON(res, 400, { error: "messages array required" }); return true; }
+      await getTable(db);
+      let saved = 0;
+      for (const m of msgs) {
+        const phone = String(m.phone || "").replace(/\D/g, "");
+        const direction = m.direction === "out" ? "out" : "in";
+        const text = m.text || "";
+        const waId = m.id || null;
+        const ts = m.ts ? new Date(m.ts) : new Date();
+        try {
+          if (waId) {
+            const r = await db.query(
+              "INSERT INTO whatsapp_messages (phone, direction, text, wa_id, received_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (wa_id) DO NOTHING",
+              [phone, direction, text, waId, ts]
+            );
+            if (r.rowCount > 0) saved++;
+          } else {
+            await db.query(
+              "INSERT INTO whatsapp_messages (phone, direction, text, received_at) VALUES ($1, $2, $3, $4)",
+              [phone, direction, text, ts]
+            );
+            saved++;
+          }
+        } catch (err) {}
+      }
+      console.log(`[whatsapp/history] Saved ${saved}/${msgs.length} messages`);
+      sendJSON(res, 200, { ok: true, saved, total: msgs.length });
       return true;
     }
 

@@ -18,8 +18,7 @@ let isReady = false;
 const pendingMessages = [];
 const pausedContacts = new Set();
 
-// LID → phone number mapping (WhatsApp privacy feature)
-// Populated from contacts.upsert events; persisted to disk so it survives restarts
+// LID → phone number mapping
 const LID_MAP_FILE = path.join(HOME, 'wa-lid-map.json');
 const lidToPhone = (() => {
   try { return JSON.parse(fs.readFileSync(LID_MAP_FILE, 'utf8')); } catch { return {}; }
@@ -29,37 +28,37 @@ function saveLidMap() {
   try { fs.writeFileSync(LID_MAP_FILE, JSON.stringify(lidToPhone)); } catch {}
 }
 
-// Resolve a JID to a clean phone number string.
-// @lid JIDs: look up in lidToPhone map. Falls back to numeric prefix of JID.
+// Resolve a JID to a clean phone number string
 function resolveJid(jid) {
   if (!jid) return null;
   if (jid.endsWith('@lid')) {
-    const lid = jid.replace('@lid', '');
-    if (lidToPhone[lid]) return lidToPhone[lid];
-    // Can't resolve — return null so we skip unknown senders
-    return null;
+    const lid = jid.replace('@lid', '').split(':')[0];
+    return lidToPhone[lid] || null;
   }
-  // Standard JID: 573226033350@s.whatsapp.net or 573226033350:3@s.whatsapp.net
+  // group chats — skip
+  if (jid.endsWith('@g.us')) return null;
+  // status broadcasts — skip
+  if (jid === 'status@broadcast') return null;
   const num = jid.split('@')[0].split(':')[0].replace(/\D/g, '');
   return num || null;
 }
 
 const PHONE_NUMBER = '573226033350';
 
-function notifyBridge(from, text, id) {
+function postToBridge(path, payload) {
   try {
-    const payload = JSON.stringify({ from, text, ts: Date.now(), id });
+    const body = JSON.stringify(payload);
     const req = http.request({
-      hostname: BRIDGE_HOST,
-      port: BRIDGE_PORT,
-      path: '/whatsapp/incoming',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+      hostname: BRIDGE_HOST, port: BRIDGE_PORT, path, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
     });
     req.on('error', () => {});
-    req.write(payload);
-    req.end();
+    req.write(body); req.end();
   } catch(e) {}
+}
+
+function notifyBridge(phone, text, id, direction) {
+  postToBridge('/whatsapp/incoming', { from: phone, text, ts: Date.now(), id, direction });
 }
 
 async function startWA() {
@@ -80,40 +79,52 @@ async function startWA() {
     auth: state,
     version,
     browser: baileys.Browsers ? baileys.Browsers.ubuntu('Chrome') : ['Ubuntu', 'Chrome', '22.04.4'],
-    syncFullHistory: false,
+    syncFullHistory: true,  // pull up to 90 days on first connect
   });
 
   sock.ev.on('creds.update', saveCreds);
 
   // Build LID→phone map from contact updates
-  sock.ev.on('contacts.upsert', (contacts) => {
+  const handleContacts = (contacts) => {
     let changed = false;
     for (const c of contacts) {
       if (c.lid && c.id) {
         const lid = c.lid.replace('@lid', '').split(':')[0];
         const phone = c.id.split('@')[0].split(':')[0].replace(/\D/g, '');
         if (phone && lid && lidToPhone[lid] !== phone) {
-          lidToPhone[lid] = phone;
-          changed = true;
+          lidToPhone[lid] = phone; changed = true;
         }
       }
     }
     if (changed) saveLidMap();
-  });
+  };
+  sock.ev.on('contacts.upsert', handleContacts);
+  sock.ev.on('contacts.update', handleContacts);
 
-  sock.ev.on('contacts.update', (updates) => {
-    let changed = false;
-    for (const c of updates) {
-      if (c.lid && c.id) {
-        const lid = c.lid.replace('@lid', '').split(':')[0];
-        const phone = c.id.split('@')[0].split(':')[0].replace(/\D/g, '');
-        if (phone && lid && lidToPhone[lid] !== phone) {
-          lidToPhone[lid] = phone;
-          changed = true;
-        }
-      }
+  // History sync — fires when WhatsApp pushes chat history on first link
+  sock.ev.on('messaging-history.set', ({ messages: histMsgs, contacts, chats, isLatest }) => {
+    console.log(`[history-sync] ${histMsgs.length} messages, ${contacts?.length || 0} contacts, isLatest=${isLatest}`);
+
+    // Update LID map from contacts in history
+    if (contacts) handleContacts(contacts);
+
+    // Bulk-save history to bridge
+    const batch = [];
+    for (const msg of histMsgs) {
+      if (!msg.message) continue;
+      const rawJid = msg.key.remoteJid;
+      const phone = resolveJid(rawJid);
+      if (!phone) continue;
+      const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+      const direction = msg.key.fromMe ? 'out' : 'in';
+      const ts = msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now();
+      batch.push({ phone, text, direction, ts, id: msg.key.id });
     }
-    if (changed) saveLidMap();
+
+    if (batch.length > 0) {
+      console.log(`[history-sync] Sending ${batch.length} messages to bridge`);
+      postToBridge('/whatsapp/history', { messages: batch });
+    }
   });
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
@@ -145,19 +156,21 @@ async function startWA() {
     }
   });
 
+  // All messages — incoming AND outgoing (fromMe)
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
-      if (!msg.message || msg.key.fromMe) continue;
+      if (!msg.message) continue;
       const rawJid = msg.key.remoteJid;
       const phone = resolveJid(rawJid);
       const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-      console.log('MSG from', rawJid, phone ? `(${phone})` : '(unresolved lid)', ':', text);
+      const direction = msg.key.fromMe ? 'out' : 'in';
+      console.log(`MSG [${direction}] ${rawJid}${phone ? ` (${phone})` : ' (unresolved)'}: ${text}`);
       if (!phone) {
-        console.log('LID unresolved — skipping bridge notify. LID map size:', Object.keys(lidToPhone).length);
+        console.log('LID unresolved — map size:', Object.keys(lidToPhone).length);
         continue;
       }
-      pendingMessages.push({ from: phone, text, ts: Date.now(), id: msg.key.id });
-      notifyBridge(phone, text, msg.key.id);
+      pendingMessages.push({ from: phone, text, ts: Date.now(), id: msg.key.id, direction });
+      notifyBridge(phone, text, msg.key.id, direction);
     }
   });
 }
@@ -174,22 +187,6 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/lid-map')
     return send(200, lidToPhone);
-
-  // Manual LID seeding: POST /lid-add { lid: "271145597153466", phone: "573187290206" }
-  if (req.method === 'POST' && url.pathname === '/lid-add') {
-    let body = '';
-    req.on('data', d => body += d);
-    req.on('end', () => {
-      try {
-        const { lid, phone } = JSON.parse(body);
-        if (!lid || !phone) return send(400, { error: 'lid and phone required' });
-        lidToPhone[lid.replace('@lid', '').split(':')[0]] = phone.replace(/\D/g, '');
-        saveLidMap();
-        return send(200, { ok: true, map: lidToPhone });
-      } catch(e) { send(500, { error: e.message }); }
-    });
-    return;
-  }
 
   if (req.method === 'GET' && url.pathname.startsWith('/messages/')) {
     const phone = url.pathname.split('/')[2];
@@ -216,6 +213,14 @@ const server = http.createServer((req, res) => {
         if (url.pathname === '/resume') {
           const jid = data.phone.includes('@') ? data.phone : `${data.phone}@s.whatsapp.net`;
           pausedContacts.delete(jid); return send(200, { resumed: true });
+        }
+        // Manual LID seeding
+        if (url.pathname === '/lid-add') {
+          const { lid, phone } = data;
+          if (!lid || !phone) return send(400, { error: 'lid and phone required' });
+          lidToPhone[lid.replace('@lid', '').split(':')[0]] = phone.replace(/\D/g, '');
+          saveLidMap();
+          return send(200, { ok: true, map: lidToPhone });
         }
       } catch(e) { send(500, { error: e.message }); }
     });
