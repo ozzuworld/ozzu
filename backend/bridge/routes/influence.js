@@ -6,6 +6,7 @@
 "use strict";
 
 const { encrypt, decrypt, createDolphinProfile, listDolphinProfiles, deleteDolphinProfile, getCapSolverBalance, loadEnv } = require("../influence");
+const { executePost, loginGoogleSSO } = require("../influence/posting-engine");
 
 const PLATFORMS = ["x", "instagram", "tiktok", "youtube", "linkedin", "reddit", "facebook"];
 
@@ -13,6 +14,119 @@ module.exports = function influenceRoutes(ctx) {
   const { sendJSON, parseBody, db } = ctx;
 
   return async function handleInfluenceRoutes(req, res, pathname, url) {
+
+    // ── Members (one per real person) ──
+
+    // GET /api/influence/members
+    if (req.method === "GET" && pathname === "/api/influence/members") {
+      if (!db) { sendJSON(res, 503, { ok: false, error: "DB unavailable" }); return true; }
+      try {
+        const r = await db.query(`
+          SELECT m.*,
+            COALESCE(json_agg(json_build_object('id', a.id, 'platform', a.platform, 'username', a.username, 'status', a.status))
+              FILTER (WHERE a.id IS NOT NULL), '[]') as accounts
+          FROM influence_members m
+          LEFT JOIN influence_accounts a ON a.member_id = m.id
+          GROUP BY m.id ORDER BY m.created_at DESC
+        `);
+        sendJSON(res, 200, { ok: true, members: r.rows });
+        return true;
+      } catch (err) {
+        sendJSON(res, 500, { ok: false, error: err.message });
+        return true;
+      }
+    }
+
+    // POST /api/influence/members — add a friend/family member
+    if (req.method === "POST" && pathname === "/api/influence/members") {
+      if (!db) { sendJSON(res, 503, { ok: false, error: "DB unavailable" }); return true; }
+      const body = await parseBody(req);
+      const { name, googleEmail, googlePassword, proxyPort } = body;
+
+      if (!name || !googleEmail) {
+        sendJSON(res, 400, { ok: false, error: "name and googleEmail required" });
+        return true;
+      }
+
+      try {
+        const port = proxyPort || (10001 + Math.floor(Math.random() * 500));
+        const encPw = googlePassword ? encrypt(googlePassword) : null;
+
+        // Create one Dolphin profile for this person
+        let dolphinProfileId = null;
+        try {
+          const dolphinResult = await createDolphinProfile(`member-${name.toLowerCase().replace(/\s+/g, "-")}`, port);
+          dolphinProfileId = String(dolphinResult.browserProfileId || dolphinResult.id || "");
+        } catch (err) {
+          console.error("[influence] Dolphin profile creation failed:", err.message);
+        }
+
+        const r = await db.query(`
+          INSERT INTO influence_members (name, google_email, encrypted_google_pw, dolphin_profile_id, proxy_port)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id, name, google_email, dolphin_profile_id, proxy_port, status, created_at
+        `, [name, googleEmail, encPw, dolphinProfileId, port]);
+
+        sendJSON(res, 201, { ok: true, member: r.rows[0] });
+        return true;
+      } catch (err) {
+        if (err.code === "23505") {
+          sendJSON(res, 409, { ok: false, error: "Member with this Google email already exists" });
+        } else {
+          sendJSON(res, 500, { ok: false, error: err.message });
+        }
+        return true;
+      }
+    }
+
+    // POST /api/influence/members/:id/login-google — SSO login for this member
+    if (req.method === "POST" && pathname.match(/^\/api\/influence\/members\/\d+\/login-google$/)) {
+      if (!db) { sendJSON(res, 503, { ok: false, error: "DB unavailable" }); return true; }
+      const id = pathname.split("/")[4];
+      try {
+        const r = await db.query(`SELECT * FROM influence_members WHERE id = $1`, [id]);
+        if (r.rows.length === 0) { sendJSON(res, 404, { ok: false, error: "Member not found" }); return true; }
+        const member = r.rows[0];
+
+        if (!member.encrypted_google_pw) {
+          sendJSON(res, 400, { ok: false, error: "No Google password stored for this member" });
+          return true;
+        }
+
+        const password = decrypt(member.encrypted_google_pw);
+        const result = await loginGoogleSSO(member.proxy_port, member.google_email, password);
+
+        if (result.success) {
+          await db.query(`UPDATE influence_members SET status = 'logged_in' WHERE id = $1`, [id]);
+        }
+
+        sendJSON(res, 200, { ok: true, result });
+        return true;
+      } catch (err) {
+        sendJSON(res, 500, { ok: false, error: err.message });
+        return true;
+      }
+    }
+
+    // DELETE /api/influence/members/:id
+    if (req.method === "DELETE" && pathname.match(/^\/api\/influence\/members\/\d+$/)) {
+      if (!db) { sendJSON(res, 503, { ok: false, error: "DB unavailable" }); return true; }
+      const id = pathname.split("/").pop();
+      try {
+        const r = await db.query(`SELECT dolphin_profile_id FROM influence_members WHERE id = $1`, [id]);
+        if (r.rows.length === 0) { sendJSON(res, 404, { ok: false, error: "Not found" }); return true; }
+        if (r.rows[0].dolphin_profile_id) {
+          try { await deleteDolphinProfile(r.rows[0].dolphin_profile_id); } catch {}
+        }
+        await db.query(`DELETE FROM influence_accounts WHERE member_id = $1`, [id]);
+        await db.query(`DELETE FROM influence_members WHERE id = $1`, [id]);
+        sendJSON(res, 200, { ok: true });
+        return true;
+      } catch (err) {
+        sendJSON(res, 500, { ok: false, error: err.message });
+        return true;
+      }
+    }
 
     // ── Accounts ──
 
@@ -185,6 +299,76 @@ module.exports = function influenceRoutes(ctx) {
         await db.query(`DELETE FROM influence_post_accounts WHERE post_id = $1`, [id]);
         await db.query(`DELETE FROM influence_posts WHERE id = $1`, [id]);
         sendJSON(res, 200, { ok: true });
+        return true;
+      } catch (err) {
+        sendJSON(res, 500, { ok: false, error: err.message });
+        return true;
+      }
+    }
+
+    // POST /api/influence/posts/:id/execute — run the post now on all target accounts
+    if (req.method === "POST" && pathname.match(/^\/api\/influence\/posts\/\d+\/execute$/)) {
+      if (!db) { sendJSON(res, 503, { ok: false, error: "DB unavailable" }); return true; }
+      const postId = pathname.split("/")[4];
+      try {
+        const postR = await db.query(`SELECT * FROM influence_posts WHERE id = $1`, [postId]);
+        if (postR.rows.length === 0) { sendJSON(res, 404, { ok: false, error: "Post not found" }); return true; }
+        const post = postR.rows[0];
+
+        const targetsR = await db.query(`
+          SELECT pa.*, a.platform, a.username, a.proxy_port, a.member_id
+          FROM influence_post_accounts pa
+          JOIN influence_accounts a ON a.id = pa.account_id
+          WHERE pa.post_id = $1 AND pa.status = 'pending'
+        `, [postId]);
+
+        if (targetsR.rows.length === 0) {
+          sendJSON(res, 400, { ok: false, error: "No pending accounts to post to" });
+          return true;
+        }
+
+        // Execute posts sequentially with delays between them
+        const results = [];
+        for (const target of targetsR.rows) {
+          try {
+            const result = await executePost(target, {
+              text: post.text_content,
+              mediaUrls: post.media_urls,
+              hashtags: post.hashtags,
+            });
+            results.push({ accountId: target.account_id, ...result });
+
+            // Update post_account status
+            await db.query(`
+              UPDATE influence_post_accounts SET status = $1, posted_at = NOW(), error_message = $2
+              WHERE post_id = $3 AND account_id = $4
+            `, [result.success ? "posted" : "failed", result.error || null, postId, target.account_id]);
+
+            // Update account last_active
+            if (result.success) {
+              await db.query(`UPDATE influence_accounts SET last_active = NOW() WHERE id = $1`, [target.account_id]);
+            }
+
+            // Human-like delay between accounts
+            if (targetsR.rows.indexOf(target) < targetsR.rows.length - 1) {
+              await new Promise((r) => setTimeout(r, 15000 + Math.random() * 30000));
+            }
+          } catch (err) {
+            results.push({ accountId: target.account_id, success: false, error: err.message });
+            await db.query(`
+              UPDATE influence_post_accounts SET status = 'failed', error_message = $1
+              WHERE post_id = $2 AND account_id = $3
+            `, [err.message, postId, target.account_id]);
+          }
+        }
+
+        // Update overall post status
+        const allPosted = results.every((r) => r.success);
+        const anyPosted = results.some((r) => r.success);
+        const newStatus = allPosted ? "posted" : anyPosted ? "partial" : "failed";
+        await db.query(`UPDATE influence_posts SET status = $1 WHERE id = $2`, [newStatus, postId]);
+
+        sendJSON(res, 200, { ok: true, status: newStatus, results });
         return true;
       } catch (err) {
         sendJSON(res, 500, { ok: false, error: err.message });
