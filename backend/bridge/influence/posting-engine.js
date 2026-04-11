@@ -42,6 +42,27 @@ function ensureXvfb() {
   }
 }
 
+// Dolphin Anty local API — runs on user's PC (accessible via VPN)
+const DOLPHIN_LOCAL_API = process.env.DOLPHIN_HOST || "http://10.8.0.2:3001";
+
+async function startDolphinProfile(profileId) {
+  const url = `${DOLPHIN_LOCAL_API}/v1.0/browser_profiles/${profileId}/start?automation=1`;
+  console.log(`[influence] Starting Dolphin profile ${profileId}...`);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Dolphin start failed: ${resp.status} ${await resp.text()}`);
+  const data = await resp.json();
+  if (!data.automation) throw new Error("Dolphin did not return automation data");
+  const wsUrl = `ws://10.8.0.2:${data.automation.port}${data.automation.wsEndpoint}`;
+  console.log(`[influence] Dolphin WS: ${wsUrl}`);
+  return wsUrl;
+}
+
+async function stopDolphinProfile(profileId) {
+  try {
+    await fetch(`${DOLPHIN_LOCAL_API}/v1.0/browser_profiles/${profileId}/stop`);
+  } catch {}
+}
+
 // Human-like delays
 async function delay(min = 500, max = 2000) {
   await new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
@@ -415,27 +436,32 @@ const PLATFORM_POSTERS = {
  * @returns {object} { success, platform, error? }
  */
 async function executePost(account, content) {
-  const proxyPort = account.proxy_port || 10001;
   const platform = account.platform;
   const poster = PLATFORM_POSTERS[platform];
+  const dolphinProfileId = account.dolphin_profile_id;
 
   if (!poster) throw new Error(`No poster for platform: ${platform}`);
 
-  console.log(`[influence] Posting to ${platform}/@${account.username} via port ${proxyPort}`);
+  console.log(`[influence] Posting to ${platform}/@${account.username}`);
 
-  const { browser, page } = await launchBrowser(proxyPort);
+  let browser, page, usedDolphin = false;
+
+  if (dolphinProfileId) {
+    // Use Dolphin Anty on user's PC — has cookies, fingerprint, Google SSO
+    console.log(`[influence] Connecting via Dolphin profile ${dolphinProfileId}`);
+    const wsUrl = await startDolphinProfile(dolphinProfileId);
+    browser = await puppeteer.connect({ browserWSEndpoint: wsUrl, defaultViewport: null });
+    const pages = await browser.pages();
+    page = pages[0] || await browser.newPage();
+    usedDolphin = true;
+  } else {
+    // Fallback: launch fresh browser with proxy (no cookies)
+    const proxyPort = account.proxy_port || 10001;
+    console.log(`[influence] Launching fresh browser via proxy port ${proxyPort}`);
+    ({ browser, page } = await launchBrowser(proxyPort));
+  }
 
   try {
-    // Handle CAPTCHA if it appears during navigation
-    page.on("framenavigated", async (frame) => {
-      try {
-        const url = frame.url();
-        if (url.includes("captcha") || url.includes("challenge")) {
-          console.log(`[influence] CAPTCHA detected on ${platform}, attempting solve...`);
-        }
-      } catch {}
-    });
-
     // Append hashtags to text
     let postText = content.text || "";
     if (content.hashtags && content.hashtags.length > 0) {
@@ -466,7 +492,12 @@ async function executePost(account, content) {
     } catch {}
     return { success: false, platform, error: err.message };
   } finally {
-    await browser.close();
+    if (usedDolphin) {
+      browser.disconnect(); // Don't close — just disconnect from Dolphin
+      await stopDolphinProfile(dolphinProfileId);
+    } else {
+      await browser.close();
+    }
   }
 }
 
