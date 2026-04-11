@@ -151,10 +151,15 @@ module.exports = function influenceRoutes(ctx) {
     if (req.method === "POST" && pathname === "/api/influence/accounts") {
       if (!db) { sendJSON(res, 503, { ok: false, error: "DB unavailable" }); return true; }
       const body = await parseBody(req);
-      const { ownerName, ownerEmail, platform, username, displayName, password, proxyPort } = body;
+      const { ownerName, ownerEmail, platform, username, displayName, password, proxyPort, authType, googleEmail, memberId } = body;
 
-      if (!ownerName || !platform || !username || !password) {
-        sendJSON(res, 400, { ok: false, error: "ownerName, platform, username, password required" });
+      if (!ownerName || !platform || !username) {
+        sendJSON(res, 400, { ok: false, error: "ownerName, platform, username required" });
+        return true;
+      }
+      const effectiveAuthType = authType || (password ? "password" : "google_sso");
+      if (effectiveAuthType === "password" && !password) {
+        sendJSON(res, 400, { ok: false, error: "password required for password auth" });
         return true;
       }
       if (!PLATFORMS.includes(platform)) {
@@ -163,27 +168,33 @@ module.exports = function influenceRoutes(ctx) {
       }
 
       try {
-        // Encrypt the password
-        const encryptedPassword = encrypt(password);
+        const encryptedPassword = password ? encrypt(password) : null;
         const port = proxyPort || (10001 + Math.floor(Math.random() * 500));
 
-        // Create Dolphin Anty profile for this account
+        // For SSO accounts, use the member's Dolphin profile instead of creating a new one
         let dolphinProfileId = null;
-        try {
-          const profileName = `${platform}-${username}`;
-          const dolphinResult = await createDolphinProfile(profileName, port);
-          dolphinProfileId = dolphinResult.browserProfileId || dolphinResult.id || null;
-        } catch (err) {
-          console.error("[influence] Dolphin profile creation failed:", err.message);
-          // Continue — profile can be created later
+        if (memberId) {
+          const memberR = await db.query(`SELECT dolphin_profile_id FROM influence_members WHERE id = $1`, [memberId]);
+          if (memberR.rows.length > 0) dolphinProfileId = memberR.rows[0].dolphin_profile_id;
+        }
+        if (!dolphinProfileId) {
+          try {
+            const profileName = `${platform}-${username}`;
+            const dolphinResult = await createDolphinProfile(profileName, port);
+            dolphinProfileId = dolphinResult.browserProfileId || dolphinResult.id || null;
+          } catch (err) {
+            console.error("[influence] Dolphin profile creation failed:", err.message);
+          }
         }
 
         const r = await db.query(`
           INSERT INTO influence_accounts
-            (owner_name, owner_email, platform, username, display_name, encrypted_password, dolphin_profile_id, proxy_port, status)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
-          RETURNING id, owner_name, platform, username, display_name, dolphin_profile_id, proxy_port, status, created_at
-        `, [ownerName, ownerEmail || null, platform, username, displayName || username, encryptedPassword, dolphinProfileId, port]);
+            (owner_name, owner_email, platform, username, display_name, encrypted_password,
+             auth_type, google_email, member_id, dolphin_profile_id, proxy_port, status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'active')
+          RETURNING id, owner_name, platform, username, display_name, auth_type, dolphin_profile_id, proxy_port, status, created_at
+        `, [ownerName, ownerEmail || null, platform, username, displayName || username, encryptedPassword,
+            effectiveAuthType, googleEmail || null, memberId || null, dolphinProfileId, port]);
 
         sendJSON(res, 201, { ok: true, account: r.rows[0] });
         return true;

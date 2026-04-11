@@ -10,11 +10,37 @@
 
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const { loadEnv, solveCapSolver } = require("./index");
 
 puppeteer.use(StealthPlugin());
+
+// Ensure Xvfb display is running for headful Chrome
+let _xvfbStarted = false;
+function ensureXvfb() {
+  if (_xvfbStarted) return;
+  try {
+    // Check if Xvfb is already running
+    try { execSync("pgrep -f 'Xvfb :99'", { stdio: "ignore" }); } catch {
+      // Start Xvfb
+      const { spawn } = require("child_process");
+      const xvfb = spawn("Xvfb", [":99", "-screen", "0", "1920x1080x24", "-nolisten", "tcp"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      xvfb.unref();
+      // Give it a moment to start
+      execSync("sleep 1");
+    }
+    process.env.DISPLAY = ":99";
+    _xvfbStarted = true;
+    console.log("[influence] Xvfb display :99 ready");
+  } catch (err) {
+    console.error("[influence] Xvfb start failed:", err.message);
+  }
+}
 
 // Human-like delays
 async function delay(min = 500, max = 2000) {
@@ -32,25 +58,32 @@ async function humanType(page, selector, text) {
 
 // Launch browser with Decodo proxy
 async function launchBrowser(proxyPort) {
+  ensureXvfb();
   const env = loadEnv();
+
+  // Use proxy if configured and port > 0, skip for testing
+  const useProxy = proxyPort > 0 && env.DECODO_PROXY_USER;
+  const args = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-blink-features=AutomationControlled",
+    "--window-size=1366,768",
+  ];
+  if (useProxy) args.unshift(`--proxy-server=http://us.decodo.com:${proxyPort}`);
 
   const browser = await puppeteer.launch({
     headless: false, // Real Chrome on Xvfb
-    args: [
-      `--proxy-server=http://us.decodo.com:${proxyPort}`,
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-blink-features=AutomationControlled",
-      "--window-size=1366,768",
-    ],
+    args,
   });
 
   const page = await browser.newPage();
-  await page.authenticate({
-    username: env.DECODO_PROXY_USER,
-    password: env.DECODO_PROXY_PASS,
-  });
+  if (useProxy) {
+    await page.authenticate({
+      username: env.DECODO_PROXY_USER,
+      password: env.DECODO_PROXY_PASS,
+    });
+  }
   await page.setViewport({ width: 1366, height: 768 });
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
@@ -438,8 +471,37 @@ async function executePost(account, content) {
 }
 
 /**
- * Google SSO login — log into Google inside a Dolphin profile
- * Only needs to be done once per member, then cookies persist
+ * Check if a Dolphin profile is logged into Google
+ * Login should happen on user's PC via Dolphin Anty app — Google blocks server-side automated login
+ */
+async function checkGoogleLogin(proxyPort) {
+  const { browser, page } = await launchBrowser(proxyPort);
+  try {
+    await page.goto("https://myaccount.google.com/", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await delay(3000, 5000);
+
+    const loggedIn = await page.evaluate(() => {
+      return !location.href.includes("signin") && !location.href.includes("ServiceLogin");
+    });
+
+    const screenshotPath = `/tmp/ozzu-bridge/uploads/google-check-${Date.now()}.png`;
+    await fs.promises.mkdir(path.dirname(screenshotPath), { recursive: true });
+    await page.screenshot({ path: screenshotPath });
+
+    const email = await page.evaluate(() => {
+      const el = document.querySelector('[data-email]');
+      return el ? el.getAttribute('data-email') : null;
+    });
+
+    return { loggedIn, email, screenshot: screenshotPath };
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Google SSO login — attempt from server (may be blocked by Google bot detection)
+ * Preferred method: login manually via Dolphin Anty on PC, cookies sync automatically
  */
 async function loginGoogleSSO(proxyPort, email, password) {
   const { browser, page } = await launchBrowser(proxyPort);
@@ -460,42 +522,72 @@ async function loginGoogleSSO(proxyPort, email, password) {
     });
     await delay(3000, 5000);
 
-    // Enter password
-    const pwInput = await page.waitForSelector('input[type="password"]', { timeout: 10000 });
-    if (pwInput) {
-      await humanType(page, 'input[type="password"]', password);
-      await delay(500, 1000);
+    // Screenshot after email step to see what Google showed
+    const afterEmailPath = `/tmp/ozzu-bridge/uploads/google-after-email-${Date.now()}.png`;
+    await fs.promises.mkdir(path.dirname(afterEmailPath), { recursive: true });
+    await page.screenshot({ path: afterEmailPath });
 
-      // Click Next
-      await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button"));
-        const next = btns.find((b) => b.textContent.includes("Next") || b.textContent.includes("Siguiente"));
-        if (next) next.click();
-      });
-      await delay(5000, 8000);
+    // Try to find password input — Google may show different flows
+    let pwInput = null;
+    try {
+      pwInput = await page.waitForSelector('input[type="password"]', { timeout: 15000 });
+    } catch {
+      // Password input didn't appear — check what's on screen
+      const pageInfo = await page.evaluate(() => ({
+        url: location.href,
+        text: Array.from(document.querySelectorAll("span, h1, h2, div")).map((e) => e.textContent.trim()).filter((t) => t.length > 3 && t.length < 100).slice(0, 15),
+        inputs: Array.from(document.querySelectorAll("input")).map((i) => ({ type: i.type, name: i.name, id: i.id })),
+      }));
+
+      const diagPath = `/tmp/ozzu-bridge/uploads/google-diag-${Date.now()}.png`;
+      await page.screenshot({ path: diagPath });
+
+      return {
+        success: false,
+        screenshot: diagPath,
+        pageInfo,
+        message: "Password input not found — Google may be showing a challenge or the email was rejected",
+      };
     }
+
+    await humanType(page, 'input[type="password"]', password);
+    await delay(500, 1000);
+
+    // Click Next
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll("button"));
+      const next = btns.find((b) => b.textContent.includes("Next") || b.textContent.includes("Siguiente"));
+      if (next) next.click();
+    });
+    await delay(5000, 8000);
+
+    // Screenshot after password
+    const afterPwPath = `/tmp/ozzu-bridge/uploads/google-after-pw-${Date.now()}.png`;
+    await page.screenshot({ path: afterPwPath });
 
     // Check for 2FA or security challenge
     const currentUrl = page.url();
     if (currentUrl.includes("challenge") || currentUrl.includes("signin/v2")) {
-      const screenshotPath = `/tmp/ozzu-bridge/uploads/google-2fa-${Date.now()}.png`;
-      await fs.promises.mkdir(path.dirname(screenshotPath), { recursive: true });
-      await page.screenshot({ path: screenshotPath });
       return {
         success: false,
         needs2FA: true,
-        screenshot: screenshotPath,
+        screenshot: afterPwPath,
+        url: currentUrl,
         message: "Google is asking for 2FA verification — screenshot saved",
       };
     }
 
-    // Check if we made it to myaccount
+    // Check if we made it through
     const finalUrl = page.url();
-    const loggedIn = finalUrl.includes("myaccount") || finalUrl.includes("google.com");
+    const loggedIn = finalUrl.includes("myaccount") || finalUrl.includes("mail.google") || !finalUrl.includes("signin");
+
+    const finalPath = `/tmp/ozzu-bridge/uploads/google-final-${Date.now()}.png`;
+    await page.screenshot({ path: finalPath });
 
     return {
       success: loggedIn,
       finalUrl,
+      screenshot: finalPath,
       message: loggedIn ? "Google login successful" : "Login may have failed — check screenshot",
     };
   } finally {
@@ -506,6 +598,7 @@ async function loginGoogleSSO(proxyPort, email, password) {
 module.exports = {
   executePost,
   loginGoogleSSO,
+  checkGoogleLogin,
   launchBrowser,
   PLATFORM_POSTERS,
 };
