@@ -8,14 +8,18 @@
 
 "use strict";
 
-const puppeteer = require("puppeteer-extra");
-const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+let puppeteer, StealthPlugin;
+try {
+  puppeteer = require("puppeteer-extra");
+  StealthPlugin = require("puppeteer-extra-plugin-stealth");
+  puppeteer.use(StealthPlugin());
+} catch {
+  console.log("[posting-engine] puppeteer-extra not installed — posting engine disabled");
+}
 const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const { loadEnv, solveCapSolver } = require("./index");
-
-puppeteer.use(StealthPlugin());
 
 // Ensure Xvfb display is running for headful Chrome
 let _xvfbStarted = false;

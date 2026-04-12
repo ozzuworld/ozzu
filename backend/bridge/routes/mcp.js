@@ -1000,7 +1000,7 @@ module.exports = function mcpRoutes(ctx) {
 
       case "solve_captcha": {
         const http = require("http");
-        const COLLECTOR_URL = process.env.COLLECTOR_URL || "http://172.17.0.1:3334";
+        const COLLECTOR_URL = process.env.COLLECTOR_URL || "http://172.17.0.1:3335";
         try {
           const body = JSON.stringify({ url: args.url || "https://www.linkedin.com" });
           const result = await new Promise((resolve, reject) => {

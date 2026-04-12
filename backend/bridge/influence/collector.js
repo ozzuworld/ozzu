@@ -12,10 +12,11 @@
 const { execSync } = require("child_process");
 const captchaSolver = require("./captcha-solver");
 const accountPool = require("./account-pool");
+const normalizer = require("./normalizer");
 
 const ADB_DEVICE = process.env.ADB_DEVICE || "localhost:5556";
 const BRIDGE_URL = process.env.BRIDGE_URL || "http://localhost:3333";
-const COLLECTOR_PORT = parseInt(process.env.COLLECTOR_PORT || "3334");
+const COLLECTOR_PORT = parseInt(process.env.COLLECTOR_PORT || "3335");
 
 // Track which account is currently active per platform on Redroid
 const activeAccounts = {};
@@ -175,23 +176,31 @@ collectors.twitter = {
     const nodes = await dumpUI();
     if (!nodes.length) return { error: "Could not dump UI" };
 
-    // Parse profile data from UI nodes
-    const profile = this._parseProfile(nodes, handle);
+    // Parse raw profile data from UI nodes
+    const rawProfile = this._parseProfile(nodes, handle);
 
-    // Store as observation
+    // NORMALIZE: structured extraction + photo capture
+    const { normalized: profile, photo } = normalizer.normalize(
+      "twitter", "profile_update", rawProfile,
+      { capturePhoto: true, subjectId }
+    );
+
+    // Store normalized observation
     await kgAddObservation(subjectId, {
       platform: "twitter",
       observation_type: "profile_update",
       content: JSON.stringify(profile),
+      raw_data: rawProfile,
       entities_extracted: [handle],
+      engagement: profile.engagement || {},
     });
 
-    // Store key facts
-    if (profile.displayName) {
+    // Store key facts from normalized data
+    if (profile.display_name) {
       await kgAddFact(subjectId, {
         category: "social",
         key: "twitter_display_name",
-        value: profile.displayName,
+        value: profile.display_name,
         source: "collector:twitter",
         is_current: true,
       });
@@ -209,7 +218,36 @@ collectors.twitter = {
       await kgAddFact(subjectId, {
         category: "social",
         key: "twitter_followers",
-        value: profile.followers,
+        value: String(profile.followers),
+        source: "collector:twitter",
+        is_current: true,
+      });
+    }
+    if (profile.location) {
+      await kgAddFact(subjectId, {
+        category: "location",
+        key: "twitter_location",
+        value: profile.location,
+        source: "collector:twitter",
+        is_current: true,
+      });
+    }
+    if (profile.joined) {
+      await kgAddFact(subjectId, {
+        category: "social",
+        key: "twitter_joined",
+        value: profile.joined,
+        source: "collector:twitter",
+        is_current: true,
+      });
+    }
+
+    // Store photo reference as fact
+    if (photo) {
+      await kgAddFact(subjectId, {
+        category: "media",
+        key: "profile_photo",
+        value: JSON.stringify({ platform: "twitter", path: photo.screenshotFilename, avatar: photo.avatar }),
         source: "collector:twitter",
         is_current: true,
       });
@@ -220,13 +258,13 @@ collectors.twitter = {
       anchor_type: "social_handle",
       platform: "twitter",
       value: handle,
-      verified: true,
+      verified: profile.verified || false,
       confidence: 100,
       source: "collector:twitter",
     });
 
-    console.log(`[collector:x] Profile collected:`, profile);
-    return profile;
+    console.log(`[collector:x] Profile collected (normalized):`, profile);
+    return { ...profile, photo: photo ? photo.screenshotFilename : null };
   },
 
   async collectFeed(subjectId) {
@@ -246,11 +284,16 @@ collectors.twitter = {
       const tweets = this._parseFeed(nodes);
 
       for (const tweet of tweets) {
+        const { normalized } = normalizer.normalize("twitter", "post", tweet);
         const obs = await kgAddObservation(subjectId, {
           platform: "twitter",
           observation_type: "post",
-          content: JSON.stringify(tweet),
-          entities_extracted: tweet.mentions || [],
+          content: JSON.stringify(normalized),
+          raw_data: tweet,
+          author_handle: normalized.author_handle || null,
+          entities_extracted: normalized.mentions || tweet.mentions || [],
+          engagement: normalized.engagement || {},
+          sentiment: null,
         });
         observations.push(obs);
       }
@@ -406,12 +449,19 @@ collectors.linkedin = {
     const nodes = await dumpUI();
     if (!nodes.length) return { error: "Could not dump UI" };
 
-    const profile = this._parseProfile(nodes);
+    const rawProfile = this._parseProfile(nodes);
+
+    // NORMALIZE: structured extraction + photo capture
+    const { normalized: profile, photo } = normalizer.normalize(
+      "linkedin", "profile_update", rawProfile,
+      { capturePhoto: true, subjectId }
+    );
 
     await kgAddObservation(subjectId, {
       platform: "linkedin",
       observation_type: "profile_update",
       content: JSON.stringify(profile),
+      raw_data: rawProfile,
       entities_extracted: profile.name ? [profile.name] : [],
     });
 
@@ -424,19 +474,45 @@ collectors.linkedin = {
         is_current: true,
       });
     }
-
     if (profile.connections) {
       await kgAddFact(subjectId, {
         category: "social",
         key: "linkedin_connections",
-        value: profile.connections,
+        value: String(profile.connections),
+        source: "collector:linkedin",
+        is_current: true,
+      });
+    }
+    if (profile.location) {
+      await kgAddFact(subjectId, {
+        category: "location",
+        key: "linkedin_location",
+        value: profile.location,
+        source: "collector:linkedin",
+        is_current: true,
+      });
+    }
+    if (profile.current_company) {
+      await kgAddFact(subjectId, {
+        category: "employment",
+        key: "current_company",
+        value: profile.current_company,
+        source: "collector:linkedin",
+        is_current: true,
+      });
+    }
+    if (photo) {
+      await kgAddFact(subjectId, {
+        category: "media",
+        key: "profile_photo",
+        value: JSON.stringify({ platform: "linkedin", path: photo.screenshotFilename, avatar: photo.avatar }),
         source: "collector:linkedin",
         is_current: true,
       });
     }
 
-    console.log(`[collector:li] Profile collected:`, profile);
-    return profile;
+    console.log(`[collector:li] Profile collected (normalized):`, profile);
+    return { ...profile, photo: photo ? photo.screenshotFilename : null };
   },
 
   async collectFeed(subjectId) {
@@ -455,11 +531,14 @@ collectors.linkedin = {
       const posts = this._parseFeed(nodes);
 
       for (const post of posts) {
+        const { normalized } = normalizer.normalize("linkedin", "post", post);
         const obs = await kgAddObservation(subjectId, {
           platform: "linkedin",
           observation_type: "post",
-          content: JSON.stringify(post),
-          entities_extracted: post.author ? [post.author] : [],
+          content: JSON.stringify(normalized),
+          raw_data: post,
+          author_handle: normalized.author || null,
+          entities_extracted: normalized.author ? [normalized.author] : [],
         });
         observations.push(obs);
       }
@@ -604,6 +683,7 @@ module.exports = {
   getDeviceState,
   captchaSolver,
   accountPool,
+  normalizer,
   adb,
   shell,
   tap,
@@ -693,6 +773,33 @@ if (require.main === module) {
           default: return send(400, { error: "health must be good|cooldown|restricted|banned" });
         }
         return send(200, { ok: true });
+      }
+
+      // POST /normalize — normalize raw content without collecting
+      if (req.method === "POST" && pathname === "/normalize") {
+        const body = await parseJSON(req);
+        if (!body.platform || !body.type || !body.content) {
+          return send(400, { error: "platform, type, and content required" });
+        }
+        const result = normalizer.normalize(body.platform, body.type, body.content, {
+          capturePhoto: false,
+        });
+        return send(200, result);
+      }
+
+      // POST /renormalize — re-normalize an existing observation by ID
+      if (req.method === "POST" && pathname === "/renormalize") {
+        const body = await parseJSON(req);
+        if (!body.observation_id) {
+          return send(400, { error: "observation_id required" });
+        }
+        // Fetch observation from bridge
+        const resp = await fetch(`${BRIDGE_URL}/kg/subjects/1/observations?limit=200`);
+        const observations = await resp.json();
+        const obs = observations.find((o) => o.id === body.observation_id);
+        if (!obs) return send(404, { error: "Observation not found" });
+        const result = normalizer.renormalize(obs);
+        return send(200, { original: obs, ...result });
       }
 
       // POST /adb — raw ADB command (for debugging)

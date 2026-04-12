@@ -1,6 +1,6 @@
 "use strict";
 
-const COLLECTOR_URL = process.env.COLLECTOR_URL || "http://172.17.0.1:3334";
+const COLLECTOR_URL = process.env.COLLECTOR_URL || "http://172.17.0.1:3335";
 
 module.exports = function knowledgeGraphRoutes(ctx) {
   const { sendJSON, parseBody, db } = ctx;
