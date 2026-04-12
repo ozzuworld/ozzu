@@ -137,6 +137,18 @@ export async function triggerKgEnrichNow(): Promise<any> {
   return apiFetch("/kg/enrich-now", { method: "POST" });
 }
 
+export async function runOsintTool(tool: string, target: string): Promise<any> {
+  return apiFetch("/kg/osint-tool", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tool, target }),
+  });
+}
+
+export async function fetchOsintHealth(): Promise<{ containerRunning: boolean; tools: Record<string, { available: boolean }> }> {
+  return apiFetch("/kg/osint-health");
+}
+
 // ── Hook ──
 
 interface UseKgResult {

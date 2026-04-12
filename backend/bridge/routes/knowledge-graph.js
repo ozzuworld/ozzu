@@ -413,7 +413,47 @@ module.exports = function knowledgeGraphRoutes(ctx) {
             console.error(`[kg] Auto-discover trigger failed:`, err.message);
           });
 
-        sendJSON(res, 202, { ok: true, message: "Auto-discovery pipeline started" });
+        sendJSON(res, 202, { ok: true, message: "Auto-discovery pipeline started (full OSINT suite)" });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /kg/osint-tool — run a specific OSINT tool on a subject
+    if (req.method === "POST" && pathname === "/kg/osint-tool") {
+      try {
+        const body = await parseBody(req);
+        if (!body.tool || !body.target) {
+          sendJSON(res, 400, { error: "tool and target are required" }); return true;
+        }
+
+        const { runSherlock, runMaigret, runH8mail, runPhoneInfoga, runTheHarvester, runSocidExtractor } = require("../influence/auto-discover");
+
+        let result;
+        switch (body.tool) {
+          case "sherlock": result = await runSherlock(body.target); break;
+          case "maigret": result = await runMaigret(body.target); break;
+          case "h8mail": result = await runH8mail(body.target); break;
+          case "phoneinfoga": result = await runPhoneInfoga(body.target); break;
+          case "theHarvester": result = await runTheHarvester(body.target); break;
+          case "socid_extractor": result = await runSocidExtractor(body.target); break;
+          default: sendJSON(res, 400, { error: `Unknown tool: ${body.tool}. Available: sherlock, maigret, h8mail, phoneinfoga, theHarvester, socid_extractor` }); return true;
+        }
+
+        sendJSON(res, 200, { ok: true, tool: body.tool, target: body.target, result });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /kg/osint-health — check OSINT tool availability
+    if (req.method === "GET" && pathname === "/kg/osint-health") {
+      try {
+        const cliRunner = require("../osint-cli-runner");
+        const health = await cliRunner.healthCheck();
+        sendJSON(res, 200, health);
       } catch (err) {
         sendJSON(res, 500, { error: err.message });
       }
