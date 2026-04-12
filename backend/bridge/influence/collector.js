@@ -10,6 +10,7 @@
 "use strict";
 
 const { execSync } = require("child_process");
+const captchaSolver = require("./captcha-solver");
 
 const ADB_DEVICE = process.env.ADB_DEVICE || "localhost:5556";
 const BRIDGE_URL = process.env.BRIDGE_URL || "http://localhost:3333";
@@ -365,12 +366,38 @@ collectors.twitter = {
 collectors.linkedin = {
   pkg: "com.linkedin.android",
 
+  async _handleCaptcha() {
+    const texts = dumpUIText();
+    const hasCaptcha = texts.some(
+      (t) =>
+        t.includes("security check") ||
+        t.includes("not a robot") ||
+        t.includes("temporarily restricted")
+    );
+    if (!hasCaptcha) return false;
+
+    console.log("[collector:li] CAPTCHA detected — solving with CapSolver...");
+    const result = await captchaSolver.detectAndSolve(
+      "https://www.linkedin.com/checkpoint/challenge/captchaInternal"
+    );
+    console.log("[collector:li] CAPTCHA result:", JSON.stringify(result));
+
+    if (result.solved) {
+      await sleep(5000); // Wait for page to process
+      return true;
+    }
+    return false;
+  },
+
   async collectProfile(subjectId, profileUrl) {
     console.log(`[collector:li] Collecting profile: ${profileUrl}...`);
 
     // Open LinkedIn profile via deep link
     shell(`am start -a android.intent.action.VIEW -d "${profileUrl}" -p com.linkedin.android`);
     await sleep(8000);
+
+    // Check for CAPTCHA
+    await this._handleCaptcha();
 
     const nodes = await dumpUI();
     if (!nodes.length) return { error: "Could not dump UI" };
@@ -411,8 +438,11 @@ collectors.linkedin = {
   async collectFeed(subjectId) {
     console.log(`[collector:li] Collecting LinkedIn feed...`);
 
-    shell("am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.linkedin.android/.authenticator.SpringActivityAlias");
+    shell("am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.linkedin.android/.authenticator.LaunchActivityDefault");
     await sleep(8000);
+
+    // Check for CAPTCHA
+    await this._handleCaptcha();
 
     const observations = [];
 
@@ -544,6 +574,7 @@ module.exports = {
   collect,
   collectors,
   getDeviceState,
+  captchaSolver,
   adb,
   shell,
   tap,
@@ -593,6 +624,14 @@ if (require.main === module) {
           return send(400, { error: "platform, action, and subject_id required" });
         }
         const result = await collect(body.platform, body.action, body.subject_id, body.params || {});
+        return send(200, result);
+      }
+
+      // POST /solve-captcha — detect and solve CAPTCHA on current WebView
+      if (req.method === "POST" && pathname === "/solve-captcha") {
+        const body = await parseJSON(req);
+        const pageUrl = body.url || "https://www.linkedin.com";
+        const result = await captchaSolver.detectAndSolve(pageUrl);
         return send(200, result);
       }
 

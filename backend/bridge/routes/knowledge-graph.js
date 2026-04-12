@@ -355,6 +355,23 @@ module.exports = function knowledgeGraphRoutes(ctx) {
       return true;
     }
 
+    // POST /kg/solve-captcha — detect and solve CAPTCHA on current WebView
+    if (req.method === "POST" && pathname === "/kg/solve-captcha") {
+      try {
+        const body = await parseBody(req);
+        const resp = await fetch(`${COLLECTOR_URL}/solve-captcha`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const result = await resp.json();
+        sendJSON(res, 200, result);
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     return false;
   };
 };
