@@ -18,4 +18,11 @@ RUN ARCH=$(dpkg --print-architecture) && \
     | tar xz -C /usr/local/bin phoneinfoga && \
     chmod +x /usr/local/bin/phoneinfoga
 
+# ADB (Android Debug Bridge) for fleet device management
+RUN curl -sL https://dl.google.com/android/repository/platform-tools-latest-linux.zip -o /tmp/pt.zip && \
+    unzip -o /tmp/pt.zip -d /tmp/ && \
+    cp /tmp/platform-tools/adb /usr/local/bin/adb && \
+    chmod +x /usr/local/bin/adb && \
+    rm -rf /tmp/pt.zip /tmp/platform-tools
+
 WORKDIR /app
