@@ -843,13 +843,18 @@ async function kairosOsintEnrich() {
         ].join("\n");
 
         const { execSync } = require("child_process");
+        const env = { ...process.env };
+        delete env.CLAUDECODE;
+        delete env.CLAUDE_CODE_ENTRYPOINT;
+
         const output = execSync(
           `claude -p ${JSON.stringify(prompt)} --model claude-haiku-4-5-20251001 --output-format text`,
-          { cwd: PROJECT_DIR, encoding: "utf8", timeout: 30000, env: { ...process.env } }
+          { cwd: "/tmp", encoding: "utf8", timeout: 30000, env }
         );
 
-        // Parse Claude's response
-        const jsonMatch = output.match(/\{[\s\S]*\}/);
+        // Parse Claude's response (strip markdown code fences)
+        const cleaned = output.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const nlpResult = JSON.parse(jsonMatch[0]);
           await _ctx.db.kgMarkObservationEnriched(obs.id, nlpResult);
