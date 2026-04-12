@@ -17,6 +17,7 @@ import {
   queryKg,
   triggerKgEnrichNow,
   triggerKgDiscover,
+  triggerAutoDiscover,
   type KgSubject,
   type KgDossier,
   type KgDiff,
@@ -92,14 +93,22 @@ export default function InfluenceScreen() {
           <Text style={{ color: TEXT3, fontSize: 11, marginTop: 2 }}>
             {selectedSubject.subject_type} · {selectedSubject.status}
           </Text>
-          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <Pressable
+              onPress={async () => {
+                try { await triggerAutoDiscover(selectedSubject.id); } catch {}
+              }}
+              style={{ backgroundColor: "#22c55e20", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}
+            >
+              <Text style={{ color: "#22c55e", fontSize: 10, fontWeight: "700" }}>⚡ AUTO-DISCOVER</Text>
+            </Pressable>
             <Pressable
               onPress={async () => {
                 try { await triggerKgDiscover(selectedSubject.id, "following"); } catch {}
               }}
               style={{ backgroundColor: ACCENT + "20", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}
             >
-              <Text style={{ color: ACCENT, fontSize: 10, fontWeight: "700" }}>🕸️ DISCOVER FOLLOWING</Text>
+              <Text style={{ color: ACCENT, fontSize: 10, fontWeight: "700" }}>🕸️ FOLLOWING</Text>
             </Pressable>
             <Pressable
               onPress={async () => {
@@ -107,7 +116,7 @@ export default function InfluenceScreen() {
               }}
               style={{ backgroundColor: ACCENT + "20", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}
             >
-              <Text style={{ color: ACCENT, fontSize: 10, fontWeight: "700" }}>🕸️ DISCOVER FOLLOWERS</Text>
+              <Text style={{ color: ACCENT, fontSize: 10, fontWeight: "700" }}>🕸️ FOLLOWERS</Text>
             </Pressable>
           </View>
         </View>

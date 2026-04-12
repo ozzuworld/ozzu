@@ -691,6 +691,7 @@ async function getDeviceState() {
 }
 
 const discovery = require("./discovery");
+const autoDiscover = require("./auto-discover");
 
 module.exports = {
   collect,
@@ -861,6 +862,21 @@ if (require.main === module) {
           }
         );
         return send(200, { ok: true, ...result });
+      }
+
+      // POST /auto-discover — full automated discovery pipeline for a subject
+      if (req.method === "POST" && pathname === "/auto-discover") {
+        const body = await parseJSON(req);
+        if (!body.subject_id) {
+          return send(400, { error: "subject_id required" });
+        }
+        // Run in background — return immediately
+        autoDiscover.autoDiscover(body.subject_id, body).then(r => {
+          console.log(`[collector] Auto-discover complete for subject ${body.subject_id}:`, JSON.stringify(r.phases));
+        }).catch(err => {
+          console.error(`[collector] Auto-discover failed:`, err.message);
+        });
+        return send(202, { ok: true, message: `Auto-discovery started for subject ${body.subject_id}` });
       }
 
       // POST /discover-all — discover from all active subjects

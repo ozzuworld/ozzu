@@ -385,6 +385,41 @@ module.exports = function knowledgeGraphRoutes(ctx) {
 
     // ── Collector (proxied to host collector service) ──
 
+    // POST /kg/auto-discover — run full automated discovery pipeline on a subject
+    if (req.method === "POST" && pathname === "/kg/auto-discover") {
+      try {
+        const body = await parseBody(req);
+        if (!body.subject_id) {
+          sendJSON(res, 400, { error: "subject_id is required" }); return true;
+        }
+
+        // Proxy to collector service
+        fetch(`${COLLECTOR_URL}/auto-discover`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject_id: body.subject_id,
+            skipHolehe: body.skip_holehe || false,
+            skipCollect: body.skip_collect || false,
+            skipDiscover: body.skip_discover || false,
+          }),
+          signal: AbortSignal.timeout(10000),
+        })
+          .then(r => r.json())
+          .then(result => {
+            console.log(`[kg] Auto-discover started for subject ${body.subject_id}`);
+          })
+          .catch(err => {
+            console.error(`[kg] Auto-discover trigger failed:`, err.message);
+          });
+
+        sendJSON(res, 202, { ok: true, message: "Auto-discovery pipeline started" });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     // POST /kg/discover — trigger network discovery from a subject
     if (req.method === "POST" && pathname === "/kg/discover") {
       try {
