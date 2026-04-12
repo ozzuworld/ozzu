@@ -844,7 +844,9 @@ async function init() {
       subject_id INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
       category VARCHAR(30) NOT NULL CHECK (category IN (
         'employment','education','location','skill','affiliation',
-        'legal','financial','personal','medical','military','political','other'
+        'legal','financial','personal','medical','military','political','other',
+        'digital_footprint','security','pii_exposure','phone_intel','domain_intel',
+        'social_ids','exposure','breach'
       )),
       key TEXT NOT NULL,
       value TEXT NOT NULL,
@@ -871,7 +873,8 @@ async function init() {
       subject_id INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
       event_type VARCHAR(30) NOT NULL CHECK (event_type IN (
         'career','education','legal','travel','publication','social',
-        'financial','personal','incident','observation','other'
+        'financial','personal','incident','observation','other',
+        'discovery','collection','enrichment','alert'
       )),
       title TEXT NOT NULL,
       description TEXT,
