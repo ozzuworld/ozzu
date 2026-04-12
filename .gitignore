@@ -10,6 +10,9 @@ backend/config/home-assistant.log
 backend/config/secrets.yaml
 backend/config/.HA_VERSION
 
+# Volts local state (machine-specific, not shared)
+.volts/
+
 # OpenVPN runtime files
 backend/openvpn/config/ipp.txt
 backend/openvpn/config/openvpn-status.log

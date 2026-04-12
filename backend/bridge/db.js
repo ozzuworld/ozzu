@@ -65,6 +65,9 @@ async function init() {
       UNIQUE(date, metric_name)
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_metrics_date ON usage_metrics(date DESC)`);
+    // Migration: Volts importance scoring on conversation turns
+    await pool.query(`ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS importance SMALLINT DEFAULT 1`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_turns_importance ON conversation_turns(importance DESC, created_at DESC)`);
     // Migration: GIN index for conversation turn search
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_turns_content_search ON conversation_turns USING gin(to_tsvector('english', content))`);
     // Migration: OSINT tables

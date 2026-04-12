@@ -391,6 +391,22 @@ module.exports = function createCipherRoutes(ctx) {
     return true;
   }
 
+  // GET /cipher/latest-session-ts — unix timestamp of most recent cipher session
+  if (req.method === "GET" && pathname === "/cipher/latest-session-ts") {
+    try {
+      const result = await db.query(
+        "SELECT EXTRACT(EPOCH FROM ended_at)::bigint AS ts FROM conversations WHERE persona = 'cipher' AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1"
+      );
+      const ts = result.rows[0]?.ts || 0;
+      res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
+      res.end(String(ts));
+    } catch {
+      res.writeHead(200, { "Content-Type": "text/plain", ...CORS_HEADERS });
+      res.end("0");
+    }
+    return true;
+  }
+
   // GET /cipher/search?q=keyword — search actual conversation content
   if (req.method === "GET" && pathname === "/cipher/search") {
     try {
@@ -809,6 +825,101 @@ module.exports = function createCipherRoutes(ctx) {
       }
 
       sendJSON(res, 200, { turns, persona: ctx.currentPersona, voiceActive: !!(ctx.geminiReady || ctx.cipherPipeline) });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return true;
+  }
+
+  // ── Volts memory endpoints ──
+
+  // GET /volts/pulse — structured state for VOLTS.local.md (Layer 0)
+  if (req.method === "GET" && pathname === "/volts/pulse") {
+    try {
+      const fs = require("fs");
+      const ledgerPath = "/home/gcp/ozzu/.volts/ledger.json";
+      let ledger = null;
+      try { ledger = JSON.parse(fs.readFileSync(ledgerPath, "utf8")); } catch {}
+
+      // Merge ledger with live directive state
+      const directives = getDirectives();
+      const branch = (() => { try { return require("child_process").execSync("git -C /home/gcp/ozzu rev-parse --abbrev-ref HEAD 2>/dev/null", { encoding: "utf8" }).trim(); } catch { return ""; } })();
+      const dirId = (branch.match(/dir_(\d{10,})/) || [])[0];
+      let liveDirective = dirId ? directives.find(d => d.id === dirId) : null;
+
+      const pulse = {
+        identity: { agent: "volts", project: "ozzu", user: "King Kazuma" },
+        directive: liveDirective ? {
+          id: liveDirective.id,
+          branch,
+          title: liveDirective.title,
+          status: liveDirective.status,
+          workSummary: liveDirective.work_summary || (ledger?.directive?.workSummary),
+          workingState: liveDirective.working_state || (ledger?.directive?.workingState),
+          handoffContext: liveDirective.handoff_context || (ledger?.directive?.handoffContext),
+        } : (ledger?.directive || null),
+        workingMemory: {
+          lastInstruction: ledger?.recentInstructions?.slice(-1)[0]?.content || null,
+          recentInstructions: ledger?.recentInstructions || [],
+          recentDecisions: ledger?.recentDecisions || [],
+        },
+        attention: directives.filter(d => ["blocked", "deploy_failed", "failed"].includes(d.status)).map(d => ({
+          id: d.id, title: d.title, status: d.status, reason: d.failureReason
+        })),
+        failures: ledger?.failedApproaches || [],
+        session: {
+          ledgerUpdatedAt: ledger?.updatedAt || 0,
+          sessionHistory: ledger?.sessionHistory || [],
+        },
+      };
+      sendJSON(res, 200, pulse);
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return true;
+  }
+
+  // POST /volts/checkpoint — manually trigger a ledger checkpoint
+  if (req.method === "POST" && pathname === "/volts/checkpoint") {
+    try {
+      const { execSync } = require("child_process");
+      execSync("/home/gcp/ozzu/scripts/volts-checkpoint.sh", { timeout: 10000, encoding: "utf8" });
+      sendJSON(res, 200, { ok: true });
+    } catch (err) {
+      sendJSON(res, 200, { ok: false, error: err.message });
+    }
+    return true;
+  }
+
+  // GET /volts/recall?topic=keyword — search archive for a topic
+  if (req.method === "GET" && pathname === "/volts/recall") {
+    try {
+      const topic = url.searchParams.get("topic") || url.searchParams.get("q");
+      if (!topic || topic.length < 2) {
+        sendJSON(res, 400, { error: "topic parameter required (min 2 chars)" });
+        return true;
+      }
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "10"), 30);
+
+      // Search high-importance turns first, then all
+      const results = await db.query(
+        `SELECT ct.content, ct.role, ct.importance, ct.created_at, c.id as convo_id
+         FROM conversation_turns ct
+         JOIN conversations c ON ct.conversation_id = c.id
+         WHERE ct.content ILIKE $1
+         ORDER BY ct.importance DESC NULLS LAST, ct.created_at DESC
+         LIMIT $2`,
+        [`%${topic.trim()}%`, limit]
+      );
+
+      const turns = results.rows.map(r => ({
+        role: r.role,
+        content: r.content.substring(0, 500),
+        importance: r.importance || 1,
+        date: r.created_at,
+        sessionId: r.convo_id,
+      }));
+      sendJSON(res, 200, { topic, count: turns.length, turns });
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
     }

@@ -17,7 +17,29 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/gcp/ozzu/scripts/cipher-session-save.sh"
+            "command": "/home/gcp/ozzu/scripts/volts-session-end.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/thoroughness-reminder.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/completion-guard.sh"
           }
         ]
       }
@@ -44,6 +66,19 @@
           {
             "type": "command",
             "command": "/home/gcp/ozzu/.claude/hooks/merge-deploy-alert.sh"
+          },
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/scripts/volts-checkpoint.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/edit-size-check.sh"
           }
         ]
       }
