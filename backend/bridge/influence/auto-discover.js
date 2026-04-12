@@ -36,11 +36,17 @@ const OSINT_CONTAINER = "osint-tools";
  */
 async function resolveEmailToPlatforms(email) {
   try {
-    const output = execSync(
-      `docker exec ${OSINT_CONTAINER} holehe "${email}" --only-used --no-clear --no-color -NP 2>/dev/null`,
-      { encoding: "utf8", timeout: 60000 }
-    );
+    const available = await cliRunner.isToolAvailable("holehe");
+    if (!available) {
+      console.error(`[auto-discover] holehe not available in container`);
+      return [];
+    }
 
+    const result = await cliRunner.runTool("holehe", [
+      "--only-used", "--no-clear", "--no-color", email,
+    ], { timeout: 120000, parseJson: false });
+
+    const output = result.stdout || "";
     const platforms = [];
     const lines = output.split("\n");
     for (const line of lines) {
