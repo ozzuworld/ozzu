@@ -315,19 +315,29 @@ function scoreCandidate(seed, candidate, collectedData) {
   // --- Tier 2: Strong signals ---
 
   // Face match
+  // IMPORTANT: kg_faces may contain contaminated data from unverified collections.
+  // A match against the SAME subject is unreliable (could be self-match from bad data).
+  // Only trust face match if: (a) it matched a DIFFERENT subject, or (b) match came
+  // from the verified 51M faces collection, or (c) seed has a verified_face flag.
   if (collectedData?.faceMatch) {
     const sim = collectedData.faceMatch.topScore || 0;
-    if (sim > 0.6) {
+    const matchedSameSubject = collectedData.faceMatch.matchedSubjectId === seed.subjectId;
+    const fromVerifiedCollection = collectedData.faceMatch.collection === "faces";
+
+    if (matchedSameSubject && !fromVerifiedCollection && !seed.hasVerifiedFace) {
+      // Self-match from kg_faces — unreliable, skip (possible contamination)
+      signals.push({ signal: "face_self_match_unverified", weight: 0, value: sim,
+        note: "kg_faces may contain unverified data — cannot trust self-match" });
+    } else if (sim > 0.6 && !matchedSameSubject) {
+      // Matched a DIFFERENT known person — strong negative
+      signals.push({ signal: "face_different_person", weight: -15, value: collectedData.faceMatch });
+    } else if (sim > 0.6 && (fromVerifiedCollection || seed.hasVerifiedFace)) {
+      // Verified face match — strongest signal
       signals.push({ signal: "face_match", weight: 13.2, value: sim });
     } else if (sim > 0.4) {
       signals.push({ signal: "face_weak", weight: 3.0, value: sim });
     } else if (sim > 0 && sim < 0.3) {
       signals.push({ signal: "face_nomatch", weight: -3.5, value: sim });
-    }
-    // Check if face matches a DIFFERENT known person
-    if (collectedData.faceMatch.matchedSubjectId &&
-        collectedData.faceMatch.matchedSubjectId !== seed.subjectId) {
-      signals.push({ signal: "face_different_person", weight: -15, value: collectedData.faceMatch });
     }
   }
 
@@ -476,19 +486,23 @@ async function runStage2(subjectId, seed, candidates, opts = {}) {
       }
 
       const data = collectResult.result;
+      // Collector returns flat fields (display_name, bio) or nested under profile
+      const prof = data.profile || data;
       const collectedData = {
-        display_name: data.profile?.display_name || data.profile?.displayName || null,
-        bio: data.profile?.bio || null,
-        location: data.profile?.location || null,
-        joinDate: data.profile?.joined || null,
-        followers: data.profile?.followers || null,
-        following: data.profile?.following || null,
-        verified: data.profile?.verified || false,
+        display_name: prof.display_name || prof.displayName || null,
+        bio: prof.bio || null,
+        location: prof.location || null,
+        joinDate: prof.joined || null,
+        followers: prof.followers || null,
+        following: prof.following || null,
+        verified: prof.verified || false,
       };
 
-      // Face matching
-      if (data.photo?.screenshotFilename) {
-        const photoPath = path.join(enricher.PHOTO_DIR, data.photo.screenshotFilename);
+      // Face matching — photo can be a string filename or {screenshotFilename}
+      const photoFilename = typeof data.photo === "string" ? data.photo
+        : (data.photo?.screenshotFilename || null);
+      if (photoFilename) {
+        const photoPath = path.join(enricher.PHOTO_DIR, photoFilename);
         const avatarPath = photoPath.replace(".png", "_avatar.png");
         const imgPath = fs.existsSync(avatarPath) ? avatarPath : photoPath;
 
