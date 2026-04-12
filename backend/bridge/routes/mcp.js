@@ -336,6 +336,16 @@ module.exports = function mcpRoutes(ctx) {
         required: ["command"],
       },
     },
+    {
+      name: "solve_captcha",
+      description: "Detect and solve a CAPTCHA on the current Redroid WebView using CapSolver. Supports reCAPTCHA v2 (visible + invisible) and hCaptcha. Uses Chrome DevTools Protocol to extract sitekey, sends to CapSolver API, injects token, and triggers callback. Call this when a social media app on Redroid is blocked by a CAPTCHA.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The page URL context (e.g. https://www.linkedin.com). Helps CapSolver solve accurately." },
+        },
+      },
+    },
   ];
 
   // ── Tool handlers ──
@@ -983,6 +993,40 @@ module.exports = function mcpRoutes(ctx) {
         } catch (e) {
           const stderr = e.stderr ? e.stderr.toString() : "";
           return { content: [{ type: "text", text: `SSH exec failed: ${e.message}\n${stderr}`.trim() }], isError: true };
+        }
+      }
+
+      // ── CAPTCHA Solver ──────────────────────────────────────────────────────
+
+      case "solve_captcha": {
+        const http = require("http");
+        const COLLECTOR_URL = process.env.COLLECTOR_URL || "http://172.17.0.1:3334";
+        try {
+          const body = JSON.stringify({ url: args.url || "https://www.linkedin.com" });
+          const result = await new Promise((resolve, reject) => {
+            const parsedUrl = new URL(`${COLLECTOR_URL}/solve-captcha`);
+            const req = http.request({
+              hostname: parsedUrl.hostname,
+              port: parsedUrl.port,
+              path: parsedUrl.pathname,
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Content-Length": body.length },
+              timeout: 180000,
+            }, (res) => {
+              let d = "";
+              res.on("data", c => d += c);
+              res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } });
+            });
+            req.on("error", reject);
+            req.write(body);
+            req.end();
+          });
+          const msg = result.solved
+            ? `CAPTCHA solved! Type: ${result.type}${result.callbackTriggered ? ", callback triggered" : ""}`
+            : `CAPTCHA not solved: ${result.error || "unknown error"}`;
+          return { content: [{ type: "text", text: msg }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `Solver error: ${e.message}` }], isError: true };
         }
       }
 
