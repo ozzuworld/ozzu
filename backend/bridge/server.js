@@ -111,6 +111,7 @@ const dashboardRoutes = require("./routes/dashboard");
 const directiveRoutes = require("./routes/directives");
 const spotifyRoutes = require("./routes/spotify");
 const osintRoutes = require("./routes/osint");
+const knowledgeGraphRoutes = require("./routes/knowledge-graph");
 const pipelineRoutes = require("./routes/pipeline");
 const epicRoutes = require("./routes/epics");
 const cedulaRoutes = require("./routes/cedula");
@@ -1573,6 +1574,7 @@ function getRouteHandlers() {
       finance: financeRoutes(routeCtx),
       whatsapp: whatsappRoutes(routeCtx),
       influence: influenceRoutes(routeCtx),
+      knowledgeGraph: knowledgeGraphRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1623,6 +1625,7 @@ async function handleRequest(req, res) {
   if (await r.finance(req, res, pathname, url)) return;
   if (await r.whatsapp(req, res, pathname, url)) return;
   if (await r.influence(req, res, pathname, url)) return;
+  if (await r.knowledgeGraph(req, res, pathname, url)) return;
 
   // ── AgroVisión training state poller (SSH to GPU, parse training log) ──
   async function refreshAgrovisionState(vastInstance) {

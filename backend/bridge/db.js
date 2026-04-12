@@ -796,7 +796,162 @@ async function init() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault)");
+    // ── Knowledge Graph tables (OSINT Intelligence Layer) ──
+
+    // Subjects — focal persons or organizations being studied
+    await pool.query(`CREATE TABLE IF NOT EXISTS kg_subjects (
+      id SERIAL PRIMARY KEY,
+      subject_type VARCHAR(20) NOT NULL DEFAULT 'person' CHECK (subject_type IN ('person','organization','event')),
+      name TEXT NOT NULL,
+      aliases TEXT[] DEFAULT '{}',
+      summary TEXT,
+      status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active','archived','monitoring')),
+      confidence INTEGER DEFAULT 0 CHECK (confidence >= 0 AND confidence <= 100),
+      metadata JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(subject_type, name)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_subjects_type ON kg_subjects(subject_type)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_subjects_name ON kg_subjects(name)`);
+
+    // Anchors — identity anchors linking a subject to the digital/physical world
+    await pool.query(`CREATE TABLE IF NOT EXISTS kg_anchors (
+      id SERIAL PRIMARY KEY,
+      subject_id INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
+      anchor_type VARCHAR(30) NOT NULL CHECK (anchor_type IN (
+        'email','phone','social_handle','domain','username','website',
+        'address','document_id','cedula','nit','passport'
+      )),
+      platform VARCHAR(50),
+      value TEXT NOT NULL,
+      verified BOOLEAN DEFAULT false,
+      confidence INTEGER DEFAULT 50 CHECK (confidence >= 0 AND confidence <= 100),
+      source TEXT,
+      metadata JSONB DEFAULT '{}',
+      first_seen TIMESTAMPTZ DEFAULT NOW(),
+      last_seen TIMESTAMPTZ DEFAULT NOW(),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(subject_id, anchor_type, value)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_anchors_subject ON kg_anchors(subject_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_anchors_type ON kg_anchors(anchor_type)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_anchors_value ON kg_anchors(value)`);
+
+    // Facts — individual verified/unverified facts about a subject
+    await pool.query(`CREATE TABLE IF NOT EXISTS kg_facts (
+      id SERIAL PRIMARY KEY,
+      subject_id INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
+      category VARCHAR(30) NOT NULL CHECK (category IN (
+        'employment','education','location','skill','affiliation',
+        'legal','financial','personal','medical','military','political','other'
+      )),
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      start_date DATE,
+      end_date DATE,
+      is_current BOOLEAN DEFAULT false,
+      confidence INTEGER DEFAULT 50 CHECK (confidence >= 0 AND confidence <= 100),
+      source TEXT,
+      source_url TEXT,
+      verified BOOLEAN DEFAULT false,
+      verified_by TEXT,
+      verified_at TIMESTAMPTZ,
+      metadata JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_facts_subject ON kg_facts(subject_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_facts_category ON kg_facts(category)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_facts_current ON kg_facts(is_current) WHERE is_current = true`);
+
+    // Timeline — chronological events associated with a subject
+    await pool.query(`CREATE TABLE IF NOT EXISTS kg_timeline (
+      id SERIAL PRIMARY KEY,
+      subject_id INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
+      event_type VARCHAR(30) NOT NULL CHECK (event_type IN (
+        'career','education','legal','travel','publication','social',
+        'financial','personal','incident','observation','other'
+      )),
+      title TEXT NOT NULL,
+      description TEXT,
+      event_date DATE,
+      event_end_date DATE,
+      location TEXT,
+      source TEXT,
+      source_url TEXT,
+      confidence INTEGER DEFAULT 50 CHECK (confidence >= 0 AND confidence <= 100),
+      metadata JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_timeline_subject ON kg_timeline(subject_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_timeline_date ON kg_timeline(event_date DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_timeline_type ON kg_timeline(event_type)`);
+
+    // Connections — relationships between subjects
+    await pool.query(`CREATE TABLE IF NOT EXISTS kg_connections (
+      id SERIAL PRIMARY KEY,
+      source_id INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
+      target_id INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
+      relationship VARCHAR(30) NOT NULL CHECK (relationship IN (
+        'employs','employed_by','colleague','manages','reports_to',
+        'knows','friend','family','spouse','studied_with',
+        'client_of','supplier_of','partner','investor','legal_opponent',
+        'member_of','founder_of','owns','affiliated','other'
+      )),
+      description TEXT,
+      start_date DATE,
+      end_date DATE,
+      is_current BOOLEAN DEFAULT true,
+      confidence INTEGER DEFAULT 50 CHECK (confidence >= 0 AND confidence <= 100),
+      source TEXT,
+      metadata JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(source_id, target_id, relationship)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_connections_source ON kg_connections(source_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_connections_target ON kg_connections(target_id)`);
+
+    // Observations — raw data collected from social media / web sources
+    await pool.query(`CREATE TABLE IF NOT EXISTS kg_observations (
+      id SERIAL PRIMARY KEY,
+      subject_id INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
+      platform VARCHAR(30) NOT NULL,
+      observation_type VARCHAR(30) NOT NULL CHECK (observation_type IN (
+        'post','comment','like','share','follow','unfollow',
+        'profile_update','mention','message','activity','other'
+      )),
+      content TEXT,
+      author_handle TEXT,
+      url TEXT,
+      engagement JSONB DEFAULT '{}',
+      sentiment VARCHAR(10) CHECK (sentiment IN ('positive','negative','neutral',NULL)),
+      entities_extracted JSONB DEFAULT '[]',
+      raw_data JSONB DEFAULT '{}',
+      observed_at TIMESTAMPTZ NOT NULL,
+      collected_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_observations_subject ON kg_observations(subject_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_observations_platform ON kg_observations(platform)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_observations_date ON kg_observations(observed_at DESC)`);
+
+    // Collections — tracking what was collected, from where, when
+    await pool.query(`CREATE TABLE IF NOT EXISTS kg_collections (
+      id SERIAL PRIMARY KEY,
+      subject_id INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
+      platform VARCHAR(30) NOT NULL,
+      collection_type VARCHAR(30) DEFAULT 'scrape',
+      status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending','running','completed','failed')),
+      items_collected INTEGER DEFAULT 0,
+      error_message TEXT,
+      started_at TIMESTAMPTZ DEFAULT NOW(),
+      completed_at TIMESTAMPTZ,
+      metadata JSONB DEFAULT '{}'
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_collections_subject ON kg_collections(subject_id)`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -3119,6 +3274,279 @@ async function getIdentityClusters(filters = {}) {
   }
 }
 
+// ── Knowledge Graph Functions ──
+
+async function kgCreateSubject(subject) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO kg_subjects (subject_type, name, aliases, summary, status, confidence, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (subject_type, name) DO UPDATE SET
+       aliases = EXCLUDED.aliases, summary = EXCLUDED.summary,
+       confidence = EXCLUDED.confidence, metadata = EXCLUDED.metadata,
+       updated_at = NOW()
+     RETURNING *`,
+    [subject.subject_type || 'person', subject.name, subject.aliases || [],
+     subject.summary || null, subject.status || 'active',
+     subject.confidence || 0, JSON.stringify(subject.metadata || {})]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgGetSubjects(filters = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT s.*,
+    (SELECT COUNT(*) FROM kg_facts WHERE subject_id = s.id)::int AS fact_count,
+    (SELECT COUNT(*) FROM kg_anchors WHERE subject_id = s.id)::int AS anchor_count,
+    (SELECT COUNT(*) FROM kg_connections WHERE source_id = s.id OR target_id = s.id)::int AS connection_count,
+    (SELECT COUNT(*) FROM kg_timeline WHERE subject_id = s.id)::int AS event_count
+    FROM kg_subjects s WHERE 1=1`;
+  const params = [];
+  if (filters.subject_type) { params.push(filters.subject_type); sql += ` AND s.subject_type = $${params.length}`; }
+  if (filters.status) { params.push(filters.status); sql += ` AND s.status = $${params.length}`; }
+  if (filters.search) { params.push(`%${filters.search}%`); sql += ` AND (s.name ILIKE $${params.length} OR s.summary ILIKE $${params.length})`; }
+  sql += ` ORDER BY s.updated_at DESC`;
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function kgGetSubject(id) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM kg_subjects WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function kgUpdateSubject(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const params = [id];
+  for (const [key, val] of Object.entries(updates)) {
+    if (['name','aliases','summary','status','confidence','metadata','subject_type'].includes(key)) {
+      params.push(key === 'metadata' || key === 'aliases' ? JSON.stringify(val) : val);
+      fields.push(`${key} = $${params.length}`);
+    }
+  }
+  if (fields.length === 0) return null;
+  fields.push('updated_at = NOW()');
+  const res = await query(`UPDATE kg_subjects SET ${fields.join(', ')} WHERE id = $1 RETURNING *`, params);
+  return res.rows[0] || null;
+}
+
+async function kgDeleteSubject(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM kg_subjects WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+// Anchors
+async function kgAddAnchor(anchor) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO kg_anchors (subject_id, anchor_type, platform, value, verified, confidence, source, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (subject_id, anchor_type, value) DO UPDATE SET
+       platform = EXCLUDED.platform, verified = EXCLUDED.verified,
+       confidence = EXCLUDED.confidence, last_seen = NOW()
+     RETURNING *`,
+    [anchor.subject_id, anchor.anchor_type, anchor.platform || null,
+     anchor.value, anchor.verified || false, anchor.confidence || 50,
+     anchor.source || null, JSON.stringify(anchor.metadata || {})]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgGetAnchors(subjectId) {
+  if (!_pgConnected) return [];
+  const res = await query(`SELECT * FROM kg_anchors WHERE subject_id = $1 ORDER BY anchor_type, created_at`, [subjectId]);
+  return res.rows;
+}
+
+async function kgDeleteAnchor(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM kg_anchors WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+// Facts
+async function kgAddFact(fact) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO kg_facts (subject_id, category, key, value, start_date, end_date, is_current, confidence, source, source_url, verified, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+    [fact.subject_id, fact.category, fact.key, fact.value,
+     fact.start_date || null, fact.end_date || null, fact.is_current || false,
+     fact.confidence || 50, fact.source || null, fact.source_url || null,
+     fact.verified || false, JSON.stringify(fact.metadata || {})]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgGetFacts(subjectId, category) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT * FROM kg_facts WHERE subject_id = $1`;
+  const params = [subjectId];
+  if (category) { params.push(category); sql += ` AND category = $${params.length}`; }
+  sql += ` ORDER BY is_current DESC, start_date DESC NULLS LAST, created_at DESC`;
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function kgUpdateFact(id, updates) {
+  if (!_pgConnected) return null;
+  const fields = [];
+  const params = [id];
+  for (const [key, val] of Object.entries(updates)) {
+    if (['category','key','value','start_date','end_date','is_current','confidence','source','source_url','verified','verified_by','metadata'].includes(key)) {
+      params.push(key === 'metadata' ? JSON.stringify(val) : val);
+      fields.push(`${key} = $${params.length}`);
+    }
+  }
+  if (fields.length === 0) return null;
+  if (updates.verified) fields.push('verified_at = NOW()');
+  fields.push('updated_at = NOW()');
+  const res = await query(`UPDATE kg_facts SET ${fields.join(', ')} WHERE id = $1 RETURNING *`, params);
+  return res.rows[0] || null;
+}
+
+async function kgDeleteFact(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM kg_facts WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+// Timeline
+async function kgAddEvent(event) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO kg_timeline (subject_id, event_type, title, description, event_date, event_end_date, location, source, source_url, confidence, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+    [event.subject_id, event.event_type, event.title, event.description || null,
+     event.event_date || null, event.event_end_date || null, event.location || null,
+     event.source || null, event.source_url || null, event.confidence || 50,
+     JSON.stringify(event.metadata || {})]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgGetTimeline(subjectId, eventType) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT * FROM kg_timeline WHERE subject_id = $1`;
+  const params = [subjectId];
+  if (eventType) { params.push(eventType); sql += ` AND event_type = $${params.length}`; }
+  sql += ` ORDER BY event_date DESC NULLS LAST, created_at DESC`;
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function kgDeleteEvent(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM kg_timeline WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+// Connections
+async function kgAddConnection(conn) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO kg_connections (source_id, target_id, relationship, description, start_date, end_date, is_current, confidence, source, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (source_id, target_id, relationship) DO UPDATE SET
+       description = EXCLUDED.description, is_current = EXCLUDED.is_current,
+       confidence = EXCLUDED.confidence, updated_at = NOW()
+     RETURNING *`,
+    [conn.source_id, conn.target_id, conn.relationship, conn.description || null,
+     conn.start_date || null, conn.end_date || null, conn.is_current !== false,
+     conn.confidence || 50, conn.source || null, JSON.stringify(conn.metadata || {})]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgGetConnections(subjectId) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT c.*,
+       s1.name AS source_name, s1.subject_type AS source_type,
+       s2.name AS target_name, s2.subject_type AS target_type
+     FROM kg_connections c
+     JOIN kg_subjects s1 ON s1.id = c.source_id
+     JOIN kg_subjects s2 ON s2.id = c.target_id
+     WHERE c.source_id = $1 OR c.target_id = $1
+     ORDER BY c.is_current DESC, c.confidence DESC`,
+    [subjectId]
+  );
+  return res.rows;
+}
+
+async function kgDeleteConnection(id) {
+  if (!_pgConnected) return false;
+  const res = await query(`DELETE FROM kg_connections WHERE id = $1`, [id]);
+  return res.rowCount > 0;
+}
+
+// Observations
+async function kgAddObservation(obs) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO kg_observations (subject_id, platform, observation_type, content, author_handle, url, engagement, sentiment, entities_extracted, raw_data, observed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+    [obs.subject_id, obs.platform, obs.observation_type, obs.content || null,
+     obs.author_handle || null, obs.url || null,
+     JSON.stringify(obs.engagement || {}), obs.sentiment || null,
+     JSON.stringify(obs.entities_extracted || []),
+     JSON.stringify(obs.raw_data || {}), obs.observed_at || new Date()]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgGetObservations(subjectId, filters = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT * FROM kg_observations WHERE subject_id = $1`;
+  const params = [subjectId];
+  if (filters.platform) { params.push(filters.platform); sql += ` AND platform = $${params.length}`; }
+  if (filters.observation_type) { params.push(filters.observation_type); sql += ` AND observation_type = $${params.length}`; }
+  sql += ` ORDER BY observed_at DESC`;
+  if (filters.limit) { params.push(filters.limit); sql += ` LIMIT $${params.length}`; }
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+// Collections
+async function kgCreateCollection(coll) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO kg_collections (subject_id, platform, collection_type, status, metadata)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [coll.subject_id, coll.platform, coll.collection_type || 'scrape',
+     'running', JSON.stringify(coll.metadata || {})]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgCompleteCollection(id, itemsCollected, error) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `UPDATE kg_collections SET status = $2, items_collected = $3, error_message = $4, completed_at = NOW()
+     WHERE id = $1 RETURNING *`,
+    [id, error ? 'failed' : 'completed', itemsCollected || 0, error || null]
+  );
+  return res.rows[0] || null;
+}
+
+// Full dossier — get everything about a subject in one call
+async function kgGetDossier(subjectId) {
+  if (!_pgConnected) return null;
+  const subject = await kgGetSubject(subjectId);
+  if (!subject) return null;
+  const [anchors, facts, timeline, connections, observations] = await Promise.all([
+    kgGetAnchors(subjectId),
+    kgGetFacts(subjectId),
+    kgGetTimeline(subjectId),
+    kgGetConnections(subjectId),
+    kgGetObservations(subjectId, { limit: 50 }),
+  ]);
+  return { subject, anchors, facts, timeline, connections, observations };
+}
+
 module.exports = {
   init,
   isConnected,
@@ -3320,6 +3748,30 @@ module.exports = {
   // Identity Clusters
   upsertIdentityCluster,
   getIdentityClusters,
+  // Knowledge Graph
+  kgCreateSubject,
+  kgGetSubjects,
+  kgGetSubject,
+  kgUpdateSubject,
+  kgDeleteSubject,
+  kgAddAnchor,
+  kgGetAnchors,
+  kgDeleteAnchor,
+  kgAddFact,
+  kgGetFacts,
+  kgUpdateFact,
+  kgDeleteFact,
+  kgAddEvent,
+  kgGetTimeline,
+  kgDeleteEvent,
+  kgAddConnection,
+  kgGetConnections,
+  kgDeleteConnection,
+  kgAddObservation,
+  kgGetObservations,
+  kgCreateCollection,
+  kgCompleteCollection,
+  kgGetDossier,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,
