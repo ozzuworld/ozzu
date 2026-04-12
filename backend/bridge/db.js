@@ -900,7 +900,8 @@ async function init() {
         'employs','employed_by','colleague','manages','reports_to',
         'knows','friend','family','spouse','studied_with',
         'client_of','supplier_of','partner','investor','legal_opponent',
-        'member_of','founder_of','owns','affiliated','other'
+        'member_of','founder_of','owns','affiliated','other',
+        'follows','followed_by','mentions','interacts_with'
       )),
       description TEXT,
       start_date DATE,
