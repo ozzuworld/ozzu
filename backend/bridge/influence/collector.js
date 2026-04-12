@@ -11,10 +11,14 @@
 
 const { execSync } = require("child_process");
 const captchaSolver = require("./captcha-solver");
+const accountPool = require("./account-pool");
 
 const ADB_DEVICE = process.env.ADB_DEVICE || "localhost:5556";
 const BRIDGE_URL = process.env.BRIDGE_URL || "http://localhost:3333";
 const COLLECTOR_PORT = parseInt(process.env.COLLECTOR_PORT || "3334");
+
+// Track which account is currently active per platform on Redroid
+const activeAccounts = {};
 
 // ── ADB Helpers ──
 
@@ -532,6 +536,22 @@ async function collect(platform, action, subjectId, params = {}) {
   const collector = collectors[platform];
   if (!collector) throw new Error(`Unknown platform: ${platform}`);
 
+  // Get best available account for this platform
+  const account = accountPool.getBestAccount(platform);
+  if (!account) {
+    const status = accountPool.getStatus();
+    const platInfo = status.byPlatform[platform] || { total: 0 };
+    return {
+      ok: false,
+      platform,
+      action,
+      error: `No available accounts for ${platform} (${platInfo.total} total, all in cooldown/restricted/banned)`,
+    };
+  }
+
+  console.log(`[collector] Using account ${account.id} (tier ${account.tier}, owner: ${account.owner})`);
+  activeAccounts[platform] = account.id;
+
   const startTime = Date.now();
   let result;
 
@@ -548,12 +568,20 @@ async function collect(platform, action, subjectId, params = {}) {
       throw new Error(`Unknown action: ${action}`);
     }
 
+    // Mark account as used
+    accountPool.markUsed(account.id);
+
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[collector] ${platform}/${action} completed in ${elapsed}s`);
-    return { ok: true, platform, action, elapsed: +elapsed, result };
+    console.log(`[collector] ${platform}/${action} completed in ${elapsed}s (account: ${account.id})`);
+    return { ok: true, platform, action, account: account.id, elapsed: +elapsed, result };
   } catch (err) {
+    // If it looks like a rate limit or restriction, put account on cooldown
+    const msg = err.message.toLowerCase();
+    if (msg.includes("rate") || msg.includes("limit") || msg.includes("restricted")) {
+      accountPool.markCooldown(account.id, 60);
+    }
     console.error(`[collector] ${platform}/${action} failed:`, err.message);
-    return { ok: false, platform, action, error: err.message };
+    return { ok: false, platform, action, account: account.id, error: err.message };
   }
 }
 
@@ -575,6 +603,7 @@ module.exports = {
   collectors,
   getDeviceState,
   captchaSolver,
+  accountPool,
   adb,
   shell,
   tap,
@@ -633,6 +662,37 @@ if (require.main === module) {
         const pageUrl = body.url || "https://www.linkedin.com";
         const result = await captchaSolver.detectAndSolve(pageUrl);
         return send(200, result);
+      }
+
+      // GET /pool — account pool status
+      if (req.method === "GET" && pathname === "/pool") {
+        return send(200, accountPool.getStatus());
+      }
+
+      // POST /pool/add — add account to pool
+      if (req.method === "POST" && pathname === "/pool/add") {
+        const body = await parseJSON(req);
+        if (!body.email || !body.platform) {
+          return send(400, { error: "email and platform required" });
+        }
+        const acct = accountPool.addAccount(body);
+        return send(201, { ok: true, account: acct });
+      }
+
+      // POST /pool/health — update account health
+      if (req.method === "POST" && pathname === "/pool/health") {
+        const body = await parseJSON(req);
+        if (!body.id || !body.health) {
+          return send(400, { error: "id and health required" });
+        }
+        switch (body.health) {
+          case "good": accountPool.markGood(body.id); break;
+          case "cooldown": accountPool.markCooldown(body.id, body.minutes); break;
+          case "restricted": accountPool.markRestricted(body.id, body.reason); break;
+          case "banned": accountPool.markBanned(body.id); break;
+          default: return send(400, { error: "health must be good|cooldown|restricted|banned" });
+        }
+        return send(200, { ok: true });
       }
 
       // POST /adb — raw ADB command (for debugging)
