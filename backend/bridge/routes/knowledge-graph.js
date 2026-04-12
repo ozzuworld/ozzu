@@ -1,5 +1,7 @@
 "use strict";
 
+const COLLECTOR_URL = process.env.COLLECTOR_URL || "http://172.17.0.1:3334";
+
 module.exports = function knowledgeGraphRoutes(ctx) {
   const { sendJSON, parseBody, db } = ctx;
 
@@ -297,6 +299,58 @@ module.exports = function knowledgeGraphRoutes(ctx) {
         sendJSON(res, 200, observations);
       } catch (err) {
         sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // ── Collector (proxied to host collector service) ──
+
+    // POST /kg/collect — trigger a collection job
+    if (req.method === "POST" && pathname === "/kg/collect") {
+      try {
+        const body = await parseBody(req);
+        if (!body.platform || !body.action || !body.subject_id) {
+          sendJSON(res, 400, { error: "platform, action, and subject_id are required" }); return true;
+        }
+
+        // Track the collection
+        const coll = await db.kgCreateCollection({
+          subject_id: body.subject_id,
+          platform: body.platform,
+          collection_type: body.action,
+        });
+
+        // Proxy to collector service (runs on host with ADB access)
+        fetch(`${COLLECTOR_URL}/collect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+          .then((r) => r.json())
+          .then(async (result) => {
+            await db.kgCompleteCollection(coll.id, result.result?.items || 1, result.ok ? null : result.error);
+            console.log(`[kg] Collection ${coll.id} completed:`, result.ok ? "success" : result.error);
+          })
+          .catch(async (err) => {
+            await db.kgCompleteCollection(coll.id, 0, err.message);
+            console.error(`[kg] Collection ${coll.id} failed:`, err.message);
+          });
+
+        sendJSON(res, 202, { ok: true, collection_id: coll.id, message: "Collection started" });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /kg/device — get current Redroid device state
+    if (req.method === "GET" && pathname === "/kg/device") {
+      try {
+        const resp = await fetch(`${COLLECTOR_URL}/device`);
+        const state = await resp.json();
+        sendJSON(res, 200, state);
+      } catch (err) {
+        sendJSON(res, 200, { foreground_app: null, adb_connected: false, error: err.message });
       }
       return true;
     }
