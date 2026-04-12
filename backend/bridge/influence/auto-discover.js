@@ -99,29 +99,20 @@ async function runSherlock(username) {
   if (!available) return { sites: [], total: 0, error: "tool_unavailable" };
 
   try {
-    const outputFile = `/tmp/osint-data/sherlock-${crypto.randomBytes(4).toString("hex")}.json`;
     const result = await cliRunner.runTool("sherlock", [
-      username, "--json", outputFile, "--timeout", "15",
+      username, "--print-found", "--timeout", "15",
     ], { timeout: 180000, parseJson: false });
 
-    let output = null;
-    try {
-      const fileResult = await cliRunner.runTool("cat", [outputFile], { timeout: 5000 });
-      output = fileResult.parsed;
-    } catch { /* file read failed */ }
-    cliRunner.runTool("rm", ["-f", outputFile], { timeout: 5000 }).catch(() => {});
-
-    if (output && typeof output === "object") {
-      const found = Object.entries(output)
-        .filter(([, data]) => data && data.status === "Claimed")
-        .map(([site, data]) => ({ site, url: data.url_user }));
-      console.log(`[auto-discover] sherlock: "${username}" → ${found.length} accounts`);
-      return { sites: found, total: found.length };
+    // Parse stdout: "[+] SiteName: https://..."
+    const sites = [];
+    for (const line of (result.stdout || "").split("\n")) {
+      const match = line.match(/^\[\+\]\s+(.+?):\s+(https?:\/\/.+)$/);
+      if (match) {
+        sites.push({ site: match[1].trim(), url: match[2].trim() });
+      }
     }
-
-    // Fallback: parse stdout
-    const lines = (result.stdout || "").split("\n").filter(l => l.includes("[+]") || l.includes("http"));
-    return { sites: lines.map(l => ({ site: l, url: l })), total: lines.length };
+    console.log(`[auto-discover] sherlock: "${username}" → ${sites.length} accounts`);
+    return { sites, total: sites.length };
   } catch (err) {
     console.error(`[auto-discover] sherlock failed for "${username}": ${err.message}`);
     return { sites: [], total: 0, error: err.message };
@@ -136,50 +127,35 @@ async function runMaigret(username) {
   const available = await cliRunner.isToolAvailable("maigret");
   if (!available) return { sites: [], pii: {}, total: 0, error: "tool_unavailable" };
 
-  const outputId = crypto.randomBytes(4).toString("hex");
-  const outputPath = `/tmp/osint-data/maigret-${outputId}`;
-
   try {
     const result = await cliRunner.runTool("maigret", [
       username, "--timeout", "10", "--top-sites", "500",
-      "--json", "ndjson", "-o", outputPath,
-    ], { timeout: 180000 });
+    ], { timeout: 180000, parseJson: false });
 
-    let entries = [];
-    try {
-      const fileResult = await cliRunner.runTool("cat", [`${outputPath}.ndjson`], { timeout: 5000 });
-      if (fileResult.parsed && Array.isArray(fileResult.parsed)) entries = fileResult.parsed;
-    } catch { /* fallback */ }
-    if (entries.length === 0 && result.parsed && Array.isArray(result.parsed)) {
-      entries = result.parsed;
-    }
-    cliRunner.runTool("sh", ["-c", `rm -f ${outputPath}*`], { timeout: 5000 }).catch(() => {});
-
-    const claimed = entries.filter(e => e.status === "Claimed" || e.is_similar === false);
-    const sites = claimed.map(e => ({
-      site: e.sitename || e.site_name || "unknown",
-      url: e.url || e.link,
-      tags: e.tags,
-    }));
-
-    // Extract PII
-    const pii = {};
-    for (const e of claimed) {
-      if (e.ids_data) {
-        for (const [key, val] of Object.entries(e.ids_data)) {
-          if (val && typeof val === "string" && val.length > 0) {
-            if (!pii[key]) pii[key] = new Set();
-            pii[key].add(val);
-          }
-        }
+    // Parse stdout: "[+] SiteName: https://..."
+    const sites = [];
+    for (const line of (result.stdout || "").split("\n")) {
+      // Maigret output: "on NN: [+] SiteName: https://..." or just "[+] SiteName: https://..."
+      const match = line.match(/\[\+\]\s+(.+?):\s+(https?:\/\/.+)/);
+      if (match) {
+        sites.push({ site: match[1].trim(), url: match[2].trim() });
       }
     }
-    // Convert Sets to arrays
-    const piiClean = {};
-    for (const [k, v] of Object.entries(pii)) piiClean[k] = [...v];
 
-    console.log(`[auto-discover] maigret: "${username}" → ${sites.length} accounts, ${Object.keys(piiClean).length} PII fields`);
-    return { sites, pii: piiClean, total: sites.length };
+    // Parse "Extracted IDs: {...}" line for PII
+    const pii = {};
+    const idsMatch = (result.stdout || "").match(/Extracted IDs:\s*(\{.+\})/);
+    if (idsMatch) {
+      try {
+        const ids = JSON.parse(idsMatch[1]);
+        for (const [k, v] of Object.entries(ids)) {
+          if (v && String(v).length > 0) pii[k] = [String(v)];
+        }
+      } catch { /* parse failed */ }
+    }
+
+    console.log(`[auto-discover] maigret: "${username}" → ${sites.length} accounts, ${Object.keys(pii).length} PII fields`);
+    return { sites, pii, total: sites.length };
   } catch (err) {
     console.error(`[auto-discover] maigret failed for "${username}": ${err.message}`);
     return { sites: [], pii: {}, total: 0, error: err.message };
@@ -372,8 +348,11 @@ function extractUsernameFromUrl(url) {
     const parts = u.pathname.split("/").filter(Boolean);
     // Most social sites: /{username} or /in/{username} (LinkedIn)
     if (parts.length > 0) {
-      const last = parts[parts.length - 1];
-      if (last && last.length > 0 && last.length < 50 && !last.includes(".")) return last;
+      let last = parts[parts.length - 1];
+      if (last && last.length > 0 && last.length < 50 && !last.includes(".")) {
+        // Strip leading @ (TikTok, Mastodon URLs use /@username)
+        return last.replace(/^@+/, "");
+      }
     }
   } catch { /* invalid URL */ }
   return null;
