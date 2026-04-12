@@ -163,8 +163,8 @@ const collectors = {};
 collectors.twitter = {
   pkg: "com.twitter.android",
 
-  async collectProfile(subjectId, handle) {
-    console.log(`[collector:x] Collecting profile for @${handle}...`);
+  async collectProfile(subjectId, handle, opts = {}) {
+    console.log(`[collector:x] Collecting profile for @${handle}${opts.dryRun ? ' (dry-run)' : ''}...`);
 
     // Force-stop foreground app if not X
     const fg = getForegroundPkg();
@@ -185,6 +185,12 @@ collectors.twitter = {
       "twitter", "profile_update", rawProfile,
       { capturePhoto: true, subjectId, uiNodes: nodes }
     );
+
+    // In dry-run mode, return data without storing to KG
+    if (opts.dryRun) {
+      console.log(`[collector:x] Dry-run complete for @${handle}`);
+      return { profile, rawProfile, photo, handle };
+    }
 
     // Store normalized observation
     await kgAddObservation(subjectId, {
@@ -650,9 +656,9 @@ async function collect(platform, action, subjectId, params = {}) {
   try {
     if (action === "profile") {
       if (platform === "twitter") {
-        result = await collector.collectProfile(subjectId, params.handle);
+        result = await collector.collectProfile(subjectId, params.handle, { dryRun: params.dryRun });
       } else if (platform === "linkedin") {
-        result = await collector.collectProfile(subjectId, params.profileUrl);
+        result = await collector.collectProfile(subjectId, params.profileUrl, { dryRun: params.dryRun });
       }
     } else if (action === "feed") {
       result = await collector.collectFeed(subjectId);

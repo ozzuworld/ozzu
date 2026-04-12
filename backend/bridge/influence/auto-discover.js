@@ -20,6 +20,7 @@
 const { execSync } = require("child_process");
 const cliRunner = require("../osint-cli-runner");
 const crypto = require("crypto");
+const identityResolver = require("./identity-resolver");
 
 const BRIDGE_URL = process.env.BRIDGE_URL || "http://localhost:3333";
 const COLLECTOR_URL = process.env.COLLECTOR_URL || "http://localhost:3335";
@@ -561,27 +562,72 @@ async function autoDiscover(subjectId, opts = {}) {
           await new Promise(r => setTimeout(r, 2000));
         }
 
-        // Process results: add discovered handles as anchors
-        const newHandles = new Map(); // platform → { username, url }
+        // Process results: build raw candidates for identity resolver
+        const rawCandidates = [];
+        const seenCandidates = new Set();
         for (const [, entry] of allSites) {
           const platform = mapSiteToPlat(entry.site);
           if (platform && !existingHandles.some(h => h.platform === platform)) {
-            if (!newHandles.has(platform)) {
-              const handle = extractUsernameFromUrl(entry.url) || entry.username;
-              newHandles.set(platform, { username: handle, url: entry.url });
+            const handle = extractUsernameFromUrl(entry.url) || entry.username;
+            const key = `${platform}:${handle}`.toLowerCase();
+            if (!seenCandidates.has(key)) {
+              seenCandidates.add(key);
+              rawCandidates.push({ platform, username: handle, profile_url: entry.url, site: entry.site });
             }
           }
         }
 
-        // Add new social_handle anchors
-        for (const [platform, { username, url }] of newHandles) {
-          console.log(`[auto-discover] Resolved handle: ${platform} → @${username} (${url})`);
-          await addAnchor(subjectId, {
-            anchor_type: "social_handle",
-            value: username,
-            platform,
+        // ── Phase 1.75: Identity Resolution ──
+        // Route ALL candidates through the resolver before adding as anchors.
+        // Only CONFIRMED/PROBABLE get added — prevents wrong-person contamination.
+        if (rawCandidates.length > 0 && !opts.skipResolver) {
+          console.log(`[auto-discover] Phase 1.75: Identity resolution — ${rawCandidates.length} candidates`);
+
+          const resolved = await identityResolver.resolveIdentities(subjectId, rawCandidates, {
+            maxStage: opts.resolverMaxStage || 2,
+            maxAdbCollections: opts.resolverMaxAdb || 10,
           });
-          results.handles_resolved.push({ platform, username, url });
+
+          const accepted = resolved.filter(r => r.classification === "confirmed" || r.classification === "probable");
+          const possible = resolved.filter(r => r.classification === "possible");
+          const rejected = resolved.filter(r => r.classification === "rejected" || r.classification === "unlikely");
+
+          // Only add confirmed/probable handles as anchors
+          for (const c of accepted) {
+            console.log(`[auto-discover] ✓ Resolved handle: ${c.platform} → @${c.username} (${c.classification}, weight: ${c.match_weight?.toFixed(1)})`);
+            await addAnchor(subjectId, {
+              anchor_type: "social_handle",
+              value: c.username,
+              platform: c.platform,
+            });
+            results.handles_resolved.push({ platform: c.platform, username: c.username, profile_url: c.profile_url, classification: c.classification });
+          }
+
+          results.phases.identity_resolution = {
+            total: rawCandidates.length,
+            confirmed: accepted.filter(r => r.classification === "confirmed").length,
+            probable: accepted.filter(r => r.classification === "probable").length,
+            possible: possible.length,
+            rejected: rejected.length,
+          };
+
+          await addTimeline(subjectId, {
+            event_type: "identity_resolution",
+            title: `Identity resolver: ${accepted.length}/${rawCandidates.length} accepted`,
+            description: `Confirmed: ${accepted.filter(r => r.classification === "confirmed").map(r => `${r.platform}:@${r.username}`).join(", ") || "none"}. Probable: ${accepted.filter(r => r.classification === "probable").map(r => `${r.platform}:@${r.username}`).join(", ") || "none"}. Rejected: ${rejected.length}`,
+            source: "auto-discover:identity-resolver",
+          });
+        } else if (rawCandidates.length > 0) {
+          // Resolver skipped — add all handles directly (legacy behavior)
+          for (const c of rawCandidates) {
+            console.log(`[auto-discover] Resolved handle (no resolver): ${c.platform} → @${c.username}`);
+            await addAnchor(subjectId, {
+              anchor_type: "social_handle",
+              value: c.username,
+              platform: c.platform,
+            });
+            results.handles_resolved.push({ platform: c.platform, username: c.username, profile_url: c.profile_url });
+          }
         }
 
         // Store PII as facts

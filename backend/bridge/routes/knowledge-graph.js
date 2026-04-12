@@ -572,6 +572,74 @@ module.exports = function knowledgeGraphRoutes(ctx) {
       return true;
     }
 
+    // ── Identity Resolution ──
+
+    // GET /kg/subjects/:id/identity-candidates — list identity candidates
+    const identCandMatch = pathname.match(/^\/kg\/subjects\/(\d+)\/identity-candidates$/);
+    if (req.method === "GET" && identCandMatch) {
+      try {
+        const subjectId = parseInt(identCandMatch[1]);
+        const classification = url.searchParams.get("classification");
+        const candidates = await db.kgGetCandidates(subjectId, { classification });
+        sendJSON(res, 200, candidates);
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /kg/subjects/:id/resolve — trigger identity resolution
+    if (req.method === "POST" && identCandMatch) {
+      try {
+        const subjectId = parseInt(identCandMatch[1]);
+        const body = await parseBody(req);
+        const identityResolver = require("../influence/identity-resolver");
+        const candidates = await db.kgGetCandidates(subjectId, { classification: "pending" });
+
+        if (candidates.length === 0) {
+          sendJSON(res, 200, { ok: true, message: "No pending candidates to resolve" });
+          return true;
+        }
+
+        // Run async — return immediately
+        identityResolver.resolveIdentities(subjectId, candidates, {
+          maxStage: body.max_stage || 2,
+          maxAdbCollections: body.max_adb || 10,
+        }).then(results => {
+          console.log(`[kg] Identity resolution for subject ${subjectId}: ${results.length} candidates processed`);
+        }).catch(err => {
+          console.error(`[kg] Identity resolution failed for subject ${subjectId}:`, err.message);
+        });
+
+        sendJSON(res, 202, { ok: true, message: `Resolving ${candidates.length} candidates`, subject_id: subjectId });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // PUT /kg/identity-candidates/:id/review — manually review a candidate
+    const reviewMatch = pathname.match(/^\/kg\/identity-candidates\/(\d+)\/review$/);
+    if (req.method === "PUT" && reviewMatch) {
+      try {
+        const body = await parseBody(req);
+        if (!body.classification) {
+          sendJSON(res, 400, { error: "classification is required (confirmed/probable/possible/unlikely/rejected)" });
+          return true;
+        }
+        const candidate = await db.kgReviewCandidate(
+          parseInt(reviewMatch[1]),
+          body.classification,
+          body.reviewed_by || "king_kazuma"
+        );
+        if (!candidate) { sendJSON(res, 404, { error: "Candidate not found" }); return true; }
+        sendJSON(res, 200, { ok: true, candidate });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     return false;
   };
 };

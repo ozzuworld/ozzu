@@ -846,7 +846,7 @@ async function init() {
         'employment','education','location','skill','affiliation',
         'legal','financial','personal','medical','military','political','other',
         'digital_footprint','security','pii_exposure','phone_intel','domain_intel',
-        'social_ids','exposure','breach'
+        'social_ids','exposure','breach','identity','media','social'
       )),
       key TEXT NOT NULL,
       value TEXT NOT NULL,
@@ -961,6 +961,41 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_observations_unenriched ON kg_observations(nlp_enriched) WHERE nlp_enriched = false`);
     await pool.query(`ALTER TABLE kg_subjects ADD COLUMN IF NOT EXISTS last_collected_at TIMESTAMPTZ DEFAULT NULL`);
     await pool.query(`ALTER TABLE kg_subjects ADD COLUMN IF NOT EXISTS collect_interval_hours INTEGER DEFAULT 24`);
+
+    // Identity resolution candidates
+    await pool.query(`CREATE TABLE IF NOT EXISTS kg_identity_candidates (
+      id              SERIAL PRIMARY KEY,
+      subject_id      INTEGER REFERENCES kg_subjects(id) ON DELETE CASCADE,
+      platform        VARCHAR(50) NOT NULL,
+      username        VARCHAR(200) NOT NULL,
+      profile_url     TEXT,
+      classification  VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (classification IN ('pending','confirmed','probable','possible','unlikely','rejected')),
+      match_weight    FLOAT,
+      confidence      FLOAT,
+      signals         JSONB DEFAULT '[]',
+      collected_data  JSONB,
+      stage_reached   INTEGER DEFAULT 0,
+      reviewed_by     VARCHAR(50),
+      reviewed_at     TIMESTAMPTZ,
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(subject_id, platform, username)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_identity_classification ON kg_identity_candidates(classification)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_identity_subject ON kg_identity_candidates(subject_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_identity_weight ON kg_identity_candidates(match_weight DESC NULLS LAST)`);
+
+    // Update kg_facts category constraint to include identity/media/social
+    await pool.query(`DO $$ BEGIN
+      ALTER TABLE kg_facts DROP CONSTRAINT IF EXISTS kg_facts_category_check;
+      ALTER TABLE kg_facts ADD CONSTRAINT kg_facts_category_check CHECK (category IN (
+        'employment','education','location','skill','affiliation',
+        'legal','financial','personal','medical','military','political','other',
+        'digital_footprint','security','pii_exposure','phone_intel','domain_intel',
+        'social_ids','exposure','breach','identity','media','social'
+      ));
+    END $$`);
 
     console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph)");
   } catch (err) {
@@ -3645,6 +3680,50 @@ async function kgGetObservationDiffs(subjectId, platform) {
   return diffs;
 }
 
+// ── Identity Resolution Candidates ──
+
+async function kgUpsertCandidate(c) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `INSERT INTO kg_identity_candidates (subject_id, platform, username, profile_url, classification, match_weight, confidence, signals, collected_data, stage_reached)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (subject_id, platform, username) DO UPDATE SET
+       classification = EXCLUDED.classification, match_weight = EXCLUDED.match_weight,
+       confidence = EXCLUDED.confidence, signals = EXCLUDED.signals,
+       collected_data = COALESCE(EXCLUDED.collected_data, kg_identity_candidates.collected_data),
+       stage_reached = GREATEST(kg_identity_candidates.stage_reached, EXCLUDED.stage_reached),
+       updated_at = NOW()
+     RETURNING *`,
+    [c.subject_id, c.platform, c.username, c.profile_url || null,
+     c.classification || 'pending', c.match_weight || null, c.confidence || null,
+     JSON.stringify(c.signals || []), c.collected_data ? JSON.stringify(c.collected_data) : null,
+     c.stage_reached || 0]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgGetCandidates(subjectId, filters = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT * FROM kg_identity_candidates WHERE subject_id = $1`;
+  const params = [subjectId];
+  if (filters.classification) { params.push(filters.classification); sql += ` AND classification = $${params.length}`; }
+  if (filters.minStage !== undefined) { params.push(filters.minStage); sql += ` AND stage_reached >= $${params.length}`; }
+  if (filters.maxStage !== undefined) { params.push(filters.maxStage); sql += ` AND stage_reached < $${params.length}`; }
+  if (filters.platform) { params.push(filters.platform); sql += ` AND platform = $${params.length}`; }
+  sql += ` ORDER BY match_weight DESC NULLS LAST`;
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function kgReviewCandidate(candidateId, classification, reviewedBy) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `UPDATE kg_identity_candidates SET classification = $2, reviewed_by = $3, reviewed_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING *`,
+    [candidateId, classification, reviewedBy || 'human']
+  );
+  return res.rows[0] || null;
+}
+
 async function kgGetStats() {
   if (!_pgConnected) return {};
   const res = await query(
@@ -3893,6 +3972,10 @@ module.exports = {
   kgSearchObservations,
   kgGetObservationDiffs,
   kgGetStats,
+  // KG Identity Resolution
+  kgUpsertCandidate,
+  kgGetCandidates,
+  kgReviewCandidate,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,
