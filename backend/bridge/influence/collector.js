@@ -13,6 +13,7 @@ const { execSync } = require("child_process");
 const captchaSolver = require("./captcha-solver");
 const accountPool = require("./account-pool");
 const normalizer = require("./normalizer");
+const enricher = require("./enricher");
 
 const ADB_DEVICE = process.env.ADB_DEVICE || "localhost:5556";
 const BRIDGE_URL = process.env.BRIDGE_URL || "http://localhost:3333";
@@ -179,10 +180,10 @@ collectors.twitter = {
     // Parse raw profile data from UI nodes
     const rawProfile = this._parseProfile(nodes, handle);
 
-    // NORMALIZE: structured extraction + photo capture
+    // NORMALIZE: structured extraction + photo capture (pass UI nodes for avatar bounds)
     const { normalized: profile, photo } = normalizer.normalize(
       "twitter", "profile_update", rawProfile,
-      { capturePhoto: true, subjectId }
+      { capturePhoto: true, subjectId, uiNodes: nodes }
     );
 
     // Store normalized observation
@@ -264,6 +265,12 @@ collectors.twitter = {
     });
 
     console.log(`[collector:x] Profile collected (normalized):`, profile);
+
+    // ENRICH (async — don't block collection)
+    enricher.enrichAndStore(subjectId, profile, photo ? photo.screenshotFilename : null)
+      .then((e) => console.log(`[collector:x] Enrichment complete for @${handle}`))
+      .catch((err) => console.error(`[collector:x] Enrichment failed:`, err.message));
+
     return { ...profile, photo: photo ? photo.screenshotFilename : null };
   },
 
@@ -451,10 +458,10 @@ collectors.linkedin = {
 
     const rawProfile = this._parseProfile(nodes);
 
-    // NORMALIZE: structured extraction + photo capture
+    // NORMALIZE: structured extraction + photo capture (pass UI nodes for avatar bounds)
     const { normalized: profile, photo } = normalizer.normalize(
       "linkedin", "profile_update", rawProfile,
-      { capturePhoto: true, subjectId }
+      { capturePhoto: true, subjectId, uiNodes: nodes }
     );
 
     await kgAddObservation(subjectId, {
@@ -512,6 +519,12 @@ collectors.linkedin = {
     }
 
     console.log(`[collector:li] Profile collected (normalized):`, profile);
+
+    // ENRICH (async — don't block collection)
+    enricher.enrichAndStore(subjectId, profile, photo ? photo.screenshotFilename : null)
+      .then((e) => console.log(`[collector:li] Enrichment complete`))
+      .catch((err) => console.error(`[collector:li] Enrichment failed:`, err.message));
+
     return { ...profile, photo: photo ? photo.screenshotFilename : null };
   },
 
@@ -684,6 +697,7 @@ module.exports = {
   captchaSolver,
   accountPool,
   normalizer,
+  enricher,
   adb,
   shell,
   tap,
@@ -773,6 +787,33 @@ if (require.main === module) {
           default: return send(400, { error: "health must be good|cooldown|restricted|banned" });
         }
         return send(200, { ok: true });
+      }
+
+      // POST /enrich — enrich a profile with face matching + NLP
+      if (req.method === "POST" && pathname === "/enrich") {
+        const body = await parseJSON(req);
+        if (!body.subject_id) {
+          return send(400, { error: "subject_id required" });
+        }
+        const result = await enricher.enrichAndStore(
+          body.subject_id,
+          body.normalized || {},
+          body.photo_filename || null
+        );
+        return send(200, result);
+      }
+
+      // POST /face-match — match a photo against the face DB
+      if (req.method === "POST" && pathname === "/face-match") {
+        const body = await parseJSON(req);
+        if (!body.photo_filename) {
+          return send(400, { error: "photo_filename required" });
+        }
+        const photoPath = require("path").join(enricher.PHOTO_DIR, body.photo_filename);
+        const result = body.all_faces
+          ? await enricher.matchAllFaces(photoPath, body)
+          : await enricher.matchFace(photoPath, body);
+        return send(200, result);
       }
 
       // POST /normalize — normalize raw content without collecting

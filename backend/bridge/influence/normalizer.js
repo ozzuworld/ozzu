@@ -89,7 +89,11 @@ function cleanTexts(raw_texts) {
  * Screenshot the current Redroid screen and crop the profile photo area.
  * Returns the local file path or null.
  */
-function captureProfilePhoto(subjectId, platform) {
+/**
+ * Screenshot the current Redroid screen, crop avatar, return paths.
+ * Also tries to find "Profile image" node bounds via uiautomator for exact crop.
+ */
+function captureProfilePhoto(subjectId, platform, uiNodes) {
   try {
     const filename = `${platform}_${subjectId}_${Date.now()}.png`;
     const devicePath = "/sdcard/kg-screenshot.png";
@@ -100,14 +104,24 @@ function captureProfilePhoto(subjectId, platform) {
     // Pull to local
     execSync(`adb -s ${ADB_DEVICE} pull ${devicePath} ${localPath}`, { timeout: 10000 });
 
-    if (fs.existsSync(localPath)) {
-      const stats = fs.statSync(localPath);
-      if (stats.size > 1000) {
-        console.log(`[normalizer] Screenshot saved: ${filename} (${Math.round(stats.size / 1024)}KB)`);
-        return { path: localPath, filename };
+    if (!fs.existsSync(localPath) || fs.statSync(localPath).size < 1000) {
+      return null;
+    }
+
+    console.log(`[normalizer] Screenshot saved: ${filename} (${Math.round(fs.statSync(localPath).size / 1024)}KB)`);
+
+    // Find "Profile image" bounds from UI nodes for accurate crop
+    let avatarBounds = null;
+    if (uiNodes) {
+      const profileNode = uiNodes.find(
+        (n) => (n.desc || "").includes("Profile image") || (n.text || "").includes("Profile image")
+      );
+      if (profileNode) {
+        avatarBounds = profileNode.bounds;
       }
     }
-    return null;
+
+    return { path: localPath, filename, avatarBounds };
   } catch (err) {
     console.error(`[normalizer] Screenshot failed:`, err.message);
     return null;
@@ -118,29 +132,45 @@ function captureProfilePhoto(subjectId, platform) {
  * Crop a profile photo from a full screenshot using ImageMagick or sharp.
  * Platform-specific crop regions based on standard app layouts.
  */
-function cropProfilePhoto(screenshotPath, platform) {
-  const cropRegions = {
-    twitter: { x: 36, y: 260, w: 200, h: 200 },    // X profile avatar position
-    linkedin: { x: 36, y: 300, w: 200, h: 200 },    // LinkedIn avatar
-    tiktok: { x: 200, y: 200, w: 200, h: 200 },     // TikTok centered avatar
-    instagram: { x: 36, y: 300, w: 200, h: 200 },   // IG avatar
+/**
+ * Crop the profile photo from a full 1080x1920 screenshot.
+ * Uses UI-derived bounds from ADB uiautomator for exact positioning.
+ * Falls back to platform-specific defaults.
+ */
+function cropProfilePhoto(screenshotPath, platform, uiBounds) {
+  // UI bounds from "Profile image" node if available, else defaults
+  const defaults = {
+    twitter: { x: 27, y: 324, w: 228, h: 228 },    // from uiautomator dump
+    linkedin: { x: 27, y: 300, w: 228, h: 228 },
+    tiktok: { x: 390, y: 200, w: 300, h: 300 },     // TikTok centered avatar
+    instagram: { x: 27, y: 300, w: 228, h: 228 },
   };
 
-  const region = cropRegions[platform] || cropRegions.twitter;
+  let region;
+  if (uiBounds) {
+    region = {
+      x: uiBounds.x1,
+      y: uiBounds.y1,
+      w: uiBounds.x2 - uiBounds.x1,
+      h: uiBounds.y2 - uiBounds.y1,
+    };
+  } else {
+    region = defaults[platform] || defaults.twitter;
+  }
+
   const croppedPath = screenshotPath.replace(".png", "_avatar.png");
 
   try {
-    // Try convert (ImageMagick)
     execSync(
       `convert "${screenshotPath}" -crop ${region.w}x${region.h}+${region.x}+${region.y} +repage "${croppedPath}"`,
       { timeout: 10000 }
     );
     if (fs.existsSync(croppedPath) && fs.statSync(croppedPath).size > 500) {
+      console.log(`[normalizer] Avatar cropped: ${region.w}x${region.h} at (${region.x},${region.y})`);
       return croppedPath;
     }
   } catch {
-    // ImageMagick not available — return full screenshot
-    console.log("[normalizer] ImageMagick not available, using full screenshot");
+    console.log("[normalizer] ImageMagick crop failed, using full screenshot");
   }
   return null;
 }
@@ -446,9 +476,9 @@ function normalize(platform, observationType, rawContent, opts = {}) {
   // Capture photo if requested and this is a profile observation
   let photo = null;
   if (opts.capturePhoto && observationType === "profile_update" && opts.subjectId) {
-    const screenshot = captureProfilePhoto(opts.subjectId, platform);
+    const screenshot = captureProfilePhoto(opts.subjectId, platform, opts.uiNodes);
     if (screenshot) {
-      const cropped = cropProfilePhoto(screenshot.path, platform);
+      const cropped = cropProfilePhoto(screenshot.path, platform, screenshot.avatarBounds);
       photo = {
         screenshot: screenshot.path,
         screenshotFilename: screenshot.filename,
