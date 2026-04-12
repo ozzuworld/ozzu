@@ -20,6 +20,7 @@ export default function TabLayout() {
       <Tabs.Screen name="ops" />
       <Tabs.Screen name="identity" />
       <Tabs.Screen name="finance" />
+      <Tabs.Screen name="influence" />
     </Tabs>
   );
 }

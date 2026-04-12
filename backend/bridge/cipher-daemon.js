@@ -767,7 +767,7 @@ async function kairosPush(urgent) {
     const owner = await Person.owner(_ctx.db);
     if (!owner) return;
 
-    const titles = { services_down: "⚠️ Service Alert", backup_overdue: "💾 Backup Overdue", stuck_directives: "🔧 Pipeline Alert", wa_failed: "📵 WhatsApp Down" };
+    const titles = { services_down: "⚠️ Service Alert", backup_overdue: "💾 Backup Overdue", stuck_directives: "🔧 Pipeline Alert", wa_failed: "📵 WhatsApp Down", osint_diff: "🔍 Profile Change Detected" };
     const title = titles[urgent.type] || "⚡ Ozzu Alert";
 
     // Try APNs push first — falls back to WhatsApp if no devices registered

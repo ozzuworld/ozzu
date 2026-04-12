@@ -11,6 +11,7 @@ type MenuItem =
 
 const staticMenuItems: MenuItem[] = [
   { icon: "🕵️", label: "INTEL", route: "/osint" },
+  { icon: "🔍", label: "INFLUENCE", route: "/influence" },
   { icon: "🚀", label: "VENTURES", route: "/business" },
   { icon: "📦", label: "FILES", route: "/files" },
   { icon: "🪪", label: "IDENTITY", route: "/identity" },
