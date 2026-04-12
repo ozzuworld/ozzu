@@ -385,6 +385,51 @@ module.exports = function knowledgeGraphRoutes(ctx) {
 
     // ── Collector (proxied to host collector service) ──
 
+    // POST /kg/discover — trigger network discovery from a subject
+    if (req.method === "POST" && pathname === "/kg/discover") {
+      try {
+        const body = await parseBody(req);
+        if (!body.subject_id) {
+          sendJSON(res, 400, { error: "subject_id is required" }); return true;
+        }
+
+        // Get Twitter anchor for the subject
+        const anchors = await db.kgGetAnchors(body.subject_id);
+        const twitterAnchor = anchors.find(a =>
+          a.anchor_type === "social_handle" && (a.platform === "twitter" || a.platform === "x")
+        );
+        if (!twitterAnchor) {
+          sendJSON(res, 400, { error: "Subject has no Twitter anchor" }); return true;
+        }
+
+        // Proxy to collector service
+        fetch(`${COLLECTOR_URL}/discover`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject_id: body.subject_id,
+            handle: twitterAnchor.value,
+            list_type: body.list_type || "following",
+            max: body.max || 50,
+            scroll_passes: body.scroll_passes || 10,
+            auto_collect: body.auto_collect || false,
+          }),
+        })
+          .then(r => r.json())
+          .then(result => {
+            console.log(`[kg] Discovery from subject ${body.subject_id}:`, result.ok ? `${result.discovered} new` : result.error);
+          })
+          .catch(err => {
+            console.error(`[kg] Discovery failed:`, err.message);
+          });
+
+        sendJSON(res, 202, { ok: true, message: `Discovery started from @${twitterAnchor.value}` });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     // POST /kg/collect — trigger a collection job
     if (req.method === "POST" && pathname === "/kg/collect") {
       try {

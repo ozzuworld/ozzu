@@ -16,6 +16,7 @@ import {
   fetchKgDiffs,
   queryKg,
   triggerKgEnrichNow,
+  triggerKgDiscover,
   type KgSubject,
   type KgDossier,
   type KgDiff,
@@ -91,6 +92,24 @@ export default function InfluenceScreen() {
           <Text style={{ color: TEXT3, fontSize: 11, marginTop: 2 }}>
             {selectedSubject.subject_type} · {selectedSubject.status}
           </Text>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+            <Pressable
+              onPress={async () => {
+                try { await triggerKgDiscover(selectedSubject.id, "following"); } catch {}
+              }}
+              style={{ backgroundColor: ACCENT + "20", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}
+            >
+              <Text style={{ color: ACCENT, fontSize: 10, fontWeight: "700" }}>🕸️ DISCOVER FOLLOWING</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                try { await triggerKgDiscover(selectedSubject.id, "followers"); } catch {}
+              }}
+              style={{ backgroundColor: ACCENT + "20", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}
+            >
+              <Text style={{ color: ACCENT, fontSize: 10, fontWeight: "700" }}>🕸️ DISCOVER FOLLOWERS</Text>
+            </Pressable>
+          </View>
         </View>
 
         {dossierLoading ? (

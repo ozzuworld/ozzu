@@ -109,6 +109,14 @@ export async function queryKg(q: string): Promise<KgQueryResult> {
   });
 }
 
+export async function triggerKgDiscover(subjectId: number, listType: string = "following"): Promise<any> {
+  return apiFetch("/kg/discover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject_id: subjectId, list_type: listType, max: 50 }),
+  });
+}
+
 export async function triggerKgCollection(subjectId: number, platform: string, target: string): Promise<any> {
   return apiFetch("/kg/collect", {
     method: "POST",

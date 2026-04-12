@@ -690,6 +690,8 @@ async function getDeviceState() {
   };
 }
 
+const discovery = require("./discovery");
+
 module.exports = {
   collect,
   collectors,
@@ -698,6 +700,7 @@ module.exports = {
   accountPool,
   normalizer,
   enricher,
+  discovery,
   adb,
   shell,
   tap,
@@ -841,6 +844,35 @@ if (require.main === module) {
         if (!obs) return send(404, { error: "Observation not found" });
         const result = normalizer.renormalize(obs);
         return send(200, { original: obs, ...result });
+      }
+
+      // POST /discover — discover new subjects from a KG subject's social connections
+      if (req.method === "POST" && pathname === "/discover") {
+        const body = await parseJSON(req);
+        if (!body.subject_id || !body.handle) {
+          return send(400, { error: "subject_id and handle required" });
+        }
+        const result = await discovery.discoverFromSubject(
+          body.subject_id, body.handle, {
+            listType: body.list_type || "following",
+            maxPerList: body.max || 50,
+            scrollPasses: body.scroll_passes || 10,
+            autoCollect: body.auto_collect || false,
+          }
+        );
+        return send(200, { ok: true, ...result });
+      }
+
+      // POST /discover-all — discover from all active subjects
+      if (req.method === "POST" && pathname === "/discover-all") {
+        const body = await parseJSON(req);
+        // Run in background — return immediately
+        discovery.discoverAll(body).then(r => {
+          console.log(`[collector] Discovery sweep complete:`, JSON.stringify(r));
+        }).catch(err => {
+          console.error(`[collector] Discovery sweep failed:`, err.message);
+        });
+        return send(202, { ok: true, message: "Discovery sweep started" });
       }
 
       // POST /adb — raw ADB command (for debugging)
