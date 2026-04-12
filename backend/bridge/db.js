@@ -832,7 +832,7 @@ async function init() {
       first_seen TIMESTAMPTZ DEFAULT NOW(),
       last_seen TIMESTAMPTZ DEFAULT NOW(),
       created_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(subject_id, anchor_type, value)
+      UNIQUE(subject_id, anchor_type, platform, value)
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_anchors_subject ON kg_anchors(subject_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_anchors_type ON kg_anchors(anchor_type)`);
@@ -3354,8 +3354,8 @@ async function kgAddAnchor(anchor) {
   const res = await query(
     `INSERT INTO kg_anchors (subject_id, anchor_type, platform, value, verified, confidence, source, metadata)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     ON CONFLICT (subject_id, anchor_type, value) DO UPDATE SET
-       platform = EXCLUDED.platform, verified = EXCLUDED.verified,
+     ON CONFLICT (subject_id, anchor_type, platform, value) DO UPDATE SET
+       verified = EXCLUDED.verified,
        confidence = EXCLUDED.confidence, last_seen = NOW()
      RETURNING *`,
     [anchor.subject_id, anchor.anchor_type, anchor.platform || null,
