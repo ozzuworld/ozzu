@@ -951,6 +951,13 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_collections_subject ON kg_collections(subject_id)`);
 
+    // ANALYZE stage columns
+    await pool.query(`ALTER TABLE kg_observations ADD COLUMN IF NOT EXISTS nlp_enriched BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE kg_observations ADD COLUMN IF NOT EXISTS nlp_result JSONB DEFAULT NULL`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_kg_observations_unenriched ON kg_observations(nlp_enriched) WHERE nlp_enriched = false`);
+    await pool.query(`ALTER TABLE kg_subjects ADD COLUMN IF NOT EXISTS last_collected_at TIMESTAMPTZ DEFAULT NULL`);
+    await pool.query(`ALTER TABLE kg_subjects ADD COLUMN IF NOT EXISTS collect_interval_hours INTEGER DEFAULT 24`);
+
     console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
@@ -3547,6 +3554,108 @@ async function kgGetDossier(subjectId) {
   return { subject, anchors, facts, timeline, connections, observations };
 }
 
+// ── ANALYZE stage — KAIROS NLP enrichment + queries + diffs ──
+
+async function kgGetUnenrichedObservations(limit = 10) {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT o.*, s.name as subject_name FROM kg_observations o
+     JOIN kg_subjects s ON o.subject_id = s.id
+     WHERE o.nlp_enriched = false AND o.observation_type IN ('profile_update', 'post', 'activity')
+     ORDER BY o.collected_at ASC LIMIT $1`,
+    [limit]
+  );
+  return res.rows;
+}
+
+async function kgMarkObservationEnriched(obsId, nlpResult) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `UPDATE kg_observations SET nlp_enriched = true, nlp_result = $2,
+     sentiment = COALESCE($3, sentiment),
+     entities_extracted = COALESCE($4, entities_extracted)
+     WHERE id = $1 RETURNING *`,
+    [obsId, JSON.stringify(nlpResult),
+     nlpResult.sentiment || null,
+     nlpResult.entities ? JSON.stringify(nlpResult.entities) : null]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgGetSubjectsDueForCollection() {
+  if (!_pgConnected) return [];
+  const res = await query(
+    `SELECT * FROM kg_subjects
+     WHERE status = 'active'
+     AND (last_collected_at IS NULL
+          OR last_collected_at < NOW() - (collect_interval_hours || ' hours')::interval)
+     ORDER BY last_collected_at ASC NULLS FIRST`
+  );
+  return res.rows;
+}
+
+async function kgMarkSubjectCollected(subjectId) {
+  if (!_pgConnected) return null;
+  const res = await query(
+    `UPDATE kg_subjects SET last_collected_at = NOW() WHERE id = $1 RETURNING *`,
+    [subjectId]
+  );
+  return res.rows[0] || null;
+}
+
+async function kgSearchObservations(searchText, filters = {}) {
+  if (!_pgConnected) return [];
+  let sql = `SELECT o.*, s.name as subject_name FROM kg_observations o
+             JOIN kg_subjects s ON o.subject_id = s.id
+             WHERE (o.content ILIKE $1 OR o.raw_data::text ILIKE $1)`;
+  const params = [`%${searchText}%`];
+  if (filters.platform) { params.push(filters.platform); sql += ` AND o.platform = $${params.length}`; }
+  if (filters.subject_id) { params.push(filters.subject_id); sql += ` AND o.subject_id = $${params.length}`; }
+  sql += ` ORDER BY o.observed_at DESC LIMIT 50`;
+  const res = await query(sql, params);
+  return res.rows;
+}
+
+async function kgGetObservationDiffs(subjectId, platform) {
+  if (!_pgConnected) return [];
+  // Get last 2 profile_update observations for the subject+platform and diff them
+  const res = await query(
+    `SELECT * FROM kg_observations
+     WHERE subject_id = $1 AND platform = $2 AND observation_type = 'profile_update'
+     ORDER BY observed_at DESC LIMIT 2`,
+    [subjectId, platform]
+  );
+  if (res.rows.length < 2) return [];
+  const [current, previous] = res.rows;
+  const diffs = [];
+  try {
+    const cur = typeof current.raw_data === "string" ? JSON.parse(current.raw_data) : current.raw_data;
+    const prev = typeof previous.raw_data === "string" ? JSON.parse(previous.raw_data) : previous.raw_data;
+    const keys = new Set([...Object.keys(cur), ...Object.keys(prev)]);
+    for (const k of keys) {
+      if (JSON.stringify(cur[k]) !== JSON.stringify(prev[k])) {
+        diffs.push({ field: k, previous: prev[k], current: cur[k], observed_at: current.observed_at });
+      }
+    }
+  } catch {}
+  return diffs;
+}
+
+async function kgGetStats() {
+  if (!_pgConnected) return {};
+  const res = await query(
+    `SELECT
+       (SELECT count(*) FROM kg_subjects) as subjects,
+       (SELECT count(*) FROM kg_observations) as observations,
+       (SELECT count(*) FROM kg_observations WHERE nlp_enriched = true) as enriched,
+       (SELECT count(*) FROM kg_observations WHERE nlp_enriched = false) as unenriched,
+       (SELECT count(*) FROM kg_facts) as facts,
+       (SELECT count(*) FROM kg_connections) as connections,
+       (SELECT count(*) FROM kg_collections WHERE status = 'completed') as collections_completed`
+  );
+  return res.rows[0] || {};
+}
+
 module.exports = {
   init,
   isConnected,
@@ -3772,6 +3881,14 @@ module.exports = {
   kgCreateCollection,
   kgCompleteCollection,
   kgGetDossier,
+  // KG ANALYZE
+  kgGetUnenrichedObservations,
+  kgMarkObservationEnriched,
+  kgGetSubjectsDueForCollection,
+  kgMarkSubjectCollected,
+  kgSearchObservations,
+  kgGetObservationDiffs,
+  kgGetStats,
   // Migration
   migrateMemoriesFromRedis,
   migrateSummariesFromRedis,

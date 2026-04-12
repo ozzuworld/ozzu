@@ -642,6 +642,12 @@ async function kairosTick() {
       _waRestartAttempts = 0; // reset counter when WA is healthy
     }
 
+    // OSINT: process un-enriched observations via Claude NLP (non-blocking, every tick)
+    await kairosOsintEnrich();
+
+    // OSINT: check if any subjects are due for re-collection
+    await kairosOsintAutoCollect(snapshot);
+
     const urgent = detectUrgent(snapshot);
     if (!urgent) return;
 
@@ -733,6 +739,9 @@ function detectUrgent(snapshot) {
   const waFailed = snapshot.issues.find(i => i.type === "wa_failed");
   if (waFailed) return { type: "wa_failed", severity: "high", message: `WhatsApp agent down after ${waFailed.attempts} restart attempt(s) — manual intervention needed` };
 
+  const osintDiff = snapshot.issues.find(i => i.type === "osint_diff");
+  if (osintDiff) return { type: "osint_diff", severity: "medium", message: `🔍 ${osintDiff.subject} profile changed: ${osintDiff.changes.join(", ")}` };
+
   return null;
 }
 
@@ -792,12 +801,193 @@ function spawnKairosAction(urgent) {
   kairosAuditLog(`ACTION_SPAWNED: ${urgent.type}`);
 }
 
+// ── KAIROS OSINT — NLP enrichment via Claude Max (zero extra cost) ──
+
+const OSINT_BATCH_SIZE = 5;  // process up to 5 observations per tick
+let _osintEnrichRunning = false;
+
+async function kairosOsintEnrich() {
+  if (_osintEnrichRunning || !_ctx?.db) return;
+  _osintEnrichRunning = true;
+
+  try {
+    const unenriched = await _ctx.db.kgGetUnenrichedObservations(OSINT_BATCH_SIZE);
+    if (unenriched.length === 0) return;
+
+    log(`[KAIROS-OSINT] ${unenriched.length} observation(s) to enrich`);
+    kairosAuditLog(`OSINT_ENRICH: processing ${unenriched.length} observations`);
+
+    for (const obs of unenriched) {
+      try {
+        // Build prompt for Claude NLP extraction
+        const data = typeof obs.raw_data === "string" ? JSON.parse(obs.raw_data) : (obs.raw_data || {});
+        const content = obs.content || "";
+        const combined = { ...data, content_text: content, platform: obs.platform, type: obs.observation_type };
+
+        const prompt = [
+          "You are an OSINT intelligence analyst. Extract structured intelligence from this social media observation.",
+          `Subject: "${obs.subject_name}" (ID: ${obs.subject_id})`,
+          `Platform: ${obs.platform}, Type: ${obs.observation_type}`,
+          "",
+          "DATA:",
+          JSON.stringify(combined, null, 2),
+          "",
+          'Return ONLY valid JSON:',
+          '{"entities":[{"name":"...","type":"person|org|location","role":"..."}],',
+          '"relationships":[{"from":"...","to":"...","type":"works_at|knows|follows|mentions","confidence":0-100}],',
+          '"sentiment":"positive|negative|neutral",',
+          '"inferred_facts":[{"category":"employment|location|education|interest|skill","key":"...","value":"...","confidence":0-100}],',
+          '"topics":["..."],',
+          '"changes_detected":["..."],',
+          '"summary":"1-sentence intelligence summary"}',
+        ].join("\n");
+
+        const { execSync } = require("child_process");
+        const output = execSync(
+          `claude -p ${JSON.stringify(prompt)} --model claude-haiku-4-5-20251001 --output-format text`,
+          { cwd: PROJECT_DIR, encoding: "utf8", timeout: 30000, env: { ...process.env } }
+        );
+
+        // Parse Claude's response
+        const jsonMatch = output.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const nlpResult = JSON.parse(jsonMatch[0]);
+          await _ctx.db.kgMarkObservationEnriched(obs.id, nlpResult);
+
+          // Store inferred facts into KG
+          for (const fact of nlpResult.inferred_facts || []) {
+            await _ctx.db.kgAddFact({
+              subject_id: obs.subject_id,
+              category: fact.category,
+              key: fact.key,
+              value: typeof fact.value === "string" ? fact.value : JSON.stringify(fact.value),
+              source: "kairos:nlp",
+              confidence: fact.confidence || 50,
+            });
+          }
+
+          // Store new connections
+          for (const rel of nlpResult.relationships || []) {
+            // Try to find target subject
+            const targets = await _ctx.db.kgGetSubjects({ search: rel.to });
+            if (targets.length > 0) {
+              try {
+                await _ctx.db.kgAddConnection({
+                  source_id: obs.subject_id,
+                  target_id: targets[0].id,
+                  relationship: rel.type || "mentions",
+                  confidence: rel.confidence || 50,
+                  source: "kairos:nlp",
+                });
+              } catch {} // ignore duplicates
+            }
+          }
+
+          log(`[KAIROS-OSINT] Enriched obs #${obs.id}: ${nlpResult.summary || "done"}`);
+        } else {
+          // Mark enriched even on parse failure to avoid infinite retries
+          await _ctx.db.kgMarkObservationEnriched(obs.id, { error: "parse_failed", raw: output.slice(0, 500) });
+          log(`[KAIROS-OSINT] Failed to parse NLP for obs #${obs.id}`);
+        }
+      } catch (err) {
+        log(`[KAIROS-OSINT] Enrichment error for obs #${obs.id}: ${err.message}`);
+        // Mark as enriched with error to avoid retrying forever
+        await _ctx.db.kgMarkObservationEnriched(obs.id, { error: err.message }).catch(() => {});
+      }
+    }
+
+    kairosAuditLog(`OSINT_ENRICH_DONE: ${unenriched.length} processed`);
+  } catch (err) {
+    log(`[KAIROS-OSINT] Enrich batch error: ${err.message}`);
+  } finally {
+    _osintEnrichRunning = false;
+  }
+}
+
+// ── KAIROS OSINT — Auto-collection for active subjects ──
+
+const COLLECTOR_URL = process.env.COLLECTOR_URL || "http://172.17.0.1:3335";
+
+async function kairosOsintAutoCollect(snapshot) {
+  if (!_ctx?.db) return;
+
+  try {
+    const due = await _ctx.db.kgGetSubjectsDueForCollection();
+    if (due.length === 0) return;
+
+    log(`[KAIROS-OSINT] ${due.length} subject(s) due for collection`);
+    kairosAuditLog(`OSINT_AUTOCOLLECT: ${due.length} subjects due`);
+
+    // Only collect 1 subject per tick to stay within time budget
+    const subject = due[0];
+
+    // Get anchors to know what platforms to collect from
+    const anchors = await _ctx.db.kgGetAnchors(subject.id);
+    const twitterAnchor = anchors.find(a => a.anchor_type === "twitter" || a.anchor_type === "x");
+
+    if (twitterAnchor) {
+      try {
+        const resp = await fetch(`${COLLECTOR_URL}/collect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            platform: "twitter",
+            action: "profile",
+            subject_id: subject.id,
+            target: twitterAnchor.value,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        const result = await resp.json();
+        if (result.ok) {
+          await _ctx.db.kgMarkSubjectCollected(subject.id);
+          log(`[KAIROS-OSINT] Auto-collected ${subject.name} on twitter`);
+          kairosAuditLog(`OSINT_COLLECTED: ${subject.name} (twitter)`);
+
+          // Also check for diffs
+          const diffs = await _ctx.db.kgGetObservationDiffs(subject.id, "twitter");
+          if (diffs.length > 0) {
+            log(`[KAIROS-OSINT] Diffs detected for ${subject.name}: ${diffs.map(d => d.field).join(", ")}`);
+            kairosAuditLog(`OSINT_DIFF: ${subject.name} changed: ${diffs.map(d => d.field).join(", ")}`);
+
+            // Store diff as timeline event
+            await _ctx.db.kgAddEvent({
+              subject_id: subject.id,
+              event_type: "profile_change",
+              title: `Profile changes detected: ${diffs.map(d => d.field).join(", ")}`,
+              description: JSON.stringify(diffs),
+              source: "kairos:diff",
+            });
+
+            // Push notification for significant diffs
+            if (diffs.some(d => ["display_name", "bio", "location", "verified"].includes(d.field))) {
+              snapshot.issues.push({
+                type: "osint_diff",
+                subject: subject.name,
+                changes: diffs.map(d => d.field),
+              });
+            }
+          }
+        }
+      } catch (err) {
+        log(`[KAIROS-OSINT] Auto-collect failed for ${subject.name}: ${err.message}`);
+      }
+    } else {
+      // No twitter anchor — just mark as collected to avoid retrying
+      await _ctx.db.kgMarkSubjectCollected(subject.id);
+    }
+  } catch (err) {
+    log(`[KAIROS-OSINT] Auto-collect error: ${err.message}`);
+  }
+}
+
 function getKairosStatus() {
   return {
     running: !_kairosRunning,
     lastActionAt: _lastKairosActionAt ? new Date(_lastKairosActionAt).toISOString() : null,
     auditLog: KAIROS_AUDIT_LOG,
     intervalMinutes: KAIROS_INTERVAL_MS / 60000,
+    osint: { enrichRunning: _osintEnrichRunning },
   };
 }
 

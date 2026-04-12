@@ -303,6 +303,86 @@ module.exports = function knowledgeGraphRoutes(ctx) {
       return true;
     }
 
+    // ── ANALYZE stage — query, search, diffs, stats ──
+
+    // GET /kg/stats — pipeline statistics
+    if (req.method === "GET" && pathname === "/kg/stats") {
+      try {
+        const stats = await db.kgGetStats();
+        sendJSON(res, 200, stats);
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /kg/query — natural language search across the KG
+    if (req.method === "POST" && pathname === "/kg/query") {
+      try {
+        const body = await parseBody(req);
+        if (!body.q) { sendJSON(res, 400, { error: "q is required" }); return true; }
+
+        // Search observations, subjects, and facts
+        const [observations, subjects, facts] = await Promise.all([
+          db.kgSearchObservations(body.q, { platform: body.platform, subject_id: body.subject_id }),
+          db.kgGetSubjects({ search: body.q }),
+          db.query(
+            `SELECT f.*, s.name as subject_name FROM kg_facts f
+             JOIN kg_subjects s ON f.subject_id = s.id
+             WHERE f.value ILIKE $1 OR f.key ILIKE $1 LIMIT 20`,
+            [`%${body.q}%`]
+          ).then(r => r.rows).catch(() => []),
+        ]);
+
+        sendJSON(res, 200, {
+          query: body.q,
+          results: {
+            subjects: subjects.slice(0, 10),
+            observations: observations.slice(0, 20),
+            facts,
+          },
+          total: subjects.length + observations.length + facts.length,
+        });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /kg/subjects/:id/diffs — profile change detection
+    const diffsMatch = pathname.match(/^\/kg\/subjects\/(\d+)\/diffs$/);
+    if (req.method === "GET" && diffsMatch) {
+      try {
+        const subjectId = parseInt(diffsMatch[1]);
+        const platform = url.searchParams.get("platform") || "twitter";
+        const diffs = await db.kgGetObservationDiffs(subjectId, platform);
+        sendJSON(res, 200, { subject_id: subjectId, platform, diffs });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
+    // POST /kg/enrich-now — manually trigger NLP enrichment for pending observations
+    if (req.method === "POST" && pathname === "/kg/enrich-now") {
+      try {
+        const unenriched = await db.kgGetUnenrichedObservations(5);
+        if (unenriched.length === 0) {
+          sendJSON(res, 200, { ok: true, message: "No observations pending enrichment" });
+          return true;
+        }
+        // Return immediately, enrichment happens on next KAIROS tick
+        sendJSON(res, 202, {
+          ok: true,
+          message: `${unenriched.length} observation(s) pending — will be enriched on next KAIROS tick (15 min)`,
+          pending: unenriched.map(o => ({ id: o.id, subject: o.subject_name, platform: o.platform })),
+        });
+      } catch (err) {
+        sendJSON(res, 500, { error: err.message });
+      }
+      return true;
+    }
+
     // ── Collector (proxied to host collector service) ──
 
     // POST /kg/collect — trigger a collection job
