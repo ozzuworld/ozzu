@@ -13,8 +13,8 @@ import { usePhoneLayout } from "../lib/usePhoneLayout";
 const TOP_BAR_HEIGHT = 48;
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB (3D scans can be large)
 
-const ALLOWED_MIME_PREFIXES = ["image/", "text/", "application/pdf", "application/json", "model/", "application/octet-stream"];
-const ALLOWED_EXTENSIONS = [".txt", ".pdf", ".md", ".json", ".csv", ".log", ".glb", ".gltf", ".obj", ".usdz", ".zip", ".bin"];
+const ALLOWED_MIME_PREFIXES = ["image/", "text/", "audio/", "video/", "application/pdf", "application/json", "model/", "application/octet-stream"];
+const ALLOWED_EXTENSIONS = [".txt", ".pdf", ".md", ".json", ".csv", ".log", ".glb", ".gltf", ".obj", ".usdz", ".zip", ".bin", ".mp3", ".m4a", ".ogg", ".wav", ".aac", ".opus", ".mp4", ".mov"];
 
 type Mode = "FILE" | "TEXT";
 type ContentType = "image" | "document" | "text";
@@ -28,7 +28,7 @@ interface SelectedFile {
   previewUri?: string;
 }
 
-const BINARY_EXTENSIONS = [".glb", ".gltf", ".obj", ".usdz", ".zip", ".bin"];
+const BINARY_EXTENSIONS = [".glb", ".gltf", ".obj", ".usdz", ".zip", ".bin", ".mp3", ".m4a", ".ogg", ".wav", ".aac", ".opus", ".mp4", ".mov"];
 
 function detectContentType(mimeType: string, name?: string): ContentType {
   if (mimeType.startsWith("image/")) return "image";
@@ -37,7 +37,7 @@ function detectContentType(mimeType: string, name?: string): ContentType {
 
 function isBinaryFile(name: string, mimeType: string): boolean {
   const ext = name.substring(name.lastIndexOf(".")).toLowerCase();
-  return BINARY_EXTENSIONS.includes(ext) || mimeType.startsWith("model/") || mimeType === "application/octet-stream";
+  return BINARY_EXTENSIONS.includes(ext) || mimeType.startsWith("model/") || mimeType.startsWith("audio/") || mimeType.startsWith("video/") || mimeType === "application/octet-stream";
 }
 
 function formatSize(bytes: number): string {
@@ -111,7 +111,7 @@ export default function UploadScreen() {
           previewUri: contentType === "image" ? asset.uri : undefined,
         });
       }
-      if (skipped > 0) setError(`${skipped} file(s) skipped (unsupported or >5MB)`);
+      if (skipped > 0) setError(`${skipped} file(s) skipped (unsupported or >50MB)`);
       if (newFiles.length > 0) setFiles((prev) => [...prev, ...newFiles]);
     } catch (e: any) {
       setError(e.message || "Failed to pick document");
@@ -145,7 +145,7 @@ export default function UploadScreen() {
           previewUri: asset.uri,
         });
       }
-      if (skipped > 0) setError(`${skipped} image(s) skipped (>5MB)`);
+      if (skipped > 0) setError(`${skipped} image(s) skipped (>50MB)`);
       if (newFiles.length > 0) setFiles((prev) => [...prev, ...newFiles]);
     } catch (e: any) {
       setError(e.message || "Failed to pick image");
