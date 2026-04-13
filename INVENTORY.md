@@ -1,6 +1,6 @@
 # OZZU PROJECT INVENTORY
 # CHECK THIS BEFORE BUILDING ANYTHING. If it exists here, USE IT. Do NOT rebuild.
-# Last updated: 2026-04-09
+# Last updated: 2026-04-13
 
 ---
 
@@ -21,6 +21,9 @@ Primary compute — always on. All services run here via Docker.
 | face-recognition | 5555 | Face embedding + search API | ✅ running |
 | osint-tools | internal | OSINT scan engine | ✅ running |
 | browser | 3334 | Headless browser for web tasks | ✅ running |
+| whatsapp-bridge | 8180 | WhatsApp MCP — whatsmeow Go bridge (41 tools) | ✅ running |
+| whatsapp-mcp | 8081 | WhatsApp MCP — Python MCP server (SSE) | ✅ running |
+| whatsapp-web-ui | 8090 | WhatsApp MCP — QR pairing + webhook UI | ✅ running |
 
 ### VPN Clients (OpenVPN 10.8.0.0/24)
 | Client | IP | Device |
@@ -65,6 +68,7 @@ Primary compute — always on. All services run here via Docker.
 | inject-last-conversation.sh | UserPromptSubmit hook — inject context | Pre-flight checklist on first msg |
 | backup.sh | Encrypted backup of all data | `--no-encrypt` |
 | gpu-orchestrator.sh | Unattended multi-dataset GPU runner | Auto-recovery, heartbeat |
+| start-gmail-mcp.sh | Launch Gmail MCP servers (both accounts) | Requires `backend/.env.gmail` OAuth creds |
 
 ---
 
@@ -121,6 +125,20 @@ smartDeploy auto-triggers after every merge — **NEVER manually trigger builds*
 | data/ms1mv2-embeddings (12GB) | 2026-04-09 | Already ingested into Qdrant |
 | data/agrovision (1.8GB) | 2026-04-09 | Agrovision decommissioned |
 | agrovision-app/ repo (476MB) | 2026-04-09 | Agrovision decommissioned |
+
+---
+
+## MCP Servers (registered in Claude Code)
+
+| Server | URL | Purpose |
+|--------|-----|---------|
+| ozzu-bridge | http://localhost:3333/mcp | Main bridge — directives, pipeline, services, WhatsApp (legacy text-only), email (legacy send-only) |
+| whatsapp-mcp | http://localhost:8081/mcp | WhatsApp Extended — 41 tools: media, groups, reactions, polls, presence, newsletters |
+| gmail-personal | http://localhost:8000/mcp | Gmail (eng.hsuarezp) — read inbox, search, send, labels, threads, drafts, attachments |
+| gmail-ozzu | http://localhost:8001/mcp | Gmail (eng.ozzu) — same as above for ozzu account |
+
+**WhatsApp MCP**: `cd whatsapp-mcp && docker compose up -d` (separate compose, not in backend/)
+**Gmail MCP**: `./scripts/start-gmail-mcp.sh` (requires Google OAuth credentials in `backend/.env.gmail`)
 
 ---
 
