@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/gcp/ozzu/scripts/volts-session-end.sh"
+            "command": "/home/gcp/ozzu/scripts/cipher-session-save.sh"
           }
         ]
       }
@@ -66,10 +66,6 @@
           {
             "type": "command",
             "command": "/home/gcp/ozzu/.claude/hooks/merge-deploy-alert.sh"
-          },
-          {
-            "type": "command",
-            "command": "/home/gcp/ozzu/scripts/volts-checkpoint.sh"
           }
         ]
       },
