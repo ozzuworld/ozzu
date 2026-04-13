@@ -53,6 +53,15 @@
             "command": "/home/gcp/ozzu/.claude/hooks/validate-commit.sh"
           }
         ]
+      },
+      {
+        "matcher": "Read|Edit|Write|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/inject-context.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [

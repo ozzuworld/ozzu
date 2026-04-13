@@ -11,7 +11,7 @@ BRIDGE_URL="${BRIDGE_URL:-http://localhost:3333}"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_MD="${PROJECT_DIR}/CLAUDE.local.md"
-MAX_HISTORY_CHARS=30000
+MAX_HISTORY_CHARS=15000
 
 # ── Anti-shortcut fixes (Apr 2026) ──
 # GitHub issues #42796, #40274: Feb 2026 defaults caused adaptive thinking regression.
@@ -122,5 +122,10 @@ KAIROS_LOCK="/tmp/cipher-session.lock"
 echo "$$" > "$KAIROS_LOCK"
 trap 'rm -f "$KAIROS_LOCK"' EXIT INT TERM
 
-# Launch Claude Code
-exec claude "$@"
+# Launch Claude Code with system-level mandatory rules
+exec claude --append-system-prompt "MANDATORY (system-level):
+1. NEVER commit to main. Work on cipher/dir_xxx branches.
+2. Every code change needs a directive FIRST.
+3. NEVER merge manually. Use merge-and-deploy.
+4. NEVER state infra facts from memory. Read .claude/rules/ or query live.
+5. Read INVENTORY.md before writing ANY code." "$@"
