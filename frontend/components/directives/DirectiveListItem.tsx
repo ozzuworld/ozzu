@@ -12,26 +12,37 @@ interface DirectiveListItemProps {
 
 export function DirectiveListItem({ directive, onPress, variant = "list", showDivider = true }: DirectiveListItemProps) {
   const pill = statusPillStyle(directive.status);
+  const isEpic = directive.type === "epic" && directive.phases && directive.phases.length > 0;
+  const epicDone = isEpic ? directive.phases!.filter((p) => p.status === "completed").length : 0;
+  const epicTotal = isEpic ? directive.phases!.length : 0;
+  const epicPct = epicTotal > 0 ? Math.round((epicDone / epicTotal) * 100) : 0;
+
+  // Pick subtitle: work_summary > description > nothing
+  const subtitle = directive.work_summary || directive.description || null;
+
+  // Last activity snippet (most recent activity_log entry)
+  const lastActivity = Array.isArray(directive.activity_log) && directive.activity_log.length > 0
+    ? directive.activity_log[directive.activity_log.length - 1]
+    : null;
 
   return (
     <Pressable
       onPress={() => onPress(directive)}
       style={({ pressed }) => ({
-        backgroundColor: pressed ? withAlpha("#ffffff", 0.03) : "transparent",
-        paddingHorizontal: 0,
-        paddingVertical: 10,
-        borderBottomWidth: showDivider ? 0.5 : 0,
-        borderBottomColor: withAlpha("#ffffff", 0.06),
+        backgroundColor: pressed ? withAlpha("#ffffff", 0.05) : colors.bg.elevated,
+        borderRadius: radius.md,
+        padding: 12,
+        marginBottom: showDivider ? 6 : 0,
       })}
     >
-      {/* Single horizontal row: emoji | title | pill | time */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        {/* Emoji — small, fixed width */}
-        <Text style={{ fontSize: 15, width: 20, textAlign: "center" }}>
+      {/* Row 1: emoji + title + status pill + time */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        {/* Emoji */}
+        <Text style={{ fontSize: 16, width: 22, textAlign: "center" }}>
           {directive.emoji || ""}
         </Text>
 
-        {/* Title — takes remaining space, single line */}
+        {/* Title */}
         <Text
           style={{
             flex: 1,
@@ -44,7 +55,7 @@ export function DirectiveListItem({ directive, onPress, variant = "list", showDi
           {directive.title}
         </Text>
 
-        {/* Status pill — compact, right-aligned */}
+        {/* Status pill */}
         <View
           style={{
             flexDirection: "row",
@@ -75,12 +86,12 @@ export function DirectiveListItem({ directive, onPress, variant = "list", showDi
           </Text>
         </View>
 
-        {/* Time — right edge */}
+        {/* Time */}
         <Text
           style={{
             color: colors.text.disabled,
             fontSize: 11,
-            minWidth: 32,
+            minWidth: 28,
             textAlign: "right",
           }}
         >
@@ -88,19 +99,52 @@ export function DirectiveListItem({ directive, onPress, variant = "list", showDi
         </Text>
       </View>
 
-      {/* Board variant: 2nd row with work summary */}
-      {variant === "board" && directive.work_summary ? (
+      {/* Row 2: subtitle (description or work_summary) */}
+      {subtitle ? (
+        <Text
+          style={{
+            color: colors.text.tertiary,
+            fontSize: 12,
+            marginTop: 5,
+            marginLeft: 30,
+            lineHeight: 16,
+          }}
+          numberOfLines={1}
+        >
+          {subtitle}
+        </Text>
+      ) : null}
+
+      {/* Row 3: epic progress bar OR last activity */}
+      {isEpic ? (
+        <View style={{ marginTop: 6, marginLeft: 30 }}>
+          {/* Progress track */}
+          <View style={{ height: 3, backgroundColor: withAlpha("#ffffff", 0.06), borderRadius: 2, overflow: "hidden" }}>
+            <View
+              style={{
+                width: `${epicPct}%`,
+                height: "100%",
+                backgroundColor: colors.accent,
+                borderRadius: 2,
+              }}
+            />
+          </View>
+          <Text style={{ color: colors.text.disabled, fontSize: 10, marginTop: 3, fontFamily: "monospace" }}>
+            {epicDone}/{epicTotal} phases  {epicPct}%
+          </Text>
+        </View>
+      ) : variant === "board" && lastActivity ? (
         <Text
           style={{
             color: colors.text.disabled,
             fontSize: 11,
-            marginTop: 3,
+            marginTop: 5,
             marginLeft: 30,
             lineHeight: 15,
           }}
           numberOfLines={1}
         >
-          {directive.work_summary}
+          {lastActivity.actor ? `${lastActivity.actor}: ` : ""}{lastActivity.message}
         </Text>
       ) : null}
     </Pressable>
