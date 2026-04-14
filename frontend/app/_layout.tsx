@@ -7,6 +7,7 @@ import { HAProvider } from "../lib/ha-context";
 import { GlassesProvider } from "../lib/glasses-context";
 import { setImmersiveCallback } from "../lib/immersive-events";
 import { probeBridgeUrl, resetBridgeUrl } from "../lib/bridge-api";
+import { GlobalApprovalGate } from "../components/GlobalApprovalGate";
 import * as BleBeacon from "../modules/ble-beacon";
 import { registerForPushNotifications } from "../lib/push-notifications";
 
@@ -164,6 +165,7 @@ export default function RootLayout() {
         <HAProvider>
           <GlassesProvider>
             <ImmersiveListener />
+            <GlobalApprovalGate />
             <Stack
               screenOptions={{
                 headerShown: false,
