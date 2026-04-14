@@ -30,8 +30,12 @@ jobs:
 
       - run: npm ci
 
+      - name: Write .env
+        run: |
+          echo "EXPO_PUBLIC_BRIDGE_URL=${EXPO_PUBLIC_BRIDGE_URL}" > .env
+
       - name: Generate native Android project
-        run: npx expo prebuild --platform android --clean --no-install
+        run: npx expo prebuild --platform android --clean
 
       - name: Add Android TV leanback support
         run: |
@@ -39,8 +43,6 @@ jobs:
           sed -i 's|<application|<uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <application|' android/app/src/main/AndroidManifest.xml
           # Add LEANBACK_LAUNCHER category to main activity
           sed -i 's|</intent-filter>|<category android:name="android.intent.category.LEANBACK_LAUNCHER" />\n                </intent-filter>|' android/app/src/main/AndroidManifest.xml
-          # Set immersive mode — hide nav bar
-          sed -i 's|android:windowSoftInputMode|android:theme="@android:style/Theme.NoTitleBar.Fullscreen"\n            android:windowSoftInputMode|' android/app/src/main/AndroidManifest.xml
 
       - name: Build debug APK
         run: |
