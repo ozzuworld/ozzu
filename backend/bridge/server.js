@@ -137,6 +137,7 @@ const financeRoutes = require("./routes/finance");
 const whatsappRoutes = require("./routes/whatsapp");
 const influenceRoutes = require("./routes/influence");
 const fleetRoutes = require("./routes/fleet");
+const devDashboardRoutes = require("./routes/dev-dashboard");
 const watchdog = require("./watchdog");
 const recoveryEngine = require("./recovery-engine");
 const cipherDaemon = require("./cipher-agent");
@@ -1576,6 +1577,7 @@ function getRouteHandlers() {
       whatsapp: whatsappRoutes(routeCtx),
       influence: influenceRoutes(routeCtx),
       fleet: fleetRoutes(routeCtx),
+      devDashboard: devDashboardRoutes(routeCtx),
       knowledgeGraph: knowledgeGraphRoutes(routeCtx),
     };
   }
@@ -1701,6 +1703,7 @@ async function handleRequest(req, res) {
   if (await r.whatsapp(req, res, pathname, url)) return;
   if (await r.influence(req, res, pathname, url)) return;
   if (await r.fleet(req, res, pathname, url)) return;
+  if (await r.devDashboard(req, res, pathname, url)) return;
   if (await r.knowledgeGraph(req, res, pathname, url)) return;
 
   // ── AgroVisión training state poller (SSH to GPU, parse training log) ──
