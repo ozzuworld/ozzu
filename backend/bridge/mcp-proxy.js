@@ -24,6 +24,7 @@ class SSEUpstream extends EventEmitter {
     this.connecting = false;
     this.connected = false;
     this.reconnectTimer = null;
+    this._initialized = false;
   }
 
   async ensureConnected() {
@@ -131,7 +132,26 @@ class SSEUpstream extends EventEmitter {
     }, 3000);
   }
 
+  async ensureInitialized() {
+    if (this._initialized) return;
+    await this.ensureConnected();
+    // Send MCP initialize handshake
+    const initResult = await this._rawForward({
+      jsonrpc: "2.0", id: -1,
+      method: "initialize",
+      params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "bridge-proxy", version: "1.0" } },
+    });
+    this._initialized = true;
+  }
+
   async forward(jsonRpcBody) {
+    await this.ensureInitialized();
+    if (!this.messageEndpoint) throw new Error(`No message endpoint for ${this.name}`);
+
+    return this._rawForward(jsonRpcBody);
+  }
+
+  async _rawForward(jsonRpcBody) {
     await this.ensureConnected();
     if (!this.messageEndpoint) throw new Error(`No message endpoint for ${this.name}`);
 

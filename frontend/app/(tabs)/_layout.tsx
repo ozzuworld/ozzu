@@ -12,6 +12,7 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen name="directives" />
+      <Tabs.Screen name="messages" />
       <Tabs.Screen name="cipher" />
       <Tabs.Screen name="osint" />
       <Tabs.Screen name="business" />

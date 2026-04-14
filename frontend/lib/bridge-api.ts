@@ -2322,6 +2322,56 @@ export async function deleteSchedule(id: number): Promise<{ deleted: boolean }> 
   return res.json();
 }
 
+// ── WhatsApp Inbox ──
+
+export interface WhatsAppChat {
+  jid: string;
+  name: string;
+  display_name: string;
+  is_group: boolean;
+  last_message_time: string;
+  last_message: string;
+  last_message_id: string;
+  last_sender: string;
+  last_is_from_me: number;
+}
+
+export interface WhatsAppMessage {
+  id: string;
+  chat_jid: string;
+  chat_name: string;
+  sender: string;
+  content: string;
+  timestamp: string;
+  is_from_me: number;
+  media_type: string;
+}
+
+export async function fetchWhatsAppChats(limit = 50): Promise<{ chats: WhatsAppChat[]; count: number }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/whatsapp/chats?limit=${limit}`);
+  if (!res.ok) throw new Error(`Fetch chats: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchWhatsAppMessages(
+  jid: string,
+  limit = 50,
+  before?: string
+): Promise<{ jid: string; messages: WhatsAppMessage[]; count: number }> {
+  const qs = before ? `&before=${encodeURIComponent(before)}` : "";
+  const res = await fetchWithTimeout(
+    `${BRIDGE_URL}/whatsapp/chats/${encodeURIComponent(jid)}/messages?limit=${limit}${qs}`
+  );
+  if (!res.ok) throw new Error(`Fetch messages: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchWhatsAppStatus(): Promise<{ status: string; note?: string }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/whatsapp/status`);
+  if (!res.ok) throw new Error(`WhatsApp status: ${res.status}`);
+  return res.json();
+}
+
 // Multi-currency formatting
 export function formatCurrency(amount: number | null | undefined, currency: string = "COP"): string {
   if (amount == null || isNaN(amount)) return currency === "JPY" ? "\u00a50" : "$0";

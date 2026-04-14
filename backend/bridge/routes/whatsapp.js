@@ -4,6 +4,40 @@
 
 "use strict";
 
+// WhatsApp MCP returns Python repr strings — convert to JSON-parseable objects
+function parsePythonRepr(text) {
+  if (!text || text === "[]") return [];
+  try {
+    // Replace Python-specific syntax with JSON equivalents
+    const jsonStr = text
+      .replace(/\bNone\b/g, "null")
+      .replace(/\bTrue\b/g, "true")
+      .replace(/\bFalse\b/g, "false")
+      .replace(/'/g, '"')
+      // Handle Contact(...) wrapper objects from list_all_contacts
+      .replace(/Contact\(([^)]+)\)/g, (_, inner) => {
+        const obj = {};
+        const pairs = inner.match(/(\w+)=("(?:[^"\\]|\\.)*"|null|true|false|\d+)/g) || [];
+        return "{" + pairs.map(p => {
+          const eq = p.indexOf("=");
+          return '"' + p.slice(0, eq) + '":' + p.slice(eq + 1);
+        }).join(",") + "}";
+      });
+    return JSON.parse(jsonStr);
+  } catch {
+    // Fallback: try eval-style parsing for complex structures
+    try {
+      const cleaned = text
+        .replace(/\bNone\b/g, "null")
+        .replace(/\bTrue\b/g, "true")
+        .replace(/\bFalse\b/g, "false")
+        .replace(/'/g, '"')
+        .replace(/Contact\([^)]*\)/g, "{}");
+      return JSON.parse(cleaned);
+    } catch { return []; }
+  }
+}
+
 async function ensureTable(db) {
   await db.query(`
     CREATE TABLE IF NOT EXISTS whatsapp_messages (
@@ -56,6 +90,101 @@ module.exports = function whatsappRoutes(ctx) {
         }
       } else {
         sendJSON(res, 200, { qr });
+      }
+      return true;
+    }
+
+    // GET /whatsapp/chats — proxy list_chats from WhatsApp MCP
+    if (req.method === "GET" && pathname === "/whatsapp/chats") {
+      try {
+        const { getUpstream } = require("../mcp-proxy");
+        const upstream = getUpstream("whatsapp-mcp");
+        if (!upstream) { sendJSON(res, 503, { error: "WhatsApp MCP not configured" }); return true; }
+
+        const url = new URL(req.url, "http://localhost");
+        const limit = parseInt(url.searchParams.get("limit") || "50");
+
+        const result = await upstream.forward({
+          jsonrpc: "2.0", id: Date.now(),
+          method: "tools/call",
+          params: { name: "list_chats", arguments: { limit, include_last_message: true, sort_by: "last_message" } },
+        });
+
+        // Parse the Python repr string from MCP response
+        const text = result?.result?.content?.[0]?.text || "[]";
+        let chats;
+        try { chats = JSON.parse(text); } catch {
+          // MCP returns Python repr — convert to JSON
+          chats = parsePythonRepr(text);
+        }
+
+        // Enrich with contact names
+        let contactMap = {};
+        try {
+          const cResult = await upstream.forward({
+            jsonrpc: "2.0", id: Date.now() + 1,
+            method: "tools/call",
+            params: { name: "list_all_contacts", arguments: { limit: 500 } },
+          });
+          const cText = cResult?.result?.content?.[0]?.text || "[]";
+          const contacts = parsePythonRepr(cText);
+          for (const c of contacts) {
+            if (c.jid) contactMap[c.jid] = c.name || c.push_name || c.business_name || null;
+            // Also map base JID without :suffix for @lid contacts
+            const baseJid = c.jid?.split(":")[0];
+            if (baseJid && c.jid !== baseJid) {
+              const domain = c.jid.includes("@") ? "@" + c.jid.split("@")[1] : "";
+              contactMap[baseJid + domain] = c.name || c.push_name || c.business_name || null;
+            }
+          }
+        } catch {}
+
+        // Filter junk, enrich with names, sort by most recent
+        const filtered = chats
+          .filter(c => c.jid && c.jid !== "status@broadcast" && !c.jid.includes("@newsletter") && c.jid !== "0@s.whatsapp.net")
+          .map(c => ({
+            ...c,
+            display_name: contactMap[c.jid] || c.name || c.jid?.split("@")[0] || "Unknown",
+          }))
+          .sort((a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime());
+
+        sendJSON(res, 200, { chats: filtered, count: filtered.length });
+      } catch (err) {
+        sendJSON(res, 503, { error: err.message });
+      }
+      return true;
+    }
+
+    // GET /whatsapp/chats/:jid/messages — proxy list_messages from WhatsApp MCP
+    if (req.method === "GET" && pathname.match(/^\/whatsapp\/chats\/[^/]+\/messages$/)) {
+      try {
+        const jid = decodeURIComponent(pathname.split("/")[3]);
+        const { getUpstream } = require("../mcp-proxy");
+        const upstream = getUpstream("whatsapp-mcp");
+        if (!upstream) { sendJSON(res, 503, { error: "WhatsApp MCP not configured" }); return true; }
+
+        const url = new URL(req.url, "http://localhost");
+        const limit = parseInt(url.searchParams.get("limit") || "50");
+        const before = url.searchParams.get("before") || undefined;
+
+        const args = { chat_jid: jid, limit };
+        if (before) args.before = before;
+
+        const result = await upstream.forward({
+          jsonrpc: "2.0", id: Date.now(),
+          method: "tools/call",
+          params: { name: "list_messages", arguments: args },
+        });
+
+        const text = result?.result?.content?.[0]?.text || "[]";
+        let messages;
+        try { messages = JSON.parse(text); } catch {
+          messages = parsePythonRepr(text);
+        }
+
+        sendJSON(res, 200, { jid, messages, count: messages.length });
+      } catch (err) {
+        sendJSON(res, 503, { error: err.message });
       }
       return true;
     }
