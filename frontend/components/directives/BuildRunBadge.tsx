@@ -3,6 +3,7 @@ import { View, Text, Pressable, Alert, Linking } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { fetchDirectiveArtifacts, deployArtifact, getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
 import { relativeTime } from "../../lib/directive-constants";
+import { colors, radius, fontSize, fontWeight, withAlpha } from "../../lib/design-tokens";
 
 interface BuildRun {
   platform: string;
@@ -158,38 +159,35 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
         gap: 5,
         paddingHorizontal: 8,
         paddingVertical: 3,
-        borderRadius: 6,
+        borderRadius: radius.sm,
         borderWidth: 1,
-        borderColor: `${badgeColor}40`,
-        backgroundColor: `${badgeColor}15`,
+        borderColor: withAlpha(badgeColor, 0.25),
+        backgroundColor: withAlpha(badgeColor, 0.08),
       }}
     >
-      <Text style={{ fontSize: 11 }}>{platformEmoji}</Text>
+      <Text style={{ fontSize: fontSize.sm }}>{platformEmoji}</Text>
       <Text
         style={{
-          color: "#A3A3A3",
-          fontSize: 10,
-          fontFamily: "monospace",
-          fontWeight: "bold",
+          color: colors.text.secondary,
+          fontSize: fontSize.xs,
+          fontWeight: fontWeight.bold,
         }}
       >
         {run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : run.platform}:
       </Text>
-      <Text style={{ fontSize: 10 }}>{statusEmoji}</Text>
+      <Text style={{ fontSize: fontSize.xs }}>{statusEmoji}</Text>
       <Text
         style={{
           color: badgeColor,
-          fontSize: 10,
-          fontFamily: "monospace",
+          fontSize: fontSize.xs,
         }}
       >
         {statusText}
       </Text>
       <Text
         style={{
-          color: "#525252",
+          color: colors.text.disabled,
           fontSize: 9,
-          fontFamily: "monospace",
         }}
       >
         {relativeTime(run.triggeredAt)}
@@ -197,11 +195,11 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
       {succeeded ? (
         <Pressable onPress={handleDownload} disabled={loadingArtifacts || isDownloading}>
           {isDownloading ? (
-            <Text style={{ fontSize: 9, color: "#3B82F6", fontFamily: "monospace", fontWeight: "bold" }}>
+            <Text style={{ fontSize: 9, color: colors.info, fontWeight: fontWeight.bold }}>
               {Math.round((downloadProgress || 0) * 100)}%
             </Text>
           ) : (
-            <Text style={{ fontSize: 12, opacity: loadingArtifacts ? 0.4 : 1 }}>{"\u{1F4E5}"}</Text>
+            <Text style={{ fontSize: fontSize.md, opacity: loadingArtifacts ? 0.4 : 1 }}>{"\u{1F4E5}"}</Text>
           )}
         </Pressable>
       ) : null}

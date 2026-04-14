@@ -190,6 +190,32 @@ export async function fetchDirectiveTimeline(category?: string): Promise<Directi
   return res.json();
 }
 
+export async function fetchDirective(id: string): Promise<Directive> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge directive error: ${res.status}`);
+  return res.json();
+}
+
+export interface HistoryEntry {
+  timestamp: number;
+  type: string;
+  actor?: string;
+  message: string;
+  source: "activity_log" | "pg_history";
+  details?: any;
+}
+
+export async function fetchDirectiveHistory(id: string): Promise<HistoryEntry[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}/history`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge history error: ${res.status}`);
+  const data = await res.json();
+  return data.history || data;
+}
+
 export async function sendDirective(
   type: string,
   title: string,

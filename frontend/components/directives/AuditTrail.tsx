@@ -1,36 +1,13 @@
 import { useState, useCallback } from "react";
 import { View, Text, Pressable, LayoutAnimation } from "react-native";
-import { ACTOR_COLORS, AUDIT_TYPE_EMOJIS, relativeTime } from "../../lib/directive-constants";
+import { ACTOR_COLORS, relativeTime } from "../../lib/directive-constants";
+import { colors, spacing, radius, fontSize, fontWeight, withAlpha, auditTypeColors } from "../../lib/design-tokens";
 
 interface ActivityEntry {
   timestamp: number;
   type: string;
   actor?: string;
   message: string;
-}
-
-function ActorBadge({ actor }: { actor?: string }) {
-  if (!actor) return null;
-  const color = ACTOR_COLORS[actor] || "#9CA3AF";
-  return (
-    <Text
-      style={{
-        color,
-        fontSize: 9,
-        fontFamily: "monospace",
-        fontWeight: "bold",
-        backgroundColor: `${color}18`,
-        borderWidth: 1,
-        borderColor: `${color}33`,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: 3,
-        overflow: "hidden",
-      }}
-    >
-      {actor}
-    </Text>
-  );
 }
 
 interface AuditTrailProps {
@@ -52,78 +29,78 @@ export function AuditTrail({ entries, collapsed = true, maxCollapsed = 3 }: Audi
   const shown = expanded ? entries : entries.slice(-maxCollapsed).reverse();
 
   return (
-    <View style={{ marginTop: 8 }}>
+    <View style={{ marginTop: spacing.sm }}>
       <Pressable
         onPress={toggle}
-        style={{ flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 4 }}
+        style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs, marginBottom: spacing.sm }}
       >
-        <Text style={{ fontSize: 11 }}>📜</Text>
-        <Text
-          style={{
-            color: "#525252",
-            fontSize: 10,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-            letterSpacing: 1,
-          }}
-        >
-          AUDIT TRAIL ({entries.length})
+        <Text style={{
+          color: colors.text.disabled,
+          fontSize: fontSize.xs,
+          fontWeight: fontWeight.bold,
+          letterSpacing: 0.5,
+        }}>
+          ACTIVITY ({entries.length})
         </Text>
-        <Text style={{ color: "#3B82F6", fontSize: 10, fontFamily: "monospace" }}>
-          {expanded ? "▲" : "▼"}
+        <Text style={{ color: colors.accent, fontSize: fontSize.xs }}>
+          {expanded ? "\u25B2" : "\u25BC"}
         </Text>
       </Pressable>
+
       {shown.map((entry, i) => {
-        const emoji = AUDIT_TYPE_EMOJIS[entry.type] || "•";
+        const dotColor = auditTypeColors[entry.type] || colors.text.disabled;
+        const actorColor = ACTOR_COLORS[entry.actor || ""] || colors.text.tertiary;
+        const isLast = i === shown.length - 1;
+
         return (
           <View
             key={expanded ? i : `c-${i}`}
-            style={{
-              flexDirection: "row",
-              gap: 5,
-              marginLeft: 4,
-              marginBottom: 3,
-              alignItems: "baseline",
-            }}
+            style={{ flexDirection: "row", minHeight: 28 }}
           >
-            <Text style={{ fontSize: 9 }}>{emoji}</Text>
-            <Text
-              style={{
-                color: "#3A3A3A",
-                fontSize: 9,
-                fontFamily: "monospace",
-                minWidth: 48,
-              }}
-            >
-              {relativeTime(entry.timestamp)}
-            </Text>
-            {entry.actor ? <ActorBadge actor={entry.actor} /> : null}
-            <Text
-              style={{
-                color: "#666",
-                fontSize: 9,
-                fontFamily: "monospace",
-                flex: 1,
-              }}
-              numberOfLines={expanded ? undefined : 1}
-            >
-              {entry.message}
-            </Text>
+            {/* Timeline rail */}
+            <View style={{ width: 16, alignItems: "center" }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor, marginTop: 4 }} />
+              {!isLast ? (
+                <View style={{ width: 1, flex: 1, backgroundColor: colors.border.subtle, marginVertical: 1 }} />
+              ) : null}
+            </View>
+
+            {/* Content */}
+            <View style={{ flex: 1, paddingBottom: spacing.sm, paddingLeft: spacing.xs }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
+                <Text style={{ color: colors.text.disabled, fontSize: 9 }}>
+                  {relativeTime(entry.timestamp)}
+                </Text>
+                {entry.actor ? (
+                  <Text style={{
+                    color: actorColor,
+                    fontSize: 9,
+                    fontWeight: fontWeight.bold,
+                    backgroundColor: withAlpha(actorColor, 0.1),
+                    paddingHorizontal: 4,
+                    paddingVertical: 1,
+                    borderRadius: radius.xs,
+                    overflow: "hidden",
+                  }}>
+                    {entry.actor}
+                  </Text>
+                ) : null}
+              </View>
+              <Text
+                style={{ color: colors.text.tertiary, fontSize: 9, lineHeight: 14 }}
+                numberOfLines={expanded ? undefined : 1}
+              >
+                {entry.message}
+              </Text>
+            </View>
           </View>
         );
       })}
+
       {!expanded && entries.length > maxCollapsed ? (
         <Pressable onPress={toggle}>
-          <Text
-            style={{
-              color: "#3B82F6",
-              fontSize: 9,
-              fontFamily: "monospace",
-              marginTop: 2,
-              marginLeft: 4,
-            }}
-          >
-            +{entries.length - maxCollapsed} more entries ▼
+          <Text style={{ color: colors.accent, fontSize: 9, marginTop: 2, marginLeft: 16 }}>
+            +{entries.length - maxCollapsed} more entries
           </Text>
         </Pressable>
       ) : null}

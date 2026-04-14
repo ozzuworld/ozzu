@@ -5,7 +5,9 @@ import {
   STATUS_COLORS,
   VALID_TRANSITIONS,
   TRANSITION_LABELS,
+  HUMAN_STATUS,
 } from "../../lib/directive-constants";
+import { colors, spacing, radius, fontSize, fontWeight, withAlpha, statusPillStyle } from "../../lib/design-tokens";
 
 interface StatusChangeSheetProps {
   visible: boolean;
@@ -18,8 +20,7 @@ export function StatusChangeSheet({ visible, directive, onDismiss, onStatusChang
   if (!directive) return null;
 
   const transitions = VALID_TRANSITIONS[directive.status] || [];
-  const currentEmoji = STATUS_EMOJI[directive.status] || "•";
-  const currentColor = STATUS_COLORS[directive.status] || "#737373";
+  const currentPill = statusPillStyle(directive.status);
 
   const handleChange = async (newStatus: string) => {
     try {
@@ -43,77 +44,47 @@ export function StatusChangeSheet({ visible, directive, onDismiss, onStatusChang
       >
         <Pressable
           style={{
-            backgroundColor: "#1A1A1A",
-            borderTopLeftRadius: 16,
-            borderTopRightRadius: 16,
+            backgroundColor: colors.bg.elevated,
+            borderTopLeftRadius: radius.xl,
+            borderTopRightRadius: radius.xl,
             borderWidth: 1,
-            borderColor: "#333",
-            padding: 20,
+            borderColor: colors.border.default,
+            padding: spacing.xl,
             paddingBottom: 40,
           }}
           onPress={() => {}}
         >
-          <Text
-            style={{
-              color: "#E5E5E5",
-              fontSize: 14,
-              fontFamily: "monospace",
-              fontWeight: "bold",
-              marginBottom: 4,
-            }}
-          >
-            📝 CHANGE STATUS
+          <Text style={{ color: colors.text.primary, fontSize: fontSize.lg, fontWeight: fontWeight.semibold, marginBottom: spacing.xs }}>
+            Change Status
           </Text>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 6,
-              marginBottom: 16,
-              paddingVertical: 6,
-            }}
-          >
-            <Text style={{ fontSize: 14 }}>{currentEmoji}</Text>
-            <Text
-              style={{
-                color: currentColor,
-                fontSize: 12,
-                fontFamily: "monospace",
-                fontWeight: "bold",
-                letterSpacing: 0.5,
-              }}
-            >
-              Current: {directive.status.toUpperCase().replace(/_/g, " ")}
-            </Text>
+
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.lg, paddingVertical: spacing.sm }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: currentPill.bg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: currentPill.dot }} />
+              <Text style={{ color: currentPill.text, fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>
+                {HUMAN_STATUS[directive.status] || directive.status}
+              </Text>
+            </View>
           </View>
 
-          <View style={{ height: 1, backgroundColor: "#2A2A2A", marginBottom: 12 }} />
+          <View style={{ height: 1, backgroundColor: colors.border.subtle, marginBottom: spacing.md }} />
 
           {transitions.map((status) => {
-            const color = STATUS_COLORS[status] || "#737373";
-            const label = TRANSITION_LABELS[status] || `${STATUS_EMOJI[status] || "•"} ${status}`;
+            const pill = statusPillStyle(status);
+            const label = TRANSITION_LABELS[status] || `${STATUS_EMOJI[status] || ""} ${HUMAN_STATUS[status] || status}`;
             return (
               <Pressable
                 key={status}
                 onPress={() => handleChange(status)}
-                style={{
-                  paddingVertical: 12,
-                  paddingHorizontal: 16,
-                  borderRadius: 8,
-                  marginBottom: 6,
-                  backgroundColor: `${color}12`,
-                  borderWidth: 1,
-                  borderColor: `${color}30`,
-                }}
+                style={({ pressed }) => ({
+                  paddingVertical: spacing.md,
+                  paddingHorizontal: spacing.lg,
+                  borderRadius: radius.md,
+                  marginBottom: spacing.sm,
+                  backgroundColor: pressed ? withAlpha(pill.text, 0.15) : withAlpha(pill.text, 0.08),
+                })}
               >
-                <Text
-                  style={{
-                    color,
-                    fontSize: 13,
-                    fontFamily: "monospace",
-                    fontWeight: "bold",
-                  }}
-                >
+                <Text style={{ color: pill.text, fontSize: fontSize.base, fontWeight: fontWeight.semibold }}>
                   {label}
                 </Text>
               </Pressable>
@@ -123,22 +94,15 @@ export function StatusChangeSheet({ visible, directive, onDismiss, onStatusChang
           <Pressable
             onPress={onDismiss}
             style={{
-              paddingVertical: 12,
+              paddingVertical: spacing.md,
               alignItems: "center",
-              marginTop: 8,
-              borderRadius: 8,
-              backgroundColor: "#2A2A2A",
+              marginTop: spacing.sm,
+              borderRadius: radius.md,
+              backgroundColor: colors.bg.surface,
             }}
           >
-            <Text
-              style={{
-                color: "#737373",
-                fontSize: 13,
-                fontFamily: "monospace",
-                fontWeight: "bold",
-              }}
-            >
-              DISMISS
+            <Text style={{ color: colors.text.tertiary, fontSize: fontSize.base, fontWeight: fontWeight.semibold }}>
+              Dismiss
             </Text>
           </Pressable>
         </Pressable>

@@ -34,10 +34,11 @@ import {
   HUMAN_STATUS,
   relativeTime,
 } from "../../lib/directive-constants";
-import { DirectiveCard } from "../../components/directives/DirectiveCard";
+import { DirectiveListItem } from "../../components/directives/DirectiveListItem";
 import { PlanReviewModal } from "../../components/directives/PlanReviewModal";
 import { StatusChangeSheet } from "../../components/directives/StatusChangeSheet";
 import HamburgerMenu from "../../components/HamburgerMenu";
+import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha, statusPillStyle } from "../../lib/design-tokens";
 
 if (
   Platform.OS === "android" &&
@@ -198,32 +199,32 @@ export default function DirectivesScreen() {
   const hPad = Math.max(16, insets.left, insets.right);
   const catKeys = Object.keys(CATEGORY_INFO);
 
+  const navigateToDirective = useCallback((d: Directive) => {
+    router.push(`/directive/${d.id}`);
+  }, [router]);
+
   const renderCard = (d: Directive) => (
-    <DirectiveCard
+    <DirectiveListItem
       key={d.id}
       directive={enrichDirective(d)}
-      isTabletLandscape={false}
-      onAction={handleAction}
-      buildStatus={buildStatus}
-      onPlanReview={handlePlanReview}
-      onStatusChange={handleStatusChange}
+      onPress={navigateToDirective}
     />
   );
 
   const renderSection = (title: string, items: Directive[], color: string, collapsed?: boolean) => {
     if (items.length === 0) return null;
     return (
-      <View key={title} style={{ marginBottom: 16 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <View key={title} style={{ marginBottom: spacing.lg }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm }}>
           <View style={{ width: 3, height: 16, backgroundColor: color, borderRadius: 2 }} />
-          <Text style={{ color: "#A3A3A3", fontSize: 13, fontWeight: "700", letterSpacing: 0.5 }}>
+          <Text style={{ color: colors.text.secondary, fontSize: fs.base, fontWeight: fw.bold, letterSpacing: 0.5 }}>
             {title}
           </Text>
-          <View style={{ backgroundColor: `${color}25`, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 10 }}>
-            <Text style={{ color, fontSize: 11, fontWeight: "bold" }}>{items.length}</Text>
+          <View style={{ backgroundColor: withAlpha(color, 0.15), paddingHorizontal: 6, paddingVertical: 1, borderRadius: 10 }}>
+            <Text style={{ color, fontSize: fs.sm, fontWeight: fw.bold }}>{items.length}</Text>
           </View>
         </View>
-        <View style={{ gap: 8, ...(isTabletLandscape ? { flexDirection: "row", flexWrap: "wrap" } : {}) }}>
+        <View style={{ gap: 1, ...(isTabletLandscape ? { flexDirection: "row", flexWrap: "wrap" } : {}) }}>
           {items.map((d) => (
             isTabletLandscape
               ? <View key={d.id} style={{ width: "48%", marginBottom: 2 }}>{renderCard(d)}</View>
@@ -235,7 +236,7 @@ export default function DirectivesScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#0A0A0A" }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
       {/* Top Bar */}
       <View style={{
         paddingTop: insets.top,
@@ -245,7 +246,7 @@ export default function DirectivesScreen() {
         justifyContent: "space-between",
         paddingHorizontal: hPad,
       }}>
-        <Text style={{ color: "#F59E0B", fontSize: 22, fontWeight: "bold", letterSpacing: 2 }}>
+        <Text style={{ color: colors.text.primary, fontSize: fs.title, fontWeight: fw.bold, letterSpacing: 2 }}>
           OZZU
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -261,23 +262,23 @@ export default function DirectivesScreen() {
           marginBottom: 10,
           paddingVertical: 10,
           paddingHorizontal: 14,
-          backgroundColor: summary.needsAttentionCount > 0 ? "#2D1B0E" : "#0D1B2A",
-          borderRadius: 12,
+          backgroundColor: summary.needsAttentionCount > 0 ? withAlpha(colors.warning, 0.08) : colors.bg.elevated,
+          borderRadius: radius.lg,
           borderWidth: 1,
-          borderColor: summary.needsAttentionCount > 0 ? "#F59E0B30" : "#3B82F620",
+          borderColor: summary.needsAttentionCount > 0 ? withAlpha(colors.warning, 0.2) : colors.border.subtle,
         }}>
-          <Text style={{ color: "#E5E5E5", fontSize: 16, fontWeight: "700" }}>
+          <Text style={{ color: colors.text.primary, fontSize: fs.xl, fontWeight: fw.bold }}>
             {summary.headline}
           </Text>
           <View style={{ flexDirection: "row", gap: 16, marginTop: 6 }}>
-            <Text style={{ color: "#737373", fontSize: 12 }}>
-              <Text style={{ color: "#22C55E", fontWeight: "bold" }}>{summary.completedToday}</Text> done today
+            <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>
+              <Text style={{ color: colors.success, fontWeight: fw.bold }}>{summary.completedToday}</Text> done today
             </Text>
-            <Text style={{ color: "#737373", fontSize: 12 }}>
-              <Text style={{ color: "#3B82F6", fontWeight: "bold" }}>{summary.activeCount}</Text> active
+            <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>
+              <Text style={{ color: colors.info, fontWeight: fw.bold }}>{summary.activeCount}</Text> active
             </Text>
-            <Text style={{ color: "#737373", fontSize: 12 }}>
-              <Text style={{ color: "#06B6D4", fontWeight: "bold" }}>{summary.completedThisWeek}</Text> this week
+            <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>
+              <Text style={{ color: colors.accent, fontWeight: fw.bold }}>{summary.completedThisWeek}</Text> this week
             </Text>
           </View>
         </View>
@@ -307,25 +308,25 @@ export default function DirectivesScreen() {
                 gap: 5,
                 paddingHorizontal: 12,
                 paddingVertical: 6,
-                borderRadius: 8,
-                backgroundColor: isActive ? `${cat.color}18` : "transparent",
+                borderRadius: radius.md,
+                backgroundColor: isActive ? withAlpha(cat.color, 0.1) : "transparent",
                 borderWidth: 1,
-                borderColor: isActive ? `${cat.color}50` : "#1A1A1A",
+                borderColor: isActive ? withAlpha(cat.color, 0.3) : colors.border.subtle,
               }}
             >
-              <Text style={{ fontSize: 11 }}>{cat.emoji}</Text>
+              <Text style={{ fontSize: fs.sm }}>{cat.emoji}</Text>
               <Text style={{
-                color: isActive ? cat.color : "#525252",
-                fontSize: 11,
-                fontWeight: "bold",
+                color: isActive ? cat.color : colors.text.disabled,
+                fontSize: fs.sm,
+                fontWeight: fw.bold,
                 letterSpacing: 0.3,
               }}>
                 {cat.label}
               </Text>
               <Text style={{
-                color: isActive ? cat.color : "#3A3A3A",
-                fontSize: 10,
-                fontWeight: "bold",
+                color: isActive ? cat.color : colors.text.disabled,
+                fontSize: fs.xs,
+                fontWeight: fw.bold,
               }}>
                 {count}
               </Text>
@@ -353,16 +354,16 @@ export default function DirectivesScreen() {
               style={{
                 paddingHorizontal: 10,
                 paddingVertical: 4,
-                borderRadius: 6,
-                backgroundColor: isActive ? "#06B6D415" : "transparent",
+                borderRadius: radius.sm,
+                backgroundColor: isActive ? withAlpha(colors.accent, 0.1) : "transparent",
                 borderWidth: 1,
-                borderColor: isActive ? "#06B6D440" : "#1A1A1A",
+                borderColor: isActive ? withAlpha(colors.accent, 0.25) : colors.border.subtle,
               }}
             >
               <Text style={{
-                color: isActive ? "#06B6D4" : "#3A3A3A",
-                fontSize: 11,
-                fontWeight: "bold",
+                color: isActive ? colors.accent : colors.text.disabled,
+                fontSize: fs.sm,
+                fontWeight: fw.bold,
               }}>
                 {labels[mode]}
               </Text>
@@ -375,59 +376,59 @@ export default function DirectivesScreen() {
           flex: 1,
           flexDirection: "row",
           alignItems: "center",
-          backgroundColor: "#141414",
-          borderRadius: 6,
+          backgroundColor: colors.bg.elevated,
+          borderRadius: radius.sm,
           borderWidth: 1,
-          borderColor: searchQuery ? "#06B6D440" : "#1A1A1A",
+          borderColor: searchQuery ? withAlpha(colors.accent, 0.25) : colors.border.subtle,
           paddingHorizontal: 8,
           height: 28,
         }}>
-          <Text style={{ color: "#3A3A3A", fontSize: 12, marginRight: 4 }}>Search</Text>
+          <Text style={{ color: colors.text.disabled, fontSize: fs.md, marginRight: 4 }}>Search</Text>
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder=""
-            placeholderTextColor="#2A2A2A"
+            placeholderTextColor={colors.text.disabled}
             style={{
               flex: 1,
-              color: "#E5E5E5",
-              fontSize: 12,
+              color: colors.text.primary,
+              fontSize: fs.md,
               padding: 0,
               height: 28,
             }}
           />
           {searchQuery ? (
             <Pressable onPress={() => setSearchQuery("")}>
-              <Text style={{ color: "#525252", fontSize: 11 }}>x</Text>
+              <Text style={{ color: colors.text.tertiary, fontSize: fs.sm }}>x</Text>
             </Pressable>
           ) : null}
         </View>
       </View>
 
-      <View style={{ height: 1, backgroundColor: "#1A1A1A", marginHorizontal: hPad }} />
+      <View style={{ height: 1, backgroundColor: colors.border.subtle, marginHorizontal: hPad }} />
 
       {/* Content */}
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: hPad, paddingBottom: Math.max(24, insets.bottom) }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#06B6D4" colors={["#06B6D4"]} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} colors={[colors.accent]} />
         }
       >
         {error ? (
           <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
-            <Text style={{ color: "#EF4444", fontSize: 12, textAlign: "center" }}>{error}</Text>
+            <Text style={{ color: colors.error, fontSize: fs.md, textAlign: "center" }}>{error}</Text>
             <Pressable onPress={refresh} style={{ marginTop: 12 }}>
-              <Text style={{ color: "#06B6D4", fontSize: 12, fontWeight: "bold" }}>TAP TO RETRY</Text>
+              <Text style={{ color: colors.accent, fontSize: fs.md, fontWeight: fw.bold }}>TAP TO RETRY</Text>
             </Pressable>
           </View>
         ) : loading && directives.length === 0 ? (
           <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
-            <Text style={{ color: "#06B6D4", fontSize: 13, opacity: 0.6 }}>Loading...</Text>
+            <Text style={{ color: colors.accent, fontSize: fs.base, opacity: 0.6 }}>Loading...</Text>
           </View>
         ) : filtered.length === 0 ? (
           <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
-            <Text style={{ color: "#525252", fontSize: 13 }}>
+            <Text style={{ color: colors.text.disabled, fontSize: fs.base }}>
               {searchQuery ? "No results" : "No directives"}
             </Text>
           </View>
@@ -448,25 +449,25 @@ export default function DirectivesScreen() {
                 key={col.key}
                 style={{
                   width: Math.min(280, screenWidth * 0.72),
-                  backgroundColor: "#111111",
-                  borderRadius: 12,
+                  backgroundColor: colors.bg.elevated,
+                  borderRadius: radius.lg,
                   borderTopWidth: 3,
                   borderTopColor: col.color,
-                  padding: 10,
+                  padding: spacing.md,
                 }}
               >
                 {/* Column header */}
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <Text style={{ color: "#A3A3A3", fontSize: 12, fontWeight: "700", letterSpacing: 0.5 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md }}>
+                  <Text style={{ color: colors.text.secondary, fontSize: fs.md, fontWeight: fw.bold, letterSpacing: 0.5 }}>
                     {col.label.toUpperCase()}
                   </Text>
                   <View style={{
-                    backgroundColor: `${col.color}20`,
+                    backgroundColor: withAlpha(col.color, 0.12),
                     paddingHorizontal: 8,
                     paddingVertical: 2,
                     borderRadius: 10,
                   }}>
-                    <Text style={{ color: col.color, fontSize: 11, fontWeight: "bold" }}>
+                    <Text style={{ color: col.color, fontSize: fs.sm, fontWeight: fw.bold }}>
                       {col.items.length}
                     </Text>
                   </View>
@@ -475,50 +476,42 @@ export default function DirectivesScreen() {
                 {/* Column cards */}
                 {col.items.length === 0 ? (
                   <View style={{ paddingVertical: 20, alignItems: "center" }}>
-                    <Text style={{ color: "#2A2A2A", fontSize: 12 }}>Empty</Text>
+                    <Text style={{ color: colors.text.disabled, fontSize: fs.md }}>Empty</Text>
                   </View>
                 ) : (
-                  <View style={{ gap: 8 }}>
+                  <View style={{ gap: spacing.sm }}>
                     {col.items.map((d) => {
-                      const sColor = STATUS_COLORS[d.status] || "#737373";
+                      const pill = statusPillStyle(d.status);
                       return (
                         <Pressable
                           key={d.id}
-                          onPress={() => {
-                            // Switch to overview and the card will be there
-                          }}
-                          style={{
-                            backgroundColor: "#1A1A1A",
-                            borderRadius: 10,
-                            padding: 10,
-                            borderLeftWidth: 3,
-                            borderLeftColor: sColor,
-                          }}
+                          onPress={() => navigateToDirective(d)}
+                          style={({ pressed }) => ({
+                            backgroundColor: pressed ? colors.bg.overlay : colors.bg.surface,
+                            borderRadius: radius.md,
+                            padding: spacing.md,
+                          })}
                         >
                           {/* Card: emoji + title */}
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                            <Text style={{ fontSize: 14 }}>{d.emoji || STATUS_EMOJI[d.status] || ""}</Text>
+                            <Text style={{ fontSize: 14 }}>{d.emoji || ""}</Text>
                             <Text
-                              style={{ color: "#E5E5E5", fontSize: 13, fontWeight: "600", flex: 1 }}
+                              style={{ color: colors.text.primary, fontSize: fs.base, fontWeight: fw.semibold, flex: 1 }}
                               numberOfLines={2}
                             >
                               {d.title}
                             </Text>
                           </View>
 
-                          {/* Card: status lozenge + type + time */}
+                          {/* Card: status pill + time */}
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
-                            <View style={{
-                              paddingHorizontal: 6,
-                              paddingVertical: 2,
-                              borderRadius: 4,
-                              backgroundColor: `${sColor}20`,
-                            }}>
-                              <Text style={{ color: sColor, fontSize: 9, fontWeight: "700", textTransform: "uppercase" }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: pill.bg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full }}>
+                              <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: pill.dot }} />
+                              <Text style={{ color: pill.text, fontSize: 9, fontWeight: fw.bold }}>
                                 {HUMAN_STATUS[d.status] || d.status}
                               </Text>
                             </View>
-                            <Text style={{ color: "#3A3A3A", fontSize: 10 }}>
+                            <Text style={{ color: colors.text.disabled, fontSize: fs.xs }}>
                               {relativeTime(d.updatedAt)}
                             </Text>
                           </View>
@@ -526,27 +519,11 @@ export default function DirectivesScreen() {
                           {/* Card: work summary preview */}
                           {d.work_summary ? (
                             <Text
-                              style={{ color: "#525252", fontSize: 10, marginTop: 4, lineHeight: 14 }}
+                              style={{ color: colors.text.tertiary, fontSize: fs.xs, marginTop: 4, lineHeight: 14 }}
                               numberOfLines={2}
                             >
                               {d.work_summary}
                             </Text>
-                          ) : null}
-
-                          {/* Card: assignee/creator */}
-                          {d.createdBy ? (
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
-                              <View style={{
-                                width: 14, height: 14, borderRadius: 7,
-                                backgroundColor: d.createdBy === "Cipher" ? "#6EE7B720" : "#A78BFA20",
-                                alignItems: "center", justifyContent: "center",
-                              }}>
-                                <Text style={{ fontSize: 7, color: d.createdBy === "Cipher" ? "#6EE7B7" : "#A78BFA" }}>
-                                  {d.createdBy[0]}
-                                </Text>
-                              </View>
-                              <Text style={{ color: "#3A3A3A", fontSize: 9 }}>{d.createdBy}</Text>
-                            </View>
                           ) : null}
                         </Pressable>
                       );
@@ -558,10 +535,10 @@ export default function DirectivesScreen() {
           </ScrollView>
         ) : viewMode === "timeline" ? (
           <>
-            {renderSection("Today", timelineGroups.today, "#06B6D4")}
-            {renderSection("Yesterday", timelineGroups.yesterday, "#3B82F6")}
+            {renderSection("Today", timelineGroups.today, colors.accent)}
+            {renderSection("Yesterday", timelineGroups.yesterday, colors.info)}
             {renderSection("This Week", timelineGroups.thisWeek, "#A855F7")}
-            {renderSection("Older", timelineGroups.older, "#525252")}
+            {renderSection("Older", timelineGroups.older, colors.text.disabled)}
           </>
         ) : (
           <View style={{ gap: 8, ...(isTabletLandscape ? { flexDirection: "row", flexWrap: "wrap" } : {}) }}>
