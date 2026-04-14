@@ -2328,6 +2328,8 @@ export interface WhatsAppChat {
   jid: string;
   name: string;
   display_name: string;
+  phone: string | null;
+  avatar_url: string | null;
   is_group: boolean;
   last_message_time: string;
   last_message: string;

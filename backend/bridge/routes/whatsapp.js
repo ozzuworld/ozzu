@@ -38,6 +38,27 @@ function parsePythonRepr(text) {
   }
 }
 
+// Format phone number for display: +57 323 254 0576
+function formatPhone(num) {
+  if (!num) return null;
+  const digits = String(num).replace(/\D/g, "");
+  if (!digits || digits.length < 7) return num;
+  // Colombian numbers: 57 + 10 digits
+  if (digits.startsWith("57") && digits.length === 12) {
+    return `+57 ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
+  }
+  // Indian numbers: 91 + 10 digits
+  if (digits.startsWith("91") && digits.length === 12) {
+    return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  }
+  // US/Canada: 1 + 10 digits
+  if (digits.startsWith("1") && digits.length === 11) {
+    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+  // Generic: +CC rest
+  return `+${digits.slice(0, 2)} ${digits.slice(2)}`;
+}
+
 async function ensureTable(db) {
   await db.query(`
     CREATE TABLE IF NOT EXISTS whatsapp_messages (
@@ -54,6 +75,10 @@ async function ensureTable(db) {
   await db.query(`ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS wa_id TEXT`);
   await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_messages_wa_id ON whatsapp_messages(wa_id) WHERE wa_id IS NOT NULL`);
 }
+
+// Module-level caches for profile pics (survive across requests)
+const _picCache = {};     // jid → url
+const _picFailed = new Set(); // jids that returned no pic
 
 let _tableReady = false;
 async function getTable(db) {
@@ -95,6 +120,7 @@ module.exports = function whatsappRoutes(ctx) {
     }
 
     // GET /whatsapp/chats — proxy list_chats from WhatsApp MCP
+    // Enriches with contact names, phone numbers, and profile picture URLs
     if (req.method === "GET" && pathname === "/whatsapp/chats") {
       try {
         const { getUpstream } = require("../mcp-proxy");
@@ -110,16 +136,13 @@ module.exports = function whatsappRoutes(ctx) {
           params: { name: "list_chats", arguments: { limit, include_last_message: true, sort_by: "last_message" } },
         });
 
-        // Parse the Python repr string from MCP response
         const text = result?.result?.content?.[0]?.text || "[]";
         let chats;
-        try { chats = JSON.parse(text); } catch {
-          // MCP returns Python repr — convert to JSON
-          chats = parsePythonRepr(text);
-        }
+        try { chats = JSON.parse(text); } catch { chats = parsePythonRepr(text); }
 
-        // Enrich with contact names
-        let contactMap = {};
+        // Build rich contact map: jid → { name, phone }
+        const contactByJid = {};  // jid → { name, phone }
+        const contactByName = {}; // name → { phone_jid }  (for LID→phone cross-ref)
         try {
           const cResult = await upstream.forward({
             jsonrpc: "2.0", id: Date.now() + 1,
@@ -128,24 +151,90 @@ module.exports = function whatsappRoutes(ctx) {
           });
           const cText = cResult?.result?.content?.[0]?.text || "[]";
           const contacts = parsePythonRepr(cText);
+
+          // First pass: index all contacts
           for (const c of contacts) {
-            if (c.jid) contactMap[c.jid] = c.name || c.push_name || c.business_name || null;
-            // Also map base JID without :suffix for @lid contacts
-            const baseJid = c.jid?.split(":")[0];
-            if (baseJid && c.jid !== baseJid) {
+            if (!c.jid) continue;
+            const name = c.name || c.push_name || c.business_name || null;
+            const isPhone = c.jid.includes("@s.whatsapp.net");
+            // Only real @s.whatsapp.net JIDs have phone numbers — LID numbers are NOT phones
+            const phone = isPhone ? c.jid.split("@")[0] : null;
+
+            contactByJid[c.jid] = { name, phone };
+            // Map base JID without :suffix for @lid contacts
+            const baseJid = c.jid.split(":")[0];
+            if (c.jid !== baseJid) {
               const domain = c.jid.includes("@") ? "@" + c.jid.split("@")[1] : "";
-              contactMap[baseJid + domain] = c.name || c.push_name || c.business_name || null;
+              if (!contactByJid[baseJid + domain]) contactByJid[baseJid + domain] = { name, phone };
+            }
+
+            // Build name→phone mapping for cross-referencing LID contacts
+            if (name && isPhone) {
+              contactByName[name] = { phone, jid: c.jid };
+            }
+          }
+
+          // Second pass: cross-reference LID contacts with their phone JID counterparts
+          for (const jid of Object.keys(contactByJid)) {
+            const entry = contactByJid[jid];
+            if (jid.includes("@lid") && entry.name && !entry.phone) {
+              const phoneEntry = contactByName[entry.name];
+              if (phoneEntry) entry.phone = phoneEntry.phone;
             }
           }
         } catch {}
 
-        // Filter junk, enrich with names, sort by most recent
+        // Fetch profile pictures sequentially (SSE transport is single-connection)
+        // Cache in module scope so subsequent requests are instant
+        const jidsNeedingPics = chats
+          .filter(c => c.jid && c.jid !== "status@broadcast" && !c.jid.includes("@newsletter") && c.jid !== "0@s.whatsapp.net")
+          .map(c => c.jid)
+          .filter(jid => !_picCache[jid] && !_picFailed.has(jid))
+          .slice(0, 10);
+
+        for (const jid of jidsNeedingPics) {
+          try {
+            const r = await upstream.forward({
+              jsonrpc: "2.0", id: Date.now() + Math.random() * 10000 | 0,
+              method: "tools/call",
+              params: { name: "get_profile_picture", arguments: { jid, preview: true } },
+            });
+            const t = r?.result?.content?.[0]?.text || "";
+            const parsed = parsePythonRepr(t.startsWith("{") ? "[" + t + "]" : t);
+            const pic = Array.isArray(parsed) ? parsed[0] : parsed;
+            if (pic?.url && pic?.has_picture) {
+              _picCache[jid] = pic.url;
+            } else {
+              _picFailed.add(jid);
+            }
+          } catch { _picFailed.add(jid); }
+        }
+
+        // Filter, enrich, sort
         const filtered = chats
           .filter(c => c.jid && c.jid !== "status@broadcast" && !c.jid.includes("@newsletter") && c.jid !== "0@s.whatsapp.net")
-          .map(c => ({
-            ...c,
-            display_name: contactMap[c.jid] || c.name || c.jid?.split("@")[0] || "Unknown",
-          }))
+          .map(c => {
+            const contact = contactByJid[c.jid] || {};
+            const name = contact.name || c.name || null;
+            const phone = contact.phone || null;
+            // Format display name: prefer name, fall back to formatted phone
+            let display_name = name;
+            if (!display_name && phone) {
+              display_name = formatPhone(phone);
+            }
+            if (!display_name) {
+              // Last resort: format the JID number itself
+              const jidNum = c.jid.split("@")[0];
+              display_name = jidNum.length > 10 ? jidNum : c.jid;
+            }
+
+            return {
+              ...c,
+              display_name,
+              phone: phone ? formatPhone(phone) : null,
+              avatar_url: _picCache[c.jid] || null,
+            };
+          })
           .sort((a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime());
 
         sendJSON(res, 200, { chats: filtered, count: filtered.length });
