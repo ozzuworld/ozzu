@@ -183,47 +183,47 @@ export default function DirectiveDetailScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
       {/* Header */}
-      <View style={{ paddingTop: insets.top + spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md }}>
-        {/* Back + ID */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm }}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <Text style={{ color: colors.text.secondary, fontSize: 20 }}>{"\u2039"}</Text>
+      <View style={{ paddingTop: insets.top + spacing.xs, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}>
+        {/* Back + ID row */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: 6 }}>
+          <Pressable onPress={() => router.back()} hitSlop={16} style={{ paddingRight: 4 }}>
+            <Text style={{ color: colors.text.tertiary, fontSize: 16 }}>{"\u2190"}</Text>
           </Pressable>
-          <Text style={{ color: colors.text.disabled, fontSize: fontSize.md }}>{directive.id}</Text>
+          <Text style={{ color: colors.text.disabled, fontSize: fontSize.sm, fontFamily: "monospace" }}>{directive.id}</Text>
         </View>
 
-        {/* Title */}
-        <Text style={{ color: colors.text.primary, fontSize: fontSize.xxl, fontWeight: fontWeight.semibold, marginBottom: spacing.sm }}>
-          {directive.emoji ? `${directive.emoji} ` : ""}{directive.title}
+        {/* Title — single line with emoji inline */}
+        <Text style={{ color: colors.text.primary, fontSize: 17, fontWeight: fontWeight.semibold, lineHeight: 22, marginBottom: 8 }} numberOfLines={2}>
+          {directive.emoji ? `${directive.emoji}  ` : ""}{directive.title}
         </Text>
 
-        {/* Pills row */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, flexWrap: "wrap" }}>
-          {/* Status pill */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: pill.bg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: pill.dot }} />
+        {/* Tags row — compact, square radius like list items */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: pill.bg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 }}>
+            <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: pill.dot }} />
             <Text style={{ color: pill.text, fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>
               {HUMAN_STATUS[directive.status] || directive.status}
             </Text>
           </View>
 
-          {/* Type pill */}
-          <View style={{ backgroundColor: withAlpha(typeColor, 0.12), paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full }}>
+          <View style={{ backgroundColor: withAlpha(typeColor, 0.1), paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
             <Text style={{ color: typeColor, fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>{typeLabel}</Text>
           </View>
 
-          {/* Priority pill */}
           {(directive.priority ?? 3) <= 2 ? (
-            <View style={{ backgroundColor: withAlpha(directive.priority <= 1 ? colors.error : colors.warning, 0.12), paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full }}>
-              <Text style={{ color: directive.priority <= 1 ? "#FCA5A5" : "#FCD34D", fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>
-                {priorityLabel(directive.priority)}
+            <View style={{ backgroundColor: withAlpha(directive.priority <= 1 ? colors.error : colors.warning, 0.1), paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+              <Text style={{ color: directive.priority <= 1 ? "#FCA5A5" : "#FCD34D", fontSize: fontSize.sm, fontWeight: fontWeight.bold }}>
+                P{directive.priority}
               </Text>
             </View>
           ) : null}
 
-          {/* Creator */}
           {directive.createdBy ? (
-            <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm }}>{directive.createdBy}</Text>
+            <Text style={{ color: colors.text.disabled, fontSize: fontSize.sm }}>{directive.createdBy}</Text>
+          ) : null}
+
+          {directive.duration ? (
+            <Text style={{ color: colors.text.disabled, fontSize: fontSize.sm }}>{humanDuration(directive.duration)}</Text>
           ) : null}
         </View>
       </View>
@@ -235,18 +235,18 @@ export default function DirectiveDetailScreen() {
             key={t}
             onPress={() => setTab(t)}
             style={{
-              paddingVertical: spacing.md,
-              paddingHorizontal: spacing.lg,
+              paddingVertical: spacing.sm,
+              paddingHorizontal: spacing.md,
               borderBottomWidth: 2,
               borderBottomColor: tab === t ? colors.accent : "transparent",
             }}
           >
             <Text style={{
-              color: tab === t ? colors.text.primary : colors.text.tertiary,
-              fontSize: fontSize.lg,
+              color: tab === t ? colors.text.primary : colors.text.disabled,
+              fontSize: fontSize.base,
               fontWeight: tab === t ? fontWeight.semibold : fontWeight.normal,
             }}>
-              {t === "overview" ? "Overview" : `Activity (${timelineEntries.length})`}
+              {t === "overview" ? "Overview" : `Activity ${timelineEntries.length}`}
             </Text>
           </Pressable>
         ))}
@@ -262,11 +262,9 @@ export default function DirectiveDetailScreen() {
           <>
             {/* Description */}
             {directive.description ? (
-              <View style={{ marginBottom: spacing.xl }}>
-                <Text style={{ color: colors.text.secondary, fontSize: fontSize.base, lineHeight: 20 }}>
-                  {directive.description}
-                </Text>
-              </View>
+              <Text style={{ color: colors.text.secondary, fontSize: fontSize.base, lineHeight: 19, marginBottom: spacing.lg }}>
+                {directive.description}
+              </Text>
             ) : null}
 
             {/* Plan preview */}
@@ -275,20 +273,20 @@ export default function DirectiveDetailScreen() {
                 onPress={() => setPlanReviewDirective(directive)}
                 style={{
                   backgroundColor: colors.bg.elevated,
-                  borderRadius: radius.md,
+                  borderRadius: radius.sm,
                   padding: spacing.md,
-                  marginBottom: spacing.xl,
-                  borderWidth: 1,
-                  borderColor: colors.border.subtle,
-                  maxHeight: 120,
+                  marginBottom: spacing.lg,
+                  borderLeftWidth: 2,
+                  borderLeftColor: colors.accent,
+                  maxHeight: 100,
                   overflow: "hidden",
                 }}
               >
-                <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.xs }}>
-                  <Text style={{ color: colors.accent, fontSize: fontSize.md, fontWeight: fontWeight.semibold }}>Plan</Text>
-                  <Text style={{ color: colors.text.disabled, fontSize: fontSize.sm }}>Tap to expand</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <Text style={{ color: colors.accent, fontSize: fontSize.sm, fontWeight: fontWeight.semibold }}>PLAN</Text>
+                  <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs }}>tap to expand</Text>
                 </View>
-                <Text style={{ color: colors.text.tertiary, fontSize: fontSize.md, lineHeight: 18 }} numberOfLines={4}>
+                <Text style={{ color: colors.text.tertiary, fontSize: fontSize.md, lineHeight: 16 }} numberOfLines={3}>
                   {directive.plan}
                 </Text>
               </Pressable>
@@ -298,16 +296,16 @@ export default function DirectiveDetailScreen() {
             {directive.work_summary ? (
               <View style={{
                 backgroundColor: colors.bg.elevated,
-                borderRadius: radius.md,
+                borderRadius: radius.sm,
                 padding: spacing.md,
-                marginBottom: spacing.xl,
+                marginBottom: spacing.lg,
                 borderLeftWidth: 2,
                 borderLeftColor: colors.info,
               }}>
-                <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: spacing.xs }}>
+                <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: 4 }}>
                   WORK SUMMARY
                 </Text>
-                <Text style={{ color: colors.text.secondary, fontSize: fontSize.md, lineHeight: 18 }} numberOfLines={12}>
+                <Text style={{ color: colors.text.secondary, fontSize: fontSize.md, lineHeight: 17 }} numberOfLines={10}>
                   {directive.work_summary}
                 </Text>
               </View>
@@ -317,16 +315,16 @@ export default function DirectiveDetailScreen() {
             {directive.handoff_context ? (
               <View style={{
                 backgroundColor: colors.bg.elevated,
-                borderRadius: radius.md,
+                borderRadius: radius.sm,
                 padding: spacing.md,
-                marginBottom: spacing.xl,
+                marginBottom: spacing.lg,
                 borderLeftWidth: 2,
                 borderLeftColor: "#A855F7",
               }}>
-                <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: spacing.xs }}>
-                  LAST SESSION HANDOFF
+                <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: 4 }}>
+                  HANDOFF
                 </Text>
-                <Text style={{ color: colors.text.secondary, fontSize: fontSize.md, lineHeight: 18 }} numberOfLines={8}>
+                <Text style={{ color: colors.text.secondary, fontSize: fontSize.md, lineHeight: 17 }} numberOfLines={6}>
                   {directive.handoff_context}
                 </Text>
               </View>
@@ -335,12 +333,12 @@ export default function DirectiveDetailScreen() {
             {/* Failure reason */}
             {directive.failureReason ? (
               <View style={{
-                backgroundColor: withAlpha(colors.error, 0.08),
-                borderRadius: radius.md,
+                backgroundColor: withAlpha(colors.error, 0.06),
+                borderRadius: radius.sm,
                 padding: spacing.md,
-                marginBottom: spacing.xl,
+                marginBottom: spacing.lg,
               }}>
-                <Text style={{ color: "#FCA5A5", fontSize: fontSize.md, lineHeight: 18 }}>
+                <Text style={{ color: "#FCA5A5", fontSize: fontSize.md, lineHeight: 17 }}>
                   {directive.failureReason}
                 </Text>
               </View>
@@ -348,7 +346,7 @@ export default function DirectiveDetailScreen() {
 
             {/* Build runs */}
             {directive.buildRuns && directive.buildRuns.length > 0 ? (
-              <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.xl, flexWrap: "wrap" }}>
+              <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.lg, flexWrap: "wrap" }}>
                 {directive.buildRuns.map((run, i) => (
                   <BuildRunBadge key={`${run.platform}-${run.runId}-${i}`} run={run} directiveId={directive.id} />
                 ))}
@@ -361,39 +359,38 @@ export default function DirectiveDetailScreen() {
               const completed = directive.phases.filter((p) => p.status === "completed").length;
               const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
               return (
-                <View style={{ marginBottom: spacing.xl }}>
-                  <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: spacing.sm }}>
+                <View style={{ marginBottom: spacing.lg }}>
+                  <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: 6 }}>
                     EPIC PROGRESS
                   </Text>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                    <View style={{ flex: 1, height: 6, backgroundColor: colors.bg.surface, borderRadius: 3, overflow: "hidden" }}>
-                      <View style={{ width: `${pct}%` as any, height: "100%", backgroundColor: colors.success, borderRadius: 3 }} />
+                    <View style={{ flex: 1, height: 4, backgroundColor: colors.bg.surface, borderRadius: 2, overflow: "hidden" }}>
+                      <View style={{ width: `${pct}%` as any, height: "100%", backgroundColor: colors.success, borderRadius: 2 }} />
                     </View>
-                    <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm }}>{completed}/{total}</Text>
+                    <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs }}>{completed}/{total}</Text>
                   </View>
                 </View>
               );
             })() : null}
 
             {/* Metadata grid */}
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginBottom: spacing.xl }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 2, marginBottom: spacing.lg }}>
               <MetaItem label="Created" value={formatTimestamp(directive.createdAt)} />
               <MetaItem label="Updated" value={formatTimestamp(directive.updatedAt)} />
               {directive.startedAt ? <MetaItem label="Started" value={formatTimestamp(directive.startedAt)} /> : null}
               {directive.completedAt ? <MetaItem label="Completed" value={formatTimestamp(directive.completedAt)} /> : null}
-              {directive.duration ? <MetaItem label="Duration" value={humanDuration(directive.duration)} /> : null}
               {(directive.retryCount ?? 0) > 0 ? <MetaItem label="Retries" value={String(directive.retryCount)} /> : null}
               {directive.mergeBranch ? <MetaItem label="Branch" value={directive.mergeBranch} /> : null}
             </View>
 
             {/* Dependencies */}
             {directive.dependsOn && directive.dependsOn.length > 0 ? (
-              <View style={{ marginBottom: spacing.xl }}>
-                <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: spacing.sm }}>
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: 4 }}>
                   DEPENDENCIES
                 </Text>
                 {directive.dependsOn.map((depId) => (
-                  <Text key={depId} style={{ color: colors.text.tertiary, fontSize: fontSize.md, marginLeft: spacing.sm, lineHeight: 22 }}>
+                  <Text key={depId} style={{ color: colors.text.tertiary, fontSize: fontSize.md, marginLeft: spacing.sm, lineHeight: 20 }}>
                     {depId}
                   </Text>
                 ))}
@@ -517,11 +514,11 @@ export default function DirectiveDetailScreen() {
 
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
-    <View style={{ width: "48%", marginBottom: spacing.sm }}>
-      <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, fontWeight: fontWeight.semibold, letterSpacing: 0.3, marginBottom: 1 }}>
+    <View style={{ width: "48%", marginBottom: 6 }}>
+      <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.semibold, letterSpacing: 0.3 }}>
         {label}
       </Text>
-      <Text style={{ color: colors.text.secondary, fontSize: fontSize.md }}>{value}</Text>
+      <Text style={{ color: colors.text.secondary, fontSize: fontSize.sm }}>{value}</Text>
     </View>
   );
 }

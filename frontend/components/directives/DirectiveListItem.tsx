@@ -10,6 +10,13 @@ interface DirectiveListItemProps {
   showDivider?: boolean;
 }
 
+const TYPE_COLORS: Record<string, string> = {
+  feature: "#3B82F6",
+  epic: "#A855F7",
+  explore: "#06B6D4",
+  quick: "#6B7280",
+};
+
 export function DirectiveListItem({ directive, onPress, variant = "list", showDivider = true }: DirectiveListItemProps) {
   const pill = statusPillStyle(directive.status);
   const statusColor = colors.status[directive.status] || "#737373";
@@ -20,171 +27,119 @@ export function DirectiveListItem({ directive, onPress, variant = "list", showDi
   const epicTotal = isEpic ? directive.phases!.length : 0;
   const epicPct = epicTotal > 0 ? Math.round((epicDone / epicTotal) * 100) : 0;
 
-  // Subtitle: work_summary first, then description
-  const subtitle = directive.work_summary || directive.description || null;
+  const typeColor = TYPE_COLORS[directive.type] || "#6B7280";
+  const isHighPriority = (directive.priority ?? 3) <= 2;
 
   return (
     <Pressable
       onPress={() => onPress(directive)}
       style={({ pressed }) => ({
-        opacity: pressed ? 0.92 : 1,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
+        opacity: pressed ? 0.85 : 1,
+        transform: [{ scale: pressed ? 0.985 : 1 }],
       })}
     >
       <View
         style={{
           backgroundColor: colors.bg.elevated,
-          borderRadius: 12,
+          borderRadius: 10,
           borderLeftWidth: 3,
           borderLeftColor: statusColor,
-          marginBottom: 10,
-          padding: 14,
+          marginBottom: 6,
+          paddingVertical: 10,
+          paddingHorizontal: 12,
           borderWidth: 1,
-          borderColor: withAlpha("#ffffff", 0.04),
+          borderColor: withAlpha("#ffffff", 0.03),
         }}
       >
-        {/* Row 1: emoji + title + status dot + time */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <Text style={{ fontSize: 22, width: 30, textAlign: "center" }}>
+        {/* Row 1: emoji + title + time */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={{ fontSize: 18 }}>
             {directive.emoji || ""}
           </Text>
           <Text
             style={{
               flex: 1,
               color: colors.text.primary,
-              fontSize: 15,
-              fontWeight: fontWeight.semibold,
+              fontSize: 14,
+              fontWeight: fontWeight.medium,
             }}
             numberOfLines={1}
           >
             {directive.title}
           </Text>
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: statusColor,
-            }}
-          />
           <Text
             style={{
               color: colors.text.disabled,
-              fontSize: 11,
-              minWidth: 32,
-              textAlign: "right",
+              fontSize: 10,
             }}
           >
             {relativeTime(directive.updatedAt)}
           </Text>
         </View>
 
-        {/* Row 2: description / work_summary — 2 lines */}
-        {subtitle ? (
-          <Text
-            style={{
-              color: colors.text.tertiary,
-              fontSize: 12,
-              lineHeight: 17,
-              marginTop: 8,
-              marginLeft: 40,
-            }}
-            numberOfLines={2}
-          >
-            {subtitle}
-          </Text>
-        ) : null}
-
-        {/* Row 3: status pill + type badge */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, marginLeft: 40 }}>
+        {/* Row 2: tags — status + type + priority (if high) */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 7, marginLeft: 26 }}>
+          {/* Status tag */}
           <View
             style={{
               flexDirection: "row",
               alignItems: "center",
               gap: 4,
               backgroundColor: pill.bg,
-              paddingHorizontal: 8,
-              paddingVertical: 3,
-              borderRadius: 10,
+              paddingHorizontal: 7,
+              paddingVertical: 2,
+              borderRadius: 4,
             }}
           >
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: pill.dot,
-              }}
-            />
-            <Text
-              style={{
-                color: pill.text,
-                fontSize: 10,
-                fontWeight: fontWeight.semibold,
-              }}
-            >
+            <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: pill.dot }} />
+            <Text style={{ color: pill.text, fontSize: 10, fontWeight: fontWeight.medium }}>
               {HUMAN_STATUS[directive.status] || directive.status}
             </Text>
           </View>
 
-          {directive.type ? (
-            <View
-              style={{
-                backgroundColor: withAlpha("#ffffff", 0.06),
-                paddingHorizontal: 7,
-                paddingVertical: 3,
-                borderRadius: 10,
-              }}
-            >
-              <Text style={{ color: colors.text.disabled, fontSize: 10, fontWeight: fontWeight.medium }}>
-                {directive.type}
-              </Text>
-            </View>
-          ) : null}
+          {/* Type tag */}
+          <View
+            style={{
+              backgroundColor: withAlpha(typeColor, 0.1),
+              paddingHorizontal: 6,
+              paddingVertical: 2,
+              borderRadius: 4,
+            }}
+          >
+            <Text style={{ color: typeColor, fontSize: 10, fontWeight: fontWeight.medium }}>
+              {directive.type}
+            </Text>
+          </View>
 
-          {directive.priority && directive.priority > 0 ? (
+          {/* Priority tag — only show P1/P2 */}
+          {isHighPriority ? (
             <View
               style={{
-                backgroundColor: withAlpha("#ffffff", 0.06),
-                paddingHorizontal: 7,
-                paddingVertical: 3,
-                borderRadius: 10,
+                backgroundColor: withAlpha(directive.priority! <= 1 ? colors.error : colors.warning, 0.12),
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                borderRadius: 4,
               }}
             >
-              <Text style={{ color: colors.text.disabled, fontSize: 10, fontWeight: fontWeight.medium }}>
+              <Text style={{ color: directive.priority! <= 1 ? "#FCA5A5" : "#FCD34D", fontSize: 10, fontWeight: fontWeight.bold }}>
                 P{directive.priority}
               </Text>
             </View>
           ) : null}
+
+          {/* Epic phase count */}
+          {isEpic ? (
+            <Text style={{ color: colors.text.disabled, fontSize: 10, marginLeft: 2 }}>
+              {epicDone}/{epicTotal}
+            </Text>
+          ) : null}
         </View>
 
-        {/* Row 4: epic progress bar */}
+        {/* Epic progress bar — minimal */}
         {isEpic ? (
-          <View style={{ marginTop: 10, marginLeft: 40 }}>
-            <View
-              style={{
-                height: 4,
-                backgroundColor: withAlpha("#ffffff", 0.08),
-                borderRadius: 2,
-                overflow: "hidden",
-              }}
-            >
-              <View
-                style={{
-                  width: `${epicPct}%`,
-                  height: "100%",
-                  backgroundColor: colors.accent,
-                  borderRadius: 2,
-                }}
-              />
-            </View>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-              <Text style={{ color: colors.text.disabled, fontSize: 10, fontFamily: "monospace" }}>
-                {epicDone}/{epicTotal} phases
-              </Text>
-              <Text style={{ color: colors.text.tertiary, fontSize: 10, fontFamily: "monospace", fontWeight: fontWeight.bold }}>
-                {epicPct}%
-              </Text>
+          <View style={{ marginTop: 6, marginLeft: 26 }}>
+            <View style={{ height: 3, backgroundColor: withAlpha("#ffffff", 0.06), borderRadius: 2, overflow: "hidden" }}>
+              <View style={{ width: `${epicPct}%` as any, height: "100%", backgroundColor: colors.success, borderRadius: 2 }} />
             </View>
           </View>
         ) : null}
