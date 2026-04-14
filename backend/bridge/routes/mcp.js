@@ -16,6 +16,66 @@ module.exports = function mcpRoutes(ctx) {
   const { mergeWorktreeToMain, smartDeploy } = (() => {
     try { return require("../agent-spawner"); } catch { return {}; }
   })();
+  const { sendPush } = require("../push-notifications");
+
+  // ── FaceID approval gate for outbound messages ──
+  async function requireMessageApproval(type, summary, payload) {
+    const http = require("http");
+    const approvalId = `apr_msg_${Date.now()}`;
+    const approval = {
+      id: approvalId,
+      tool: type,
+      description: summary,
+      risk: "high",
+      type: "message_send",
+      payload,
+    };
+
+    // Create approval via bridge
+    const createResult = await new Promise((resolve) => {
+      const body = JSON.stringify(approval);
+      const req = http.request({ hostname: "localhost", port: 3333, path: "/approvals", method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+      }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
+      req.on("error", e => resolve({ error: e.message }));
+      req.write(body); req.end();
+    });
+    if (createResult.error) return { error: `Failed to create approval: ${createResult.error}` };
+
+    // Send push notification to all registered devices
+    try {
+      const tokens = await db.query("SELECT token FROM device_push_tokens ORDER BY updated_at DESC LIMIT 5");
+      if (tokens.rows.length > 0) {
+        await sendPush(tokens.rows.map(r => r.token), {
+          title: "🔐 Approval Required",
+          body: summary,
+          data: { type: "message_approval", approvalId, screen: "directives" },
+        });
+      }
+    } catch (e) { /* push is best-effort */ }
+
+    // Poll for resolution (up to 5 minutes)
+    const POLL_INTERVAL = 2000;
+    const MAX_WAIT = 5 * 60 * 1000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < MAX_WAIT) {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL));
+      const pollResult = await new Promise((resolve) => {
+        const req = http.request({ hostname: "localhost", port: 3333, path: `/approvals/${approvalId}/poll`, method: "GET" },
+          (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({}); } }); });
+        req.on("error", () => resolve({}));
+        req.end();
+      });
+
+      if (pollResult.resolved) {
+        if (pollResult.approved) return { approved: true };
+        return { error: "Message denied by King Kazuma" };
+      }
+    }
+
+    return { error: "Approval timed out (5 minutes). Message NOT sent." };
+  }
 
   // ── Tool definitions ──
 
@@ -574,6 +634,14 @@ module.exports = function mcpRoutes(ctx) {
 
       case "send_email": {
         const http = require("http");
+        // FaceID approval gate
+        const emailApproval = await requireMessageApproval(
+          "send_email",
+          `Email to ${args.to}: "${args.subject}"`,
+          { to: args.to, subject: args.subject, from_account: args.from_account || "personal" }
+        );
+        if (emailApproval.error) return { content: [{ type: "text", text: emailApproval.error }], isError: true };
+
         const payload = JSON.stringify({
           to: args.to, subject: args.subject, text: args.text,
           html: args.html, cc: args.cc, from_account: args.from_account || "personal",
@@ -614,6 +682,14 @@ module.exports = function mcpRoutes(ctx) {
 
       case "send_whatsapp": {
         const http = require("http");
+        // FaceID approval gate
+        const waApproval = await requireMessageApproval(
+          "send_whatsapp",
+          `WhatsApp to ${args.phone}: "${args.message.length > 80 ? args.message.slice(0, 80) + '...' : args.message}"`,
+          { phone: args.phone, message: args.message }
+        );
+        if (waApproval.error) return { content: [{ type: "text", text: waApproval.error }], isError: true };
+
         const payload = JSON.stringify({ to: args.phone, message: args.message });
         const result = await new Promise((resolve) => {
           const req = http.request({ hostname: "localhost", port: 3333, path: "/whatsapp/send", method: "POST",
@@ -623,7 +699,7 @@ module.exports = function mcpRoutes(ctx) {
           req.write(payload); req.end();
         });
         if (result.error) return { content: [{ type: "text", text: `WhatsApp send failed: ${result.error}` }], isError: true };
-        return { content: [{ type: "text", text: `✅ WhatsApp sent to ${args.phone}: "${args.message}"` }] };
+        return { content: [{ type: "text", text: `WhatsApp sent to ${args.phone}: "${args.message}"` }] };
       }
 
       case "read_whatsapp": {

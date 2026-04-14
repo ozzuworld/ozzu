@@ -36,6 +36,7 @@ import {
 } from "../../lib/directive-constants";
 import { DirectiveCard } from "../../components/directives/DirectiveCard";
 import { PlanReviewModal } from "../../components/directives/PlanReviewModal";
+import { MessageApprovalModal } from "../../components/directives/MessageApprovalModal";
 import { StatusChangeSheet } from "../../components/directives/StatusChangeSheet";
 import HamburgerMenu from "../../components/HamburgerMenu";
 
@@ -66,6 +67,21 @@ export default function DirectivesScreen() {
   // Plan review modal
   const [planReviewDirective, setPlanReviewDirective] = useState<Directive | null>(null);
   const [planReviewApproval, setPlanReviewApproval] = useState<any>(null);
+  // Message approval modal
+  const [messageApproval, setMessageApproval] = useState<any>(null);
+  const [lastSeenMsgApproval, setLastSeenMsgApproval] = useState<string | null>(null);
+
+  // Auto-show message_send approvals
+  useEffect(() => {
+    const msgApproval = approvals.find(
+      (a: any) => a.type === "message_send" && !a.resolved && a.id !== lastSeenMsgApproval
+    );
+    if (msgApproval) {
+      setMessageApproval(msgApproval);
+      setLastSeenMsgApproval(msgApproval.id);
+    }
+  }, [approvals, lastSeenMsgApproval]);
+
   // Status change sheet
   const [statusChangeDirective, setStatusChangeDirective] = useState<Directive | null>(null);
 
@@ -656,6 +672,14 @@ export default function DirectivesScreen() {
         directive={planReviewDirective}
         approval={planReviewApproval}
         onDismiss={() => { setPlanReviewDirective(null); setPlanReviewApproval(null); }}
+        onResolved={refresh}
+      />
+
+      {/* Message Approval Modal (FaceID gated) */}
+      <MessageApprovalModal
+        visible={messageApproval !== null}
+        approval={messageApproval}
+        onDismiss={() => setMessageApproval(null)}
         onResolved={refresh}
       />
 
