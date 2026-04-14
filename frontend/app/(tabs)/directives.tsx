@@ -8,7 +8,6 @@ import {
   UIManager,
   Platform,
   Alert,
-  TextInput,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
@@ -25,12 +24,7 @@ import {
 } from "../../lib/bridge-api";
 import {
   STATUS_ORDER,
-  STATUS_COLORS,
-  STATUS_EMOJI,
   ACTIVE_STATUSES,
-  FAILED_STATUSES,
-  NEEDS_ACTION_STATUSES,
-  CATEGORY_INFO,
   HUMAN_STATUS,
   relativeTime,
 } from "../../lib/directive-constants";
@@ -59,9 +53,7 @@ export default function DirectivesScreen() {
 
   const { directives, buildStatus, summary, loading, error, refresh } = useDirectives();
 
-  const [category, setCategory] = useState("all");
-  const [viewMode, setViewMode] = useState<ViewMode>("overview");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("timeline");
   const [refreshing, setRefreshing] = useState(false);
 
   // Plan review modal
@@ -108,22 +100,8 @@ export default function DirectivesScreen() {
     setStatusChangeDirective(directive);
   }, []);
 
-  // Filter by category + search
-  const filtered = useMemo(() => {
-    let result = directives;
-    if (category !== "all") {
-      result = result.filter((d) => (d.category || "dev") === category);
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter((d) =>
-        (d.title || "").toLowerCase().includes(q) ||
-        (d.description || "").toLowerCase().includes(q) ||
-        (d.work_summary || "").toLowerCase().includes(q)
-      );
-    }
-    return result;
-  }, [directives, category, searchQuery]);
+  // All directives — no category filter
+  const filtered = directives;
 
   // Timeline groups
   const timelineGroups = useMemo(() => {
@@ -143,12 +121,11 @@ export default function DirectivesScreen() {
     };
   }, [filtered]);
 
-  // Overview: split into active + needs attention + recent completed
+  // Overview: needs attention + active only (no completed)
   const overviewGroups = useMemo(() => {
     const needsAttention = filtered.filter((d) => ["blocked", "deploy_failed", "failed", "stale"].includes(d.status));
     const active = filtered.filter((d) => ACTIVE_STATUSES.includes(d.status) && !["blocked"].includes(d.status));
-    const completed = filtered.filter((d) => d.status === "completed").sort((a, b) => (b.completedAt || b.updatedAt) - (a.completedAt || a.updatedAt)).slice(0, 10);
-    return { needsAttention, active, completed };
+    return { needsAttention, active };
   }, [filtered]);
 
   // Board columns (Jira-style kanban)
@@ -177,16 +154,6 @@ export default function DirectivesScreen() {
     return columns;
   }, [filtered]);
 
-  // Status-sorted list view
-  const listSorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
-      const oa = STATUS_ORDER[a.status] ?? 99;
-      const ob = STATUS_ORDER[b.status] ?? 99;
-      if (oa !== ob) return oa - ob;
-      return b.updatedAt - a.updatedAt;
-    });
-  }, [filtered]);
-
   // Enrich epics with phases
   const enrichDirective = (d: Directive): Directive => {
     if (d.type === "epic" && !d.phases) {
@@ -197,7 +164,6 @@ export default function DirectivesScreen() {
   };
 
   const hPad = Math.max(16, insets.left, insets.right);
-  const catKeys = Object.keys(CATEGORY_INFO);
 
   const navigateToDirective = useCallback((d: Directive) => {
     router.push(`/directive/${d.id}`);
@@ -245,8 +211,8 @@ export default function DirectivesScreen() {
         justifyContent: "space-between",
         paddingHorizontal: hPad,
       }}>
-        <Text style={{ color: colors.text.primary, fontSize: fs.title, fontWeight: fw.bold, letterSpacing: 2 }}>
-          OZZU
+        <Text style={{ color: colors.text.primary, fontSize: 18, fontWeight: fw.semibold }}>
+          Directives
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusBadge />
@@ -271,24 +237,21 @@ export default function DirectivesScreen() {
         </View>
       ) : null}
 
-      {/* Category Tabs — underline style */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ flexGrow: 0, maxHeight: 36, borderBottomWidth: 0.5, borderBottomColor: withAlpha("#ffffff", 0.06) }}
-        contentContainerStyle={{ paddingHorizontal: hPad, gap: 0, alignItems: "stretch" }}
-      >
-        {catKeys.map((key) => {
-          const cat = CATEGORY_INFO[key];
-          const isActive = category === key;
-          const count = key === "all"
-            ? directives.length
-            : directives.filter((d) => (d.category || "dev") === key).length;
-          if (count === 0 && key !== "all") return null;
+      {/* View Mode Tabs — underline style */}
+      <View style={{
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: hPad,
+        borderBottomWidth: 0.5,
+        borderBottomColor: withAlpha("#ffffff", 0.06),
+      }}>
+        {(["timeline", "board", "overview"] as ViewMode[]).map((mode) => {
+          const isActive = viewMode === mode;
+          const labels: Record<ViewMode, string> = { timeline: "Timeline", board: "Board", overview: "Pending", list: "All" };
           return (
             <Pressable
-              key={key}
-              onPress={() => setCategory(key)}
+              key={mode}
+              onPress={() => setViewMode(mode)}
               style={{
                 paddingHorizontal: 14,
                 paddingVertical: 8,
@@ -301,74 +264,11 @@ export default function DirectivesScreen() {
                 fontSize: 13,
                 fontWeight: isActive ? fw.semibold : fw.normal,
               }}>
-                {cat.label} <Text style={{ color: isActive ? colors.text.tertiary : colors.text.disabled, fontSize: 11 }}>{count}</Text>
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      {/* View Mode + Search */}
-      <View style={{
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: hPad,
-        paddingVertical: 8,
-        gap: 0,
-      }}>
-        {/* View mode toggles — text only */}
-        {(["overview", "board", "timeline", "list"] as ViewMode[]).map((mode) => {
-          const isActive = viewMode === mode;
-          const labels: Record<ViewMode, string> = { overview: "Overview", board: "Board", timeline: "Timeline", list: "All" };
-          return (
-            <Pressable
-              key={mode}
-              onPress={() => setViewMode(mode)}
-              style={{ paddingHorizontal: 10, paddingVertical: 4 }}
-            >
-              <Text style={{
-                color: isActive ? colors.text.primary : colors.text.disabled,
-                fontSize: 12,
-                fontWeight: isActive ? fw.semibold : fw.normal,
-              }}>
                 {labels[mode]}
               </Text>
             </Pressable>
           );
         })}
-
-        <View style={{ flex: 1 }} />
-
-        {/* Search — icon-only trigger or inline */}
-        <View style={{
-          flexDirection: "row",
-          alignItems: "center",
-          backgroundColor: withAlpha("#ffffff", 0.04),
-          borderRadius: 6,
-          paddingHorizontal: 8,
-          height: 28,
-          minWidth: 100,
-        }}>
-          <Text style={{ color: colors.text.disabled, fontSize: 12, marginRight: 4 }}>search</Text>
-          <TextInput
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder=""
-            placeholderTextColor={colors.text.disabled}
-            style={{
-              flex: 1,
-              color: colors.text.primary,
-              fontSize: 12,
-              padding: 0,
-              height: 28,
-            }}
-          />
-          {searchQuery ? (
-            <Pressable onPress={() => setSearchQuery("")}>
-              <Text style={{ color: colors.text.tertiary, fontSize: 11 }}>x</Text>
-            </Pressable>
-          ) : null}
-        </View>
       </View>
 
       {/* Content */}
@@ -400,7 +300,6 @@ export default function DirectivesScreen() {
           <>
             {renderSection("Needs Attention", overviewGroups.needsAttention)}
             {renderSection("Active", overviewGroups.active)}
-            {renderSection("Recently Completed", overviewGroups.completed)}
           </>
         ) : viewMode === "board" ? (
           <ScrollView
@@ -504,17 +403,7 @@ export default function DirectivesScreen() {
             {renderSection("This Week", timelineGroups.thisWeek)}
             {renderSection("Older", timelineGroups.older)}
           </>
-        ) : (
-          <View>
-            {listSorted.map((d) => (
-              <DirectiveListItem
-                key={d.id}
-                directive={enrichDirective(d)}
-                onPress={navigateToDirective}
-              />
-            ))}
-          </View>
-        )}
+        ) : null}
       </ScrollView>
 
       {/* Plan Review Modal */}

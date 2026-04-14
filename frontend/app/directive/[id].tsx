@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -6,8 +6,10 @@ import {
   Pressable,
   RefreshControl,
   Alert,
-  Platform,
   ActivityIndicator,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
@@ -19,16 +21,15 @@ import {
   retryDirective,
   retryMergeDirective,
   unblockDirective,
+  commentDirective,
   type Directive,
   type HistoryEntry,
 } from "../../lib/bridge-api";
 import {
   HUMAN_STATUS,
-  TYPE_EMOJI,
   relativeTime,
   formatTimestamp,
   humanDuration,
-  priorityLabel,
 } from "../../lib/directive-constants";
 import {
   colors,
@@ -51,6 +52,7 @@ export default function DirectiveDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { insets } = usePhoneLayout();
+  const scrollRef = useRef<ScrollView>(null);
 
   const [directive, setDirective] = useState<Directive | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -58,6 +60,8 @@ export default function DirectiveDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
 
   const [planReviewDirective, setPlanReviewDirective] = useState<Directive | null>(null);
   const [statusChangeDirective, setStatusChangeDirective] = useState<Directive | null>(null);
@@ -114,6 +118,22 @@ export default function DirectiveDetailScreen() {
     }
   }, [directive, load]);
 
+  const handleSendComment = useCallback(async () => {
+    if (!directive || !comment.trim() || sending) return;
+    setSending(true);
+    try {
+      await commentDirective(directive.id, comment.trim());
+      setComment("");
+      setTab("activity");
+      await load();
+      setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
+    } catch (err: any) {
+      Alert.alert("Error", err.message);
+    } finally {
+      setSending(false);
+    }
+  }, [directive, comment, sending, load]);
+
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg.base, justifyContent: "center", alignItems: "center", paddingTop: insets.top }}>
@@ -137,30 +157,23 @@ export default function DirectiveDetailScreen() {
   const typeLabel = directive.type === "feature" ? "Feature" : directive.type === "epic" ? "Epic" : directive.type === "explore" ? "Explore" : "Quick";
   const typeColor = directive.type === "feature" ? "#3B82F6" : directive.type === "epic" ? "#A855F7" : directive.type === "explore" ? "#06B6D4" : "#22C55E";
 
-  // Determine which action buttons to show
-  const actionButtons: Array<{ label: string; action: string; color: string; filled?: boolean }> = [];
+  // Context action buttons
+  const actions: Array<{ label: string; action: string; color: string; filled?: boolean }> = [];
   if (directive.status === "planned") {
-    actionButtons.push({ label: "Approve", action: "approve", color: colors.success, filled: true });
+    actions.push({ label: "Approve", action: "approve", color: colors.success, filled: true });
   }
   if (directive.status === "deploy_failed") {
-    actionButtons.push({ label: "Retry Merge", action: "retry_merge", color: colors.warning });
-    actionButtons.push({ label: "Retry Full", action: "retry", color: colors.info });
+    actions.push({ label: "Retry Merge", action: "retry_merge", color: colors.warning });
+    actions.push({ label: "Retry", action: "retry", color: colors.info });
   }
   if (directive.status === "blocked") {
-    actionButtons.push({ label: "Unblock", action: "unblock", color: "#A855F7" });
+    actions.push({ label: "Unblock", action: "unblock", color: "#A855F7" });
   }
   if (["failed", "stale", "cancelled"].includes(directive.status)) {
-    actionButtons.push({ label: "Retry", action: "retry", color: colors.info });
+    actions.push({ label: "Retry", action: "retry", color: colors.info });
   }
-  if (!["completed", "failed", "cancelled", "stale", "planned", "blocked", "deploy_failed"].includes(directive.status)) {
-    actionButtons.push({ label: "Cancel", action: "cancel", color: colors.error });
-  }
-  if (directive.plan) {
-    actionButtons.push({ label: "View Plan", action: "plan", color: colors.accent });
-  }
-  actionButtons.push({ label: "Status", action: "status", color: colors.text.tertiary });
 
-  // Timeline entries — merge activity_log and history, dedupe by timestamp+message
+  // Timeline entries
   const actLog = Array.isArray(directive.activity_log) ? directive.activity_log : [];
   const histList = Array.isArray(history) ? history : [];
   const timelineEntries = (() => {
@@ -181,49 +194,69 @@ export default function DirectiveDetailScreen() {
   })();
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: colors.bg.base }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
       {/* Header */}
       <View style={{ paddingTop: insets.top + spacing.xs, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}>
-        {/* Back + ID row */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: 6 }}>
-          <Pressable onPress={() => router.back()} hitSlop={16} style={{ paddingRight: 4 }}>
-            <Text style={{ color: colors.text.tertiary, fontSize: 16 }}>{"\u2190"}</Text>
+        {/* Back + ID + action dots */}
+        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 6 }}>
+          <Pressable onPress={() => router.back()} hitSlop={16} style={{ paddingRight: 8 }}>
+            <Text style={{ color: colors.text.tertiary, fontSize: 18 }}>{"\u2039"}</Text>
           </Pressable>
-          <Text style={{ color: colors.text.disabled, fontSize: fontSize.sm, fontFamily: "monospace" }}>{directive.id}</Text>
+          <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, fontFamily: "monospace", flex: 1 }}>{directive.id}</Text>
+          {/* Inline actions */}
+          {actions.length > 0 ? (
+            <View style={{ flexDirection: "row", gap: 6 }}>
+              {actions.map((a) => (
+                <Pressable
+                  key={a.action}
+                  onPress={() => handleAction(a.action)}
+                  style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 4,
+                    backgroundColor: a.filled ? a.color : withAlpha(a.color, 0.12),
+                  }}
+                >
+                  <Text style={{ color: a.filled ? "#fff" : a.color, fontSize: 10, fontWeight: fontWeight.semibold }}>
+                    {a.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </View>
 
-        {/* Title — single line with emoji inline */}
-        <Text style={{ color: colors.text.primary, fontSize: 17, fontWeight: fontWeight.semibold, lineHeight: 22, marginBottom: 8 }} numberOfLines={2}>
+        {/* Title */}
+        <Text style={{ color: colors.text.primary, fontSize: 16, fontWeight: fontWeight.semibold, lineHeight: 21, marginBottom: 6 }} numberOfLines={2}>
           {directive.emoji ? `${directive.emoji}  ` : ""}{directive.title}
         </Text>
 
-        {/* Tags row — compact, square radius like list items */}
+        {/* Tags */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: pill.bg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 }}>
             <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: pill.dot }} />
-            <Text style={{ color: pill.text, fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>
+            <Text style={{ color: pill.text, fontSize: fontSize.xs, fontWeight: fontWeight.medium }}>
               {HUMAN_STATUS[directive.status] || directive.status}
             </Text>
           </View>
-
           <View style={{ backgroundColor: withAlpha(typeColor, 0.1), paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-            <Text style={{ color: typeColor, fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>{typeLabel}</Text>
+            <Text style={{ color: typeColor, fontSize: fontSize.xs, fontWeight: fontWeight.medium }}>{typeLabel}</Text>
           </View>
-
           {(directive.priority ?? 3) <= 2 ? (
-            <View style={{ backgroundColor: withAlpha(directive.priority <= 1 ? colors.error : colors.warning, 0.1), paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-              <Text style={{ color: directive.priority <= 1 ? "#FCA5A5" : "#FCD34D", fontSize: fontSize.sm, fontWeight: fontWeight.bold }}>
+            <View style={{ backgroundColor: withAlpha(directive.priority! <= 1 ? colors.error : colors.warning, 0.1), paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+              <Text style={{ color: directive.priority! <= 1 ? "#FCA5A5" : "#FCD34D", fontSize: fontSize.xs, fontWeight: fontWeight.bold }}>
                 P{directive.priority}
               </Text>
             </View>
           ) : null}
-
           {directive.createdBy ? (
-            <Text style={{ color: colors.text.disabled, fontSize: fontSize.sm }}>{directive.createdBy}</Text>
+            <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs }}>{directive.createdBy}</Text>
           ) : null}
-
           {directive.duration ? (
-            <Text style={{ color: colors.text.disabled, fontSize: fontSize.sm }}>{humanDuration(directive.duration)}</Text>
+            <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs }}>{humanDuration(directive.duration)}</Text>
           ) : null}
         </View>
       </View>
@@ -235,7 +268,7 @@ export default function DirectiveDetailScreen() {
             key={t}
             onPress={() => setTab(t)}
             style={{
-              paddingVertical: spacing.sm,
+              paddingVertical: 7,
               paddingHorizontal: spacing.md,
               borderBottomWidth: 2,
               borderBottomColor: tab === t ? colors.accent : "transparent",
@@ -254,9 +287,11 @@ export default function DirectiveDetailScreen() {
 
       {/* Content */}
       <ScrollView
+        ref={scrollRef}
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 + insets.bottom }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 80 + insets.bottom }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} colors={[colors.accent]} />}
+        keyboardShouldPersistTaps="handled"
       >
         {tab === "overview" ? (
           <>
@@ -267,7 +302,7 @@ export default function DirectiveDetailScreen() {
               </Text>
             ) : null}
 
-            {/* Plan preview */}
+            {/* Plan */}
             {directive.plan ? (
               <Pressable
                 onPress={() => setPlanReviewDirective(directive)}
@@ -283,7 +318,7 @@ export default function DirectiveDetailScreen() {
                 }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                  <Text style={{ color: colors.accent, fontSize: fontSize.sm, fontWeight: fontWeight.semibold }}>PLAN</Text>
+                  <Text style={{ color: colors.accent, fontSize: fontSize.xs, fontWeight: fontWeight.semibold }}>PLAN</Text>
                   <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs }}>tap to expand</Text>
                 </View>
                 <Text style={{ color: colors.text.tertiary, fontSize: fontSize.md, lineHeight: 16 }} numberOfLines={3}>
@@ -311,7 +346,7 @@ export default function DirectiveDetailScreen() {
               </View>
             ) : null}
 
-            {/* Handoff Context */}
+            {/* Handoff */}
             {directive.handoff_context ? (
               <View style={{
                 backgroundColor: colors.bg.elevated,
@@ -330,17 +365,10 @@ export default function DirectiveDetailScreen() {
               </View>
             ) : null}
 
-            {/* Failure reason */}
+            {/* Failure */}
             {directive.failureReason ? (
-              <View style={{
-                backgroundColor: withAlpha(colors.error, 0.06),
-                borderRadius: radius.sm,
-                padding: spacing.md,
-                marginBottom: spacing.lg,
-              }}>
-                <Text style={{ color: "#FCA5A5", fontSize: fontSize.md, lineHeight: 17 }}>
-                  {directive.failureReason}
-                </Text>
+              <View style={{ backgroundColor: withAlpha(colors.error, 0.06), borderRadius: radius.sm, padding: spacing.md, marginBottom: spacing.lg }}>
+                <Text style={{ color: "#FCA5A5", fontSize: fontSize.md, lineHeight: 17 }}>{directive.failureReason}</Text>
               </View>
             ) : null}
 
@@ -356,24 +384,22 @@ export default function DirectiveDetailScreen() {
             {/* Epic progress */}
             {directive.type === "epic" && directive.phases && directive.phases.length > 0 ? (() => {
               const total = directive.phases.length;
-              const completed = directive.phases.filter((p) => p.status === "completed").length;
-              const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+              const done = directive.phases.filter((p) => p.status === "completed").length;
+              const pct = total > 0 ? Math.round((done / total) * 100) : 0;
               return (
                 <View style={{ marginBottom: spacing.lg }}>
-                  <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: 6 }}>
-                    EPIC PROGRESS
-                  </Text>
+                  <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: 6 }}>EPIC PROGRESS</Text>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                     <View style={{ flex: 1, height: 4, backgroundColor: colors.bg.surface, borderRadius: 2, overflow: "hidden" }}>
                       <View style={{ width: `${pct}%` as any, height: "100%", backgroundColor: colors.success, borderRadius: 2 }} />
                     </View>
-                    <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs }}>{completed}/{total}</Text>
+                    <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs }}>{done}/{total}</Text>
                   </View>
                 </View>
               );
             })() : null}
 
-            {/* Metadata grid */}
+            {/* Metadata */}
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 2, marginBottom: spacing.lg }}>
               <MetaItem label="Created" value={formatTimestamp(directive.createdAt)} />
               <MetaItem label="Updated" value={formatTimestamp(directive.updatedAt)} />
@@ -386,115 +412,104 @@ export default function DirectiveDetailScreen() {
             {/* Dependencies */}
             {directive.dependsOn && directive.dependsOn.length > 0 ? (
               <View style={{ marginBottom: spacing.lg }}>
-                <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: 4 }}>
-                  DEPENDENCIES
-                </Text>
+                <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: 4 }}>DEPENDENCIES</Text>
                 {directive.dependsOn.map((depId) => (
-                  <Text key={depId} style={{ color: colors.text.tertiary, fontSize: fontSize.md, marginLeft: spacing.sm, lineHeight: 20 }}>
-                    {depId}
-                  </Text>
+                  <Text key={depId} style={{ color: colors.text.tertiary, fontSize: fontSize.md, marginLeft: spacing.sm, lineHeight: 20 }}>{depId}</Text>
+                ))}
+              </View>
+            ) : null}
+
+            {/* Recent activity preview */}
+            {timelineEntries.length > 0 ? (
+              <View style={{ marginTop: spacing.sm }}>
+                <Pressable onPress={() => setTab("activity")} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm }}>
+                  <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5 }}>RECENT ACTIVITY</Text>
+                  <Text style={{ color: colors.accent, fontSize: fontSize.xs }}>View all</Text>
+                </Pressable>
+                {timelineEntries.slice(0, 3).map((entry, i) => (
+                  <ActivityEntry key={`${entry.timestamp}-${i}`} entry={entry} isLast={i === Math.min(2, timelineEntries.length - 1)} />
                 ))}
               </View>
             ) : null}
           </>
         ) : (
           /* Activity timeline */
-          <View style={{ gap: 0 }}>
+          <View>
             {timelineEntries.length === 0 ? (
               <Text style={{ color: colors.text.disabled, fontSize: fontSize.base, textAlign: "center", paddingVertical: 40 }}>
                 No activity yet
               </Text>
             ) : (
-              timelineEntries.map((entry, i) => {
-                const dotColor = auditTypeColors[entry.type] || colors.text.disabled;
-                const actor = entry.actor;
-                const aColor = actorColors[actor || ""] || colors.text.tertiary;
-                const isLast = i === timelineEntries.length - 1;
-
-                return (
-                  <View key={`${entry.timestamp}-${i}`} style={{ flexDirection: "row", minHeight: 40 }}>
-                    {/* Timeline rail */}
-                    <View style={{ width: 24, alignItems: "center" }}>
-                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, marginTop: 6 }} />
-                      {!isLast ? (
-                        <View style={{ width: 1, flex: 1, backgroundColor: colors.border.subtle, marginVertical: 2 }} />
-                      ) : null}
-                    </View>
-
-                    {/* Content */}
-                    <View style={{ flex: 1, paddingBottom: spacing.lg, paddingLeft: spacing.sm }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: 2 }}>
-                        {actor ? (
-                          <Text style={{
-                            color: aColor,
-                            fontSize: fontSize.xs,
-                            fontWeight: fontWeight.bold,
-                            backgroundColor: withAlpha(aColor, 0.1),
-                            paddingHorizontal: 5,
-                            paddingVertical: 1,
-                            borderRadius: radius.xs,
-                            overflow: "hidden",
-                          }}>
-                            {actor}
-                          </Text>
-                        ) : null}
-                        <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs }}>
-                          {relativeTime(entry.timestamp)}
-                        </Text>
-                      </View>
-                      <Text style={{ color: colors.text.secondary, fontSize: fontSize.md, lineHeight: 18 }}>
-                        {entry.message}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })
+              timelineEntries.map((entry, i) => (
+                <ActivityEntry key={`${entry.timestamp}-${i}`} entry={entry} isLast={i === timelineEntries.length - 1} />
+              ))
             )}
           </View>
         )}
       </ScrollView>
 
-      {/* Bottom action bar */}
-      {actionButtons.length > 0 ? (
+      {/* Bottom bar — comment input + action shortcuts */}
+      <View style={{
+        backgroundColor: colors.bg.elevated,
+        borderTopWidth: 1,
+        borderTopColor: colors.border.subtle,
+        paddingHorizontal: spacing.lg,
+        paddingTop: spacing.sm,
+        paddingBottom: Math.max(spacing.sm, insets.bottom),
+      }}>
+        {/* Comment input row */}
         <View style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          backgroundColor: colors.bg.elevated,
-          borderTopWidth: 1,
-          borderTopColor: colors.border.subtle,
-          paddingHorizontal: spacing.lg,
-          paddingTop: spacing.md,
-          paddingBottom: Math.max(spacing.lg, insets.bottom),
+          flexDirection: "row",
+          alignItems: "center",
+          backgroundColor: colors.bg.surface,
+          borderRadius: radius.md,
+          paddingHorizontal: spacing.md,
+          minHeight: 36,
+          gap: spacing.sm,
         }}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
-            {actionButtons.map((btn) => (
-              <Pressable
-                key={btn.action}
-                onPress={() => {
-                  if (btn.action === "plan") setPlanReviewDirective(directive);
-                  else handleAction(btn.action);
-                }}
-                style={{
-                  paddingHorizontal: spacing.lg,
-                  paddingVertical: spacing.sm,
-                  borderRadius: radius.md,
-                  backgroundColor: btn.filled ? btn.color : withAlpha(btn.color, 0.12),
-                }}
-              >
-                <Text style={{
-                  color: btn.filled ? "#fff" : btn.color,
-                  fontSize: fontSize.md,
-                  fontWeight: fontWeight.semibold,
-                }}>
-                  {btn.label}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          <TextInput
+            value={comment}
+            onChangeText={setComment}
+            placeholder="Leave a comment..."
+            placeholderTextColor={colors.text.disabled}
+            style={{
+              flex: 1,
+              color: colors.text.primary,
+              fontSize: fontSize.base,
+              paddingVertical: 8,
+            }}
+            multiline
+            maxLength={2000}
+            returnKeyType="send"
+            blurOnSubmit
+            onSubmitEditing={handleSendComment}
+          />
+          {comment.trim() ? (
+            <Pressable onPress={handleSendComment} disabled={sending} style={{ paddingLeft: 4 }}>
+              <Text style={{ color: sending ? colors.text.disabled : colors.accent, fontSize: fontSize.base, fontWeight: fontWeight.bold }}>
+                {sending ? "..." : "Send"}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
-      ) : null}
+
+        {/* Quick action row below input */}
+        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6, gap: spacing.sm }}>
+          {directive.plan ? (
+            <Pressable onPress={() => setPlanReviewDirective(directive)} style={{ paddingVertical: 2 }}>
+              <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs }}>Plan</Text>
+            </Pressable>
+          ) : null}
+          <Pressable onPress={() => handleAction("status")} style={{ paddingVertical: 2 }}>
+            <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs }}>Status</Text>
+          </Pressable>
+          {!["completed", "failed", "cancelled", "stale", "planned", "blocked", "deploy_failed"].includes(directive.status) ? (
+            <Pressable onPress={() => handleAction("cancel")} style={{ paddingVertical: 2 }}>
+              <Text style={{ color: withAlpha(colors.error, 0.5), fontSize: fontSize.xs }}>Cancel</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
 
       <PlanReviewModal
         visible={planReviewDirective !== null}
@@ -508,6 +523,62 @@ export default function DirectiveDetailScreen() {
         onDismiss={() => setStatusChangeDirective(null)}
         onStatusChanged={load}
       />
+    </KeyboardAvoidingView>
+  );
+}
+
+function ActivityEntry({ entry, isLast }: { entry: HistoryEntry; isLast: boolean }) {
+  const dotColor = auditTypeColors[entry.type] || colors.text.disabled;
+  const actor = entry.actor;
+  const aColor = actorColors[actor || ""] || colors.text.tertiary;
+  const isComment = entry.type === "comment";
+
+  return (
+    <View style={{ flexDirection: "row", minHeight: 36 }}>
+      {/* Timeline rail */}
+      <View style={{ width: 20, alignItems: "center" }}>
+        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: dotColor, marginTop: 5 }} />
+        {!isLast ? <View style={{ width: 1, flex: 1, backgroundColor: colors.border.subtle, marginVertical: 2 }} /> : null}
+      </View>
+
+      {/* Content */}
+      <View style={{ flex: 1, paddingBottom: spacing.md, paddingLeft: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 1 }}>
+          {actor ? (
+            <Text style={{
+              color: aColor,
+              fontSize: 10,
+              fontWeight: fontWeight.bold,
+              backgroundColor: withAlpha(aColor, 0.1),
+              paddingHorizontal: 4,
+              paddingVertical: 1,
+              borderRadius: 3,
+              overflow: "hidden",
+            }}>
+              {actor}
+            </Text>
+          ) : null}
+          <Text style={{ color: colors.text.disabled, fontSize: 10 }}>
+            {relativeTime(entry.timestamp)}
+          </Text>
+        </View>
+        {isComment ? (
+          <View style={{
+            backgroundColor: colors.bg.elevated,
+            borderRadius: radius.sm,
+            padding: spacing.sm,
+            marginTop: 3,
+          }}>
+            <Text style={{ color: colors.text.secondary, fontSize: fontSize.md, lineHeight: 17 }}>
+              {entry.message}
+            </Text>
+          </View>
+        ) : (
+          <Text style={{ color: colors.text.tertiary, fontSize: fontSize.md, lineHeight: 17 }}>
+            {entry.message}
+          </Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -515,9 +586,7 @@ export default function DirectiveDetailScreen() {
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ width: "48%", marginBottom: 6 }}>
-      <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.semibold, letterSpacing: 0.3 }}>
-        {label}
-      </Text>
+      <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.semibold, letterSpacing: 0.3 }}>{label}</Text>
       <Text style={{ color: colors.text.secondary, fontSize: fontSize.sm }}>{value}</Text>
     </View>
   );

@@ -283,6 +283,18 @@ export async function unblockDirective(
   return res.json();
 }
 
+export async function commentDirective(
+  id: string,
+  message: string
+): Promise<{ ok: boolean }> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}/comment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  return res.json();
+}
+
 export async function fetchApprovalDetails(): Promise<EnrichedApproval[]> {
   const res = await fetchWithTimeout(`${BRIDGE_URL}/approvals/details`, {
     headers: { "Content-Type": "application/json" },
