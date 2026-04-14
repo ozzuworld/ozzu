@@ -56,7 +56,7 @@ export default function DirectivesScreen() {
   const { insets, isPhone, screenWidth, screenHeight } = usePhoneLayout();
   const isTabletLandscape = !isPhone && screenWidth > screenHeight;
 
-  const { directives, approvals, buildStatus, summary, loading, error, refresh } = useDirectives();
+  const { directives, buildStatus, summary, loading, error, refresh } = useDirectives();
 
   const [category, setCategory] = useState("all");
   const [viewMode, setViewMode] = useState<ViewMode>("overview");
@@ -65,7 +65,6 @@ export default function DirectivesScreen() {
 
   // Plan review modal
   const [planReviewDirective, setPlanReviewDirective] = useState<Directive | null>(null);
-  const [planReviewApproval, setPlanReviewApproval] = useState<any>(null);
 
   // Status change sheet
   const [statusChangeDirective, setStatusChangeDirective] = useState<Directive | null>(null);
@@ -82,15 +81,7 @@ export default function DirectivesScreen() {
       try {
         if (action === "approve") {
           const dir = directives.find((d) => d.id === id);
-          const approval = approvals.find((a) => a.directiveId === id);
-          if (dir) { setPlanReviewDirective(dir); setPlanReviewApproval(approval || null); }
-          return;
-        }
-        if (action === "deny") {
-          Alert.alert("Deny Plan", "Cancel this directive?", [
-            { text: "No", style: "cancel" },
-            { text: "Yes, Deny", style: "destructive", onPress: async () => { await cancelDirective(id); refresh(); } },
-          ]);
+          if (dir) setPlanReviewDirective(dir);
           return;
         }
         if (action === "cancel") {
@@ -105,13 +96,12 @@ export default function DirectivesScreen() {
         if (action === "unblock") { const r = await unblockDirective(id); if (!r.ok) Alert.alert("Error", r.error || "Unblock failed"); refresh(); return; }
       } catch (err: any) { Alert.alert("Error", err.message || "Action failed"); }
     },
-    [approvals, directives, refresh]
+    [directives, refresh]
   );
 
   const handlePlanReview = useCallback((directive: Directive) => {
-    const approval = approvals.find((a) => a.directiveId === directive.id);
-    setPlanReviewDirective(directive); setPlanReviewApproval(approval || null);
-  }, [approvals]);
+    setPlanReviewDirective(directive);
+  }, []);
 
   const handleStatusChange = useCallback((directive: Directive) => {
     setStatusChangeDirective(directive);
@@ -424,73 +414,6 @@ export default function DirectivesScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#06B6D4" colors={["#06B6D4"]} />
         }
       >
-        {/* Pending Approvals */}
-        {approvals.length > 0 ? (
-          <View style={{
-            backgroundColor: "#111111",
-            borderRadius: 14,
-            padding: 16,
-            marginBottom: 12,
-          }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#3B82F6" }} />
-              <Text style={{ color: "#E5E5E5", fontSize: 15, fontWeight: "700" }}>
-                {approvals.length === 1 ? "1 item needs your approval" : `${approvals.length} items need your approval`}
-              </Text>
-            </View>
-            {approvals.map((a) => (
-              <Pressable
-                key={a.id}
-                onPress={() => {
-                  const dir = directives.find((d) => d.id === a.directiveId);
-                  if (dir) handlePlanReview(dir);
-                }}
-                style={{
-                  backgroundColor: "#1A1A1A",
-                  borderRadius: 12,
-                  padding: 14,
-                  marginBottom: 8,
-                }}
-              >
-                <Text style={{ color: "#F5F5F5", fontSize: 14, fontWeight: "600" }} numberOfLines={1}>
-                  {a.directiveTitle || a.directiveId || a.id}
-                </Text>
-                {a.directivePlan ? (
-                  <Text style={{ color: "#525252", fontSize: 12, marginTop: 4, lineHeight: 18 }} numberOfLines={2}>{a.directivePlan.slice(0, 150)}</Text>
-                ) : null}
-                <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-                  <Pressable
-                    onPress={() => handleAction("approve", a.directiveId || "")}
-                    style={{
-                      flex: 2,
-                      paddingVertical: 10,
-                      borderRadius: 10,
-                      backgroundColor: "#22C55E",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>Approve</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => handleAction("deny", a.directiveId || "")}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 10,
-                      borderRadius: 10,
-                      backgroundColor: "#1A1A1A",
-                      borderWidth: 1,
-                      borderColor: "#333333",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text style={{ color: "#EF4444", fontSize: 13, fontWeight: "600" }}>Deny</Text>
-                  </Pressable>
-                </View>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-
         {error ? (
           <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
             <Text style={{ color: "#EF4444", fontSize: 12, textAlign: "center" }}>{error}</Text>
@@ -655,8 +578,7 @@ export default function DirectivesScreen() {
       <PlanReviewModal
         visible={planReviewDirective !== null}
         directive={planReviewDirective}
-        approval={planReviewApproval}
-        onDismiss={() => { setPlanReviewDirective(null); setPlanReviewApproval(null); }}
+        onDismiss={() => setPlanReviewDirective(null)}
         onResolved={refresh}
       />
 

@@ -1499,24 +1499,7 @@ module.exports = function directiveRoutes(ctx) {
       return true;
     }
 
-    // GET /approvals/details — Pending approvals enriched with directive info
-    if (req.method === "GET" && pathname === "/approvals/details") {
-      const approvals = expireApprovals(getApprovals());
-      const pending = approvals.filter((a) => !a.resolved);
-      const directives = getDirectives();
-      const enriched = pending.map((a) => {
-        const directive = directives.find((d) => d.directiveApprovalId === a.id);
-        return {
-          ...a,
-          directiveTitle: directive ? directive.title : null,
-          directivePlan: directive ? directive.plan : null,
-          directiveDescription: directive ? directive.description : null,
-          directiveId: directive ? directive.id : null,
-        };
-      });
-      sendJSON(res, 200, enriched);
-      return true;
-    }
+    // /approvals/details — removed (old directive approval UI)
 
     // GET /uploads — List persisted uploads
     if (req.method === "GET" && pathname === "/uploads") {

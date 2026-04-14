@@ -3,11 +3,9 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   fetchDirectives,
-  fetchApprovalDetails,
   fetchBuildStatus,
   fetchDirectiveSummary,
   type Directive,
-  type EnrichedApproval,
   type BuildStatus,
   type DirectiveSummary,
 } from "./bridge-api";
@@ -26,7 +24,6 @@ const POLL_INTERVAL_ACTIVE_BUILD = 10000;
 
 export interface UseDirectivesResult {
   directives: Directive[];
-  approvals: EnrichedApproval[];
   buildStatus: BuildStatus | null;
   summary: DirectiveSummary | null;
   loading: boolean;
@@ -36,7 +33,6 @@ export interface UseDirectivesResult {
 
 export function useDirectives(): UseDirectivesResult {
   const [directives, setDirectives] = useState<Directive[]>([]);
-  const [approvals, setApprovals] = useState<EnrichedApproval[]>([]);
   const [buildStatus, setBuildStatus] = useState<BuildStatus | null>(null);
   const [summary, setSummary] = useState<DirectiveSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,15 +48,13 @@ export function useDirectives(): UseDirectivesResult {
     try {
       if (!mountedRef.current) return;
       setError(null);
-      const [directiveData, approvalData, buildData, summaryData] = await Promise.all([
+      const [directiveData, buildData, summaryData] = await Promise.all([
         fetchDirectives(),
-        fetchApprovalDetails().catch(() => [] as EnrichedApproval[]),
         fetchBuildStatus().catch(() => null as BuildStatus | null),
         fetchDirectiveSummary().catch(() => null as DirectiveSummary | null),
       ]);
       if (!mountedRef.current) return;
       setDirectives(directiveData);
-      setApprovals(approvalData);
       if (buildData) setBuildStatus(buildData);
       if (summaryData) setSummary(summaryData);
       setLoading(false);
@@ -168,5 +162,5 @@ export function useDirectives(): UseDirectivesResult {
     };
   }, [hasActiveBuild, loadData]);
 
-  return { directives, approvals, buildStatus, summary, loading, error, refresh };
+  return { directives, buildStatus, summary, loading, error, refresh };
 }
