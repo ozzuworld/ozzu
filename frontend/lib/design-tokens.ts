@@ -5,10 +5,10 @@
 export const colors = {
   // Base surfaces (luminance-based elevation: lighter = higher)
   bg: {
-    base: "#121212",
-    elevated: "#1b1c1d",
-    surface: "#232425",
-    overlay: "#2a2b2c",
+    base: "#0a0a0a",
+    elevated: "#161617",
+    surface: "#1e1f20",
+    overlay: "#262728",
   },
 
   // Text

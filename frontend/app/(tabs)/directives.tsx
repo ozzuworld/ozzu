@@ -211,26 +211,26 @@ export default function DirectivesScreen() {
     />
   );
 
-  const renderSection = (title: string, items: Directive[], color: string, collapsed?: boolean) => {
+  const renderSection = (title: string, items: Directive[], count?: number) => {
     if (items.length === 0) return null;
     return (
-      <View key={title} style={{ marginBottom: spacing.lg }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm }}>
-          <View style={{ width: 3, height: 16, backgroundColor: color, borderRadius: 2 }} />
-          <Text style={{ color: colors.text.secondary, fontSize: fs.base, fontWeight: fw.bold, letterSpacing: 0.5 }}>
+      <View key={title} style={{ marginBottom: 20 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4, paddingVertical: 6 }}>
+          <Text style={{ color: colors.text.disabled, fontSize: 12, fontWeight: fw.semibold, letterSpacing: 0.3, textTransform: "uppercase" }}>
             {title}
           </Text>
-          <View style={{ backgroundColor: withAlpha(color, 0.15), paddingHorizontal: 6, paddingVertical: 1, borderRadius: 10 }}>
-            <Text style={{ color, fontSize: fs.sm, fontWeight: fw.bold }}>{items.length}</Text>
-          </View>
+          <Text style={{ color: colors.text.disabled, fontSize: 11, marginLeft: 6, opacity: 0.6 }}>
+            {items.length}
+          </Text>
         </View>
-        <View style={{ gap: 1, ...(isTabletLandscape ? { flexDirection: "row", flexWrap: "wrap" } : {}) }}>
-          {items.map((d) => (
-            isTabletLandscape
-              ? <View key={d.id} style={{ width: "48%", marginBottom: 2 }}>{renderCard(d)}</View>
-              : renderCard(d)
-          ))}
-        </View>
+        {items.map((d, i) => (
+          <DirectiveListItem
+            key={d.id}
+            directive={enrichDirective(d)}
+            onPress={navigateToDirective}
+            showDivider={i < items.length - 1}
+          />
+        ))}
       </View>
     );
   };
@@ -255,41 +255,29 @@ export default function DirectivesScreen() {
         </View>
       </View>
 
-      {/* Headline Banner */}
+      {/* Stats row — minimal, no box */}
       {summary ? (
-        <View style={{
-          marginHorizontal: hPad,
-          marginBottom: 10,
-          paddingVertical: 10,
-          paddingHorizontal: 14,
-          backgroundColor: summary.needsAttentionCount > 0 ? withAlpha(colors.warning, 0.08) : colors.bg.elevated,
-          borderRadius: radius.lg,
-          borderWidth: 1,
-          borderColor: summary.needsAttentionCount > 0 ? withAlpha(colors.warning, 0.2) : colors.border.subtle,
-        }}>
-          <Text style={{ color: colors.text.primary, fontSize: fs.xl, fontWeight: fw.bold }}>
-            {summary.headline}
+        <View style={{ paddingHorizontal: hPad, paddingBottom: 8, flexDirection: "row", gap: 16, alignItems: "baseline" }}>
+          <Text style={{ color: colors.text.secondary, fontSize: 13 }}>
+            <Text style={{ color: colors.success, fontWeight: fw.bold }}>{summary.completedToday}</Text> done today
           </Text>
-          <View style={{ flexDirection: "row", gap: 16, marginTop: 6 }}>
-            <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>
-              <Text style={{ color: colors.success, fontWeight: fw.bold }}>{summary.completedToday}</Text> done today
+          <Text style={{ color: colors.text.secondary, fontSize: 13 }}>
+            <Text style={{ color: colors.accent, fontWeight: fw.bold }}>{summary.activeCount}</Text> active
+          </Text>
+          {summary.needsAttentionCount > 0 ? (
+            <Text style={{ color: colors.text.secondary, fontSize: 13 }}>
+              <Text style={{ color: colors.error, fontWeight: fw.bold }}>{summary.needsAttentionCount}</Text> needs action
             </Text>
-            <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>
-              <Text style={{ color: colors.info, fontWeight: fw.bold }}>{summary.activeCount}</Text> active
-            </Text>
-            <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>
-              <Text style={{ color: colors.accent, fontWeight: fw.bold }}>{summary.completedThisWeek}</Text> this week
-            </Text>
-          </View>
+          ) : null}
         </View>
       ) : null}
 
-      {/* Category Tabs */}
+      {/* Category Tabs — underline style */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={{ flexGrow: 0, maxHeight: 38 }}
-        contentContainerStyle={{ paddingHorizontal: hPad, gap: 6, alignItems: "center", paddingVertical: 3 }}
+        style={{ flexGrow: 0, maxHeight: 36, borderBottomWidth: 0.5, borderBottomColor: withAlpha("#ffffff", 0.06) }}
+        contentContainerStyle={{ paddingHorizontal: hPad, gap: 0, alignItems: "stretch" }}
       >
         {catKeys.map((key) => {
           const cat = CATEGORY_INFO[key];
@@ -303,32 +291,18 @@ export default function DirectivesScreen() {
               key={key}
               onPress={() => setCategory(key)}
               style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 5,
-                paddingHorizontal: 12,
-                paddingVertical: 6,
-                borderRadius: radius.md,
-                backgroundColor: isActive ? withAlpha(cat.color, 0.1) : "transparent",
-                borderWidth: 1,
-                borderColor: isActive ? withAlpha(cat.color, 0.3) : colors.border.subtle,
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                borderBottomWidth: 2,
+                borderBottomColor: isActive ? colors.accent : "transparent",
               }}
             >
-              <Text style={{ fontSize: fs.sm }}>{cat.emoji}</Text>
               <Text style={{
-                color: isActive ? cat.color : colors.text.disabled,
-                fontSize: fs.sm,
-                fontWeight: fw.bold,
-                letterSpacing: 0.3,
+                color: isActive ? colors.text.primary : colors.text.disabled,
+                fontSize: 13,
+                fontWeight: isActive ? fw.semibold : fw.normal,
               }}>
-                {cat.label}
-              </Text>
-              <Text style={{
-                color: isActive ? cat.color : colors.text.disabled,
-                fontSize: fs.xs,
-                fontWeight: fw.bold,
-              }}>
-                {count}
+                {cat.label} <Text style={{ color: isActive ? colors.text.tertiary : colors.text.disabled, fontSize: 11 }}>{count}</Text>
               </Text>
             </Pressable>
           );
@@ -340,10 +314,10 @@ export default function DirectivesScreen() {
         flexDirection: "row",
         alignItems: "center",
         paddingHorizontal: hPad,
-        paddingVertical: 6,
-        gap: 8,
+        paddingVertical: 8,
+        gap: 0,
       }}>
-        {/* View mode toggles */}
+        {/* View mode toggles — text only */}
         {(["overview", "board", "timeline", "list"] as ViewMode[]).map((mode) => {
           const isActive = viewMode === mode;
           const labels: Record<ViewMode, string> = { overview: "Overview", board: "Board", timeline: "Timeline", list: "All" };
@@ -351,19 +325,12 @@ export default function DirectivesScreen() {
             <Pressable
               key={mode}
               onPress={() => setViewMode(mode)}
-              style={{
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                borderRadius: radius.sm,
-                backgroundColor: isActive ? withAlpha(colors.accent, 0.1) : "transparent",
-                borderWidth: 1,
-                borderColor: isActive ? withAlpha(colors.accent, 0.25) : colors.border.subtle,
-              }}
+              style={{ paddingHorizontal: 10, paddingVertical: 4 }}
             >
               <Text style={{
-                color: isActive ? colors.accent : colors.text.disabled,
-                fontSize: fs.sm,
-                fontWeight: fw.bold,
+                color: isActive ? colors.text.primary : colors.text.disabled,
+                fontSize: 12,
+                fontWeight: isActive ? fw.semibold : fw.normal,
               }}>
                 {labels[mode]}
               </Text>
@@ -371,19 +338,19 @@ export default function DirectivesScreen() {
           );
         })}
 
-        {/* Search */}
+        <View style={{ flex: 1 }} />
+
+        {/* Search — icon-only trigger or inline */}
         <View style={{
-          flex: 1,
           flexDirection: "row",
           alignItems: "center",
-          backgroundColor: colors.bg.elevated,
-          borderRadius: radius.sm,
-          borderWidth: 1,
-          borderColor: searchQuery ? withAlpha(colors.accent, 0.25) : colors.border.subtle,
+          backgroundColor: withAlpha("#ffffff", 0.04),
+          borderRadius: 6,
           paddingHorizontal: 8,
           height: 28,
+          minWidth: 100,
         }}>
-          <Text style={{ color: colors.text.disabled, fontSize: fs.md, marginRight: 4 }}>Search</Text>
+          <Text style={{ color: colors.text.disabled, fontSize: 12, marginRight: 4 }}>search</Text>
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -392,20 +359,18 @@ export default function DirectivesScreen() {
             style={{
               flex: 1,
               color: colors.text.primary,
-              fontSize: fs.md,
+              fontSize: 12,
               padding: 0,
               height: 28,
             }}
           />
           {searchQuery ? (
             <Pressable onPress={() => setSearchQuery("")}>
-              <Text style={{ color: colors.text.tertiary, fontSize: fs.sm }}>x</Text>
+              <Text style={{ color: colors.text.tertiary, fontSize: 11 }}>x</Text>
             </Pressable>
           ) : null}
         </View>
       </View>
-
-      <View style={{ height: 1, backgroundColor: colors.border.subtle, marginHorizontal: hPad }} />
 
       {/* Content */}
       <ScrollView
@@ -434,9 +399,9 @@ export default function DirectivesScreen() {
           </View>
         ) : viewMode === "overview" ? (
           <>
-            {renderSection("Needs Attention", overviewGroups.needsAttention, "#EF4444")}
-            {renderSection("Active", overviewGroups.active, "#3B82F6")}
-            {renderSection("Recently Completed", overviewGroups.completed, "#22C55E")}
+            {renderSection("Needs Attention", overviewGroups.needsAttention)}
+            {renderSection("Active", overviewGroups.active)}
+            {renderSection("Recently Completed", overviewGroups.completed)}
           </>
         ) : viewMode === "board" ? (
           <ScrollView
@@ -535,18 +500,21 @@ export default function DirectivesScreen() {
           </ScrollView>
         ) : viewMode === "timeline" ? (
           <>
-            {renderSection("Today", timelineGroups.today, colors.accent)}
-            {renderSection("Yesterday", timelineGroups.yesterday, colors.info)}
-            {renderSection("This Week", timelineGroups.thisWeek, "#A855F7")}
-            {renderSection("Older", timelineGroups.older, colors.text.disabled)}
+            {renderSection("Today", timelineGroups.today)}
+            {renderSection("Yesterday", timelineGroups.yesterday)}
+            {renderSection("This Week", timelineGroups.thisWeek)}
+            {renderSection("Older", timelineGroups.older)}
           </>
         ) : (
-          <View style={{ gap: 8, ...(isTabletLandscape ? { flexDirection: "row", flexWrap: "wrap" } : {}) }}>
-            {listSorted.map((d) =>
-              isTabletLandscape
-                ? <View key={d.id} style={{ width: "48%", marginBottom: 2 }}>{renderCard(d)}</View>
-                : renderCard(d)
-            )}
+          <View>
+            {listSorted.map((d, i) => (
+              <DirectiveListItem
+                key={d.id}
+                directive={enrichDirective(d)}
+                onPress={navigateToDirective}
+                showDivider={i < listSorted.length - 1}
+              />
+            ))}
           </View>
         )}
       </ScrollView>

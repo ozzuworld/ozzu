@@ -7,98 +7,102 @@ interface DirectiveListItemProps {
   directive: Directive;
   onPress: (directive: Directive) => void;
   variant?: "list" | "board";
+  showDivider?: boolean;
 }
 
-export function DirectiveListItem({ directive, onPress, variant = "list" }: DirectiveListItemProps) {
+export function DirectiveListItem({ directive, onPress, variant = "list", showDivider = true }: DirectiveListItemProps) {
   const pill = statusPillStyle(directive.status);
 
   return (
     <Pressable
       onPress={() => onPress(directive)}
       style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: pressed ? colors.bg.surface : colors.bg.elevated,
-        paddingHorizontal: spacing.lg,
-        paddingVertical: spacing.md,
-        borderRadius: radius.md,
-        gap: spacing.md,
-        minHeight: 56,
+        backgroundColor: pressed ? withAlpha("#ffffff", 0.03) : "transparent",
+        paddingHorizontal: 0,
+        paddingVertical: 10,
+        borderBottomWidth: showDivider ? 0.5 : 0,
+        borderBottomColor: withAlpha("#ffffff", 0.06),
       })}
     >
-      {/* Emoji */}
-      <Text style={{ fontSize: 16, width: 24, textAlign: "center" }}>
-        {directive.emoji || ""}
-      </Text>
+      {/* Single horizontal row: emoji | title | pill | time */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        {/* Emoji — small, fixed width */}
+        <Text style={{ fontSize: 15, width: 20, textAlign: "center" }}>
+          {directive.emoji || ""}
+        </Text>
 
-      {/* Title + optional work summary */}
-      <View style={{ flex: 1, gap: 2 }}>
+        {/* Title — takes remaining space, single line */}
         <Text
           style={{
+            flex: 1,
             color: colors.text.primary,
-            fontSize: fontSize.lg,
+            fontSize: 14,
             fontWeight: fontWeight.medium,
           }}
           numberOfLines={1}
         >
           {directive.title}
         </Text>
-        {variant === "board" && directive.work_summary ? (
-          <Text
-            style={{
-              color: colors.text.tertiary,
-              fontSize: fontSize.xs,
-              lineHeight: 14,
-            }}
-            numberOfLines={2}
-          >
-            {directive.work_summary}
-          </Text>
-        ) : null}
-      </View>
 
-      {/* Status pill */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 5,
-          backgroundColor: pill.bg,
-          paddingHorizontal: 8,
-          paddingVertical: 3,
-          borderRadius: radius.full,
-        }}
-      >
+        {/* Status pill — compact, right-aligned */}
         <View
           style={{
-            width: 6,
-            height: 6,
-            borderRadius: 3,
-            backgroundColor: pill.dot,
-          }}
-        />
-        <Text
-          style={{
-            color: pill.text,
-            fontSize: fontSize.xs,
-            fontWeight: fontWeight.medium,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            backgroundColor: pill.bg,
+            paddingHorizontal: 7,
+            paddingVertical: 2,
+            borderRadius: 10,
           }}
         >
-          {HUMAN_STATUS[directive.status] || directive.status}
+          <View
+            style={{
+              width: 5,
+              height: 5,
+              borderRadius: 3,
+              backgroundColor: pill.dot,
+            }}
+          />
+          <Text
+            style={{
+              color: pill.text,
+              fontSize: 10,
+              fontWeight: fontWeight.medium,
+            }}
+          >
+            {HUMAN_STATUS[directive.status] || directive.status}
+          </Text>
+        </View>
+
+        {/* Time — right edge */}
+        <Text
+          style={{
+            color: colors.text.disabled,
+            fontSize: 11,
+            minWidth: 32,
+            textAlign: "right",
+          }}
+        >
+          {relativeTime(directive.updatedAt)}
         </Text>
       </View>
 
-      {/* Relative time */}
-      <Text
-        style={{
-          color: colors.text.disabled,
-          fontSize: fontSize.md,
-          minWidth: 36,
-          textAlign: "right",
-        }}
-      >
-        {relativeTime(directive.updatedAt)}
-      </Text>
+      {/* Board variant: 2nd row with work summary */}
+      {variant === "board" && directive.work_summary ? (
+        <Text
+          style={{
+            color: colors.text.disabled,
+            fontSize: 11,
+            marginTop: 3,
+            marginLeft: 30,
+            lineHeight: 15,
+          }}
+          numberOfLines={1}
+        >
+          {directive.work_summary}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
