@@ -44,10 +44,10 @@ jobs:
           # Add LEANBACK_LAUNCHER category to main activity
           sed -i 's|</intent-filter>|<category android:name="android.intent.category.LEANBACK_LAUNCHER" />\n                </intent-filter>|' android/app/src/main/AndroidManifest.xml
 
-      - name: Build debug APK
+      - name: Build release APK
         run: |
           cd android
-          ./gradlew assembleDebug \
+          ./gradlew assembleRelease \
             -x lint -x test \
             -x checkDebugDuplicateClasses \
             -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86_64
@@ -55,5 +55,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ozzu-tv
-          path: tv/android/app/build/outputs/apk/debug/app-debug.apk
+          path: tv/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
