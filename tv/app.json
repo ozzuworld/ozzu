@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Ozzu TV",
+    "slug": "ozzu-tv",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#020208"
+    },
+    "android": {
+      "package": "com.ozzu.tv",
+      "minSdkVersion": 24,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#020208"
+      },
+      "edgeToEdgeEnabled": true,
+      "intentFilters": [
+        {
+          "action": "MAIN",
+          "category": ["LEANBACK_LAUNCHER"]
+        }
+      ]
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          }
+        }
+      ]
+    ]
+  }
+}

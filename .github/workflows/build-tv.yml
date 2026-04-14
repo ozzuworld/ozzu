@@ -1,0 +1,57 @@
+name: Build Ozzu TV APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-tv:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tv
+    env:
+      EXPO_PUBLIC_BRIDGE_URL: ${{ secrets.EXPO_PUBLIC_BRIDGE_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tv/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Add Android TV leanback support
+        run: |
+          # Add leanback feature and intent filter to AndroidManifest
+          sed -i 's|<application|<uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <application|' android/app/src/main/AndroidManifest.xml
+          # Add LEANBACK_LAUNCHER category to main activity
+          sed -i 's|</intent-filter>|<category android:name="android.intent.category.LEANBACK_LAUNCHER" />\n                </intent-filter>|' android/app/src/main/AndroidManifest.xml
+          # Set immersive mode — hide nav bar
+          sed -i 's|android:windowSoftInputMode|android:theme="@android:style/Theme.NoTitleBar.Fullscreen"\n            android:windowSoftInputMode|' android/app/src/main/AndroidManifest.xml
+
+      - name: Build debug APK
+        run: |
+          cd android
+          ./gradlew assembleDebug \
+            -x lint -x test \
+            -x checkDebugDuplicateClasses \
+            -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ozzu-tv
+          path: tv/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

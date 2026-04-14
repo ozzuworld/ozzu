@@ -21,13 +21,11 @@ module.exports = function devDashboardRoutes(ctx) {
   // Watch for git changes and push to SSE clients
   function pollGitChanges() {
     try {
-      const diff = execSync("git diff --stat HEAD 2>/dev/null || true", {
-        cwd: "/home/gcp/ozzu/frontend",
+      const diff = execSync("git -C /home/gcp/ozzu diff --stat HEAD -- frontend/app frontend/components frontend/lib 2>/dev/null || true", {
         encoding: "utf8",
         timeout: 5000,
       });
-      const fullDiff = execSync("git diff HEAD 2>/dev/null || true", {
-        cwd: "/home/gcp/ozzu/frontend",
+      const fullDiff = execSync("git -C /home/gcp/ozzu diff HEAD -- frontend/app frontend/components frontend/lib 2>/dev/null || true", {
         encoding: "utf8",
         timeout: 5000,
       });
@@ -137,167 +135,414 @@ module.exports = function devDashboardRoutes(ctx) {
 function getDashboardHtml(port) {
   return `<!DOCTYPE html>
 <html><head>
-<title>Ozzu Dev Dashboard</title>
+<title>OZZU // DEV CONSOLE</title>
 <meta charset="utf-8">
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+  :root {
+    --cyan: #0ff5ee;
+    --cyan-mid: #0cc7c2;
+    --cyan-dim: #0aa8a3;
+    --cyan-dark: #064d4a;
+    --cyan-glow: rgba(15, 245, 238, 0.25);
+    --cyan-glow-strong: rgba(15, 245, 238, 0.5);
+    --green: #00ff41;
+    --red: #ff3c3c;
+    --yellow: #ffd700;
+    --bg: #020208;
+    --frame-bg: rgba(6, 77, 74, 0.06);
+  }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
+
   body {
-    background: #0a0a0a;
-    color: #e5e5e5;
-    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+    background: var(--bg);
+    color: var(--cyan);
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     height: 100vh;
     overflow: hidden;
-  }
-
-  /* Top bar */
-  .topbar {
-    height: 36px;
-    background: #111;
-    border-bottom: 1px solid #222;
     display: flex;
-    align-items: center;
-    padding: 0 16px;
-    gap: 16px;
-    font-size: 12px;
-    color: #666;
-  }
-  .topbar .title { color: #5e6ad2; font-weight: 600; letter-spacing: 1px; }
-  .topbar .status { margin-left: auto; }
-  .topbar .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 4px; }
-  .dot.green { background: #22c55e; }
-  .dot.yellow { background: #eab308; }
-  .dot.red { background: #ef4444; }
-
-  /* Main split */
-  .split {
-    display: flex;
-    height: calc(100vh - 36px);
-  }
-
-  /* Left: Device mirror */
-  .device-panel {
-    width: 40%;
-    display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: #0a0a0a;
-    border-right: 1px solid #1a1a1a;
-    position: relative;
-  }
-  .device-panel img {
-    max-height: calc(100vh - 80px);
-    max-width: 100%;
-    object-fit: contain;
-    border-radius: 8px;
-    border: 1px solid #222;
-  }
-  .device-label {
-    position: absolute;
-    bottom: 8px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 10px;
-    color: #444;
-    background: #111;
-    padding: 2px 8px;
-    border-radius: 4px;
+    gap: 30px;
   }
 
-  /* Right: Code diff */
-  .code-panel {
-    width: 60%;
-    display: flex;
-    flex-direction: column;
+  /* ── Scanline overlay ── */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0, 0, 0, 0.06) 2px, rgba(0, 0, 0, 0.06) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── Ambient background glow ── */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 50%; left: 50%;
+    width: 120vw; height: 120vh;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(ellipse at 30% 50%, rgba(15,245,238,0.03) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 50%, rgba(15,245,238,0.02) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ══════════════════════════════════
+     SCI-FI FLOATING FRAME
+     ══════════════════════════════════ */
+  .hud-frame {
+    position: relative;
+    z-index: 1;
+    /* Outer glow */
+    filter: drop-shadow(0 0 15px rgba(15, 245, 238, 0.15))
+            drop-shadow(0 0 40px rgba(15, 245, 238, 0.05));
+  }
+
+  .hud-frame .frame-border {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* Main border with corner cuts */
+  .hud-frame .frame-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--cyan-dark);
+    /* Cut corners using clip-path */
+    clip-path: polygon(
+      20px 0%, calc(100% - 20px) 0%,
+      100% 20px, 100% calc(100% - 20px),
+      calc(100% - 20px) 100%, 20px 100%,
+      0% calc(100% - 20px), 0% 20px
+    );
+  }
+
+  /* Inner glow border */
+  .hud-frame .frame-border::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border: 1px solid rgba(15, 245, 238, 0.08);
+    clip-path: polygon(
+      18px 0%, calc(100% - 18px) 0%,
+      100% 18px, 100% calc(100% - 18px),
+      calc(100% - 18px) 100%, 18px 100%,
+      0% calc(100% - 18px), 0% 18px
+    );
+  }
+
+  /* Corner hotspot glow elements */
+  .corner {
+    position: absolute;
+    width: 30px;
+    height: 30px;
+    z-index: 11;
+    pointer-events: none;
+  }
+  .corner::before, .corner::after {
+    content: '';
+    position: absolute;
+    background: var(--cyan);
+    box-shadow: 0 0 6px var(--cyan), 0 0 12px var(--cyan-glow);
+  }
+  /* Top-left */
+  .corner.tl { top: -1px; left: -1px; }
+  .corner.tl::before { top: 0; left: 20px; width: 16px; height: 2px; }
+  .corner.tl::after { top: 20px; left: 0; width: 2px; height: 16px; }
+  /* Top-right */
+  .corner.tr { top: -1px; right: -1px; }
+  .corner.tr::before { top: 0; right: 20px; width: 16px; height: 2px; }
+  .corner.tr::after { top: 20px; right: 0; width: 2px; height: 16px; }
+  /* Bottom-left */
+  .corner.bl { bottom: -1px; left: -1px; }
+  .corner.bl::before { bottom: 0; left: 20px; width: 16px; height: 2px; }
+  .corner.bl::after { bottom: 20px; left: 0; width: 2px; height: 16px; }
+  /* Bottom-right */
+  .corner.br { bottom: -1px; right: -1px; }
+  .corner.br::before { bottom: 0; right: 20px; width: 16px; height: 2px; }
+  .corner.br::after { bottom: 20px; right: 0; width: 2px; height: 16px; }
+
+  /* Small tick marks along edges */
+  .edge-tick {
+    position: absolute;
+    background: var(--cyan-dark);
+    z-index: 11;
+    pointer-events: none;
+  }
+  .edge-tick.top { top: 0; height: 1px; width: 6px; }
+  .edge-tick.bottom { bottom: 0; height: 1px; width: 6px; }
+  .edge-tick.left { left: 0; width: 1px; height: 6px; }
+  .edge-tick.right { right: 0; width: 1px; height: 6px; }
+
+  /* Frame label */
+  .frame-label {
+    position: absolute;
+    top: -22px;
+    left: 28px;
+    font-size: 9px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--cyan-dim);
+    z-index: 11;
+    text-shadow: 0 0 8px var(--cyan-glow);
+  }
+
+  /* Frame status (bottom) */
+  .frame-status {
+    position: absolute;
+    bottom: -20px;
+    right: 28px;
+    font-size: 8px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--cyan-dark);
+    z-index: 11;
+  }
+
+  /* Inner grid pattern */
+  .frame-grid {
+    position: absolute;
+    inset: 4px;
+    background-image:
+      linear-gradient(rgba(15,245,238,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(15,245,238,0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+    clip-path: polygon(
+      17px 0%, calc(100% - 17px) 0%,
+      100% 17px, 100% calc(100% - 17px),
+      calc(100% - 17px) 100%, 17px 100%,
+      0% calc(100% - 17px), 0% 17px
+    );
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  /* Content area inside the frame */
+  .frame-content {
+    position: relative;
+    z-index: 5;
+    width: 100%;
+    height: 100%;
+    clip-path: polygon(
+      17px 0%, calc(100% - 17px) 0%,
+      100% 17px, 100% calc(100% - 17px),
+      calc(100% - 17px) 100%, 17px 100%,
+      0% calc(100% - 17px), 0% 17px
+    );
     overflow: hidden;
   }
-  .code-header {
-    height: 32px;
-    background: #111;
-    border-bottom: 1px solid #1a1a1a;
+
+  /* ══════════════════════════════════
+     DEVICE FRAME — phone aspect ratio (9:19.5)
+     ══════════════════════════════════ */
+  .device-frame {
+    /* 9:19.5 aspect = 0.4615 width:height */
+    height: calc(100vh - 80px);
+    width: calc((100vh - 80px) * 0.4615);
+    max-width: 42vw;
+  }
+  .device-frame .frame-content {
+    background: #000;
     display: flex;
     align-items: center;
-    padding: 0 12px;
-    gap: 12px;
-    font-size: 11px;
-    color: #555;
-    flex-shrink: 0;
+    justify-content: center;
   }
-  .code-header .changed { color: #eab308; }
+  .device-frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  /* ══════════════════════════════════
+     CODE FRAME — fills remaining space
+     ══════════════════════════════════ */
+  .code-frame {
+    height: calc(100vh - 80px);
+    width: 52vw;
+    display: flex;
+    flex-direction: column;
+  }
+  .code-frame .frame-content {
+    display: flex;
+    flex-direction: column;
+    background: var(--frame-bg);
+  }
+
+  /* Code header inside frame */
+  .code-header {
+    height: 30px;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--cyan-dim);
+    border-bottom: 1px solid rgba(15,245,238,0.08);
+    flex-shrink: 0;
+    text-transform: uppercase;
+  }
+  .code-header .tag {
+    color: var(--yellow);
+    text-shadow: 0 0 6px rgba(255,215,0,0.3);
+  }
+  .code-header .files { color: var(--cyan-mid); }
+
+  /* Code body (diff view) */
   .code-body {
     flex: 1;
     overflow-y: auto;
-    padding: 12px 0;
+    padding: 8px 0;
   }
 
   /* Diff rendering */
-  .diff-file {
-    margin-bottom: 16px;
-  }
+  .diff-file { margin-bottom: 6px; }
   .diff-file-header {
-    background: #161616;
-    padding: 6px 16px;
-    font-size: 12px;
-    color: #8b8b8b;
-    border-top: 1px solid #1a1a1a;
-    border-bottom: 1px solid #1a1a1a;
+    background: rgba(15, 245, 238, 0.04);
+    padding: 4px 20px;
+    font-size: 11px;
+    color: var(--cyan);
+    letter-spacing: 1px;
+    border-left: 2px solid var(--cyan-dim);
     position: sticky;
     top: 0;
     z-index: 1;
   }
   .diff-line {
-    font-size: 12px;
-    line-height: 20px;
-    padding: 0 16px;
+    font-size: 11px;
+    line-height: 17px;
+    padding: 0 20px 0 24px;
     white-space: pre;
     font-family: inherit;
+    border-left: 2px solid transparent;
   }
-  .diff-add { background: rgba(34, 197, 94, 0.08); color: #4ade80; }
-  .diff-del { background: rgba(239, 68, 68, 0.08); color: #f87171; }
-  .diff-hunk { color: #5e6ad2; background: rgba(94, 106, 210, 0.06); }
-  .diff-ctx { color: #555; }
+  .diff-add {
+    background: rgba(0, 255, 65, 0.05);
+    color: var(--green);
+    border-left-color: var(--green);
+    text-shadow: 0 0 3px rgba(0,255,65,0.15);
+  }
+  .diff-del {
+    background: rgba(255, 60, 60, 0.05);
+    color: var(--red);
+    border-left-color: var(--red);
+    text-shadow: 0 0 3px rgba(255,60,60,0.15);
+  }
+  .diff-hunk {
+    color: var(--cyan-dim);
+    background: rgba(15, 245, 238, 0.02);
+    font-size: 9px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    margin-top: 3px;
+  }
+  .diff-ctx { color: rgba(10, 168, 163, 0.4); }
 
-  /* Empty state */
+  /* Telemetry strip at bottom of code frame */
+  .telem-strip {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 24px;
+    border-top: 1px solid rgba(15,245,238,0.08);
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--cyan-dark);
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .telem-strip .val { color: var(--cyan-dim); }
+  .telem-strip .live { color: var(--green); }
+  .telem-strip .warn { color: var(--yellow); }
+  .telem-strip .err { color: var(--red); }
+
+  /* ── Empty state ── */
   .empty {
     display: flex;
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: #333;
-    font-size: 14px;
+    color: var(--cyan-dark);
+    font-size: 11px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
   }
 
-  /* Scrollbar */
-  .code-body::-webkit-scrollbar { width: 6px; }
-  .code-body::-webkit-scrollbar-track { background: transparent; }
-  .code-body::-webkit-scrollbar-thumb { background: #222; border-radius: 3px; }
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--cyan-dark); }
+
+  /* ── Animations ── */
+  @keyframes glow-pulse {
+    0%, 100% { box-shadow: 0 0 6px var(--cyan), 0 0 12px var(--cyan-glow); }
+    50% { box-shadow: 0 0 10px var(--cyan), 0 0 20px var(--cyan-glow-strong); }
+  }
+  .corner::before, .corner::after { animation: glow-pulse 3s ease-in-out infinite; }
+  .corner.tr::before, .corner.tr::after { animation-delay: 0.5s; }
+  .corner.bl::before, .corner.bl::after { animation-delay: 1s; }
+  .corner.br::before, .corner.br::after { animation-delay: 1.5s; }
+
+  @keyframes flicker { 0%,97%,100% { opacity: 1; } 98% { opacity: 0.85; } 99% { opacity: 0.92; } }
 </style>
 </head><body>
 
-<div class="topbar">
-  <span class="title">OZZU DEV</span>
-  <span>Device :${port}</span>
-  <span>|</span>
-  <span id="file-count">0 files changed</span>
-  <span class="status">
-    <span class="dot" id="build-dot"></span>
-    <span id="build-label">checking...</span>
-    <span style="margin-left:12px; color:#333" id="fps-label"></span>
-  </span>
+<!-- ═══ DEVICE FRAME (left) ═══ -->
+<div class="hud-frame device-frame">
+  <div class="frame-border"></div>
+  <div class="corner tl"></div><div class="corner tr"></div>
+  <div class="corner bl"></div><div class="corner br"></div>
+  <div class="edge-tick top" style="left:50%"></div>
+  <div class="edge-tick bottom" style="left:50%"></div>
+  <div class="edge-tick left" style="top:50%"></div>
+  <div class="edge-tick right" style="top:50%"></div>
+  <div class="frame-grid"></div>
+  <div class="frame-label">DEVICE MIRROR // :${port}</div>
+  <div class="frame-status"><span id="device-status">CONNECTING</span> | <span id="fps-label">-- FPS</span> | <span id="device-res">--</span></div>
+  <div class="frame-content">
+    <img id="screen" alt="" />
+  </div>
 </div>
 
-<div class="split">
-  <div class="device-panel">
-    <img id="screen" alt="Device Screen" />
-    <div class="device-label" id="device-label">loading...</div>
-  </div>
-  <div class="code-panel">
+<!-- ═══ CODE FRAME (right) ═══ -->
+<div class="hud-frame code-frame">
+  <div class="frame-border"></div>
+  <div class="corner tl"></div><div class="corner tr"></div>
+  <div class="corner bl"></div><div class="corner br"></div>
+  <div class="edge-tick top" style="left:33%"></div>
+  <div class="edge-tick top" style="left:66%"></div>
+  <div class="edge-tick bottom" style="left:33%"></div>
+  <div class="edge-tick bottom" style="left:66%"></div>
+  <div class="edge-tick left" style="top:33%"></div>
+  <div class="edge-tick left" style="top:66%"></div>
+  <div class="edge-tick right" style="top:33%"></div>
+  <div class="edge-tick right" style="top:66%"></div>
+  <div class="frame-grid"></div>
+  <div class="frame-label">LIVE DIFF // SOURCE MONITOR</div>
+  <div class="frame-status"><span id="file-count">0 FILES</span> | <span id="diff-time">--:--:--</span></div>
+  <div class="frame-content">
     <div class="code-header">
-      <span>LIVE DIFF</span>
-      <span class="changed" id="diff-time"></span>
+      <span class="files" id="file-summary">AWAITING CHANGES</span>
+      <span style="margin-left:auto" class="tag" id="build-label">SCANNING...</span>
     </div>
     <div class="code-body" id="diff-view">
-      <div class="empty">Waiting for code changes...</div>
+      <div class="empty">AWAITING SOURCE MODIFICATIONS</div>
+    </div>
+    <div class="telem-strip">
+      <span>FPS <span class="val" id="tv-fps">--</span></span>
+      <span>BUILD <span class="val" id="tv-build">--</span>S</span>
+      <span id="clock">00:00:00</span>
     </div>
   </div>
 </div>
@@ -308,32 +553,49 @@ const img = document.getElementById('screen');
 const diffView = document.getElementById('diff-view');
 const diffTime = document.getElementById('diff-time');
 const fileCount = document.getElementById('file-count');
-const buildDot = document.getElementById('build-dot');
+const fileSummary = document.getElementById('file-summary');
 const buildLabel = document.getElementById('build-label');
-const deviceLabel = document.getElementById('device-label');
 const fpsLabel = document.getElementById('fps-label');
+const deviceStatus = document.getElementById('device-status');
+const deviceRes = document.getElementById('device-res');
+const clockEl = document.getElementById('clock');
+const tvFps = document.getElementById('tv-fps');
+const tvBuild = document.getElementById('tv-build');
+
+// ── Clock ──
+setInterval(() => {
+  clockEl.textContent = new Date().toLocaleTimeString('en', { hour12: false });
+}, 1000);
 
 // ── Device screenshot polling ──
-let frameCount = 0, lastFpsTime = Date.now();
+let frameCount = 0, lastFpsTime = Date.now(), totalFrames = 0;
 
 function refreshScreen() {
-  const t = Date.now();
   const next = new Image();
   next.onload = () => {
     img.src = next.src;
     frameCount++;
+    totalFrames++;
+    if (totalFrames === 1) {
+      deviceStatus.textContent = 'ONLINE';
+      deviceRes.textContent = next.naturalWidth + 'x' + next.naturalHeight;
+    }
     const elapsed = Date.now() - lastFpsTime;
-    if (elapsed > 3000) {
+    if (elapsed > 2000) {
       const fps = (frameCount / (elapsed / 1000)).toFixed(1);
-      fpsLabel.textContent = fps + ' fps';
-      deviceLabel.textContent = 'Device :' + PORT + ' — ' + fps + ' fps';
+      fpsLabel.textContent = fps + ' FPS';
+      tvFps.textContent = fps;
       frameCount = 0;
       lastFpsTime = Date.now();
     }
-    setTimeout(refreshScreen, 200);
+    setTimeout(refreshScreen, 150);
   };
-  next.onerror = () => setTimeout(refreshScreen, 1000);
-  next.src = '/dev/screenshot/' + PORT + '?' + t;
+  next.onerror = () => {
+    deviceStatus.textContent = 'OFFLINE';
+    tvFps.textContent = '0';
+    setTimeout(refreshScreen, 2000);
+  };
+  next.src = '/dev/screenshot/' + PORT + '?' + Date.now();
 }
 refreshScreen();
 
@@ -346,74 +608,65 @@ function connectChanges() {
       if (data.type === 'diff') renderDiff(data.diff, data.stat);
     } catch {}
   };
-  es.onerror = () => {
-    es.close();
-    setTimeout(connectChanges, 3000);
-  };
+  es.onerror = () => { es.close(); setTimeout(connectChanges, 3000); };
 }
 connectChanges();
 
 function renderDiff(raw, stat) {
   if (!raw.trim()) {
-    diffView.innerHTML = '<div class="empty">No uncommitted changes</div>';
-    fileCount.textContent = '0 files changed';
-    diffTime.textContent = '';
+    diffView.innerHTML = '<div class="empty">NO UNCOMMITTED CHANGES</div>';
+    fileCount.textContent = '0 FILES';
+    fileSummary.textContent = 'CLEAN';
+    diffTime.textContent = '--:--:--';
     return;
   }
-
   const lines = raw.split('\\n');
-  let html = '';
-  let currentFile = '';
-  let filesChanged = 0;
-
+  let html = '', filesChanged = 0, additions = 0, deletions = 0;
   for (const line of lines) {
     if (line.startsWith('diff --git')) {
       const m = line.match(/b\\/(.+)$/);
-      currentFile = m ? m[1] : '';
       filesChanged++;
-      html += '<div class="diff-file"><div class="diff-file-header">' + esc(currentFile) + '</div>';
+      html += '<div class="diff-file"><div class="diff-file-header">\u25B8 ' + esc(m ? m[1] : '') + '</div>';
     } else if (line.startsWith('@@')) {
       html += '<div class="diff-line diff-hunk">' + esc(line) + '</div>';
     } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      additions++;
       html += '<div class="diff-line diff-add">' + esc(line) + '</div>';
     } else if (line.startsWith('-') && !line.startsWith('---')) {
+      deletions++;
       html += '<div class="diff-line diff-del">' + esc(line) + '</div>';
     } else if (!line.startsWith('index ') && !line.startsWith('---') && !line.startsWith('+++') && !line.startsWith('diff ')) {
       html += '<div class="diff-line diff-ctx">' + esc(line) + '</div>';
     }
   }
-
-  diffView.innerHTML = html || '<div class="empty">No diff data</div>';
-  fileCount.textContent = filesChanged + ' file' + (filesChanged !== 1 ? 's' : '') + ' changed';
-  diffTime.textContent = new Date().toLocaleTimeString();
-
-  // Auto-scroll to bottom to show latest changes
+  diffView.innerHTML = html || '<div class="empty">NO DIFF DATA</div>';
+  fileCount.textContent = filesChanged + ' FILE' + (filesChanged !== 1 ? 'S' : '');
+  fileSummary.textContent = filesChanged + ' FILE' + (filesChanged !== 1 ? 'S' : '') + ' // +' + additions + ' -' + deletions;
+  diffTime.textContent = new Date().toLocaleTimeString('en', { hour12: false });
   diffView.scrollTop = diffView.scrollHeight;
 }
 
-function esc(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-// ── Build status polling ──
+// ── Build status ──
 async function checkBuild() {
   try {
     const r = await fetch('/dev/build-status');
     const d = await r.json();
     if (d.running) {
-      buildDot.className = 'dot green';
-      buildLabel.textContent = 'auto-build active';
+      buildLabel.textContent = 'AUTO-BUILD \u25CF';
+      buildLabel.style.color = 'var(--green)';
     } else {
-      buildDot.className = 'dot yellow';
-      buildLabel.textContent = 'auto-build off';
+      buildLabel.textContent = 'BUILD \u25CB IDLE';
+      buildLabel.style.color = 'var(--yellow)';
     }
   } catch {
-    buildDot.className = 'dot red';
-    buildLabel.textContent = 'bridge offline';
+    buildLabel.textContent = 'OFFLINE';
+    buildLabel.style.color = 'var(--red)';
   }
 }
 checkBuild();
-setInterval(checkBuild, 10000);
+setInterval(checkBuild, 5000);
 </script>
 </body></html>`;
 }
