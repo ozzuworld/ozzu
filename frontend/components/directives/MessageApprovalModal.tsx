@@ -1,7 +1,7 @@
 import { View, Text, Pressable, Modal, Alert } from "react-native";
 import { useState, useCallback, useEffect } from "react";
 import { resolveApproval, type ApprovalRequest } from "../../lib/bridge-api";
-import { canUseBiometric, authenticateWithBiometric, BRIDGE_PIN } from "../../lib/biometric-auth";
+import { authenticateWithBiometric, BRIDGE_PIN } from "../../lib/biometric-auth";
 
 interface MessageApprovalModalProps {
   visible: boolean;
@@ -23,11 +23,6 @@ export function MessageApprovalModal({
 }: MessageApprovalModalProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [hasBiometric, setHasBiometric] = useState(false);
-
-  useEffect(() => {
-    canUseBiometric().then(setHasBiometric);
-  }, []);
 
   const doResolve = useCallback(async (approved: boolean) => {
     if (!approval) return;
@@ -49,15 +44,11 @@ export function MessageApprovalModal({
   }, [approval, onResolved, onDismiss]);
 
   const handleApprove = useCallback(async () => {
-    if (hasBiometric) {
-      const label = approval?.tool ? TOOL_LABELS[approval.tool] || approval.tool : "message";
-      const ok = await authenticateWithBiometric(`Approve ${label} send`);
-      if (ok) await doResolve(true);
-      else setError("Authentication cancelled");
-    } else {
-      await doResolve(true);
-    }
-  }, [hasBiometric, doResolve, approval]);
+    const label = approval?.tool ? TOOL_LABELS[approval.tool] || approval.tool : "message";
+    const ok = await authenticateWithBiometric(`Approve ${label} send`);
+    if (ok) await doResolve(true);
+    else setError("Authentication failed — FaceID required");
+  }, [doResolve, approval]);
 
   const handleDeny = useCallback(() => {
     Alert.alert("Deny Send", "Block this message?", [
@@ -102,7 +93,7 @@ export function MessageApprovalModal({
               style={{ flex: 2, backgroundColor: "#1b4332", borderRadius: 12, padding: 16, alignItems: "center" }}
             >
               <Text style={{ color: "#52b788", fontSize: 16, fontWeight: "600" }}>
-                {loading ? "..." : hasBiometric ? "Approve with Face ID" : "Approve"}
+                {loading ? "..." : "Approve with Face ID"}
               </Text>
             </Pressable>
           </View>

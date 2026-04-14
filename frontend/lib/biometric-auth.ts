@@ -13,7 +13,8 @@ export async function authenticateWithBiometric(promptMessage: string): Promise<
   const result = await LocalAuthentication.authenticateAsync({
     promptMessage,
     cancelLabel: 'Cancel',
-    disableDeviceFallback: true,
+    disableDeviceFallback: false,
+    fallbackLabel: 'Use Passcode',
   });
   return result.success;
 }
