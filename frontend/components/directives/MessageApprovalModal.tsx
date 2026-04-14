@@ -12,7 +12,19 @@ interface MessageApprovalModalProps {
 
 const TOOL_LABELS: Record<string, string> = {
   send_whatsapp: "WhatsApp",
+  send_message: "WhatsApp",
+  send_file: "WhatsApp File",
+  send_audio_message: "WhatsApp Audio",
   send_email: "Email",
+  send_gmail_message: "Gmail",
+  reach_person: "Reach Person",
+  "WhatsApp": "WhatsApp",
+  "WhatsApp File": "WhatsApp File",
+  "WhatsApp Audio": "WhatsApp Audio",
+  "Gmail (personal)": "Gmail (personal)",
+  "Gmail (ozzu)": "Gmail (ozzu)",
+  "Chat (personal)": "Chat (personal)",
+  "Chat (ozzu)": "Chat (ozzu)",
 };
 
 export function MessageApprovalModal({
@@ -71,7 +83,23 @@ export function MessageApprovalModal({
 
           <View style={{ backgroundColor: "#16213e", borderRadius: 12, padding: 16, marginBottom: 20 }}>
             <Text style={{ color: "#a0a0b0", fontSize: 13, marginBottom: 4 }}>Cipher wants to send:</Text>
-            <Text style={{ color: "#e0e0e0", fontSize: 16, lineHeight: 22 }}>{approval.description}</Text>
+            {approval.payload?.recipient ? (
+              <>
+                <Text style={{ color: "#7b8cde", fontSize: 14, fontWeight: "600", marginBottom: 8 }}>
+                  To: {approval.payload.recipient}
+                </Text>
+                {approval.payload.message ? (
+                  <Text style={{ color: "#e0e0e0", fontSize: 16, lineHeight: 22 }}>{approval.payload.message}</Text>
+                ) : null}
+                {approval.payload.media_path ? (
+                  <Text style={{ color: "#a0a0b0", fontSize: 14, fontStyle: "italic", marginTop: 4 }}>
+                    File: {approval.payload.media_path.split("/").pop()}
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <Text style={{ color: "#e0e0e0", fontSize: 16, lineHeight: 22 }}>{approval.description}</Text>
+            )}
           </View>
 
           {error ? (

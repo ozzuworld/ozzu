@@ -17,65 +17,8 @@ module.exports = function mcpRoutes(ctx) {
     try { return require("../agent-spawner"); } catch { return {}; }
   })();
   const { sendPush } = require("../push-notifications");
-
-  // ── FaceID approval gate for outbound messages ──
-  async function requireMessageApproval(type, summary, payload) {
-    const http = require("http");
-    const approvalId = `apr_msg_${Date.now()}`;
-    const approval = {
-      id: approvalId,
-      tool: type,
-      description: summary,
-      risk: "high",
-      type: "message_send",
-      payload,
-    };
-
-    // Create approval via bridge
-    const createResult = await new Promise((resolve) => {
-      const body = JSON.stringify(approval);
-      const req = http.request({ hostname: "localhost", port: 3333, path: "/approvals", method: "POST",
-        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
-      }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
-      req.on("error", e => resolve({ error: e.message }));
-      req.write(body); req.end();
-    });
-    if (createResult.error) return { error: `Failed to create approval: ${createResult.error}` };
-
-    // Send push notification to all registered devices
-    try {
-      const tokens = await db.query("SELECT token FROM device_push_tokens ORDER BY updated_at DESC LIMIT 5");
-      if (tokens.rows.length > 0) {
-        await sendPush(tokens.rows.map(r => r.token), {
-          title: "🔐 Approval Required",
-          body: summary,
-          data: { type: "message_approval", approvalId, screen: "directives" },
-        });
-      }
-    } catch (e) { /* push is best-effort */ }
-
-    // Poll for resolution (up to 5 minutes)
-    const POLL_INTERVAL = 2000;
-    const MAX_WAIT = 5 * 60 * 1000;
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < MAX_WAIT) {
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
-      const pollResult = await new Promise((resolve) => {
-        const req = http.request({ hostname: "localhost", port: 3333, path: `/approvals/${approvalId}/poll`, method: "GET" },
-          (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({}); } }); });
-        req.on("error", () => resolve({}));
-        req.end();
-      });
-
-      if (pollResult.resolved) {
-        if (pollResult.approved) return { approved: true };
-        return { error: "Message denied by King Kazuma" };
-      }
-    }
-
-    return { error: "Approval timed out (5 minutes). Message NOT sent." };
-  }
+  const { createApprovalGate } = require("../approval-gate");
+  const requireMessageApproval = createApprovalGate({ db, sendPush });
 
   // ── Tool definitions ──
 
@@ -291,43 +234,7 @@ module.exports = function mcpRoutes(ctx) {
         },
       },
     },
-    {
-      name: "send_whatsapp",
-      description: "Send a WhatsApp message to a phone number on behalf of King Kazuma. ALWAYS show the message to King Kazuma and get approval before sending unless he explicitly said to proceed autonomously. If the contact is paused (human takeover active), this will fail — use request_human_takeover status to check.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          phone: { type: "string", description: "Phone number with country code, no + (e.g. 573187290206 for Colombia)" },
-          message: { type: "string", description: "Message text to send" },
-        },
-        required: ["phone", "message"],
-      },
-    },
-    {
-      name: "read_whatsapp",
-      description: "Read recent WhatsApp messages with a contact. Use to check their reply before crafting a response.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          phone: { type: "string", description: "Phone number with country code, no +" },
-          limit: { type: "number", description: "Max messages to return (default 30)" },
-        },
-        required: ["phone"],
-      },
-    },
-    {
-      name: "request_human_takeover",
-      description: "Pause AI messaging for a contact and send a push notification to King Kazuma to take over manually. Use when: the other party may have detected AI, a sensitive question is asked, or you need a human judgment call. AI cannot send messages to this contact until King Kazuma calls resume.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          phone: { type: "string", description: "Phone number of the contact to pause" },
-          reason: { type: "string", description: "Why human takeover is needed (shown in push notification)" },
-          preview: { type: "string", description: "The message that triggered the takeover (shown in push notification)" },
-        },
-        required: ["phone", "reason"],
-      },
-    },
+    // send_whatsapp, read_whatsapp, request_human_takeover removed — now handled by whatsapp-mcp server (localhost:8081)
     {
       name: "list_persons",
       description: "List all known persons in Ozzu — their name, relationship, channels (WhatsApp, email, push), devices, and linked faces.",
@@ -680,83 +587,7 @@ module.exports = function mcpRoutes(ctx) {
         return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
       }
 
-      case "send_whatsapp": {
-        const http = require("http");
-        // FaceID approval gate
-        const waApproval = await requireMessageApproval(
-          "send_whatsapp",
-          `WhatsApp to ${args.phone}: "${args.message.length > 80 ? args.message.slice(0, 80) + '...' : args.message}"`,
-          { phone: args.phone, message: args.message }
-        );
-        if (waApproval.error) return { content: [{ type: "text", text: waApproval.error }], isError: true };
-
-        const payload = JSON.stringify({ to: args.phone, message: args.message });
-        const result = await new Promise((resolve) => {
-          const req = http.request({ hostname: "localhost", port: 3333, path: "/whatsapp/send", method: "POST",
-            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
-          }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
-          req.on("error", e => resolve({ error: e.message }));
-          req.write(payload); req.end();
-        });
-        if (result.error) return { content: [{ type: "text", text: `WhatsApp send failed: ${result.error}` }], isError: true };
-        return { content: [{ type: "text", text: `WhatsApp sent to ${args.phone}: "${args.message}"` }] };
-      }
-
-      case "read_whatsapp": {
-        const phone = String(args.phone).replace(/\D/g, "");
-        const limit = args.limit || 30;
-
-        // Pull from phone's in-memory buffer first — catches messages missed by push
-        try {
-          const http = require("http");
-          const phoneData = await new Promise((resolve) => {
-            const req = http.request(
-              { hostname: "localhost", port: 8766, path: `/messages/${phone}`, method: "GET", timeout: 3000 },
-              (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } }); }
-            );
-            req.on("error", () => resolve(null));
-            req.on("timeout", () => { req.destroy(); resolve(null); });
-            req.end();
-          });
-          if (phoneData && Array.isArray(phoneData.messages)) {
-            for (const m of phoneData.messages) {
-              const msgPhone = String(m.from || "").replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/\D/g, "") || phone;
-              if (m.id) {
-                await ctx.db.query(
-                  "INSERT INTO whatsapp_messages (phone, direction, text, wa_id, received_at) VALUES ($1, 'in', $2, $3, $4) ON CONFLICT (wa_id) DO NOTHING",
-                  [msgPhone, m.text || "", m.id, m.ts ? new Date(m.ts) : new Date()]
-                );
-              }
-            }
-          }
-        } catch (_) { /* phone unreachable — continue with DB */ }
-
-        // Read from postgres — authoritative persistent store
-        const rows = await ctx.db.query(
-          "SELECT direction, text, received_at FROM whatsapp_messages WHERE phone = $1 ORDER BY received_at DESC LIMIT $2",
-          [phone, limit]
-        );
-        const msgs = rows.rows.reverse().map(m => {
-          const ts = new Date(m.received_at).toLocaleString("en-US", { timeZone: "America/Bogota", hour12: false });
-          const who = m.direction === "out" ? "Ozzu" : `+${phone}`;
-          return `[${ts}] ${who}: ${m.text || "(media)"}`;
-        }).join("\n");
-        return { content: [{ type: "text", text: msgs || "No messages found." }] };
-      }
-
-      case "request_human_takeover": {
-        const http = require("http");
-        const payload = JSON.stringify({ phone: args.phone, reason: args.reason, preview: args.preview });
-        const result = await new Promise((resolve) => {
-          const req = http.request({ hostname: "localhost", port: 3333, path: "/whatsapp/notify-human", method: "POST",
-            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
-          }, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } }); });
-          req.on("error", e => resolve({ error: e.message }));
-          req.write(payload); req.end();
-        });
-        if (result.error) return { content: [{ type: "text", text: `Takeover failed: ${result.error}` }], isError: true };
-        return { content: [{ type: "text", text: `🔔 Human takeover requested for ${args.phone}. Push notification sent (${result.push?.sent ?? 0} devices). AI messaging paused until King Kazuma resumes.` }] };
-      }
+      // send_whatsapp, read_whatsapp, request_human_takeover — removed, now handled by whatsapp-mcp server
 
       case "create_venture": {
         const http = require("http");
@@ -1145,6 +976,12 @@ module.exports = function mcpRoutes(ctx) {
           : args.id ? await Person.find(ctx.db, args.id) : null;
         if (!p) return { content: [{ type: "text", text: `Person not found: ${args.name || args.id}` }], isError: true };
         if (!args.message) return { content: [{ type: "text", text: "message is required" }], isError: true };
+        const reachApproval = await requireMessageApproval(
+          "reach_person",
+          `Message to ${p.name}: "${args.message}"`,
+          { recipient: p.name, message: args.message }
+        );
+        if (reachApproval.error) return { content: [{ type: "text", text: reachApproval.error }], isError: true };
         await p.reach(args.message, args.via || null);
         const channel = args.via || (p.channels.find(c => c.is_primary) || p.channels[0])?.type || "unknown";
         return { content: [{ type: "text", text: `✓ Reached ${p.name} via ${channel}: "${args.message}"` }] };

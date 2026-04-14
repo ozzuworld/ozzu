@@ -1584,6 +1584,74 @@ function getRouteHandlers() {
 
 // ── Route handlers ──
 
+// ── MCP Proxy — approval-gated upstream forwarding ──
+const { GATED_TOOLS, createApprovalGate } = require("./approval-gate");
+const { getUpstream } = require("./mcp-proxy");
+const _mcpProxyGate = createApprovalGate({ db, sendPush: require("./push-notifications").sendPush });
+
+async function handleMcpProxy(req, res, pathname) {
+  const serverName = pathname.replace("/mcp-proxy/", "").split("/")[0];
+  const upstream = getUpstream(serverName);
+  if (!upstream) {
+    sendJSON(res, 404, { error: `Unknown MCP server: ${serverName}` }, req);
+    return true;
+  }
+
+  if (req.method !== "POST") {
+    sendJSON(res, 405, { error: "Method not allowed" }, req);
+    return true;
+  }
+
+  let body;
+  try {
+    body = await parseBody(req);
+  } catch (e) {
+    sendJSON(res, 400, { jsonrpc: "2.0", error: { code: -32700, message: "Parse error" } }, req);
+    return true;
+  }
+
+  // Gate tools/call for gated tools
+  if (body.method === "tools/call") {
+    const toolName = body.params?.name;
+    const serverGates = GATED_TOOLS[serverName];
+    const gate = serverGates?.[toolName];
+
+    if (gate) {
+      const args = body.params?.arguments || {};
+      const extracted = gate.extract(args);
+      const summary = `${gate.label} → ${extracted.recipient || "unknown"}: ${extracted.message || ""}`;
+
+      log.bridge?.info?.(`[mcp-proxy] Gating ${serverName}/${toolName}: ${summary}`);
+
+      const approval = await _mcpProxyGate(gate.label, summary, extracted);
+      if (approval.error) {
+        const jsonRpcError = {
+          jsonrpc: "2.0",
+          id: body.id,
+          error: { code: -32000, message: approval.error },
+        };
+        sendJSON(res, 200, jsonRpcError, req);
+        return true;
+      }
+    }
+  }
+
+  // Forward to upstream
+  try {
+    const result = await upstream.forward(body);
+    sendJSON(res, 200, result, req);
+  } catch (e) {
+    log.bridge?.error?.(`[mcp-proxy] ${serverName} error: ${e.message}`);
+    const jsonRpcError = {
+      jsonrpc: "2.0",
+      id: body.id,
+      error: { code: -32603, message: `Upstream error: ${e.message}` },
+    };
+    sendJSON(res, 200, jsonRpcError, req);
+  }
+  return true;
+}
+
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
@@ -1595,6 +1663,11 @@ async function handleRequest(req, res) {
     res.writeHead(204, getCorsHeaders(req));
     res.end();
     return;
+  }
+
+  // ── MCP Proxy (approval-gated upstream forwarding) ──
+  if (pathname.startsWith("/mcp-proxy/")) {
+    if (await handleMcpProxy(req, res, pathname)) return;
   }
 
   // ── Extracted route dispatch ──
@@ -2196,6 +2269,8 @@ async function handleRequest(req, res) {
       tool: data.tool || "",
       description: data.description || "",
       risk: data.risk || "medium",
+      type: data.type || "",
+      payload: data.payload || null,
       resolved: false,
       approved: false,
       createdAt: Date.now(),
@@ -3667,12 +3742,12 @@ async function handleToolCall(name, args) {
 
         if (!approvalId) return { success: false, message: "Missing approval_id" };
 
-        // Server-side enforcement: directive plan approvals ALWAYS require PIN
-        // (don't trust the LLM's needs_user_pin for high-risk approvals)
+        // Server-side enforcement: high-risk approvals ALWAYS require PIN
+        // (don't trust the LLM's needs_user_pin for message sends or directive plans)
         {
           const approvals = getApprovals();
           const approval = approvals.find((a) => a.id === approvalId);
-          if (approval && approval.tool === "directive_plan") {
+          if (approval && (approval.tool === "directive_plan" || approval.type === "message_send")) {
             needsUserPin = true;
           }
         }
