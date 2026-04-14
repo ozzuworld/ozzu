@@ -25,13 +25,15 @@ android {
 
 repositories {
   flatDir { dirs 'libs' }
-  maven {
-    url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
-    credentials {
-      username = System.getenv("GITHUB_USER") ?: "github"
-      password = System.getenv("GITHUB_TOKEN") ?: ""
-    }
-  }
+  // Meta Wearables GitHub Maven — disabled until SDK is needed (all calls are stubs).
+  // Re-enable when uncommenting SDK imports in GlassesModule.kt:
+  // maven {
+  //   url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
+  //   credentials {
+  //     username = System.getenv("GITHUB_USER") ?: "github"
+  //     password = System.getenv("GITHUB_TOKEN") ?: ""
+  //   }
+  // }
 }
 
 dependencies {
@@ -39,9 +41,11 @@ dependencies {
   // Use stripped local AAR — duplicate Facebook classes (fbjni, fbcore, proguard-annotations)
   // removed to prevent DEX merge conflicts with React Native's standalone copies.
   implementation(name: 'mwdat-core-0.4.0', ext: 'aar')
-  implementation('com.meta.wearable:mwdat-camera:0.4.0') {
-    exclude group: 'com.meta.wearable', module: 'mwdat-core'
-  }
+  // mwdat-camera disabled — module is in stub mode, SDK calls are commented out.
+  // Re-enable when real SDK integration begins:
+  // implementation('com.meta.wearable:mwdat-camera:0.4.0') {
+  //   exclude group: 'com.meta.wearable', module: 'mwdat-core'
+  // }
   implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
 }
 

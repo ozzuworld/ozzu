@@ -76,18 +76,13 @@ function withMetaDATMaven(config) {
         return match;
       }
     );
-    // Add Meta DAT SDK Maven repo + flatDir for stripped local AAR
-    if (!contents.includes("meta-wearables-dat-android")) {
+    // Add flatDir for stripped local AAR (mwdat-core)
+    // Meta DAT Maven repo disabled — module is in stub mode, mwdat-camera not needed.
+    // Re-enable when real SDK integration begins.
+    if (!contents.includes("expo-glasses/android/libs")) {
       const reposBlock = [
         '    // Stripped mwdat-core AAR (duplicate Facebook classes removed)',
         '    flatDir { dirs "${rootProject.projectDir}/../modules/expo-glasses/android/libs" }',
-        "    maven {",
-        '      url "https://maven.pkg.github.com/facebook/meta-wearables-dat-android"',
-        "      credentials {",
-        "        username = System.getenv('GITHUB_USER') ?: 'github'",
-        "        password = System.getenv('GITHUB_TOKEN') ?: ''",
-        "      }",
-        "    }",
       ].join("\n");
       contents = contents.replace(
         /allprojects\s*\{\s*\n\s*repositories\s*\{/,
