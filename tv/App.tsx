@@ -2,8 +2,9 @@ import { useEffect, useState, useRef } from "react";
 import { View, Text, StatusBar, Pressable, TextInput, BackHandler } from "react-native";
 import { WebView } from "react-native-webview";
 
-// Bridge URL — the TV connects over the local network
-const DEFAULT_BRIDGE = "http://10.8.0.1:3333";
+// Bridge URL — use public URL so TV works standalone over internet
+const DEFAULT_BRIDGE =
+  process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
 const DASHBOARD_PATH = "/dev/dashboard?port=5560";
 
 export default function App() {
