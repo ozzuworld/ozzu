@@ -213,7 +213,7 @@ export async function fetchDirectiveHistory(id: string): Promise<HistoryEntry[]>
   });
   if (!res.ok) throw new Error(`Bridge history error: ${res.status}`);
   const data = await res.json();
-  return data.history || data;
+  return Array.isArray(data.timeline) ? data.timeline : Array.isArray(data) ? data : [];
 }
 
 export async function sendDirective(

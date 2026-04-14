@@ -161,14 +161,16 @@ export default function DirectiveDetailScreen() {
   actionButtons.push({ label: "Status", action: "status", color: colors.text.tertiary });
 
   // Timeline entries — merge activity_log and history, dedupe by timestamp+message
+  const actLog = Array.isArray(directive.activity_log) ? directive.activity_log : [];
+  const histList = Array.isArray(history) ? history : [];
   const timelineEntries = (() => {
     const all: HistoryEntry[] = [];
     const seen = new Set<string>();
-    for (const h of history) {
+    for (const h of histList) {
       const key = `${h.timestamp}-${h.message}`;
       if (!seen.has(key)) { seen.add(key); all.push(h); }
     }
-    for (const e of directive.activity_log || []) {
+    for (const e of actLog) {
       const key = `${e.timestamp}-${e.message}`;
       if (!seen.has(key)) {
         seen.add(key);
