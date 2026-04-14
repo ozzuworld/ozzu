@@ -71,11 +71,25 @@ You tend to produce "AI slop" — generic layouts that show data but have no vis
 6. **Font hierarchy.** Title: 15px semibold white. Subtitle/description: 12px normal tertiary. Metadata: 10-11px disabled. Never use the same size+weight+color for different levels of information.
 7. **Interactive feedback.** Pressables need: opacity change OR scale animation on press. Reference: `ProjectCard.tsx` uses `scale: 0.98` + `opacity: 0.92`.
 
+### Visual Feedback Loop (mandatory for UI work)
+An iPhone 16 mirror device (Redroid, 1179x2556, 480 DPI, port 5560) is always running.
+The `android-mcp` MCP server provides `State-Tool` (screenshot + UI tree) and interaction tools.
+
+**After ANY UI change:**
+1. OTA deploy: `./scripts/ota-deploy.sh --restart`
+2. Screenshot the device using `State-Tool` with `use_vision=True`
+3. Analyze: does this match the design target? Is the visual hierarchy clear? Do cards have structure?
+4. If it looks like a text dump or doesn't match the reference — fix it BEFORE telling King Kazuma it's done
+5. Repeat until the screenshot looks right
+
+**To install Expo app on the mirror device:**
+`adb -s localhost:5560 install <apk-path>` or push OTA after initial install.
+
 ### Before Writing UI Code
 1. Read `frontend/Components.md` — does a component already exist for this?
 2. Read `frontend/lib/design-tokens.ts` — use ONLY these values
 3. If King Kazuma sent reference images to the bridge, READ THEM at `/tmp/ozzu-bridge/uploads/` and match the visual language — not just the data fields
-4. After writing, mentally render it: does this look like Linear/ventures, or does it look like a text dump with a background color?
+4. After writing, screenshot the mirror device and compare against the reference — not just the data fields
 
 ## Reference
 

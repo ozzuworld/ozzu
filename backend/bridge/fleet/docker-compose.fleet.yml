@@ -100,6 +100,7 @@ services:
           cpus: '1.5'
 
   redroid05:
+    # iPhone 16 mirror — 393x852 logical dp (matches iOS exactly at 3x scale)
     image: redroid/redroid:14.0.0_litegapps_magisk
     container_name: redroid05
     privileged: true
@@ -110,13 +111,13 @@ services:
       - redroid-data-05:/data
     command:
       - androidboot.redroid_gpu_mode=guest
-      - androidboot.redroid_width=1080
-      - androidboot.redroid_height=1920
-      - androidboot.redroid_dpi=460
+      - androidboot.redroid_width=1179
+      - androidboot.redroid_height=2556
+      - androidboot.redroid_dpi=480
       - androidboot.redroid_fps=25
-      - ro.product.model=SM-A546E
-      - ro.product.manufacturer=samsung
-      - ro.serialno=FLEET05M3N4O5
+      - ro.product.model=iPhone16-Mirror
+      - ro.product.manufacturer=Ozzu
+      - ro.serialno=FLEET05IPHONE16
     deploy:
       resources:
         limits:
