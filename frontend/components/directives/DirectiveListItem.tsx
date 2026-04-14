@@ -1,5 +1,5 @@
 import { View, Text, Pressable } from "react-native";
-import { colors, spacing, radius, fontSize, fontWeight, withAlpha, statusPillStyle } from "../../lib/design-tokens";
+import { colors, spacing, radius, fontWeight, withAlpha, statusPillStyle } from "../../lib/design-tokens";
 import { HUMAN_STATUS, relativeTime } from "../../lib/directive-constants";
 import type { Directive } from "../../lib/bridge-api";
 
@@ -12,141 +12,183 @@ interface DirectiveListItemProps {
 
 export function DirectiveListItem({ directive, onPress, variant = "list", showDivider = true }: DirectiveListItemProps) {
   const pill = statusPillStyle(directive.status);
-  const isEpic = directive.type === "epic" && directive.phases && directive.phases.length > 0;
+  const statusColor = colors.status[directive.status] || "#737373";
+
+  // Epic progress
+  const isEpic = directive.type === "epic" && Array.isArray(directive.phases) && directive.phases.length > 0;
   const epicDone = isEpic ? directive.phases!.filter((p) => p.status === "completed").length : 0;
   const epicTotal = isEpic ? directive.phases!.length : 0;
   const epicPct = epicTotal > 0 ? Math.round((epicDone / epicTotal) * 100) : 0;
 
-  // Pick subtitle: work_summary > description > nothing
+  // Subtitle: work_summary first, then description
   const subtitle = directive.work_summary || directive.description || null;
-
-  // Last activity snippet (most recent activity_log entry)
-  const lastActivity = Array.isArray(directive.activity_log) && directive.activity_log.length > 0
-    ? directive.activity_log[directive.activity_log.length - 1]
-    : null;
 
   return (
     <Pressable
       onPress={() => onPress(directive)}
       style={({ pressed }) => ({
-        backgroundColor: pressed ? withAlpha("#ffffff", 0.05) : colors.bg.elevated,
-        borderRadius: radius.md,
-        padding: 12,
-        marginBottom: showDivider ? 6 : 0,
+        opacity: pressed ? 0.92 : 1,
+        transform: [{ scale: pressed ? 0.98 : 1 }],
       })}
     >
-      {/* Row 1: emoji + title + status pill + time */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        {/* Emoji */}
-        <Text style={{ fontSize: 16, width: 22, textAlign: "center" }}>
-          {directive.emoji || ""}
-        </Text>
-
-        {/* Title */}
-        <Text
-          style={{
-            flex: 1,
-            color: colors.text.primary,
-            fontSize: 14,
-            fontWeight: fontWeight.medium,
-          }}
-          numberOfLines={1}
-        >
-          {directive.title}
-        </Text>
-
-        {/* Status pill */}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 4,
-            backgroundColor: pill.bg,
-            paddingHorizontal: 7,
-            paddingVertical: 2,
-            borderRadius: 10,
-          }}
-        >
+      <View
+        style={{
+          backgroundColor: colors.bg.elevated,
+          borderRadius: 12,
+          borderLeftWidth: 3,
+          borderLeftColor: statusColor,
+          marginBottom: 10,
+          padding: 14,
+          borderWidth: 1,
+          borderColor: withAlpha("#ffffff", 0.04),
+        }}
+      >
+        {/* Row 1: emoji + title + status dot + time */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Text style={{ fontSize: 22, width: 30, textAlign: "center" }}>
+            {directive.emoji || ""}
+          </Text>
+          <Text
+            style={{
+              flex: 1,
+              color: colors.text.primary,
+              fontSize: 15,
+              fontWeight: fontWeight.semibold,
+            }}
+            numberOfLines={1}
+          >
+            {directive.title}
+          </Text>
           <View
             style={{
-              width: 5,
-              height: 5,
-              borderRadius: 3,
-              backgroundColor: pill.dot,
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: statusColor,
             }}
           />
           <Text
             style={{
-              color: pill.text,
-              fontSize: 10,
-              fontWeight: fontWeight.medium,
+              color: colors.text.disabled,
+              fontSize: 11,
+              minWidth: 32,
+              textAlign: "right",
             }}
           >
-            {HUMAN_STATUS[directive.status] || directive.status}
+            {relativeTime(directive.updatedAt)}
           </Text>
         </View>
 
-        {/* Time */}
-        <Text
-          style={{
-            color: colors.text.disabled,
-            fontSize: 11,
-            minWidth: 28,
-            textAlign: "right",
-          }}
-        >
-          {relativeTime(directive.updatedAt)}
-        </Text>
-      </View>
+        {/* Row 2: description / work_summary — 2 lines */}
+        {subtitle ? (
+          <Text
+            style={{
+              color: colors.text.tertiary,
+              fontSize: 12,
+              lineHeight: 17,
+              marginTop: 8,
+              marginLeft: 40,
+            }}
+            numberOfLines={2}
+          >
+            {subtitle}
+          </Text>
+        ) : null}
 
-      {/* Row 2: subtitle (description or work_summary) */}
-      {subtitle ? (
-        <Text
-          style={{
-            color: colors.text.tertiary,
-            fontSize: 12,
-            marginTop: 5,
-            marginLeft: 30,
-            lineHeight: 16,
-          }}
-          numberOfLines={1}
-        >
-          {subtitle}
-        </Text>
-      ) : null}
-
-      {/* Row 3: epic progress bar OR last activity */}
-      {isEpic ? (
-        <View style={{ marginTop: 6, marginLeft: 30 }}>
-          {/* Progress track */}
-          <View style={{ height: 3, backgroundColor: withAlpha("#ffffff", 0.06), borderRadius: 2, overflow: "hidden" }}>
+        {/* Row 3: status pill + type badge */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, marginLeft: 40 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+              backgroundColor: pill.bg,
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 10,
+            }}
+          >
             <View
               style={{
-                width: `${epicPct}%`,
-                height: "100%",
-                backgroundColor: colors.accent,
-                borderRadius: 2,
+                width: 6,
+                height: 6,
+                borderRadius: 3,
+                backgroundColor: pill.dot,
               }}
             />
+            <Text
+              style={{
+                color: pill.text,
+                fontSize: 10,
+                fontWeight: fontWeight.semibold,
+              }}
+            >
+              {HUMAN_STATUS[directive.status] || directive.status}
+            </Text>
           </View>
-          <Text style={{ color: colors.text.disabled, fontSize: 10, marginTop: 3, fontFamily: "monospace" }}>
-            {epicDone}/{epicTotal} phases  {epicPct}%
-          </Text>
+
+          {directive.type ? (
+            <View
+              style={{
+                backgroundColor: withAlpha("#ffffff", 0.06),
+                paddingHorizontal: 7,
+                paddingVertical: 3,
+                borderRadius: 10,
+              }}
+            >
+              <Text style={{ color: colors.text.disabled, fontSize: 10, fontWeight: fontWeight.medium }}>
+                {directive.type}
+              </Text>
+            </View>
+          ) : null}
+
+          {directive.priority && directive.priority > 0 ? (
+            <View
+              style={{
+                backgroundColor: withAlpha("#ffffff", 0.06),
+                paddingHorizontal: 7,
+                paddingVertical: 3,
+                borderRadius: 10,
+              }}
+            >
+              <Text style={{ color: colors.text.disabled, fontSize: 10, fontWeight: fontWeight.medium }}>
+                P{directive.priority}
+              </Text>
+            </View>
+          ) : null}
         </View>
-      ) : variant === "board" && lastActivity ? (
-        <Text
-          style={{
-            color: colors.text.disabled,
-            fontSize: 11,
-            marginTop: 5,
-            marginLeft: 30,
-            lineHeight: 15,
-          }}
-          numberOfLines={1}
-        >
-          {lastActivity.actor ? `${lastActivity.actor}: ` : ""}{lastActivity.message}
-        </Text>
-      ) : null}
+
+        {/* Row 4: epic progress bar */}
+        {isEpic ? (
+          <View style={{ marginTop: 10, marginLeft: 40 }}>
+            <View
+              style={{
+                height: 4,
+                backgroundColor: withAlpha("#ffffff", 0.08),
+                borderRadius: 2,
+                overflow: "hidden",
+              }}
+            >
+              <View
+                style={{
+                  width: `${epicPct}%`,
+                  height: "100%",
+                  backgroundColor: colors.accent,
+                  borderRadius: 2,
+                }}
+              />
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
+              <Text style={{ color: colors.text.disabled, fontSize: 10, fontFamily: "monospace" }}>
+                {epicDone}/{epicTotal} phases
+              </Text>
+              <Text style={{ color: colors.text.tertiary, fontSize: 10, fontFamily: "monospace", fontWeight: fontWeight.bold }}>
+                {epicPct}%
+              </Text>
+            </View>
+          </View>
+        ) : null}
+      </View>
     </Pressable>
   );
 }

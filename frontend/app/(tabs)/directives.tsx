@@ -215,7 +215,7 @@ export default function DirectivesScreen() {
     if (items.length === 0) return null;
     return (
       <View key={title} style={{ marginBottom: 20 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4, paddingVertical: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8, paddingVertical: 6 }}>
           <Text style={{ color: colors.text.disabled, fontSize: 12, fontWeight: fw.semibold, letterSpacing: 0.3, textTransform: "uppercase" }}>
             {title}
           </Text>
@@ -223,12 +223,11 @@ export default function DirectivesScreen() {
             {items.length}
           </Text>
         </View>
-        {items.map((d, i) => (
+        {items.map((d) => (
           <DirectiveListItem
             key={d.id}
             directive={enrichDirective(d)}
             onPress={navigateToDirective}
-            showDivider={i < items.length - 1}
           />
         ))}
       </View>
@@ -507,12 +506,11 @@ export default function DirectivesScreen() {
           </>
         ) : (
           <View>
-            {listSorted.map((d, i) => (
+            {listSorted.map((d) => (
               <DirectiveListItem
                 key={d.id}
                 directive={enrichDirective(d)}
                 onPress={navigateToDirective}
-                showDivider={i < listSorted.length - 1}
               />
             ))}
           </View>
