@@ -5,6 +5,11 @@
 
 set -e
 
+# merge-and-deploy sets this env var — it IS the pipeline, let it through
+if [[ "${OZZU_MERGE_AND_DEPLOY:-}" == "1" ]]; then
+  exit 0
+fi
+
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
 # Agent branches are always allowed (legacy)

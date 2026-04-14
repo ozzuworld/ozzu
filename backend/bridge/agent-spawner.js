@@ -571,7 +571,7 @@ function mergeWorktreeToMain(directiveId, branch) {
         log(`Rebase conflict for ${branch} — falling back to merge commit`);
         try { execSync(`git rebase --abort`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
         execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
-        execSync(`git merge "${branch}" --no-edit`, { cwd: WORKDIR, timeout: 30000 });
+        execSync(`git merge "${branch}" --no-edit`, { cwd: WORKDIR, timeout: 30000, env: { ...process.env, OZZU_MERGE_AND_DEPLOY: "1" } });
         execSync(`git push origin main`, { cwd: WORKDIR, timeout: 60000 });
         log(`Merge-committed ${branch} to main (attempt ${attempt}) and pushed`);
         return true;
@@ -579,7 +579,7 @@ function mergeWorktreeToMain(directiveId, branch) {
 
       // 5. Fast-forward merge (guaranteed to work after successful rebase)
       execSync(`git checkout main`, { cwd: WORKDIR, timeout: 10000, stdio: "ignore" });
-      execSync(`git merge --ff-only "${branch}"`, { cwd: WORKDIR, timeout: 10000 });
+      execSync(`git merge --ff-only "${branch}"`, { cwd: WORKDIR, timeout: 10000, env: { ...process.env, OZZU_MERGE_AND_DEPLOY: "1" } });
 
       // 6. Push to origin
       execSync(`git push origin main`, { cwd: WORKDIR, timeout: 60000 });
