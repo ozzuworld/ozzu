@@ -128,18 +128,14 @@ function DeviceMirror({ bridgeUrl }: { bridgeUrl: string }) {
     function connect() {
       if (!mounted) return;
       const wsUrl = bridgeUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
-      const ws = new WebSocket(`${wsUrl}/dev/mirror?port=${MIRROR_PORT}&fps=${MIRROR_FPS}`);
-      ws.binaryType = "arraybuffer";
+      // format=base64: server sends pre-encoded data URI strings — no client-side conversion needed
+      const ws = new WebSocket(`${wsUrl}/dev/mirror?port=${MIRROR_PORT}&fps=${MIRROR_FPS}&format=base64`);
       wsRef.current = ws;
 
       ws.onmessage = (event) => {
         if (!mounted) return;
-        const bytes = new Uint8Array(event.data as ArrayBuffer);
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        setFrameUri(`data:image/png;base64,${btoa(binary)}`);
+        // Server sends ready-to-use data URI string: "data:image/jpeg;base64,..."
+        setFrameUri(event.data as string);
       };
 
       ws.onerror = () => {};

@@ -43,10 +43,19 @@ function captureFrame(device) {
   });
 }
 
+// Convert PNG to JPEG for smaller frames (264KB → ~70KB)
+let sharp;
+try { sharp = require("sharp"); } catch { sharp = null; }
+
+async function toJpeg(pngBuf) {
+  if (!sharp) return pngBuf; // fallback to PNG if sharp not available
+  return sharp(pngBuf).jpeg({ quality: 65 }).toBuffer();
+}
+
 function startStream(device, fps) {
   if (streams.has(device) && streams.get(device).timer) return;
 
-  const stream = streams.get(device) || { clients: new Set(), timer: null, capturing: false, lastFrame: null };
+  const stream = streams.get(device) || { clients: new Set(), timer: null, capturing: false, lastFrame: null, lastBase64: null };
   streams.set(device, stream);
 
   const intervalMs = Math.max(Math.floor(1000 / Math.min(fps, MAX_FPS)), 100);
@@ -56,10 +65,22 @@ function startStream(device, fps) {
     stream.capturing = true;
     try {
       const png = await captureFrame(device);
-      stream.lastFrame = png;
+      // Convert to JPEG for smaller frames
+      const jpeg = await toJpeg(png);
+      stream.lastFrame = jpeg;
+      // Pre-compute base64 data URI once for all base64 clients
+      const hasBase64Client = [...stream.clients].some(ws => ws._sendBase64);
+      if (hasBase64Client) {
+        const mime = sharp ? "image/jpeg" : "image/png";
+        stream.lastBase64 = `data:${mime};base64,${jpeg.toString("base64")}`;
+      }
       for (const ws of stream.clients) {
         if (ws.readyState === 1) { // WebSocket.OPEN
-          ws.send(png);
+          if (ws._sendBase64) {
+            ws.send(stream.lastBase64);
+          } else {
+            ws.send(jpeg);
+          }
         }
       }
     } catch (e) {
@@ -68,7 +89,7 @@ function startStream(device, fps) {
     stream.capturing = false;
   }, intervalMs);
 
-  log(`streaming ${device} @ ${fps}fps (${intervalMs}ms interval)`);
+  log(`streaming ${device} @ ${fps}fps (${intervalMs}ms interval), jpeg=${!!sharp}`);
 }
 
 function stopStream(device) {
@@ -106,19 +127,27 @@ wss.on("connection", (ws, req) => {
   const portParam = url.searchParams.get("port");
   const device = url.searchParams.get("device") || (portParam ? `localhost:${portParam}` : "localhost:5560");
   const fps = Math.min(parseInt(url.searchParams.get("fps") || "5"), MAX_FPS);
+  // format=base64: send pre-encoded data URI strings instead of binary
+  // This avoids expensive ArrayBuffer→base64 conversion on weak clients (Android TV)
+  const sendBase64 = url.searchParams.get("format") === "base64";
+  ws._sendBase64 = sendBase64;
 
-  log(`client connected for ${device} @ ${fps}fps`);
+  log(`client connected for ${device} @ ${fps}fps (${sendBase64 ? "base64" : "binary"})`);
 
   // Register client
   if (!streams.has(device)) {
-    streams.set(device, { clients: new Set(), timer: null, capturing: false, lastFrame: null });
+    streams.set(device, { clients: new Set(), timer: null, capturing: false, lastFrame: null, lastBase64: null });
   }
   const stream = streams.get(device);
   stream.clients.add(ws);
 
   // Send last frame immediately if available
   if (stream.lastFrame && ws.readyState === 1) {
-    ws.send(stream.lastFrame);
+    if (sendBase64 && stream.lastBase64) {
+      ws.send(stream.lastBase64);
+    } else {
+      ws.send(stream.lastFrame);
+    }
   }
 
   // Start streaming
