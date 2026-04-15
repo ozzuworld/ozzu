@@ -9,6 +9,7 @@ import {
   TextInput,
   BackHandler,
 } from "react-native";
+import { useKeepAwake } from "expo-keep-awake";
 import * as Updates from "expo-updates";
 import { isDeviceOwner, getVersionCode, downloadAndInstall } from "expo-device-owner";
 
@@ -19,19 +20,18 @@ const MIRROR_PORT = 5560;
 const MIRROR_FPS = 5;
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 
-// ── Theme (matches PoC sci-fi aesthetic) ──
+// ── Theme ──
 const C = {
-  bg: "#020208",
-  cyan: "#0ff5ee",
-  cyanMid: "#0cc7c2",
-  cyanDim: "#0aa8a3",
-  cyanDark: "#064d4a",
-  cyanGlow: "rgba(15, 245, 238, 0.15)",
-  green: "#00ff41",
-  red: "#ff3c3c",
-  yellow: "#ffd700",
-  frameBg: "rgba(6, 77, 74, 0.06)",
-  surface: "rgba(15, 245, 238, 0.04)",
+  bg: "#07070e",
+  panelBg: "#0c0c16",
+  panelBorder: "rgba(255, 255, 255, 0.06)",
+  panelShadow: "#000000",
+  labelColor: "rgba(255, 255, 255, 0.35)",
+  textMuted: "rgba(255, 255, 255, 0.2)",
+  green: "#4ade80",
+  red: "#f87171",
+  dimCyan: "rgba(15, 245, 238, 0.08)",
+  white: "#f0f0f0",
 };
 
 // ── Types ──
@@ -85,15 +85,41 @@ function parseDiff(raw: string): DiffData {
 }
 
 // ═══════════════════════════════════════
-// Device Mirror — WebSocket binary frames
+// Floating Panel — depth frame
+// ═══════════════════════════════════════
+function Panel({
+  label,
+  children,
+  style,
+}: {
+  label: string;
+  children: React.ReactNode;
+  style?: any;
+}) {
+  return (
+    <View style={[s.panelOuter, style]}>
+      {/* Label above */}
+      <Text style={s.panelLabel}>{label}</Text>
+
+      {/* Panel with depth */}
+      <View style={s.panelFrame}>
+        {/* Inner shadow layers for depth */}
+        <View style={s.panelDepthOuter} />
+        <View style={s.panelDepthInner} />
+
+        {/* Content */}
+        <View style={s.panelContent}>{children}</View>
+      </View>
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════
+// Device Mirror
 // ═══════════════════════════════════════
 function DeviceMirror({ bridgeUrl }: { bridgeUrl: string }) {
   const [frameUri, setFrameUri] = useState<string | null>(null);
-  const [status, setStatus] = useState<"connecting" | "online" | "offline">("connecting");
-  const [fps, setFps] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
-  const frameCountRef = useRef(0);
-  const fpsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -101,130 +127,66 @@ function DeviceMirror({ bridgeUrl }: { bridgeUrl: string }) {
 
     function connect() {
       if (!mounted) return;
-      const wsUrl = bridgeUrl
-        .replace(/^https:/, "wss:")
-        .replace(/^http:/, "ws:");
+      const wsUrl = bridgeUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
       const ws = new WebSocket(`${wsUrl}/dev/mirror?port=${MIRROR_PORT}&fps=${MIRROR_FPS}`);
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;
-      setStatus("connecting");
-
-      ws.onopen = () => {
-        if (mounted) setStatus("online");
-      };
 
       ws.onmessage = (event) => {
         if (!mounted) return;
-        // Convert binary ArrayBuffer to base64 data URI
         const bytes = new Uint8Array(event.data as ArrayBuffer);
         let binary = "";
         for (let i = 0; i < bytes.length; i++) {
           binary += String.fromCharCode(bytes[i]);
         }
-        const b64 = btoa(binary);
-        setFrameUri(`data:image/png;base64,${b64}`);
-        setStatus("online");
-        frameCountRef.current++;
+        setFrameUri(`data:image/png;base64,${btoa(binary)}`);
       };
 
-      ws.onerror = () => {
-        if (mounted) setStatus("offline");
-      };
-
+      ws.onerror = () => {};
       ws.onclose = () => {
-        if (mounted) {
-          setStatus("offline");
-          reconnectTimer = setTimeout(connect, 3000);
-        }
+        if (mounted) reconnectTimer = setTimeout(connect, 3000);
       };
     }
 
     connect();
-
-    // FPS counter
-    fpsTimerRef.current = setInterval(() => {
-      if (mounted) {
-        setFps(frameCountRef.current);
-        frameCountRef.current = 0;
-      }
-    }, 1000);
-
     return () => {
       mounted = false;
       clearTimeout(reconnectTimer);
-      if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
       if (wsRef.current) wsRef.current.close();
     };
   }, [bridgeUrl]);
 
-  const statusColor =
-    status === "online" ? C.green : status === "connecting" ? C.yellow : C.red;
-
   return (
-    <View style={{ flex: 0.42, marginRight: 16 }}>
-      {/* Label */}
-      <Text style={s.frameLabel}>
-        DEVICE MIRROR // :{MIRROR_PORT}
-      </Text>
-
-      {/* Frame */}
-      <View style={[s.frame, { flex: 1 }]}>
-        {/* Corner accents */}
-        <View style={[s.corner, s.cornerTL]} />
-        <View style={[s.corner, s.cornerTR]} />
-        <View style={[s.corner, s.cornerBL]} />
-        <View style={[s.corner, s.cornerBR]} />
-
-        {/* Content */}
-        <View style={{ flex: 1, backgroundColor: "#000", overflow: "hidden" }}>
-          {frameUri ? (
-            <Image
-              source={{ uri: frameUri }}
-              style={{ flex: 1 }}
-              resizeMode="contain"
-            />
-          ) : (
-            <View style={s.emptyState}>
-              <Text style={s.emptyText}>
-                {status === "connecting" ? "CONNECTING..." : "NO SIGNAL"}
-              </Text>
-            </View>
-          )}
+    <View style={{ flex: 1, backgroundColor: "#000", borderRadius: 4, overflow: "hidden" }}>
+      {frameUri ? (
+        <Image source={{ uri: frameUri }} style={{ flex: 1 }} resizeMode="contain" />
+      ) : (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <Text style={{ fontFamily: "monospace", fontSize: 12, color: C.textMuted, letterSpacing: 3 }}>
+            CONNECTING
+          </Text>
         </View>
-      </View>
-
-      {/* Status bar */}
-      <View style={s.statusBar}>
-        <Text style={[s.statusText, { color: statusColor }]}>
-          {status.toUpperCase()}
-        </Text>
-        <Text style={s.statusText}>{fps} FPS</Text>
-      </View>
+      )}
     </View>
   );
 }
 
 // ═══════════════════════════════════════
-// Diff Viewer — SSE live git diffs
+// Diff Viewer
 // ═══════════════════════════════════════
 function DiffViewer({ bridgeUrl }: { bridgeUrl: string }) {
   const [diff, setDiff] = useState<DiffData | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [buildRunning, setBuildRunning] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-
-  // Poll for diffs every 2 seconds (RN doesn't support Web Streams API for SSE)
   const lastDiffTimeRef = useRef(0);
+
   useEffect(() => {
     let mounted = true;
-
     async function poll() {
       try {
         const res = await fetch(`${bridgeUrl}/dev/diff`);
-        if (!res.ok) throw new Error("fetch failed");
+        if (!res.ok) return;
         const data = await res.json();
         if (mounted) {
-          setConnected(true);
           if (data.diff && data.time !== lastDiffTimeRef.current) {
             lastDiffTimeRef.current = data.time;
             const parsed = parseDiff(data.diff);
@@ -235,28 +197,10 @@ function DiffViewer({ bridgeUrl }: { bridgeUrl: string }) {
             setDiff(null);
           }
         }
-      } catch {
-        if (mounted) setConnected(false);
-      }
-    }
-
-    poll();
-    const interval = setInterval(poll, 2000);
-    return () => { mounted = false; clearInterval(interval); };
-  }, [bridgeUrl]);
-
-  // Poll build status
-  useEffect(() => {
-    let mounted = true;
-    async function check() {
-      try {
-        const res = await fetch(`${bridgeUrl}/dev/build-status`);
-        const data = await res.json();
-        if (mounted) setBuildRunning(data.running);
       } catch {}
     }
-    check();
-    const interval = setInterval(check, 5000);
+    poll();
+    const interval = setInterval(poll, 2000);
     return () => { mounted = false; clearInterval(interval); };
   }, [bridgeUrl]);
 
@@ -264,146 +208,61 @@ function DiffViewer({ bridgeUrl }: { bridgeUrl: string }) {
     switch (type) {
       case "add": return C.green;
       case "del": return C.red;
-      case "hunk": return C.cyanDim;
-      default: return "rgba(10, 168, 163, 0.4)";
+      case "hunk": return "rgba(255,255,255,0.25)";
+      default: return "rgba(255,255,255,0.15)";
     }
   };
 
   const lineBg = (type: DiffLine["type"]) => {
     switch (type) {
-      case "add": return "rgba(0, 255, 65, 0.05)";
-      case "del": return "rgba(255, 60, 60, 0.05)";
-      case "hunk": return "rgba(15, 245, 238, 0.02)";
+      case "add": return "rgba(74, 222, 128, 0.06)";
+      case "del": return "rgba(248, 113, 113, 0.06)";
       default: return "transparent";
     }
   };
-
-  const lineBorder = (type: DiffLine["type"]) => {
-    switch (type) {
-      case "add": return C.green;
-      case "del": return C.red;
-      default: return "transparent";
-    }
-  };
-
-  const timeStr = diff?.time
-    ? new Date(diff.time).toLocaleTimeString("en", { hour12: false })
-    : "--:--:--";
 
   return (
-    <View style={{ flex: 0.58 }}>
-      {/* Label */}
-      <Text style={s.frameLabel}>LIVE DIFF // SOURCE MONITOR</Text>
-
-      {/* Frame */}
-      <View style={[s.frame, { flex: 1 }]}>
-        <View style={[s.corner, s.cornerTL]} />
-        <View style={[s.corner, s.cornerTR]} />
-        <View style={[s.corner, s.cornerBL]} />
-        <View style={[s.corner, s.cornerBR]} />
-
-        <View style={{ flex: 1, backgroundColor: C.frameBg }}>
-          {/* Header */}
-          <View style={s.diffHeader}>
-            <Text style={s.diffHeaderText}>
-              {diff && diff.fileCount > 0
-                ? `${diff.fileCount} FILE${diff.fileCount !== 1 ? "S" : ""} // +${diff.additions} -${diff.deletions}`
-                : "AWAITING CHANGES"}
-            </Text>
-            <Text
-              style={[
-                s.diffHeaderTag,
-                { color: buildRunning ? C.green : C.yellow },
-              ]}
-            >
-              {buildRunning ? "AUTO-BUILD \u25CF" : "BUILD \u25CB IDLE"}
-            </Text>
-          </View>
-
-          {/* Diff content */}
-          <ScrollView
-            ref={scrollRef}
-            style={{ flex: 1 }}
-            showsVerticalScrollIndicator={false}
-          >
-            {!diff || diff.fileCount === 0 ? (
-              <View style={s.emptyState}>
-                <Text style={s.emptyText}>AWAITING SOURCE MODIFICATIONS</Text>
-              </View>
-            ) : (
-              diff.files.map((file, fi) => (
-                <View key={fi} style={{ marginBottom: 4 }}>
-                  {/* File header */}
-                  <View style={s.fileHeader}>
-                    <Text style={s.fileHeaderText}>
-                      {"\u25B8"} {file.path}
-                    </Text>
-                  </View>
-                  {/* Lines */}
-                  {file.hunks.map((line, li) => (
-                    <View
-                      key={li}
-                      style={{
-                        backgroundColor: lineBg(line.type),
-                        borderLeftWidth: 2,
-                        borderLeftColor: lineBorder(line.type),
-                        paddingHorizontal: 16,
-                        paddingVertical: 1,
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontFamily: "monospace",
-                          fontSize: 11,
-                          lineHeight: 17,
-                          color: lineColor(line.type),
-                        }}
-                        numberOfLines={1}
-                      >
-                        {line.text}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              ))
-            )}
-          </ScrollView>
-
-          {/* Telemetry strip */}
-          <View style={s.telemStrip}>
-            <Text style={s.telemText}>
-              {diff ? `${diff.fileCount} FILES` : "0 FILES"}
-            </Text>
-            <Text style={s.telemText}>{timeStr}</Text>
-            <View style={{ flex: 1 }} />
-            <Clock />
-          </View>
+    <ScrollView ref={scrollRef} style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+      {!diff || diff.fileCount === 0 ? (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 120 }}>
+          <Text style={{ fontFamily: "monospace", fontSize: 11, color: C.textMuted, letterSpacing: 4 }}>
+            AWAITING CHANGES
+          </Text>
         </View>
-      </View>
-
-      {/* Status bar */}
-      <View style={s.statusBar}>
-        <Text style={[s.statusText, { color: connected ? C.green : C.red }]}>
-          {connected ? "STREAM CONNECTED" : "DISCONNECTED"}
-        </Text>
-      </View>
-    </View>
+      ) : (
+        diff.files.map((file, fi) => (
+          <View key={fi} style={{ marginBottom: 8 }}>
+            <View style={{
+              paddingVertical: 6,
+              paddingHorizontal: 14,
+              backgroundColor: "rgba(255,255,255,0.03)",
+              borderBottomWidth: 1,
+              borderBottomColor: "rgba(255,255,255,0.04)",
+            }}>
+              <Text style={{
+                fontFamily: "monospace",
+                fontSize: 10,
+                color: "rgba(255,255,255,0.4)",
+                letterSpacing: 1,
+              }}>
+                {file.path}
+              </Text>
+            </View>
+            {file.hunks.map((line, li) => (
+              <View key={li} style={{ backgroundColor: lineBg(line.type), paddingHorizontal: 14, paddingVertical: 1 }}>
+                <Text
+                  style={{ fontFamily: "monospace", fontSize: 10.5, lineHeight: 16, color: lineColor(line.type) }}
+                  numberOfLines={1}
+                >
+                  {line.text}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ))
+      )}
+    </ScrollView>
   );
-}
-
-// ── Clock ──
-function Clock() {
-  const [time, setTime] = useState(
-    new Date().toLocaleTimeString("en", { hour12: false })
-  );
-  useEffect(() => {
-    const i = setInterval(
-      () => setTime(new Date().toLocaleTimeString("en", { hour12: false })),
-      1000
-    );
-    return () => clearInterval(i);
-  }, []);
-  return <Text style={[s.telemText, { color: C.cyanMid }]}>{time}</Text>;
 }
 
 // ═══════════════════════════════════════
@@ -419,29 +278,36 @@ function SettingsScreen({
   onCancel: () => void;
 }) {
   const [inputUrl, setInputUrl] = useState(bridgeUrl);
-
   return (
-    <View style={s.settingsContainer}>
-      <Text style={s.settingsTitle}>OZZU TV // CONFIGURE</Text>
-      <Text style={s.settingsLabel}>BRIDGE URL</Text>
+    <View style={{ flex: 1, backgroundColor: C.bg, alignItems: "center", justifyContent: "center", padding: 40 }}>
+      <Text style={{ color: C.white, fontFamily: "monospace", fontSize: 16, letterSpacing: 4, marginBottom: 30, opacity: 0.6 }}>
+        CONFIGURE
+      </Text>
       <TextInput
         value={inputUrl}
         onChangeText={setInputUrl}
-        style={s.settingsInput}
+        style={{
+          width: 480, height: 46, backgroundColor: "rgba(255,255,255,0.04)",
+          borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", borderRadius: 6,
+          color: C.white, fontFamily: "monospace", fontSize: 14, paddingHorizontal: 16, letterSpacing: 0.5,
+        }}
         autoFocus
         selectTextOnFocus
-        placeholderTextColor={C.cyanDark}
+        placeholderTextColor="rgba(255,255,255,0.15)"
         placeholder="https://home.ozzu.world/bridge"
       />
-      <View style={{ flexDirection: "row", gap: 20, marginTop: 24 }}>
+      <View style={{ flexDirection: "row", gap: 16, marginTop: 20 }}>
         <Pressable
           onPress={() => onSave(inputUrl.replace(/\/+$/, ""))}
-          style={s.settingsBtn}
+          style={{ backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 6, paddingHorizontal: 28, paddingVertical: 10 }}
         >
-          <Text style={s.settingsBtnText}>CONNECT</Text>
+          <Text style={{ color: C.white, fontFamily: "monospace", fontSize: 13, letterSpacing: 2, opacity: 0.7 }}>SAVE</Text>
         </Pressable>
-        <Pressable onPress={onCancel} style={s.settingsBtnCancel}>
-          <Text style={[s.settingsBtnText, { color: "#666" }]}>CANCEL</Text>
+        <Pressable
+          onPress={onCancel}
+          style={{ paddingHorizontal: 28, paddingVertical: 10 }}
+        >
+          <Text style={{ color: C.white, fontFamily: "monospace", fontSize: 13, letterSpacing: 2, opacity: 0.3 }}>CANCEL</Text>
         </Pressable>
       </View>
     </View>
@@ -456,70 +322,53 @@ export default function App() {
   const [editing, setEditing] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
 
-  // Hide system UI
-  useEffect(() => {
-    StatusBar.setHidden(true);
-  }, []);
+  // Keep screen on — TV should never sleep while app is running
+  useKeepAwake();
+  useEffect(() => { StatusBar.setHidden(true); }, []);
 
-  // Back button closes settings
   useEffect(() => {
     const handler = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (editing) {
-        setEditing(false);
-        return true;
-      }
+      if (editing) { setEditing(false); return true; }
       return false;
     });
     return () => handler.remove();
   }, [editing]);
 
-  // Update checker (OTA + APK self-install)
   const checkForUpdates = useCallback(async () => {
     try {
       const update = await Updates.checkForUpdateAsync();
       if (update.isAvailable) {
-        setUpdateStatus("Downloading update...");
+        setUpdateStatus("Updating...");
         await Updates.fetchUpdateAsync();
-        setUpdateStatus("Restarting...");
         await Updates.reloadAsync();
         return;
       }
       const deviceOwner = isDeviceOwner();
       if (!deviceOwner) return;
       const currentVersion = getVersionCode();
-      const res = await fetch(
-        `${bridgeUrl}/tv/release/check?versionCode=${currentVersion}`
-      );
+      const res = await fetch(`${bridgeUrl}/tv/release/check?versionCode=${currentVersion}`);
       if (!res.ok) return;
       const data = await res.json();
       if (data.updateAvailable) {
         setUpdateStatus(`Installing v${data.versionName}...`);
         await downloadAndInstall(`${bridgeUrl}/tv/release/download`);
-        setUpdateStatus("Update installed — restarting...");
       }
-    } catch (e) {
-      console.log("Update check failed:", e);
+    } catch {
       setUpdateStatus(null);
     }
   }, [bridgeUrl]);
 
   useEffect(() => {
-    const initialCheck = setTimeout(checkForUpdates, 10_000);
-    const interval = setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL);
-    return () => {
-      clearTimeout(initialCheck);
-      clearInterval(interval);
-    };
+    const t = setTimeout(checkForUpdates, 10_000);
+    const i = setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL);
+    return () => { clearTimeout(t); clearInterval(i); };
   }, [checkForUpdates]);
 
   if (editing) {
     return (
       <SettingsScreen
         bridgeUrl={bridgeUrl}
-        onSave={(url) => {
-          setBridgeUrl(url);
-          setEditing(false);
-        }}
+        onSave={(url) => { setBridgeUrl(url); setEditing(false); }}
         onCancel={() => setEditing(false)}
       />
     );
@@ -527,27 +376,37 @@ export default function App() {
 
   return (
     <View style={s.root}>
-      {/* Main split view */}
-      <View style={s.splitContainer}>
-        <DeviceMirror bridgeUrl={bridgeUrl} />
-        <DiffViewer bridgeUrl={bridgeUrl} />
+      {/* Floating panels */}
+      <View style={s.stage}>
+        {/* Device mirror */}
+        <Panel label={`redroid05 :${MIRROR_PORT}`} style={{ flex: 0.38 }}>
+          <DeviceMirror bridgeUrl={bridgeUrl} />
+        </Panel>
+
+        {/* Gap */}
+        <View style={{ width: 28 }} />
+
+        {/* Diff viewer */}
+        <Panel label="PLANNING" style={{ flex: 0.52 }}>
+          <DiffViewer bridgeUrl={bridgeUrl} />
+        </Panel>
       </View>
 
-      {/* Update status overlay */}
+      {/* Update overlay */}
       {updateStatus && (
-        <View style={s.updateOverlay}>
-          <Text style={s.updateText}>{updateStatus}</Text>
+        <View style={{ position: "absolute", bottom: 20, left: 0, right: 0, alignItems: "center" }}>
+          <Text style={{ fontFamily: "monospace", fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: 2 }}>
+            {updateStatus}
+          </Text>
         </View>
       )}
 
-      {/* Settings gear — very subtle */}
+      {/* Settings gear */}
       <Pressable
         onPress={() => setEditing(true)}
-        style={s.settingsGear}
+        style={{ position: "absolute", top: 12, right: 16, opacity: 0.1 }}
       >
-        <Text style={{ color: C.cyan, fontFamily: "monospace", fontSize: 16 }}>
-          {"\u2699"}
-        </Text>
+        <Text style={{ color: "#fff", fontSize: 18 }}>{"\u2699"}</Text>
       </Pressable>
     </View>
   );
@@ -562,235 +421,65 @@ const s = {
     backgroundColor: C.bg,
   } as const,
 
-  splitContainer: {
+  // The stage centers the floating panels with generous padding
+  stage: {
     flex: 1,
     flexDirection: "row" as const,
-    padding: 24,
-    paddingTop: 32,
-    paddingBottom: 16,
+    paddingHorizontal: 60,
+    paddingVertical: 48,
   },
 
-  // ── Frame ──
-  frame: {
-    borderWidth: 1,
-    borderColor: C.cyanDark,
+  // ── Panel ──
+  panelOuter: {
+    // flex set per-instance
+  },
+
+  panelLabel: {
+    fontFamily: "monospace",
+    fontSize: 10,
+    letterSpacing: 3,
+    color: C.labelColor,
+    textTransform: "uppercase" as const,
+    marginBottom: 10,
+    marginLeft: 2,
+  },
+
+  panelFrame: {
+    flex: 1,
+    borderRadius: 8,
     overflow: "hidden" as const,
+    backgroundColor: C.panelBg,
+    // Depth — outer border + shadow
+    borderWidth: 1,
+    borderColor: C.panelBorder,
+    // Elevation for Android shadow
+    elevation: 20,
+    shadowColor: C.panelShadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
   },
 
-  frameLabel: {
-    fontFamily: "monospace",
-    fontSize: 9,
-    letterSpacing: 4,
-    color: C.cyanDim,
-    textTransform: "uppercase" as const,
-    marginBottom: 6,
-    marginLeft: 4,
-  },
-
-  // Corner accents
-  corner: {
+  panelDepthOuter: {
     position: "absolute" as const,
-    width: 12,
-    height: 12,
-    zIndex: 10,
-  },
-  cornerTL: {
-    top: -1,
-    left: -1,
-    borderTopWidth: 2,
-    borderLeftWidth: 2,
-    borderTopColor: C.cyan,
-    borderLeftColor: C.cyan,
-  },
-  cornerTR: {
-    top: -1,
-    right: -1,
-    borderTopWidth: 2,
-    borderRightWidth: 2,
-    borderTopColor: C.cyan,
-    borderRightColor: C.cyan,
-  },
-  cornerBL: {
-    bottom: -1,
-    left: -1,
-    borderBottomWidth: 2,
-    borderLeftWidth: 2,
-    borderBottomColor: C.cyan,
-    borderLeftColor: C.cyan,
-  },
-  cornerBR: {
-    bottom: -1,
-    right: -1,
-    borderBottomWidth: 2,
-    borderRightWidth: 2,
-    borderBottomColor: C.cyan,
-    borderRightColor: C.cyan,
-  },
-
-  // ── Status bar (below frame) ──
-  statusBar: {
-    flexDirection: "row" as const,
-    justifyContent: "space-between" as const,
-    paddingHorizontal: 4,
-    paddingTop: 4,
-  },
-  statusText: {
-    fontFamily: "monospace",
-    fontSize: 8,
-    letterSpacing: 2,
-    color: C.cyanDark,
-    textTransform: "uppercase" as const,
-  },
-
-  // ── Diff viewer ──
-  diffHeader: {
-    height: 28,
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(15, 245, 238, 0.08)",
-  },
-  diffHeaderText: {
-    fontFamily: "monospace",
-    fontSize: 9,
-    letterSpacing: 2,
-    color: C.cyanDim,
-    textTransform: "uppercase" as const,
-  },
-  diffHeaderTag: {
-    fontFamily: "monospace",
-    fontSize: 9,
-    letterSpacing: 2,
-    marginLeft: "auto" as any,
-  },
-
-  fileHeader: {
-    backgroundColor: C.surface,
-    paddingVertical: 4,
-    paddingHorizontal: 16,
-    borderLeftWidth: 2,
-    borderLeftColor: C.cyanDim,
-  },
-  fileHeaderText: {
-    fontFamily: "monospace",
-    fontSize: 11,
-    color: C.cyan,
-    letterSpacing: 1,
-  },
-
-  telemStrip: {
-    height: 26,
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    paddingHorizontal: 16,
-    gap: 20,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(15, 245, 238, 0.08)",
-  },
-  telemText: {
-    fontFamily: "monospace",
-    fontSize: 9,
-    letterSpacing: 2,
-    color: C.cyanDark,
-    textTransform: "uppercase" as const,
-  },
-
-  // ── Empty state ──
-  emptyState: {
-    flex: 1,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    minHeight: 200,
-  },
-  emptyText: {
-    fontFamily: "monospace",
-    fontSize: 11,
-    letterSpacing: 4,
-    color: C.cyanDark,
-    textTransform: "uppercase" as const,
-  },
-
-  // ── Settings ──
-  settingsContainer: {
-    flex: 1,
-    backgroundColor: C.bg,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    padding: 40,
-  },
-  settingsTitle: {
-    color: C.cyan,
-    fontFamily: "monospace",
-    fontSize: 18,
-    letterSpacing: 4,
-    marginBottom: 30,
-  },
-  settingsLabel: {
-    color: C.cyanDim,
-    fontFamily: "monospace",
-    fontSize: 13,
-    letterSpacing: 2,
-    marginBottom: 12,
-  },
-  settingsInput: {
-    width: 500,
-    height: 50,
-    backgroundColor: "#0d0d14",
-    borderWidth: 1,
-    borderColor: "rgba(10, 168, 163, 0.25)",
-    color: C.cyan,
-    fontFamily: "monospace",
-    fontSize: 16,
-    paddingHorizontal: 16,
-    letterSpacing: 1,
-  },
-  settingsBtn: {
-    backgroundColor: "rgba(10, 168, 163, 0.13)",
-    borderWidth: 1,
-    borderColor: C.cyanDim,
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-  },
-  settingsBtnCancel: {
-    backgroundColor: "transparent",
-    borderWidth: 1,
-    borderColor: "#333",
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-  },
-  settingsBtnText: {
-    color: C.cyan,
-    fontFamily: "monospace",
-    fontSize: 14,
-    letterSpacing: 2,
-  },
-
-  // ── Overlays ──
-  updateOverlay: {
-    position: "absolute" as const,
-    bottom: 12,
+    top: 0,
     left: 0,
     right: 0,
-    alignItems: "center" as const,
+    height: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
   },
-  updateText: {
-    color: C.cyan,
-    fontFamily: "monospace",
-    fontSize: 11,
-    letterSpacing: 2,
-    backgroundColor: "rgba(2, 2, 8, 0.8)",
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
-  settingsGear: {
+
+  panelDepthInner: {
     position: "absolute" as const,
-    top: 8,
-    right: 8,
-    width: 32,
-    height: 32,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    opacity: 0.15,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+  },
+
+  panelContent: {
+    flex: 1,
+    overflow: "hidden" as const,
   },
 };
