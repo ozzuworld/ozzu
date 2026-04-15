@@ -746,6 +746,7 @@ module.exports = function createPipelineRoutes(ctx) {
 
   // GET /tv/release/check?versionCode=N — check if a newer APK is available
   if (req.method === "GET" && pathname === "/tv/release/check") {
+    log.bridge.info(`TV update check from ${req.headers['user-agent']} versionCode=${url.searchParams.get("versionCode")}`);
     const currentVersion = parseInt(url.searchParams.get("versionCode") || "0", 10);
     const metaPath = path.join(TV_RELEASES_DIR, "latest.json");
 
