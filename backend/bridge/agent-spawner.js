@@ -1549,17 +1549,43 @@ function smartDeploy(directive) {
     req.end();
   };
 
-  // Check if bridge server code changed — needs restart
+  // ────────────────────────────────────────────────────────────────
+  // Deploy Pipeline — Three Tiers
+  //
+  // HOT  (~25s) — JS-only changes → Android OTA only. No iOS build.
+  //               iOS gets updated when King Kazuma runs /stage-ios.
+  //
+  // WARM (~10m) — Native changes → Android CI + iOS CI in parallel.
+  //               Both platforms need full rebuild.
+  //
+  // STAGING     — Explicit /stage-ios command → iOS CI build only.
+  //               Caches IPA to artifacts/ozzu-latest.ipa for AltStore.
+  //
+  // Each product (phone, TV, firmware) has independent detection.
+  // ────────────────────────────────────────────────────────────────
+
   const bridgeChanged = detectBridgeChanges();
-
   const native = detectNativeChanges();
-  if (native.any) {
-    const platforms = [native.android && "Android (native)", native.ios && "iOS (native)"].filter(Boolean).join(" + ") || "Android";
-    log(`Native changes detected (${platforms}) — triggering CI builds for all platforms`);
-    notify(`Big update going out — full rebuild for all devices, should be done in about 10 minutes.`);
+  const tvChanges = detectTvChanges();
+  const firmwareChanged = detectFirmwareChanges();
 
-    // Android APK build + deploy (with artifact verification)
-    // Spawn detached so it survives bridge restarts
+  // Log what was detected
+  const detections = [];
+  if (native.any) detections.push(`phone:native(android=${native.android},ios=${native.ios})`);
+  else detections.push("phone:js-only");
+  if (tvChanges.any) detections.push(tvChanges.native ? "tv:native" : "tv:js-only");
+  if (firmwareChanged) detections.push("firmware");
+  if (bridgeChanged) detections.push("bridge");
+  log(`smartDeploy: ${detections.join(", ")}`);
+
+  // ── PHONE APP ──
+
+  if (native.any) {
+    // WARM tier — native changes, full CI rebuild for both platforms
+    const platforms = [native.android && "Android", native.ios && "iOS"].filter(Boolean).join(" + ");
+    log(`WARM deploy: ${platforms} native CI builds`);
+    notify(`Native update — full rebuild for ${platforms}, ~10 minutes.`);
+
     if (native.android) {
       spawnDetachedDeploy("android", [
         `cd ${WORKDIR}`,
@@ -1569,77 +1595,45 @@ function smartDeploy(directive) {
         `gh run watch "$RUN_ID" --exit-status`,
         `rm -rf /tmp/ozzu-apk-verify`,
         `gh run download "$RUN_ID" --name ozzu-android --dir /tmp/ozzu-apk-verify -R ozzuworld/ozzu`,
-        `test -f /tmp/ozzu-apk-verify/app-debug.apk || { echo "ERROR: APK artifact not found after download"; exit 1; }`,
-        `APK_SIZE=$(stat -c%s /tmp/ozzu-apk-verify/app-debug.apk 2>/dev/null || echo 0)`,
-        `test "$APK_SIZE" -gt 1000000 || { echo "ERROR: APK too small ($APK_SIZE bytes), likely corrupt"; exit 1; }`,
+        `test -f /tmp/ozzu-apk-verify/app-release.apk || { echo "ERROR: APK artifact not found"; exit 1; }`,
+        `APK_SIZE=$(stat -c%s /tmp/ozzu-apk-verify/app-release.apk 2>/dev/null || echo 0)`,
+        `test "$APK_SIZE" -gt 1000000 || { echo "ERROR: APK too small ($APK_SIZE bytes)"; exit 1; }`,
         `rm -rf /tmp/ozzu-apk-verify`,
         `./scripts/deploy.sh`,
         `echo "Caching APK artifact locally..."`,
         `gh run download "$RUN_ID" --name ozzu-android --dir /tmp/ozzu-apk-cache -R ozzuworld/ozzu`,
-        `test -f /tmp/ozzu-apk-cache/app-debug.apk && cp /tmp/ozzu-apk-cache/app-debug.apk ${WORKDIR}/artifacts/ozzu-latest.apk && echo "APK cached" || echo "APK cache skipped"`,
+        `test -f /tmp/ozzu-apk-cache/app-release.apk && cp /tmp/ozzu-apk-cache/app-release.apk ${WORKDIR}/artifacts/ozzu-latest.apk && echo "APK cached" || echo "APK cache skipped"`,
         `rm -rf /tmp/ozzu-apk-cache`,
       ].join(" && "));
     }
 
-    // iOS IPA build — ALWAYS build iOS alongside Android
-    // iPhone can't do OTA, so every frontend change needs a full rebuild
-    // IPA is cached locally after build for direct download from dashboard
-    spawnDetachedDeploy("ios", [
-      `cd ${WORKDIR}`,
-      `gh workflow run build-ios.yml`,
-      `sleep 20`,
-      `RUN_ID=$(gh run list --workflow=build-ios.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
-      `echo "iOS build started: run $RUN_ID"`,
-      directive.id ? `curl -s -X POST ${BRIDGE}/directives/${directive.id}/build-run -H 'Content-Type: application/json' -d "{\\"platform\\":\\"ios\\",\\"runId\\":$RUN_ID,\\"url\\":\\"https://github.com/ozzuworld/ozzu/actions/runs/$RUN_ID\\"}" || true` : `echo "No directive ID — skipping build-run registration"`,
-      `gh run watch "$RUN_ID" --exit-status`,
-      `echo "Caching IPA artifact locally..."`,
-      `rm -rf /tmp/ozzu-ipa-cache && gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ipa-cache -R ozzuworld/ozzu`,
-      `IPA_FILE=$(find /tmp/ozzu-ipa-cache -name "*.ipa" 2>/dev/null | head -1)`,
-      `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
-      `rm -rf /tmp/ozzu-ipa-cache`,
-    ].join(" && "));
+    // iOS CI — only on native changes (WARM), never on JS-only (HOT)
+    spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
   } else {
-    log("JS-only changes — deploying via OTA (Android) + CI build (iOS)");
-    notify("Quick update going out to tablets now. iPhone build takes about 10 minutes.");
+    // HOT tier — JS-only, Android OTA only (~25s). NO iOS build.
+    log("HOT deploy: Android OTA only (iOS skipped — use /stage-ios when ready)");
+    notify("Quick update going out to tablets now (~25s).");
 
-    // Android: instant OTA deploy
     exec(`cd ${WORKDIR} && ./scripts/ota-deploy.sh --restart`, {
       cwd: WORKDIR,
-      timeout: 5 * 60 * 1000, // 5 min max
+      timeout: 5 * 60 * 1000,
     }, (err) => {
       if (err) {
-        log(`OTA deploy failed: ${err.message}`);
+        log(`HOT deploy failed: ${err.message}`);
         notify("Tablet update failed — might need a full rebuild.");
       } else {
-        log("OTA deploy complete");
-        notify("Tablets are updating now — should be live in a few seconds.");
+        log("HOT deploy complete — tablets updated");
+        notify("Tablets updated. Run /stage-ios when ready for iPhone.");
       }
     });
-
-    // iOS: always needs a full rebuild (no OTA for sideloaded apps)
-    // IPA is cached locally after build for direct download from dashboard
-    spawnDetachedDeploy("ios", [
-      `cd ${WORKDIR}`,
-      `gh workflow run build-ios.yml`,
-      `sleep 20`,
-      `RUN_ID=$(gh run list --workflow=build-ios.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
-      `echo "iOS build started: run $RUN_ID"`,
-      directive.id ? `curl -s -X POST ${BRIDGE}/directives/${directive.id}/build-run -H 'Content-Type: application/json' -d "{\\"platform\\":\\"ios\\",\\"runId\\":$RUN_ID,\\"url\\":\\"https://github.com/ozzuworld/ozzu/actions/runs/$RUN_ID\\"}" || true` : `echo "No directive ID — skipping build-run registration"`,
-      `gh run watch "$RUN_ID" --exit-status`,
-      `echo "Caching IPA artifact locally..."`,
-      `rm -rf /tmp/ozzu-ipa-cache && gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ipa-cache -R ozzuworld/ozzu`,
-      `IPA_FILE=$(find /tmp/ozzu-ipa-cache -name "*.ipa" 2>/dev/null | head -1)`,
-      `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
-      `rm -rf /tmp/ozzu-ipa-cache`,
-    ].join(" && "));
   }
 
-  // TV deploy — separate from phone app, has its own OTA + native CI pipeline
-  const tvChanges = detectTvChanges();
+  // ── TV APP ──
+
   if (tvChanges.any) {
     if (tvChanges.jsOnly) {
-      log("TV JS-only changes — deploying via OTA");
-      notify("TV update going out — should be live on next app launch.");
+      log("TV HOT deploy: OTA");
+      notify("TV update going out — live on next app launch.");
       exec(`cd ${WORKDIR} && ./scripts/ota-deploy-tv.sh`, {
         cwd: WORKDIR,
         timeout: 5 * 60 * 1000,
@@ -1649,11 +1643,11 @@ function smartDeploy(directive) {
           notify("TV update failed — might need a full rebuild.");
         } else {
           log("TV OTA deploy complete");
-          notify("TV update published — it'll pick it up on next launch.");
+          notify("TV update published — picks it up on next launch.");
         }
       });
     } else {
-      log("TV native changes detected — triggering CI build");
+      log("TV WARM deploy: native CI build");
       notify("TV native update building — will auto-install when done.");
       spawnDetachedDeploy("tv", [
         `cd ${WORKDIR}`,
@@ -1671,10 +1665,10 @@ function smartDeploy(directive) {
     }
   }
 
-  // ESP32 firmware deploy — build in Docker, SCP to Rock Pi, trigger instant OTA
-  const firmwareChanged = detectFirmwareChanges();
+  // ── FIRMWARE ──
+
   if (firmwareChanged) {
-    log("Firmware changes detected — building and deploying ESP32 OTA");
+    log("Firmware deploy: Docker build + SCP + OTA broadcast");
     notify("Firmware update building — ESP32 nodes will update automatically.");
     spawnDetachedDeploy("firmware", [
       `cd ${WORKDIR}/hardware/positioning/esp32-csi`,
@@ -1684,12 +1678,12 @@ function smartDeploy(directive) {
     ].join(" && "));
   }
 
-  // Bridge restart — do this LAST (kills this process, Docker auto-restarts)
-  // IMPORTANT: Must wait long enough for OTA deploy to complete (expo export can take 60s+)
+  // ── BRIDGE RESTART ──
+  // Must be LAST — kills this process, Docker auto-restarts
   if (bridgeChanged) {
-    const restartDelay = native.any ? 10000 : 90000; // 90s for OTA (export+copy+restart), 10s for native (CI runs async)
-    log(`Bridge code changed — scheduling restart in ${restartDelay / 1000}s (waiting for deploys to finish)`);
-    notify("Server code changed too — will restart after the update finishes.");
+    const restartDelay = native.any ? 10000 : 60000; // 60s for OTA (was 90s, now faster without iOS export)
+    log(`Bridge code changed — scheduling restart in ${restartDelay / 1000}s`);
+    notify("Server code changed — will restart after the update finishes.");
     setTimeout(() => {
       log("Triggering bridge restart via POST /restart");
       const payload = JSON.stringify({});
@@ -1704,6 +1698,40 @@ function smartDeploy(directive) {
       req.end();
     }, restartDelay);
   }
+}
+
+// Helper: build iOS CI deploy command (shared by WARM tier and /stage-ios)
+function buildIosDeployCommand(directive) {
+  return [
+    `cd ${WORKDIR}`,
+    `gh workflow run build-ios.yml`,
+    `sleep 20`,
+    `RUN_ID=$(gh run list --workflow=build-ios.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
+    `echo "iOS build started: run $RUN_ID"`,
+    directive && directive.id ? `curl -s -X POST ${BRIDGE}/directives/${directive.id}/build-run -H 'Content-Type: application/json' -d "{\\"platform\\":\\"ios\\",\\"runId\\":$RUN_ID,\\"url\\":\\"https://github.com/ozzuworld/ozzu/actions/runs/$RUN_ID\\"}" || true` : `echo "No directive ID — skipping build-run registration"`,
+    `gh run watch "$RUN_ID" --exit-status`,
+    `echo "Caching IPA artifact locally..."`,
+    `rm -rf /tmp/ozzu-ipa-cache && gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ipa-cache -R ozzuworld/ozzu`,
+    `IPA_FILE=$(find /tmp/ozzu-ipa-cache -name "*.ipa" 2>/dev/null | head -1)`,
+    `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
+    `rm -rf /tmp/ozzu-ipa-cache`,
+  ].join(" && ");
+}
+
+// STAGING tier — explicit iOS build, callable from MCP tool
+function stageIos(directive) {
+  log("STAGING: iOS CI build triggered explicitly");
+  const http = require("http");
+  const payload = JSON.stringify({ message: "iOS build started — IPA will be ready in ~10 minutes." });
+  const req = http.request(
+    `${BRIDGE}/notify`,
+    { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+  );
+  req.on("error", () => {});
+  req.write(payload);
+  req.end();
+
+  spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
 }
 
 // ── Watchdog: periodic liveness check for running agents ──
@@ -1730,5 +1758,6 @@ module.exports = {
   cleanupWorktree,
   cleanupStaleBranches,
   smartDeploy,
+  stageIos,
   _lastSmartDeployTime: 0,
 };

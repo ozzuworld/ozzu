@@ -1,8 +1,10 @@
 #!/bin/bash
-# ota-deploy.sh — Export JS bundle and publish as OTA update via bridge server
-# Devices pick up the update on next app launch (checkAutomatically: ON_LOAD)
+# ota-deploy.sh — Export Android JS bundle and publish as OTA update
+# This is the HOT deploy path — Android only, ~25s total.
+# iOS builds are triggered separately via staging (build-ios.yml).
+#
 # Usage: ./scripts/ota-deploy.sh [--restart]
-#   --restart    Force-restart the app on all devices after publishing
+#   --restart    Force-restart + double-restart to apply OTA immediately
 
 set -e
 
@@ -11,35 +13,17 @@ WORKDIR="/home/gcp/ozzu"
 FRONTEND="$WORKDIR/frontend"
 RUNTIME_VERSION="1.0.0"
 UPDATES_DIR="/tmp/ozzu-bridge/updates/$RUNTIME_VERSION"
-BRIDGE="http://localhost:3333"
 
 RESTART=false
 [[ "$1" == "--restart" ]] && RESTART=true
 
-echo "=== OTA Deploy ==="
+echo "=== OTA Deploy (Android) ==="
 
-# Export JS bundles for both platforms (export separately to avoid web bundler failure)
-echo "[1/3] Exporting JS bundles (Android + iOS)..."
+# Export Android JS bundle only — iOS is never OTA'd (sideloaded via AltStore)
+echo "[1/3] Exporting JS bundle (Android only)..."
 cd "$FRONTEND"
-rm -rf /tmp/ota-export /tmp/ota-android /tmp/ota-ios
-npx expo export --platform android --output-dir /tmp/ota-android 2>&1 | tail -5
-npx expo export --platform ios --output-dir /tmp/ota-ios 2>&1 | tail -5
-
-# Merge: start with Android, overlay iOS bundles + merge metadata
-cp -r /tmp/ota-android /tmp/ota-export
-cp -r /tmp/ota-ios/_expo/static/js/ios /tmp/ota-export/_expo/static/js/ 2>/dev/null || true
-
-# Merge metadata.json from both platforms (use node — python3 not available in Docker)
-node -e "
-const fs = require('fs');
-const a = JSON.parse(fs.readFileSync('/tmp/ota-android/metadata.json', 'utf8'));
-const b = JSON.parse(fs.readFileSync('/tmp/ota-ios/metadata.json', 'utf8'));
-a.fileMetadata.ios = b.fileMetadata.ios;
-fs.writeFileSync('/tmp/ota-export/metadata.json', JSON.stringify(a, null, 2));
-console.log('Merged metadata: android + ios');
-"
-
-rm -rf /tmp/ota-android /tmp/ota-ios
+rm -rf /tmp/ota-export
+npx expo export --platform android --output-dir /tmp/ota-export 2>&1 | tail -5
 
 # Verify export produced a valid bundle
 METADATA="/tmp/ota-export/metadata.json"
@@ -58,15 +42,6 @@ if [ "$BUNDLE_SIZE" -lt 100000 ]; then
   exit 1
 fi
 
-# Verify iOS bundle too
-IOS_BUNDLE_REL=$(node -e "const m=JSON.parse(require('fs').readFileSync('$METADATA','utf8')); console.log(m.fileMetadata.ios.bundle)" 2>/dev/null || true)
-if [ -z "$IOS_BUNDLE_REL" ] || [ ! -f "/tmp/ota-export/$IOS_BUNDLE_REL" ]; then
-  echo "WARNING: iOS bundle not found in export — iOS devices won't get this OTA update"
-else
-  IOS_BUNDLE_SIZE=$(stat -c%s "/tmp/ota-export/$IOS_BUNDLE_REL" 2>/dev/null || echo 0)
-  echo "  iOS bundle: $IOS_BUNDLE_SIZE bytes"
-fi
-
 # Publish to bridge updates directory
 echo "[2/3] Publishing update..."
 rm -rf "$UPDATES_DIR"
@@ -77,10 +52,9 @@ sync  # Flush writes to disk before restarting apps
 echo "Published to $UPDATES_DIR"
 echo "Bundle: $(du -sh "$UPDATES_DIR" | cut -f1) ($BUNDLE_SIZE bytes)"
 
-# Restart apps on devices so they check for update on load
-# Non-fatal: OTA is already published, restart is best-effort (adb may not be available in Docker)
+# Double-restart: 1st downloads OTA, 2nd applies it
 if [ "$RESTART" = true ]; then
-  echo "[3/3] Restarting apps on devices..."
+  echo "[3/3] Double-restarting apps on devices..."
 
   # Brief pause to ensure bridge serves the new manifest
   sleep 2
@@ -94,12 +68,28 @@ if [ "$RESTART" = true ]; then
       name="${entry%%|*}"
       addr=$(get_device_addr "$name" 2>/dev/null) || true
       if [ -n "$addr" ]; then
+        # 1st restart — app launches, downloads OTA in background
         adb -s "$addr" shell am force-stop "$PACKAGE" 2>/dev/null || true
-        sleep 1  # Let the process fully exit before restarting
+        sleep 1
         adb -s "$addr" shell am start -n "$PACKAGE/$ACTIVITY" 2>/dev/null || true
-        echo "  [$name] restarted ($addr)"
+        echo "  [$name] restart 1/2 — downloading OTA ($addr)"
       else
         echo "  [$name] not reachable"
+      fi
+    done
+
+    # Wait for OTA download to complete
+    sleep 8
+
+    for entry in "${KNOWN_DEVICES[@]}"; do
+      name="${entry%%|*}"
+      addr=$(get_device_addr "$name" 2>/dev/null) || true
+      if [ -n "$addr" ]; then
+        # 2nd restart — app loads the downloaded update
+        adb -s "$addr" shell am force-stop "$PACKAGE" 2>/dev/null || true
+        sleep 1
+        adb -s "$addr" shell am start -n "$PACKAGE/$ACTIVITY" 2>/dev/null || true
+        echo "  [$name] restart 2/2 — applying update ($addr)"
       fi
     done
   else
@@ -107,7 +97,7 @@ if [ "$RESTART" = true ]; then
   fi
 else
   echo "[3/3] Skipping restart (apps will pick up update on next launch)"
-  echo "  Use --restart to force-restart all devices now"
+  echo "  Use --restart to force double-restart all devices now"
 fi
 
 # Clean up

@@ -75,6 +75,16 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "stage_ios",
+      description: "STAGING tier: Trigger an iOS CI build explicitly. Use this when King Kazuma says the app is ready for iPhone. JS-only changes do NOT auto-build iOS — this is the only way to get a new IPA. Caches to artifacts/ozzu-latest.ipa.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Optional directive ID to link the build to" },
+        },
+      },
+    },
+    {
       name: "check_pipeline",
       description: "Check the health of the entire pipeline — stuck directives, failed deploys, service status.",
       inputSchema: { type: "object", properties: {} },
@@ -478,6 +488,16 @@ module.exports = function mcpRoutes(ctx) {
         }
 
         return { content: [{ type: "text", text: `✓ Merged ${args.branch} → main. Directive ${args.id} completed. Deploy triggered.` }] };
+      }
+
+      case "stage_ios": {
+        const { stageIos } = require("../agent-spawner");
+        if (!stageIos) {
+          return { content: [{ type: "text", text: "Error: stageIos not available" }], isError: true };
+        }
+        const directive = args.id ? getDirectives().find(d => d.id === args.id) : null;
+        stageIos(directive);
+        return { content: [{ type: "text", text: "✓ iOS STAGING build triggered. IPA will be cached to artifacts/ozzu-latest.ipa in ~10 minutes." }] };
       }
 
       case "check_pipeline": {
