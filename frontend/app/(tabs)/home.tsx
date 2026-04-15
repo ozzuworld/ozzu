@@ -335,25 +335,21 @@ export default function HomeScreen() {
           }} />
         </View>
 
-        {/* ── Square shortcut grid ── */}
+        {/* ── Shortcut grid (2×2) ── */}
         <View style={{ paddingHorizontal: SIDE, width: "100%" }}>
           {[
             [
               { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", badge: stats.ventureCount > 0 ? `${stats.ventureCount}` : "" },
-              { id: "finance", icon: "💰", label: "Finance", route: "/finance", badge: "" },
-            ],
-            [
               { id: "intel", icon: "🕵️", label: "Intel", route: "/osint", badge: "" },
-              { id: "influence", icon: "🔗", label: "Influence", route: "/influence", badge: "" },
             ],
             [
               { id: "ops", icon: "🖥️", label: "Ops", route: "/ops", badge: "" },
-              { id: "files", icon: "📦", label: "Files", route: "/files", badge: "" },
+              { id: "influence", icon: "🔗", label: "Influence", route: "/influence", badge: "" },
             ],
           ].map((row, ri) => (
             <View key={ri} style={{ flexDirection: "row", gap: gridGap, marginBottom: gridGap }}>
               {row.map((tile) => (
-                <View key={tile.id} style={{ width: tileSize, height: tileSize * 0.55 }}>
+                <View key={tile.id} style={{ width: tileSize, height: tileSize * 0.5 }}>
                 <Pressable
                   onPress={() => router.push(tile.route as any)}
                   style={({ pressed }) => ({
@@ -413,9 +409,9 @@ export default function HomeScreen() {
       }}>
         {[
           { icon: "⌂", label: "Home", route: null, active: true },
-          { icon: "⊞", label: "Modules", route: "/directives" },
-          { icon: "◎", label: "Cipher", route: "/cipher" },
-          { icon: "◫", label: "Intel", route: "/osint" },
+          { icon: "▶", label: "Directives", route: "/directives" },
+          { icon: "◎", label: "Finance", route: "/finance" },
+          { icon: "✉", label: "Inbox", route: "/messages" },
           { icon: "◉", label: "Me", route: "/identity" },
         ].map((tab, i) => (
           <Pressable
