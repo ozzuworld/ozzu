@@ -6040,63 +6040,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// ── Dev Mirror WebSocket — streams device screenshots to TV app ──
-const devMirrorWss = new WebSocket.Server({ noServer: true, perMessageDeflate: false });
-const _mirrorStreams = new Map(); // port -> { clients: Set<ws>, interval, lastFrame }
-
-devMirrorWss.on("connection", (ws, req) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`);
-  const port = parseInt(url.searchParams.get("port") || "5560");
-  const fps = Math.min(parseInt(url.searchParams.get("fps") || "5"), 10); // cap at 10fps
-  log.bridge.info(`[dev-mirror] client connected for port ${port} @ ${fps}fps`);
-
-  // Track this client under its port
-  if (!_mirrorStreams.has(port)) {
-    _mirrorStreams.set(port, { clients: new Set(), interval: null, lastFrame: null });
-  }
-  const stream = _mirrorStreams.get(port);
-  stream.clients.add(ws);
-
-  // Start streaming if this is the first client for this port
-  if (!stream.interval) {
-    const intervalMs = Math.max(Math.floor(1000 / fps), 100);
-    let capturing = false;
-    stream.interval = setInterval(() => {
-      if (capturing || stream.clients.size === 0) return;
-      capturing = true;
-      try {
-        const { execSync } = require("child_process");
-        const adbBin = require("fs").existsSync("/app/adb") ? "/app/adb" : "adb";
-        const png = execSync(
-          `${adbBin} -s localhost:${port} exec-out screencap -p`,
-          { timeout: 4000, maxBuffer: 10 * 1024 * 1024 }
-        );
-        stream.lastFrame = png;
-        for (const client of stream.clients) {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(png, { binary: true });
-          }
-        }
-      } catch {}
-      capturing = false;
-    }, intervalMs);
-  }
-
-  // Send last frame immediately so client doesn't start with black screen
-  if (stream.lastFrame && ws.readyState === WebSocket.OPEN) {
-    ws.send(stream.lastFrame, { binary: true });
-  }
-
-  ws.on("close", () => {
-    stream.clients.delete(ws);
-    if (stream.clients.size === 0 && stream.interval) {
-      clearInterval(stream.interval);
-      stream.interval = null;
-      stream.lastFrame = null;
-      log.bridge.info(`[dev-mirror] all clients disconnected from port ${port}, stopping capture`);
-    }
-  });
-});
+// ── Dev Mirror — MOVED to standalone service (backend/mirror/mirror-server.js on port 3340) ──
+// The execSync screencap was blocking the event loop at 5fps, causing manifest/HTTP timeouts.
+// nginx now routes /bridge/dev/mirror to the standalone service.
 
 // ── Device WebSocket server ──
 
@@ -6106,9 +6052,8 @@ const wss = new WebSocket.Server({ noServer: true });
 server.on("upgrade", (req, socket, head) => {
   const pathname = new URL(req.url, `http://localhost:${PORT}`).pathname;
   if (pathname === "/dev/mirror") {
-    devMirrorWss.handleUpgrade(req, socket, head, (ws) => {
-      devMirrorWss.emit("connection", ws, req);
-    });
+    // Mirror moved to standalone service on port 3340 — nginx routes there directly
+    socket.destroy();
   } else if (pathname === "/ws") {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);

@@ -25,6 +25,14 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ozzuLogo = require("../../assets/ozzu-logo.png");
 
+// Surface colors — high contrast against #0a0a0a base
+const CARD_BG = "#252729";
+const CARD_BORDER = "#3a3c40";
+const TILE_BG = "#252729";
+const TILE_BORDER = "#3a3c40";
+const GO_BG = "#3a3c40";
+const ICON_BOX_BG = "#37393d";
+
 // ── Live stats ──
 
 function useHomeStats() {
@@ -73,9 +81,9 @@ export default function HomeScreen() {
 
   const SIDE = 20;
   const dims = Dimensions.get("window");
-  const W = Math.min(dims.width, dims.height); // always portrait width
-  const logoSize = W * 0.52;
-  const gridGap = 12;
+  const W = Math.min(dims.width, dims.height);
+  const logoSize = W * 0.42;
+  const gridGap = 10;
   const cardWidth = (W - SIDE * 2 - gridGap) / 2;
   const tileSize = cardWidth;
 
@@ -87,21 +95,21 @@ export default function HomeScreen() {
       <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, overflow: "hidden" }}>
         <View style={{
           position: "absolute",
-          top: W * 0.05,
-          left: W * 0.1,
-          width: W * 0.8,
-          height: W * 0.8,
-          borderRadius: W * 0.4,
-          backgroundColor: withAlpha("#1a1a2e", 0.8),
+          top: -W * 0.1,
+          left: -W * 0.1,
+          width: W * 1.2,
+          height: W * 0.85,
+          borderRadius: W * 0.42,
+          backgroundColor: withAlpha("#1a1520", 0.9),
         }} />
         <View style={{
           position: "absolute",
-          top: W * 0.15,
-          left: W * 0.2,
-          width: W * 0.6,
+          top: W * 0.02,
+          left: W * 0.12,
+          width: W * 0.76,
           height: W * 0.6,
           borderRadius: W * 0.3,
-          backgroundColor: withAlpha("#1e1f30", 0.5),
+          backgroundColor: withAlpha("#1e1828", 0.55),
         }} />
       </View>
 
@@ -162,27 +170,18 @@ export default function HomeScreen() {
         <View style={{
           alignItems: "center",
           justifyContent: "center",
-          paddingVertical: W * 0.04,
-          minHeight: W * 0.62,
+          paddingVertical: W * 0.03,
+          minHeight: W * 0.46,
         }}>
-          <View style={{
-            width: logoSize,
-            height: logoSize,
-            borderRadius: logoSize / 2,
-            backgroundColor: withAlpha("#ffffff", 0.03),
-            alignItems: "center",
-            justifyContent: "center",
-          }}>
-            <Image
-              source={ozzuLogo}
-              style={{
-                width: logoSize * 0.85,
-                height: logoSize * 0.85,
-                borderRadius: (logoSize * 0.85) / 2,
-              }}
-              resizeMode="contain"
-            />
-          </View>
+          <Image
+            source={ozzuLogo}
+            style={{
+              width: logoSize,
+              height: logoSize,
+              borderRadius: logoSize / 2,
+            }}
+            resizeMode="contain"
+          />
         </View>
 
         {/* ── Name + Status row ── */}
@@ -190,48 +189,46 @@ export default function HomeScreen() {
           paddingHorizontal: SIDE,
           flexDirection: "row",
           justifyContent: "space-between",
-          alignItems: "flex-start",
-          marginBottom: 16,
+          alignItems: "center",
+          marginBottom: 12,
         }}>
           <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Text style={{
                 color: colors.text.primary,
-                fontSize: 24,
+                fontSize: 22,
                 fontWeight: fw.bold,
-                letterSpacing: -0.5,
+                letterSpacing: -0.4,
               }}>
                 Ozzu
               </Text>
-              <Text style={{ fontSize: 13, opacity: 0.25 }}>{"✎"}</Text>
+              <Text style={{ fontSize: 11, color: colors.text.disabled }}>{"✎"}</Text>
             </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 }}>
               <View style={{
-                width: 7, height: 7, borderRadius: 4,
+                width: 6, height: 6, borderRadius: 3,
                 backgroundColor: stats.attentionCount > 0 ? colors.warning : colors.success,
               }} />
               <Text style={{
                 color: colors.text.secondary,
                 fontSize: fs.md,
-                fontWeight: fw.normal,
               }}>
                 {stats.statusText}
               </Text>
             </View>
           </View>
 
-          {/* GO button */}
+          {/* GO pill */}
           <Pressable
             onPress={() => router.push("/directives" as any)}
             style={({ pressed }) => ({
               flexDirection: "row",
               alignItems: "center",
-              backgroundColor: withAlpha(colors.text.primary, pressed ? 0.15 : 0.08),
-              paddingHorizontal: 18,
+              backgroundColor: pressed ? "#383a3d" : GO_BG,
+              paddingHorizontal: 22,
               paddingVertical: 10,
               borderRadius: radius.full,
-              gap: 4,
-              marginTop: 2,
+              gap: 6,
             })}
           >
             <Text style={{
@@ -241,13 +238,13 @@ export default function HomeScreen() {
             }}>
               GO
             </Text>
-            <Text style={{ color: colors.text.secondary, fontSize: fs.md }}>
+            <Text style={{ color: colors.text.tertiary, fontSize: fs.base }}>
               {">"}
             </Text>
           </Pressable>
         </View>
 
-        {/* ── Action cards (Dreame-style: tall, solid surface) ── */}
+        {/* ── Action cards ── */}
         <View style={{
           flexDirection: "row",
           paddingHorizontal: SIDE,
@@ -259,16 +256,24 @@ export default function HomeScreen() {
               onPress={() => router.push("/directives" as any)}
               style={({ pressed }) => ({
                 flex: 1,
-                backgroundColor: colors.bg.surface,
+                backgroundColor: CARD_BG,
                 borderRadius: radius.xl,
+                borderWidth: 1,
+                borderColor: CARD_BORDER,
                 padding: 16,
                 justifyContent: "space-between",
-                minHeight: 120,
+                minHeight: 126,
                 transform: [{ scale: pressed ? 0.97 : 1 }],
                 opacity: pressed ? 0.85 : 1,
               })}
             >
-              <Text style={{ fontSize: 26 }}>{"▶"}</Text>
+              <View style={{
+                width: 42, height: 42, borderRadius: 12,
+                backgroundColor: ICON_BOX_BG,
+                alignItems: "center", justifyContent: "center",
+              }}>
+                <Text style={{ fontSize: 20 }}>{"▶"}</Text>
+              </View>
               <View>
                 <Text style={{
                   color: colors.text.primary,
@@ -295,16 +300,24 @@ export default function HomeScreen() {
               onPress={() => router.push("/messages" as any)}
               style={({ pressed }) => ({
                 flex: 1,
-                backgroundColor: colors.bg.surface,
+                backgroundColor: CARD_BG,
                 borderRadius: radius.xl,
+                borderWidth: 1,
+                borderColor: CARD_BORDER,
                 padding: 16,
                 justifyContent: "space-between",
-                minHeight: 120,
+                minHeight: 126,
                 transform: [{ scale: pressed ? 0.97 : 1 }],
                 opacity: pressed ? 0.85 : 1,
               })}
             >
-              <Text style={{ fontSize: 26 }}>{"💬"}</Text>
+              <View style={{
+                width: 42, height: 42, borderRadius: 12,
+                backgroundColor: ICON_BOX_BG,
+                alignItems: "center", justifyContent: "center",
+              }}>
+                <Text style={{ fontSize: 20 }}>{"💬"}</Text>
+              </View>
               <Text style={{
                 color: colors.text.primary,
                 fontSize: 15,
@@ -321,16 +334,16 @@ export default function HomeScreen() {
           flexDirection: "row",
           justifyContent: "center",
           alignItems: "center",
-          gap: 6,
-          marginTop: 16,
-          marginBottom: 20,
+          gap: 5,
+          marginTop: 12,
+          marginBottom: 12,
         }}>
           <View style={{
-            width: 18, height: 5, borderRadius: 3,
-            backgroundColor: withAlpha(colors.text.primary, 0.35),
+            width: 16, height: 4, borderRadius: 2,
+            backgroundColor: withAlpha(colors.text.primary, 0.3),
           }} />
           <View style={{
-            width: 5, height: 5, borderRadius: 3,
+            width: 4, height: 4, borderRadius: 2,
             backgroundColor: withAlpha(colors.text.primary, 0.1),
           }} />
         </View>
@@ -349,25 +362,28 @@ export default function HomeScreen() {
           ].map((row, ri) => (
             <View key={ri} style={{ flexDirection: "row", gap: gridGap, marginBottom: gridGap }}>
               {row.map((tile) => (
-                <View key={tile.id} style={{ width: tileSize, height: tileSize * 0.5 }}>
+                <View key={tile.id} style={{ width: tileSize, height: tileSize * 0.58 }}>
                 <Pressable
                   onPress={() => router.push(tile.route as any)}
                   style={({ pressed }) => ({
                     flex: 1,
-                    backgroundColor: colors.bg.elevated,
+                    backgroundColor: TILE_BG,
                     borderRadius: radius.xl,
-                    padding: 14,
+                    borderWidth: 1,
+                    borderColor: TILE_BORDER,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
                     justifyContent: "space-between",
                     transform: [{ scale: pressed ? 0.96 : 1 }],
                     opacity: pressed ? 0.8 : 1,
                   })}
                 >
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <Text style={{ fontSize: 28 }}>{tile.icon}</Text>
+                    <Text style={{ fontSize: 22 }}>{tile.icon}</Text>
                     {tile.badge !== "" && (
                       <View style={{
                         backgroundColor: withAlpha(colors.accent, 0.15),
-                        paddingHorizontal: 8,
+                        paddingHorizontal: 7,
                         paddingVertical: 2,
                         borderRadius: radius.full,
                       }}>
@@ -379,7 +395,7 @@ export default function HomeScreen() {
                   </View>
                   <Text style={{
                     color: colors.text.secondary,
-                    fontSize: fs.lg,
+                    fontSize: fs.base,
                     fontWeight: fw.medium,
                   }}>
                     {tile.label}
