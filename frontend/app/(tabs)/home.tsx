@@ -102,7 +102,7 @@ export default function HomeScreen() {
       <ScrollView
         contentContainerStyle={{
           paddingTop: insets.top + 12,
-          paddingBottom: insets.bottom + 40,
+          paddingBottom: insets.bottom + 80,
         }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text.tertiary} />
@@ -243,7 +243,7 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {/* ── Action cards ── */}
+        {/* ── Action cards (2 only — mimics Dreame) ── */}
         <View style={{
           flexDirection: "row",
           paddingHorizontal: SIDE,
@@ -260,7 +260,7 @@ export default function HomeScreen() {
               padding: 18,
               paddingBottom: 20,
               justifyContent: "space-between",
-              minHeight: 100,
+              minHeight: 110,
               borderWidth: 1,
               borderColor: withAlpha(colors.border.default, 0.5),
               transform: [{ scale: pressed ? 0.97 : 1 }],
@@ -296,7 +296,7 @@ export default function HomeScreen() {
               padding: 18,
               paddingBottom: 20,
               justifyContent: "space-between",
-              minHeight: 100,
+              minHeight: 110,
               borderWidth: 1,
               borderColor: withAlpha(colors.border.default, 0.5),
               transform: [{ scale: pressed ? 0.97 : 1 }],
@@ -331,58 +331,6 @@ export default function HomeScreen() {
             width: 5, height: 5, borderRadius: 3,
             backgroundColor: withAlpha(colors.text.primary, 0.12),
           }} />
-        </View>
-
-        {/* ── Quick access grid ── */}
-        <View style={{ paddingHorizontal: SIDE }}>
-          {[
-            [
-              { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", stat: stats.ventureCount > 0 ? `${stats.ventureCount} active` : "" },
-              { id: "finance", icon: "💰", label: "Finance", route: "/finance", stat: "" },
-            ],
-            [
-              { id: "intel", icon: "🕵️", label: "Intel", route: "/osint", stat: "" },
-              { id: "influence", icon: "🔗", label: "Influence", route: "/influence", stat: "" },
-            ],
-            [
-              { id: "ops", icon: "🖥️", label: "Ops", route: "/ops", stat: "" },
-              { id: "files", icon: "📦", label: "Files", route: "/files", stat: "" },
-            ],
-            [
-              { id: "identity", icon: "🪪", label: "Identity", route: "/identity", stat: "" },
-              { id: "music", icon: "🎵", label: "Music", route: "/music", stat: "" },
-            ],
-          ].map((row, ri) => (
-            <View key={ri} style={{ flexDirection: "row", gap: 12, marginBottom: 12 }}>
-              {row.map((tile) => (
-                <Pressable
-                  key={tile.id}
-                  onPress={() => router.push(tile.route as any)}
-                  style={({ pressed }) => ({
-                    flex: 1,
-                    height: 88,
-                    backgroundColor: withAlpha(colors.bg.surface, 0.6),
-                    borderRadius: radius.xl,
-                    padding: 16,
-                    justifyContent: "space-between",
-                    borderWidth: 1,
-                    borderColor: withAlpha(colors.border.default, 0.3),
-                    transform: [{ scale: pressed ? 0.96 : 1 }],
-                    opacity: pressed ? 0.8 : 1,
-                  })}
-                >
-                  <Text style={{ fontSize: 22 }}>{tile.icon}</Text>
-                  <Text style={{
-                    color: colors.text.secondary,
-                    fontSize: fs.md,
-                    fontWeight: fw.medium,
-                  }}>
-                    {tile.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ))}
         </View>
       </ScrollView>
 
