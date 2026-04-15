@@ -6,6 +6,7 @@ import {
   ScrollView,
   Pressable,
   RefreshControl,
+  Dimensions,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
@@ -71,11 +72,12 @@ export default function HomeScreen() {
   }, []);
 
   const SIDE = 20;
-  const logoSize = screenWidth * 0.52;
-
-  // Square grid: 2 columns, compute tile size from available width
+  const dims = Dimensions.get("window");
+  const W = Math.min(dims.width, dims.height); // always portrait width
+  const logoSize = W * 0.52;
   const gridGap = 12;
-  const tileSize = (screenWidth - SIDE * 2 - gridGap) / 2;
+  const cardWidth = (W - SIDE * 2 - gridGap) / 2;
+  const tileSize = cardWidth;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
@@ -85,20 +87,20 @@ export default function HomeScreen() {
       <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, overflow: "hidden" }}>
         <View style={{
           position: "absolute",
-          top: screenWidth * 0.05,
-          left: screenWidth * 0.1,
-          width: screenWidth * 0.8,
-          height: screenWidth * 0.8,
-          borderRadius: screenWidth * 0.4,
+          top: W * 0.05,
+          left: W * 0.1,
+          width: W * 0.8,
+          height: W * 0.8,
+          borderRadius: W * 0.4,
           backgroundColor: withAlpha("#1a1a2e", 0.8),
         }} />
         <View style={{
           position: "absolute",
-          top: screenWidth * 0.15,
-          left: screenWidth * 0.2,
-          width: screenWidth * 0.6,
-          height: screenWidth * 0.6,
-          borderRadius: screenWidth * 0.3,
+          top: W * 0.15,
+          left: W * 0.2,
+          width: W * 0.6,
+          height: W * 0.6,
+          borderRadius: W * 0.3,
           backgroundColor: withAlpha("#1e1f30", 0.5),
         }} />
       </View>
@@ -107,6 +109,7 @@ export default function HomeScreen() {
         contentContainerStyle={{
           paddingTop: insets.top + 12,
           paddingBottom: insets.bottom + 80,
+          width: W,
         }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text.tertiary} />
@@ -159,8 +162,8 @@ export default function HomeScreen() {
         <View style={{
           alignItems: "center",
           justifyContent: "center",
-          paddingVertical: screenWidth * 0.04,
-          minHeight: screenWidth * 0.62,
+          paddingVertical: W * 0.04,
+          minHeight: W * 0.62,
         }}>
           <View style={{
             width: logoSize,
@@ -249,63 +252,68 @@ export default function HomeScreen() {
           flexDirection: "row",
           paddingHorizontal: SIDE,
           gap: gridGap,
+          width: "100%",
         }}>
-          <Pressable
-            onPress={() => router.push("/directives" as any)}
-            style={({ pressed }) => ({
-              flex: 1,
-              backgroundColor: colors.bg.surface,
-              borderRadius: radius.xl,
-              padding: 16,
-              justifyContent: "space-between",
-              minHeight: 120,
-              transform: [{ scale: pressed ? 0.97 : 1 }],
-              opacity: pressed ? 0.85 : 1,
-            })}
-          >
-            <Text style={{ fontSize: 26 }}>{"▶"}</Text>
-            <View>
+          <View style={{ width: cardWidth }}>
+            <Pressable
+              onPress={() => router.push("/directives" as any)}
+              style={({ pressed }) => ({
+                flex: 1,
+                backgroundColor: colors.bg.surface,
+                borderRadius: radius.xl,
+                padding: 16,
+                justifyContent: "space-between",
+                minHeight: 120,
+                transform: [{ scale: pressed ? 0.97 : 1 }],
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ fontSize: 26 }}>{"▶"}</Text>
+              <View>
+                <Text style={{
+                  color: colors.text.primary,
+                  fontSize: 15,
+                  fontWeight: fw.medium,
+                }}>
+                  Directives
+                </Text>
+                {stats.directiveCount > 0 && (
+                  <Text style={{
+                    color: colors.text.tertiary,
+                    fontSize: fs.sm,
+                    marginTop: 2,
+                  }}>
+                    {stats.directiveCount} active
+                  </Text>
+                )}
+              </View>
+            </Pressable>
+          </View>
+
+          <View style={{ width: cardWidth }}>
+            <Pressable
+              onPress={() => router.push("/messages" as any)}
+              style={({ pressed }) => ({
+                flex: 1,
+                backgroundColor: colors.bg.surface,
+                borderRadius: radius.xl,
+                padding: 16,
+                justifyContent: "space-between",
+                minHeight: 120,
+                transform: [{ scale: pressed ? 0.97 : 1 }],
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ fontSize: 26 }}>{"💬"}</Text>
               <Text style={{
                 color: colors.text.primary,
                 fontSize: 15,
                 fontWeight: fw.medium,
               }}>
-                Directives
+                Messages
               </Text>
-              {stats.directiveCount > 0 && (
-                <Text style={{
-                  color: colors.text.tertiary,
-                  fontSize: fs.sm,
-                  marginTop: 2,
-                }}>
-                  {stats.directiveCount} active
-                </Text>
-              )}
-            </View>
-          </Pressable>
-
-          <Pressable
-            onPress={() => router.push("/messages" as any)}
-            style={({ pressed }) => ({
-              flex: 1,
-              backgroundColor: colors.bg.surface,
-              borderRadius: radius.xl,
-              padding: 16,
-              justifyContent: "space-between",
-              minHeight: 120,
-              transform: [{ scale: pressed ? 0.97 : 1 }],
-              opacity: pressed ? 0.85 : 1,
-            })}
-          >
-            <Text style={{ fontSize: 26 }}>{"💬"}</Text>
-            <Text style={{
-              color: colors.text.primary,
-              fontSize: 15,
-              fontWeight: fw.medium,
-            }}>
-              Messages
-            </Text>
-          </Pressable>
+            </Pressable>
+          </View>
         </View>
 
         {/* ── Page dots ── */}
@@ -328,7 +336,7 @@ export default function HomeScreen() {
         </View>
 
         {/* ── Square shortcut grid ── */}
-        <View style={{ paddingHorizontal: SIDE }}>
+        <View style={{ paddingHorizontal: SIDE, width: "100%" }}>
           {[
             [
               { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", badge: stats.ventureCount > 0 ? `${stats.ventureCount}` : "" },
@@ -345,12 +353,11 @@ export default function HomeScreen() {
           ].map((row, ri) => (
             <View key={ri} style={{ flexDirection: "row", gap: gridGap, marginBottom: gridGap }}>
               {row.map((tile) => (
+                <View key={tile.id} style={{ width: tileSize, height: tileSize * 0.55 }}>
                 <Pressable
-                  key={tile.id}
                   onPress={() => router.push(tile.route as any)}
                   style={({ pressed }) => ({
-                    width: tileSize,
-                    height: tileSize,
+                    flex: 1,
                     backgroundColor: colors.bg.elevated,
                     borderRadius: radius.xl,
                     padding: 14,
@@ -382,6 +389,7 @@ export default function HomeScreen() {
                     {tile.label}
                   </Text>
                 </Pressable>
+                </View>
               ))}
             </View>
           ))}
