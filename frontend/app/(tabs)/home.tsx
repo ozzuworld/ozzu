@@ -71,31 +71,35 @@ export default function HomeScreen() {
   }, []);
 
   const SIDE = 20;
-  const logoSize = screenWidth * 0.58;
+  const logoSize = screenWidth * 0.52;
+
+  // Square grid: 2 columns, compute tile size from available width
+  const gridGap = 12;
+  const tileSize = (screenWidth - SIDE * 2 - gridGap) / 2;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
       <StatusBar style="light" />
 
-      {/* Ambient glow behind logo area */}
+      {/* Ambient glow behind logo */}
       <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, overflow: "hidden" }}>
         <View style={{
           position: "absolute",
-          top: screenWidth * 0.08,
+          top: screenWidth * 0.05,
           left: screenWidth * 0.1,
           width: screenWidth * 0.8,
           height: screenWidth * 0.8,
           borderRadius: screenWidth * 0.4,
-          backgroundColor: withAlpha("#1a1a2e", 0.9),
+          backgroundColor: withAlpha("#1a1a2e", 0.8),
         }} />
         <View style={{
           position: "absolute",
-          top: screenWidth * 0.18,
+          top: screenWidth * 0.15,
           left: screenWidth * 0.2,
           width: screenWidth * 0.6,
           height: screenWidth * 0.6,
           borderRadius: screenWidth * 0.3,
-          backgroundColor: withAlpha("#1e1f30", 0.6),
+          backgroundColor: withAlpha("#1e1f30", 0.5),
         }} />
       </View>
 
@@ -115,7 +119,7 @@ export default function HomeScreen() {
           justifyContent: "space-between",
           alignItems: "center",
           paddingHorizontal: SIDE,
-          marginBottom: 8,
+          marginBottom: 4,
         }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Text style={{
@@ -155,23 +159,23 @@ export default function HomeScreen() {
         <View style={{
           alignItems: "center",
           justifyContent: "center",
-          paddingVertical: screenWidth * 0.06,
-          minHeight: screenWidth * 0.75,
+          paddingVertical: screenWidth * 0.04,
+          minHeight: screenWidth * 0.62,
         }}>
           <View style={{
             width: logoSize,
             height: logoSize,
             borderRadius: logoSize / 2,
-            backgroundColor: withAlpha("#ffffff", 0.04),
+            backgroundColor: withAlpha("#ffffff", 0.03),
             alignItems: "center",
             justifyContent: "center",
           }}>
             <Image
               source={ozzuLogo}
               style={{
-                width: logoSize * 0.82,
-                height: logoSize * 0.82,
-                borderRadius: (logoSize * 0.82) / 2,
+                width: logoSize * 0.85,
+                height: logoSize * 0.85,
+                borderRadius: (logoSize * 0.85) / 2,
               }}
               resizeMode="contain"
             />
@@ -184,19 +188,19 @@ export default function HomeScreen() {
           flexDirection: "row",
           justifyContent: "space-between",
           alignItems: "flex-start",
-          marginBottom: 6,
+          marginBottom: 16,
         }}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={{
                 color: colors.text.primary,
-                fontSize: 26,
+                fontSize: 24,
                 fontWeight: fw.bold,
                 letterSpacing: -0.5,
               }}>
                 Ozzu
               </Text>
-              <Text style={{ fontSize: 14, opacity: 0.3 }}>{"✎"}</Text>
+              <Text style={{ fontSize: 13, opacity: 0.25 }}>{"✎"}</Text>
             </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
               <View style={{
@@ -213,7 +217,7 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          {/* GO button — navigates to directives */}
+          {/* GO button */}
           <Pressable
             onPress={() => router.push("/directives" as any)}
             style={({ pressed }) => ({
@@ -224,7 +228,7 @@ export default function HomeScreen() {
               paddingVertical: 10,
               borderRadius: radius.full,
               gap: 4,
-              marginTop: 4,
+              marginTop: 2,
             })}
           >
             <Text style={{
@@ -234,79 +238,69 @@ export default function HomeScreen() {
             }}>
               GO
             </Text>
-            <Text style={{
-              color: colors.text.secondary,
-              fontSize: fs.md,
-            }}>
+            <Text style={{ color: colors.text.secondary, fontSize: fs.md }}>
               {">"}
             </Text>
           </Pressable>
         </View>
 
-        {/* ── Action cards (2 only — mimics Dreame) ── */}
+        {/* ── Action cards (Dreame-style: tall, solid surface) ── */}
         <View style={{
           flexDirection: "row",
           paddingHorizontal: SIDE,
-          gap: 12,
-          marginTop: 20,
+          gap: gridGap,
         }}>
-          {/* Directives card */}
           <Pressable
             onPress={() => router.push("/directives" as any)}
             style={({ pressed }) => ({
               flex: 1,
-              backgroundColor: withAlpha(colors.bg.surface, 0.8),
+              backgroundColor: colors.bg.surface,
               borderRadius: radius.xl,
-              padding: 18,
-              paddingBottom: 20,
+              padding: 16,
               justifyContent: "space-between",
-              minHeight: 110,
-              borderWidth: 1,
-              borderColor: withAlpha(colors.border.default, 0.5),
+              minHeight: 120,
               transform: [{ scale: pressed ? 0.97 : 1 }],
               opacity: pressed ? 0.85 : 1,
             })}
           >
-            <Text style={{ fontSize: 22, marginBottom: 16 }}>{"▶"}</Text>
-            <Text style={{
-              color: colors.text.primary,
-              fontSize: fs.lg,
-              fontWeight: fw.medium,
-            }}>
-              Directives
-            </Text>
-            {stats.directiveCount > 0 && (
+            <Text style={{ fontSize: 26 }}>{"▶"}</Text>
+            <View>
               <Text style={{
-                color: colors.text.tertiary,
-                fontSize: fs.xs,
-                marginTop: 3,
+                color: colors.text.primary,
+                fontSize: 15,
+                fontWeight: fw.medium,
               }}>
-                {stats.directiveCount} active
+                Directives
               </Text>
-            )}
+              {stats.directiveCount > 0 && (
+                <Text style={{
+                  color: colors.text.tertiary,
+                  fontSize: fs.sm,
+                  marginTop: 2,
+                }}>
+                  {stats.directiveCount} active
+                </Text>
+              )}
+            </View>
           </Pressable>
 
-          {/* Messages card */}
           <Pressable
             onPress={() => router.push("/messages" as any)}
             style={({ pressed }) => ({
               flex: 1,
-              backgroundColor: withAlpha(colors.bg.surface, 0.8),
+              backgroundColor: colors.bg.surface,
               borderRadius: radius.xl,
-              padding: 18,
-              paddingBottom: 20,
+              padding: 16,
               justifyContent: "space-between",
-              minHeight: 110,
-              borderWidth: 1,
-              borderColor: withAlpha(colors.border.default, 0.5),
+              minHeight: 120,
               transform: [{ scale: pressed ? 0.97 : 1 }],
               opacity: pressed ? 0.85 : 1,
             })}
           >
-            <Text style={{ fontSize: 22, marginBottom: 16 }}>{"⌂"}</Text>
+            <Text style={{ fontSize: 26 }}>{"💬"}</Text>
             <Text style={{
               color: colors.text.primary,
-              fontSize: fs.lg,
+              fontSize: 15,
               fontWeight: fw.medium,
             }}>
               Messages
@@ -320,21 +314,81 @@ export default function HomeScreen() {
           justifyContent: "center",
           alignItems: "center",
           gap: 6,
-          marginTop: 20,
-          marginBottom: 24,
+          marginTop: 16,
+          marginBottom: 20,
         }}>
           <View style={{
-            width: 20, height: 5, borderRadius: 3,
-            backgroundColor: withAlpha(colors.text.primary, 0.4),
+            width: 18, height: 5, borderRadius: 3,
+            backgroundColor: withAlpha(colors.text.primary, 0.35),
           }} />
           <View style={{
             width: 5, height: 5, borderRadius: 3,
-            backgroundColor: withAlpha(colors.text.primary, 0.12),
+            backgroundColor: withAlpha(colors.text.primary, 0.1),
           }} />
+        </View>
+
+        {/* ── Square shortcut grid ── */}
+        <View style={{ paddingHorizontal: SIDE }}>
+          {[
+            [
+              { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", badge: stats.ventureCount > 0 ? `${stats.ventureCount}` : "" },
+              { id: "finance", icon: "💰", label: "Finance", route: "/finance", badge: "" },
+            ],
+            [
+              { id: "intel", icon: "🕵️", label: "Intel", route: "/osint", badge: "" },
+              { id: "influence", icon: "🔗", label: "Influence", route: "/influence", badge: "" },
+            ],
+            [
+              { id: "ops", icon: "🖥️", label: "Ops", route: "/ops", badge: "" },
+              { id: "files", icon: "📦", label: "Files", route: "/files", badge: "" },
+            ],
+          ].map((row, ri) => (
+            <View key={ri} style={{ flexDirection: "row", gap: gridGap, marginBottom: gridGap }}>
+              {row.map((tile) => (
+                <Pressable
+                  key={tile.id}
+                  onPress={() => router.push(tile.route as any)}
+                  style={({ pressed }) => ({
+                    width: tileSize,
+                    height: tileSize,
+                    backgroundColor: colors.bg.elevated,
+                    borderRadius: radius.xl,
+                    padding: 14,
+                    justifyContent: "space-between",
+                    transform: [{ scale: pressed ? 0.96 : 1 }],
+                    opacity: pressed ? 0.8 : 1,
+                  })}
+                >
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <Text style={{ fontSize: 28 }}>{tile.icon}</Text>
+                    {tile.badge !== "" && (
+                      <View style={{
+                        backgroundColor: withAlpha(colors.accent, 0.15),
+                        paddingHorizontal: 8,
+                        paddingVertical: 2,
+                        borderRadius: radius.full,
+                      }}>
+                        <Text style={{ color: colors.accentLight, fontSize: fs.xs, fontWeight: fw.medium }}>
+                          {tile.badge}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={{
+                    color: colors.text.secondary,
+                    fontSize: fs.lg,
+                    fontWeight: fw.medium,
+                  }}>
+                    {tile.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ))}
         </View>
       </ScrollView>
 
-      {/* ── Bottom tab bar (mimics Dreame) ── */}
+      {/* ── Bottom tab bar ── */}
       <View style={{
         position: "absolute",
         bottom: 0,
