@@ -34,6 +34,7 @@ public class GlassesModule: Module {
     private var registrationTask: Task<Void, Never>?
 #endif
 #if canImport(MWDATCamera)
+    private var deviceSession: DeviceSession?
     private var streamSession: StreamSession?
     private var stateListenerToken: AnyListenerToken?
     private var videoFrameListenerToken: AnyListenerToken?
@@ -386,11 +387,57 @@ public class GlassesModule: Module {
                 frameRate: frameRate
             )
 
+            // 0.6.0 API: create DeviceSession first, then add stream as capability
             let deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
-            let session = await StreamSession(
-                streamSessionConfig: config,
-                deviceSelector: deviceSelector
-            )
+            let devSession: DeviceSession
+            do {
+                devSession = try Wearables.shared.createSession(deviceSelector: deviceSelector)
+            } catch {
+                GlassesModule.log("Failed to create device session: \(error)")
+                self.sendEvent("onError", [
+                    "code": "SESSION_ERROR",
+                    "message": "Failed to create device session: \(error)"
+                ])
+                return
+            }
+            self.deviceSession = devSession
+
+            // Start device session and wait for .started state
+            do {
+                try devSession.start()
+                let stateStream = devSession.stateStream()
+                for await state in stateStream {
+                    if state == .started { break }
+                    if state == .stopped {
+                        GlassesModule.log("Device session stopped before starting")
+                        self.sendEvent("onError", [
+                            "code": "SESSION_ERROR",
+                            "message": "Device session stopped unexpectedly"
+                        ])
+                        return
+                    }
+                }
+            } catch {
+                GlassesModule.log("Failed to start device session: \(error)")
+                self.sendEvent("onError", [
+                    "code": "SESSION_ERROR",
+                    "message": "Failed to start device session: \(error)"
+                ])
+                return
+            }
+
+            // Add stream capability to the device session
+            let session: StreamSession
+            do {
+                session = try devSession.addStream(config: config)
+            } catch {
+                GlassesModule.log("Failed to add stream: \(error)")
+                self.sendEvent("onError", [
+                    "code": "STREAM_ERROR",
+                    "message": "Failed to add stream: \(error)"
+                ])
+                return
+            }
             self.streamSession = session
 
             // Subscribe to state changes
@@ -595,6 +642,8 @@ public class GlassesModule: Module {
         errorListenerToken = nil
         await streamSession?.stop()
         streamSession = nil
+        deviceSession?.stop()
+        deviceSession = nil
 #endif
         streaming = false
         sendEvent("onStreamStateChanged", ["state": "stopped"])
@@ -624,6 +673,8 @@ public class GlassesModule: Module {
         videoFrameListenerToken = nil
         photoDataListenerToken = nil
         errorListenerToken = nil
+        deviceSession?.stop()
+        deviceSession = nil
 #endif
         feedbackSynth?.stopSpeaking(at: .immediate)
         feedbackSynth = nil
