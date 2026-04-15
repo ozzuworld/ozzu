@@ -360,10 +360,10 @@ export default function HomeScreen() {
                   onPress={() => router.push(tile.route as any)}
                   style={({ pressed }) => ({
                     flex: 1,
-                    height: 72,
+                    height: 88,
                     backgroundColor: withAlpha(colors.bg.surface, 0.6),
-                    borderRadius: radius.lg,
-                    padding: 14,
+                    borderRadius: radius.xl,
+                    padding: 16,
                     justifyContent: "space-between",
                     borderWidth: 1,
                     borderColor: withAlpha(colors.border.default, 0.3),
@@ -371,10 +371,10 @@ export default function HomeScreen() {
                     opacity: pressed ? 0.8 : 1,
                   })}
                 >
-                  <Text style={{ fontSize: 18 }}>{tile.icon}</Text>
+                  <Text style={{ fontSize: 22 }}>{tile.icon}</Text>
                   <Text style={{
                     color: colors.text.secondary,
-                    fontSize: fs.sm,
+                    fontSize: fs.md,
                     fontWeight: fw.medium,
                   }}>
                     {tile.label}

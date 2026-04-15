@@ -52,16 +52,15 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean --no-install
 
-      - name: Build debug APK (arm + x86_64)
+      - name: Build release APK (arm + x86_64)
         run: |
           cd android
-          ./gradlew assembleDebug \
+          ./gradlew assembleRelease \
             -x lint -x test \
-            -x checkDebugDuplicateClasses \
             -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86_64
 
       - uses: actions/upload-artifact@v4
         with:
           name: ozzu-android
-          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          path: frontend/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
