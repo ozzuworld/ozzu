@@ -1,6 +1,6 @@
 import { Redirect } from "expo-router";
 
-// Root URL "/" → redirect to directives tab
+// Root URL "/" → redirect to home tab
 export default function Index() {
-  return <Redirect href="/directives" />;
+  return <Redirect href="/home" />;
 }

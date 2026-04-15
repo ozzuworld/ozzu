@@ -2,15 +2,16 @@ import { Tabs } from "expo-router";
 import { useEffect } from "react";
 
 export default function TabLayout() {
-  useEffect(() => { console.log("[boot] TabLayout mounted — initialRouteName=directives"); }, []);
+  useEffect(() => { console.log("[boot] TabLayout mounted — initialRouteName=home"); }, []);
   return (
     <Tabs
-      initialRouteName="directives"
+      initialRouteName="home"
       screenOptions={{
         headerShown: false,
         tabBarStyle: { display: "none" },
       }}
     >
+      <Tabs.Screen name="home" />
       <Tabs.Screen name="directives" />
       <Tabs.Screen name="messages" />
       <Tabs.Screen name="cipher" />

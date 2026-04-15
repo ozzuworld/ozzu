@@ -1,1 +1,13 @@
 ifconfig-push 10.8.0.4 255.255.255.0
+
+# Override global pushes — Kazuma-PC is ON 192.168.1.x (ISP WiFi),
+# so pushing that route would break local LAN (TV, printer, etc).
+# Reset all pushes and re-push only what's needed.
+push-reset
+push "topology subnet"
+push "route-gateway 10.8.0.1"
+push "route 172.168.0.0 255.255.255.0"
+push "dhcp-option DNS 1.1.1.1"
+push "dhcp-option DNS 8.8.8.8"
+push "ping 10"
+push "ping-restart 120"

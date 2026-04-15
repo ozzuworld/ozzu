@@ -21,11 +21,11 @@ module.exports = function devDashboardRoutes(ctx) {
   // Watch for git changes and push to SSE clients
   function pollGitChanges() {
     try {
-      const diff = execSync("git -C /home/gcp/ozzu diff --stat HEAD -- frontend/app frontend/components frontend/lib 2>/dev/null || true", {
+      const diff = execSync("git -C /home/gcp/ozzu diff --stat HEAD -- frontend/app frontend/components frontend/lib tv/ 2>/dev/null || true", {
         encoding: "utf8",
         timeout: 5000,
       });
-      const fullDiff = execSync("git -C /home/gcp/ozzu diff HEAD -- frontend/app frontend/components frontend/lib 2>/dev/null || true", {
+      const fullDiff = execSync("git -C /home/gcp/ozzu diff HEAD -- frontend/app frontend/components frontend/lib tv/ 2>/dev/null || true", {
         encoding: "utf8",
         timeout: 5000,
       });
@@ -107,6 +107,15 @@ module.exports = function devDashboardRoutes(ctx) {
       _changeClients.push(res);
       req.on("close", () => {
         _changeClients = _changeClients.filter((c) => c !== res);
+      });
+      return true;
+    }
+
+    // GET /dev/diff — current diff as JSON (for polling clients like TV app)
+    if (req.method === "GET" && pathname === "/dev/diff") {
+      sendJSON(res, 200, {
+        diff: _lastDiff,
+        time: _lastDiffTime,
       });
       return true;
     }
