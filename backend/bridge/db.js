@@ -698,6 +698,20 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_directives_category ON directives(category)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_directives_completed ON directives(completed_at DESC) WHERE completed_at IS NOT NULL`);
 
+    // Migration: directive threads — topic grouping for related directives
+    await pool.query(`CREATE TABLE IF NOT EXISTS directive_threads (
+      id VARCHAR(40) PRIMARY KEY,
+      name TEXT NOT NULL,
+      summary TEXT,
+      status VARCHAR(20) DEFAULT 'active',
+      decisions JSONB DEFAULT '[]',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_threads_status ON directive_threads(status)`);
+    await pool.query(`ALTER TABLE directives ADD COLUMN IF NOT EXISTS thread_id VARCHAR(40) REFERENCES directive_threads(id) ON DELETE SET NULL`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_directives_thread ON directives(thread_id) WHERE thread_id IS NOT NULL`);
+
     // Migration: service health monitoring tables (watchdog)
     await pool.query(`CREATE TABLE IF NOT EXISTS service_health_log (
       id SERIAL PRIMARY KEY,
@@ -1183,13 +1197,13 @@ async function saveDirective(directive) {
   await query(
     `INSERT INTO directives (id, type, title, description, status, plan, approval_id, epic_id, phase_order,
        created_at, updated_at, emoji, created_by, work_summary, working_state, activity_log,
-       started_at, completed_at, duration, priority, depends_on, failure_reason, category, retry_count)
+       started_at, completed_at, duration, priority, depends_on, failure_reason, category, retry_count, thread_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
        to_timestamp($10::double precision / 1000), to_timestamp($11::double precision / 1000),
        $12, $13, $14, $15, $16::jsonb,
        CASE WHEN $17::double precision > 0 THEN to_timestamp($17::double precision / 1000) ELSE NULL END,
        CASE WHEN $18::double precision > 0 THEN to_timestamp($18::double precision / 1000) ELSE NULL END,
-       $19, $20, $21::text[], $22, $23, $24)
+       $19, $20, $21::text[], $22, $23, $24, $25)
      ON CONFLICT (id) DO UPDATE SET
        type = EXCLUDED.type, title = EXCLUDED.title, description = EXCLUDED.description,
        status = EXCLUDED.status, plan = EXCLUDED.plan, approval_id = EXCLUDED.approval_id,
@@ -1200,7 +1214,7 @@ async function saveDirective(directive) {
        completed_at = EXCLUDED.completed_at, duration = EXCLUDED.duration,
        priority = EXCLUDED.priority, depends_on = EXCLUDED.depends_on,
        failure_reason = EXCLUDED.failure_reason, category = EXCLUDED.category,
-       retry_count = EXCLUDED.retry_count`,
+       retry_count = EXCLUDED.retry_count, thread_id = EXCLUDED.thread_id`,
     [
       directive.id, directive.type, directive.title || "", directive.description || "",
       directive.status, directive.plan || null, directive.directiveApprovalId || null,
@@ -1213,6 +1227,7 @@ async function saveDirective(directive) {
       directive.duration || null, directive.priority || 3,
       directive.dependsOn || null, directive.failureReason || null,
       directive.category || "dev", directive.retryCount || 0,
+      directive.thread_id || null,
     ]
   );
 }
@@ -1248,6 +1263,60 @@ async function getDirectiveHistory(directiveId) {
     [directiveId]
   );
   return res.rows;
+}
+
+// ── Directive Threads ──
+
+async function saveThread(thread) {
+  if (!_pgConnected) return;
+  await query(
+    `INSERT INTO directive_threads (id, name, summary, status, decisions, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name, summary = EXCLUDED.summary, status = EXCLUDED.status,
+       decisions = EXCLUDED.decisions, updated_at = EXCLUDED.updated_at`,
+    [
+      thread.id, thread.name, thread.summary || null, thread.status || "active",
+      JSON.stringify(thread.decisions || []),
+      thread.created_at || new Date(), thread.updated_at || new Date(),
+    ]
+  );
+}
+
+async function getThreads(statusFilter = null) {
+  if (!_pgConnected) return [];
+  let res;
+  if (statusFilter) {
+    res = await query(`SELECT * FROM directive_threads WHERE status = $1 ORDER BY updated_at DESC`, [statusFilter]);
+  } else {
+    res = await query(`SELECT * FROM directive_threads ORDER BY updated_at DESC`);
+  }
+  return res.rows;
+}
+
+async function getThread(threadId) {
+  if (!_pgConnected) return null;
+  const res = await query(`SELECT * FROM directive_threads WHERE id = $1`, [threadId]);
+  if (res.rows.length === 0) return null;
+  const thread = res.rows[0];
+  // Fetch linked directives
+  const dirRes = await query(
+    `SELECT id, type, title, status, emoji, category, work_summary, created_at, completed_at, duration, thread_id
+     FROM directives WHERE thread_id = $1 ORDER BY created_at ASC`,
+    [threadId]
+  );
+  thread.directives = dirRes.rows;
+  return thread;
+}
+
+async function linkDirectiveToThread(directiveId, threadId) {
+  if (!_pgConnected) return;
+  await query(`UPDATE directives SET thread_id = $1 WHERE id = $2`, [threadId, directiveId]);
+}
+
+async function unlinkDirectiveFromThread(directiveId) {
+  if (!_pgConnected) return;
+  await query(`UPDATE directives SET thread_id = NULL WHERE id = $1`, [directiveId]);
 }
 
 async function getDirectives(statusFilter = null) {
@@ -3764,6 +3833,12 @@ module.exports = {
   addDirectiveHistory,
   getDirectiveHistory,
   getDirectives,
+  // Threads
+  saveThread,
+  getThreads,
+  getThread,
+  linkDirectiveToThread,
+  unlinkDirectiveFromThread,
   // Approvals
   saveApproval,
   // Status

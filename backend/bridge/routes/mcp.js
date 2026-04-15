@@ -313,6 +313,54 @@ module.exports = function mcpRoutes(ctx) {
         },
       },
     },
+    // ── Thread tools ──
+    {
+      name: "list_threads",
+      description: "List directive threads (topic groups). Threads group related directives by topic — use to see all work done on a subject across sessions. View 1: topic-based (default). Includes directive counts per thread.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status: { type: "string", description: "Filter: active (default), archived" },
+        },
+      },
+    },
+    {
+      name: "get_thread",
+      description: "Get a thread with all linked directives, decisions, and summary. Use this to understand the full history of a topic before starting related work.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          thread_id: { type: "string", description: "Thread ID (e.g. thread_xxx)" },
+        },
+        required: ["thread_id"],
+      },
+    },
+    {
+      name: "get_thread_timeline",
+      description: "Get chronological timeline of ALL activity across a thread's directives. View 2: time-based — useful for debugging, understanding cause-and-effect, and tracing what happened when.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          thread_id: { type: "string", description: "Thread ID" },
+        },
+        required: ["thread_id"],
+      },
+    },
+    {
+      name: "organize_directive",
+      description: "Link a directive to a thread (or create a new thread). Call this after completing a directive to organize it. If thread_id is omitted, provide thread_name to create a new thread.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          directive_id: { type: "string", description: "Directive ID to organize" },
+          thread_id: { type: "string", description: "Existing thread to link to" },
+          thread_name: { type: "string", description: "Name for a new thread (if thread_id not provided)" },
+          thread_summary: { type: "string", description: "Summary for the new thread" },
+          add_decision: { type: "string", description: "Optional: a key decision made during this directive to record on the thread" },
+        },
+        required: ["directive_id"],
+      },
+    },
   ];
 
   // ── Tool handlers ──
@@ -935,6 +983,109 @@ module.exports = function mcpRoutes(ctx) {
         } catch (e) {
           return { content: [{ type: "text", text: `Solver error: ${e.message}` }], isError: true };
         }
+      }
+
+      // ── Thread tools ──────────────────────────────────────────────────────────
+
+      case "list_threads": {
+        const threads = await db.getThreads(args.status || null);
+        if (threads.length === 0) return { content: [{ type: "text", text: "No threads yet." }] };
+        // Attach directive counts from in-memory directives
+        const allDirs = getDirectives();
+        const lines = threads.map(t => {
+          const linked = allDirs.filter(d => d.thread_id === t.id);
+          const completed = linked.filter(d => d.status === "completed").length;
+          const active = linked.filter(d => ["in_progress", "planning", "planned", "approved", "pending"].includes(d.status)).length;
+          const status = t.status === "archived" ? " [archived]" : "";
+          return `• ${t.name}${status} (${t.id}) — ${linked.length} directives (${completed} done, ${active} active)${t.summary ? `\n  ${t.summary.substring(0, 120)}` : ""}`;
+        });
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      }
+
+      case "get_thread": {
+        const thread = await db.getThread(args.thread_id);
+        if (!thread) return { content: [{ type: "text", text: `Thread ${args.thread_id} not found.` }], isError: true };
+        const result = {
+          id: thread.id, name: thread.name, status: thread.status,
+          summary: thread.summary, decisions: thread.decisions,
+          directives: (thread.directives || []).map(d => ({
+            id: d.id, title: d.title, status: d.status, emoji: d.emoji,
+            work_summary: d.work_summary, created_at: d.created_at, completed_at: d.completed_at,
+          })),
+        };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "get_thread_timeline": {
+        const http = require("http");
+        const result = await new Promise((resolve, reject) => {
+          const req = http.request({ hostname: "localhost", port: 3333, path: `/threads/${args.thread_id}/timeline`, method: "GET",
+            headers: { Authorization: `Bearer ${process.env.API_KEY || ""}` },
+          }, (res) => {
+            let d = ""; res.on("data", c => d += c);
+            res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } });
+          });
+          req.on("error", reject); req.end();
+        });
+        if (result.error) return { content: [{ type: "text", text: `Error: ${JSON.stringify(result.error)}` }], isError: true };
+        const entries = (result.timeline || []).slice(-100); // Last 100 entries
+        const lines = entries.map(e => {
+          const ts = new Date(e.timestamp).toISOString().replace("T", " ").substring(0, 19);
+          return `[${ts}] ${e.directive_emoji || ""} ${e.directive_title} — ${e.type}: ${e.message}`;
+        });
+        return { content: [{ type: "text", text: `Thread: ${result.thread?.name || args.thread_id}\n\n${lines.join("\n") || "No activity yet."}` }] };
+      }
+
+      case "organize_directive": {
+        const http = require("http");
+        let threadId = args.thread_id;
+
+        // Create new thread if no thread_id provided
+        if (!threadId && args.thread_name) {
+          const body = JSON.stringify({ name: args.thread_name, summary: args.thread_summary || null });
+          const createResult = await new Promise((resolve, reject) => {
+            const req = http.request({ hostname: "localhost", port: 3333, path: "/threads", method: "POST",
+              headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body), Authorization: `Bearer ${process.env.API_KEY || ""}` },
+            }, (res) => {
+              let d = ""; res.on("data", c => d += c);
+              res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ error: d }); } });
+            });
+            req.on("error", reject); req.write(body); req.end();
+          });
+          if (!createResult.ok) return { content: [{ type: "text", text: `Failed to create thread: ${JSON.stringify(createResult)}` }], isError: true };
+          threadId = createResult.thread.id;
+        }
+
+        if (!threadId) return { content: [{ type: "text", text: "Provide thread_id or thread_name to create a new thread." }], isError: true };
+
+        // Link directive to thread
+        const linkBody = JSON.stringify({ directive_id: args.directive_id });
+        await new Promise((resolve, reject) => {
+          const req = http.request({ hostname: "localhost", port: 3333, path: `/threads/${threadId}/link`, method: "POST",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(linkBody), Authorization: `Bearer ${process.env.API_KEY || ""}` },
+          }, (res) => {
+            let d = ""; res.on("data", c => d += c);
+            res.on("end", () => resolve(d));
+          });
+          req.on("error", reject); req.write(linkBody); req.end();
+        });
+
+        // Record decision if provided
+        if (args.add_decision) {
+          const decBody = JSON.stringify({ add_decision: { text: args.add_decision, directive_id: args.directive_id } });
+          await new Promise((resolve, reject) => {
+            const req = http.request({ hostname: "localhost", port: 3333, path: `/threads/${threadId}`, method: "PATCH",
+              headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(decBody), Authorization: `Bearer ${process.env.API_KEY || ""}` },
+            }, (res) => {
+              let d = ""; res.on("data", c => d += c);
+              res.on("end", () => resolve(d));
+            });
+            req.on("error", reject); req.write(decBody); req.end();
+          });
+        }
+
+        const verb = args.thread_id ? "linked to" : "created thread and linked to";
+        return { content: [{ type: "text", text: `Directive ${args.directive_id} ${verb} ${threadId}${args.add_decision ? ". Decision recorded." : ""}` }] };
       }
 
       // ── Person / Identity tools ──────────────────────────────────────────────

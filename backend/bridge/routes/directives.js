@@ -1647,6 +1647,170 @@ module.exports = function directiveRoutes(ctx) {
       return true;
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // DIRECTIVE THREADS — Topic grouping for related directives
+    // ═══════════════════════════════════════════════════════════════════
+
+    // POST /threads — Create a new thread
+    if (req.method === "POST" && pathname === "/threads") {
+      if (!requireAuth(req, res)) return true;
+      const data = await parseBody(req);
+      if (!data.name) {
+        sendJSON(res, 400, { error: "name is required" });
+        return true;
+      }
+      const thread = {
+        id: `thread_${Date.now()}`,
+        name: data.name,
+        summary: data.summary || null,
+        status: "active",
+        decisions: data.decisions || [],
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+      await db.saveThread(thread);
+      // Link directives if provided
+      if (Array.isArray(data.directive_ids)) {
+        for (const dId of data.directive_ids) {
+          await db.linkDirectiveToThread(dId, thread.id);
+          const d = getDirectives().find(x => x.id === dId);
+          if (d) d.thread_id = thread.id;
+        }
+        saveDirectives(getDirectives(), null, null, "Cipher");
+      }
+      log.bridge.info(`Thread created: ${thread.id} "${thread.name}"`);
+      sendJSON(res, 200, { ok: true, thread });
+      return true;
+    }
+
+    // GET /threads — List all threads
+    if (req.method === "GET" && pathname === "/threads") {
+      const statusFilter = url.searchParams.get("status");
+      const threads = await db.getThreads(statusFilter);
+      // Attach directive counts
+      const directives = getDirectives();
+      for (const t of threads) {
+        const linked = directives.filter(d => d.thread_id === t.id);
+        t.directive_count = linked.length;
+        t.completed_count = linked.filter(d => d.status === "completed").length;
+        t.active_count = linked.filter(d => ["in_progress", "planning", "planned", "approved", "pending"].includes(d.status)).length;
+      }
+      sendJSON(res, 200, threads);
+      return true;
+    }
+
+    // GET /threads/:id — Get thread with all linked directives
+    const threadGetMatch = pathname.match(/^\/threads\/([^/]+)$/);
+    if (req.method === "GET" && threadGetMatch) {
+      const thread = await db.getThread(threadGetMatch[1]);
+      if (!thread) {
+        sendJSON(res, 404, { error: "Thread not found" });
+        return true;
+      }
+      sendJSON(res, 200, thread);
+      return true;
+    }
+
+    // PATCH /threads/:id — Update thread
+    const threadPatchMatch = pathname.match(/^\/threads\/([^/]+)$/);
+    if (req.method === "PATCH" && threadPatchMatch) {
+      if (!requireAuth(req, res)) return true;
+      const data = await parseBody(req);
+      const thread = await db.getThread(threadPatchMatch[1]);
+      if (!thread) {
+        sendJSON(res, 404, { error: "Thread not found" });
+        return true;
+      }
+      if (data.name !== undefined) thread.name = data.name;
+      if (data.summary !== undefined) thread.summary = data.summary;
+      if (data.status !== undefined) thread.status = data.status;
+      if (data.decisions !== undefined) thread.decisions = data.decisions;
+      // Append a single decision
+      if (data.add_decision) {
+        if (!Array.isArray(thread.decisions)) thread.decisions = [];
+        thread.decisions.push({ ...data.add_decision, timestamp: Date.now() });
+      }
+      thread.updated_at = new Date();
+      await db.saveThread(thread);
+      sendJSON(res, 200, { ok: true, thread });
+      return true;
+    }
+
+    // POST /threads/:id/link — Link directive(s) to thread
+    const threadLinkMatch = pathname.match(/^\/threads\/([^/]+)\/link$/);
+    if (req.method === "POST" && threadLinkMatch) {
+      if (!requireAuth(req, res)) return true;
+      const data = await parseBody(req);
+      const threadId = threadLinkMatch[1];
+      const thread = await db.getThread(threadId);
+      if (!thread) {
+        sendJSON(res, 404, { error: "Thread not found" });
+        return true;
+      }
+      const ids = Array.isArray(data.directive_ids) ? data.directive_ids : [data.directive_id].filter(Boolean);
+      if (ids.length === 0) {
+        sendJSON(res, 400, { error: "directive_id or directive_ids required" });
+        return true;
+      }
+      const directives = getDirectives();
+      for (const dId of ids) {
+        await db.linkDirectiveToThread(dId, threadId);
+        const d = directives.find(x => x.id === dId);
+        if (d) d.thread_id = threadId;
+      }
+      saveDirectives(directives, null, null, "Cipher");
+      sendJSON(res, 200, { ok: true, linked: ids.length });
+      return true;
+    }
+
+    // POST /threads/:id/unlink — Remove directive from thread
+    const threadUnlinkMatch = pathname.match(/^\/threads\/([^/]+)\/unlink$/);
+    if (req.method === "POST" && threadUnlinkMatch) {
+      if (!requireAuth(req, res)) return true;
+      const data = await parseBody(req);
+      const dId = data.directive_id;
+      if (!dId) {
+        sendJSON(res, 400, { error: "directive_id required" });
+        return true;
+      }
+      await db.unlinkDirectiveFromThread(dId);
+      const d = getDirectives().find(x => x.id === dId);
+      if (d) {
+        d.thread_id = null;
+        saveDirectives(getDirectives(), d, null, "Cipher");
+      }
+      sendJSON(res, 200, { ok: true });
+      return true;
+    }
+
+    // GET /threads/:id/timeline — Chronological view across all linked directives
+    const threadTimelineMatch = pathname.match(/^\/threads\/([^/]+)\/timeline$/);
+    if (req.method === "GET" && threadTimelineMatch) {
+      const thread = await db.getThread(threadTimelineMatch[1]);
+      if (!thread) {
+        sendJSON(res, 404, { error: "Thread not found" });
+        return true;
+      }
+      // Build unified timeline from all linked directives' activity_logs
+      const timeline = [];
+      const directives = getDirectives();
+      const linked = directives.filter(d => d.thread_id === thread.id);
+      for (const d of linked) {
+        const log = Array.isArray(d.activity_log) ? d.activity_log : [];
+        for (const entry of log) {
+          timeline.push({
+            ...entry,
+            directive_id: d.id,
+            directive_title: d.title,
+            directive_emoji: d.emoji,
+          });
+        }
+      }
+      timeline.sort((a, b) => a.timestamp - b.timestamp);
+      sendJSON(res, 200, { thread: { id: thread.id, name: thread.name }, timeline });
+      return true;
+    }
+
     return false;
   };
 };
