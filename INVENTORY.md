@@ -61,6 +61,7 @@ Primary compute — always on. All services run here via Docker.
 | face-clusterer.py | Identity clustering (Union-Find) | `--incremental`, `--stats` |
 | deploy.sh | Android APK deploy from CI | `[device-names]`, `--local` |
 | ota-deploy.sh | OTA JS update (Android ONLY) | `--restart` |
+| ota-deploy-tv.sh | OTA JS update (TV app) | Separate runtimeVersion `tv-1.0.0` |
 | deploy-ios.sh | iOS IPA via AltStore on Windows laptop | `--local /path`, `--check` |
 | cipher.sh | Launch Cipher with memory context | Loads from bridge /cipher/context |
 | cipher-guard.sh | PreToolUse hook — enforce pipeline | Blocks edits without directive |
@@ -102,6 +103,8 @@ These took 1 week to build and tune on embed-pipeline-v2.py:
 | Android OTA (JS only) | `./scripts/ota-deploy.sh --restart` |
 | Android APK (native) | CI auto-triggers after merge |
 | iOS | `gh workflow run build-ios.yml` → King Kazuma installs via AltStore |
+| TV OTA (JS only) | `./scripts/ota-deploy-tv.sh` |
+| TV APK (native) | CI auto-triggers on `tv/` push to main → self-installs via Device Owner |
 | Bridge restart | `docker compose restart bridge` (in `/home/gcp/ozzu/backend/`) |
 | Full redeploy | `POST /directives/{id}/merge-and-deploy` via MCP |
 

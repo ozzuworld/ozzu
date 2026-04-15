@@ -2,6 +2,10 @@ name: Build Ozzu TV APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tv/**'
 
 jobs:
   build-tv:
@@ -34,17 +38,21 @@ jobs:
         run: |
           echo "EXPO_PUBLIC_BRIDGE_URL=${EXPO_PUBLIC_BRIDGE_URL}" > .env
 
+      - name: Decode keystore
+        if: env.OZZU_TV_KEYSTORE_BASE64 != ''
+        env:
+          OZZU_TV_KEYSTORE_BASE64: ${{ secrets.OZZU_TV_KEYSTORE_BASE64 }}
+        run: |
+          echo "$OZZU_TV_KEYSTORE_BASE64" | base64 -d > /tmp/ozzu-tv.keystore
+
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean
 
-      - name: Add Android TV leanback support
-        run: |
-          # Add leanback feature and intent filter to AndroidManifest
-          sed -i 's|<application|<uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <application|' android/app/src/main/AndroidManifest.xml
-          # Add LEANBACK_LAUNCHER category to main activity
-          sed -i 's|</intent-filter>|<category android:name="android.intent.category.LEANBACK_LAUNCHER" />\n                </intent-filter>|' android/app/src/main/AndroidManifest.xml
-
       - name: Build release APK
+        env:
+          OZZU_TV_KEYSTORE_FILE: ${{ secrets.OZZU_TV_KEYSTORE_BASE64 && '/tmp/ozzu-tv.keystore' || '' }}
+          OZZU_TV_KEY_ALIAS: ${{ secrets.OZZU_TV_KEY_ALIAS }}
+          OZZU_TV_KEY_PASSWORD: ${{ secrets.OZZU_TV_KEY_PASSWORD }}
         run: |
           cd android
           ./gradlew assembleRelease \
@@ -52,8 +60,35 @@ jobs:
             -x checkDebugDuplicateClasses \
             -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86_64
 
+      - name: Compute APK metadata
+        id: apk-meta
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          VERSION_CODE=$(node -e "console.log(require('./app.json').expo.android.versionCode)")
+          VERSION_NAME=$(node -e "console.log(require('./app.json').expo.version)")
+          SHA256=$(sha256sum "$APK" | cut -d' ' -f1)
+          SIZE=$(stat -c%s "$APK")
+          echo "versionCode=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "versionName=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Write latest.json
+        run: |
+          cat > /tmp/latest.json <<EOF
+          {
+            "versionCode": ${{ steps.apk-meta.outputs.versionCode }},
+            "versionName": "${{ steps.apk-meta.outputs.versionName }}",
+            "sha256": "${{ steps.apk-meta.outputs.sha256 }}",
+            "size": ${{ steps.apk-meta.outputs.size }},
+            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
       - uses: actions/upload-artifact@v4
         with:
           name: ozzu-tv
-          path: tv/android/app/build/outputs/apk/release/app-release.apk
+          path: |
+            tv/android/app/build/outputs/apk/release/app-release.apk
+            /tmp/latest.json
           retention-days: 30

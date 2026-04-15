@@ -1,17 +1,21 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { View, Text, StatusBar, Pressable, TextInput, BackHandler } from "react-native";
 import { WebView } from "react-native-webview";
+import * as Updates from "expo-updates";
+import { isDeviceOwner, getVersionCode, downloadAndInstall } from "expo-device-owner";
 
 // Bridge URL — use public URL so TV works standalone over internet
 const DEFAULT_BRIDGE =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
 const DASHBOARD_PATH = "/dev/dashboard?port=5560";
+const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 export default function App() {
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE);
   const [editing, setEditing] = useState(false);
   const [inputUrl, setInputUrl] = useState(DEFAULT_BRIDGE);
   const [error, setError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const webViewRef = useRef<WebView>(null);
 
   // Hide system UI for full immersive mode
@@ -30,6 +34,53 @@ export default function App() {
     });
     return () => handler.remove();
   }, [editing]);
+
+  // --- Update checker ---
+  const checkForUpdates = useCallback(async () => {
+    try {
+      // 1. JS OTA update (expo-updates)
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        setUpdateStatus("Downloading JS update...");
+        await Updates.fetchUpdateAsync();
+        setUpdateStatus("Restarting...");
+        await Updates.reloadAsync();
+        return; // App restarts here
+      }
+
+      // 2. Native APK update (Device Owner silent install)
+      const deviceOwner = isDeviceOwner();
+      if (!deviceOwner) return; // Can't silently install without device owner
+
+      const currentVersion = getVersionCode();
+      const checkUrl = `${bridgeUrl}/tv/release/check?versionCode=${currentVersion}`;
+      const res = await fetch(checkUrl);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      if (data.updateAvailable) {
+        setUpdateStatus(`Installing v${data.versionName}...`);
+        const downloadUrl = `${bridgeUrl}/tv/release/download`;
+        await downloadAndInstall(downloadUrl);
+        setUpdateStatus("Update installed — restarting...");
+      }
+    } catch (e) {
+      // Silent fail — don't interrupt the dashboard
+      console.log("Update check failed:", e);
+      setUpdateStatus(null);
+    }
+  }, [bridgeUrl]);
+
+  useEffect(() => {
+    // Check on launch (after a short delay to let the app settle)
+    const initialCheck = setTimeout(checkForUpdates, 10_000);
+    // Check periodically
+    const interval = setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL);
+    return () => {
+      clearTimeout(initialCheck);
+      clearInterval(interval);
+    };
+  }, [checkForUpdates]);
 
   const dashboardUrl = `${bridgeUrl}${DASHBOARD_PATH}`;
 
@@ -245,6 +296,32 @@ export default function App() {
           </View>
         )}
       />
+      {/* Update status indicator */}
+      {updateStatus && (
+        <View
+          style={{
+            position: "absolute",
+            bottom: 12,
+            left: 0,
+            right: 0,
+            alignItems: "center",
+          }}
+        >
+          <Text
+            style={{
+              color: "#0ff5ee",
+              fontFamily: "monospace",
+              fontSize: 11,
+              letterSpacing: 2,
+              backgroundColor: "#020208cc",
+              paddingHorizontal: 16,
+              paddingVertical: 6,
+            }}
+          >
+            {updateStatus}
+          </Text>
+        </View>
+      )}
       {/* Floating settings button — top-right corner, very subtle */}
       <Pressable
         onPress={() => {

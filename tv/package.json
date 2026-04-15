@@ -12,9 +12,11 @@
     "expo": "~54.0.33",
     "expo-build-properties": "^55.0.13",
     "expo-status-bar": "~3.0.9",
+    "expo-updates": "~29.0.16",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-webview": "^13.16.1"
+    "react-native-webview": "^13.16.1",
+    "expo-device-owner": "./modules/expo-device-owner"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

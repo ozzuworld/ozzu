@@ -1385,6 +1385,40 @@ function killAllAgents() {
 // ── Smart deploy (ported from cipher-watcher.sh) ──
 
 // Returns { android: bool, ios: bool, any: bool } indicating which platforms have native changes
+// Returns { native: bool, jsOnly: bool, any: bool } for tv/ path changes
+function detectTvChanges() {
+  try {
+    const { execSync } = require("child_process");
+    const changed = execSync("git diff --name-only HEAD~1 HEAD", {
+      cwd: WORKDIR, encoding: "utf8", timeout: 10000,
+    }).trim();
+
+    if (!changed) return { native: false, jsOnly: false, any: false };
+
+    const lines = changed.split("\n");
+    const tvLines = lines.filter(l => l.startsWith("tv/"));
+    if (tvLines.length === 0) return { native: false, jsOnly: false, any: false };
+
+    // Native: app.json, plugins/, modules/, package.json with native deps
+    const nativePatterns = [/tv\/app\.json/, /tv\/plugins\//, /tv\/modules\//];
+    let native = tvLines.some(l => nativePatterns.some(p => p.test(l)));
+
+    // Check if package.json added native deps
+    if (!native && changed.includes("tv/package.json")) {
+      const pkgDiff = execSync("git diff HEAD~1 HEAD -- tv/package.json", {
+        cwd: WORKDIR, encoding: "utf8", timeout: 10000,
+      });
+      if (/^\+.*"(expo-|react-native-|@react-native)/m.test(pkgDiff)) {
+        native = true;
+      }
+    }
+
+    return { native, jsOnly: !native, any: true };
+  } catch {
+    return { native: false, jsOnly: false, any: false };
+  }
+}
+
 function detectNativeChanges() {
   try {
     const { execSync } = require("child_process");
@@ -1598,6 +1632,43 @@ function smartDeploy(directive) {
       `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
       `rm -rf /tmp/ozzu-ipa-cache`,
     ].join(" && "));
+  }
+
+  // TV deploy — separate from phone app, has its own OTA + native CI pipeline
+  const tvChanges = detectTvChanges();
+  if (tvChanges.any) {
+    if (tvChanges.jsOnly) {
+      log("TV JS-only changes — deploying via OTA");
+      notify("TV update going out — should be live on next app launch.");
+      exec(`cd ${WORKDIR} && ./scripts/ota-deploy-tv.sh`, {
+        cwd: WORKDIR,
+        timeout: 5 * 60 * 1000,
+      }, (err) => {
+        if (err) {
+          log(`TV OTA deploy failed: ${err.message}`);
+          notify("TV update failed — might need a full rebuild.");
+        } else {
+          log("TV OTA deploy complete");
+          notify("TV update published — it'll pick it up on next launch.");
+        }
+      });
+    } else {
+      log("TV native changes detected — triggering CI build");
+      notify("TV native update building — will auto-install when done.");
+      spawnDetachedDeploy("tv", [
+        `cd ${WORKDIR}`,
+        `gh workflow run build-tv.yml`,
+        `sleep 20`,
+        `RUN_ID=$(gh run list --workflow=build-tv.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
+        `gh run watch "$RUN_ID" --exit-status`,
+        `rm -rf /tmp/ozzu-tv-release`,
+        `gh run download "$RUN_ID" --name ozzu-tv --dir /tmp/ozzu-tv-release -R ozzuworld/ozzu`,
+        `mkdir -p /tmp/ozzu-bridge/tv-releases`,
+        `test -f /tmp/ozzu-tv-release/app-release.apk && cp /tmp/ozzu-tv-release/app-release.apk /tmp/ozzu-bridge/tv-releases/ozzu-tv.apk || echo "APK not found"`,
+        `test -f /tmp/ozzu-tv-release/latest.json && cp /tmp/ozzu-tv-release/latest.json /tmp/ozzu-bridge/tv-releases/latest.json || echo "metadata not found"`,
+        `rm -rf /tmp/ozzu-tv-release`,
+      ].join(" && "));
+    }
   }
 
   // ESP32 firmware deploy — build in Docker, SCP to Rock Pi, trigger instant OTA

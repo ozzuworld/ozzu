@@ -14,18 +14,20 @@
     },
     "android": {
       "package": "com.ozzu.tv",
+      "versionCode": 1,
       "minSdkVersion": 24,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#020208"
       },
-      "edgeToEdgeEnabled": true,
-      "intentFilters": [
-        {
-          "action": "MAIN",
-          "category": ["LEANBACK_LAUNCHER"]
-        }
-      ]
+      "edgeToEdgeEnabled": true
+    },
+    "runtimeVersion": "tv-1.0.0",
+    "updates": {
+      "url": "https://home.ozzu.world/bridge/api/manifest",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 5000
     },
     "plugins": [
       [
@@ -35,7 +37,13 @@
             "minSdkVersion": 24
           }
         }
-      ]
+      ],
+      "./plugins/tv-leanback",
+      "./plugins/force-bundle-js",
+      "./plugins/enable-updates",
+      "./plugins/disable-dev-support",
+      "./plugins/device-owner-config",
+      "./plugins/signing-config"
     ]
   }
 }

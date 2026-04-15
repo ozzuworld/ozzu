@@ -740,6 +740,69 @@ module.exports = function createPipelineRoutes(ctx) {
     return true;
   }
 
+  // ── TV Release endpoints (self-update) ──
+
+  const TV_RELEASES_DIR = "/tmp/ozzu-bridge/tv-releases";
+
+  // GET /tv/release/check?versionCode=N — check if a newer APK is available
+  if (req.method === "GET" && pathname === "/tv/release/check") {
+    const currentVersion = parseInt(url.searchParams.get("versionCode") || "0", 10);
+    const metaPath = path.join(TV_RELEASES_DIR, "latest.json");
+
+    let metaExists = true;
+    try { await fs.promises.access(metaPath); } catch { metaExists = false; }
+
+    if (!metaExists) {
+      sendJSON(res, 200, { updateAvailable: false });
+      return true;
+    }
+
+    try {
+      const meta = JSON.parse(await fs.promises.readFile(metaPath, "utf8"));
+      const updateAvailable = meta.versionCode > currentVersion;
+      sendJSON(res, 200, {
+        updateAvailable,
+        versionCode: meta.versionCode,
+        versionName: meta.versionName,
+        sha256: meta.sha256,
+        size: meta.size,
+        publishedAt: meta.publishedAt,
+      });
+    } catch (err) {
+      log.bridge.error(`TV release check failed: ${err.message}`);
+      sendJSON(res, 500, { error: "Failed to read TV release metadata" });
+    }
+    return true;
+  }
+
+  // GET /tv/release/download — stream the latest TV APK
+  if (req.method === "GET" && pathname === "/tv/release/download") {
+    const apkPath = path.join(TV_RELEASES_DIR, "ozzu-tv.apk");
+
+    let apkExists = true;
+    try { await fs.promises.access(apkPath); } catch { apkExists = false; }
+
+    if (!apkExists) {
+      sendJSON(res, 404, { error: "No TV release APK available" });
+      return true;
+    }
+
+    try {
+      const stat = await fs.promises.stat(apkPath);
+      res.writeHead(200, {
+        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Length": stat.size,
+        "Content-Disposition": "attachment; filename=ozzu-tv.apk",
+        ...CORS_HEADERS,
+      });
+      fs.createReadStream(apkPath).pipe(res);
+    } catch (err) {
+      log.bridge.error(`TV release download failed: ${err.message}`);
+      sendJSON(res, 500, { error: "Failed to serve TV APK" });
+    }
+    return true;
+  }
+
     return false;
   };
 };
