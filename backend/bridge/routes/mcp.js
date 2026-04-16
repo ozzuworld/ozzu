@@ -1142,6 +1142,7 @@ module.exports = function mcpRoutes(ctx) {
       case "execute_objective": {
         const { ObjectiveEngine } = require("../objective-engine");
         const { AttackPlanner } = require("../attack-planner");
+        const { AutonomousLoop } = require("../autonomous-loop");
 
         const objEngine = new ObjectiveEngine(db, log);
         const planner = new AttackPlanner(log);
@@ -1162,33 +1163,72 @@ module.exports = function mcpRoutes(ctx) {
 
         log(`[execute_objective] Starting autonomous loop for ${objective.id}: ${args.goal} on ${args.target}`);
 
-        return {
-          content: [{
-            type: "text",
-            text: `✅ Autonomous objective started: ${objective.id}
+        // Initialize autonomous loop
+        const loop = new AutonomousLoop({
+          objectiveEngine: objEngine,
+          attackPlanner: planner,
+          db,
+          log,
+        });
 
-**Goal:** ${args.goal}
-**Target:** ${args.target}
-**Engagement:** ${args.engagement_id}
-**Max Iterations:** ${objective.max_iterations}
+        // Execute autonomous loop (this will iterate until complete or escalation)
+        const result = await loop.execute(objective.id);
 
-**Attack Plan:**
-${objective.attack_plan.paths.map((p, i) => `${i + 1}. ${p.name} — ${p.description} (${p.steps.length} steps)`).join('\n')}
+        // Format response based on outcome
+        if (result.success) {
+          return {
+            content: [{
+              type: "text",
+              text: `✅ **Objective ACHIEVED**
 
-🔄 Cipher + Joko will now iterate autonomously until:
-  ✓ Objective achieved
-  ✗ All paths exhausted
-  ⚠️  Critical finding or escalation needed
+${result.narrative}
 
-You will be notified when complete or if human input needed.
+**Evidence:**
+${result.objective.state.evidence.map(e => `- ${e}`).join('\n') || "No evidence files"}
 
-**Objective ID:** ${objective.id}
-**Status:** executing
-**Evidence dir:** /tmp/${args.engagement_id}/evidence/
+**Findings:**
+${result.objective.state.findings.map(f => `- [${f.severity}] ${f.title}`).join('\n') || "No findings"}
 
-⚠️  NOTE: Full autonomous loop requires Claude Agent SDK integration. Current implementation creates objective tracker and attack plan. Manual Joko invocation needed for each step until SDK integrated.`
-          }]
-        };
+**Final Access:** ${result.objective.state.current_access_level}
+**Iterations:** ${result.objective.state.iterations}/${result.objective.max_iterations}`
+            }]
+          };
+        } else if (result.escalate) {
+          return {
+            content: [{
+              type: "text",
+              text: `⚠️  **ESCALATION NEEDED**
+
+**Reason:** ${result.reason}
+**Message:** ${result.message}
+
+${result.narrative}
+
+**What was tried:**
+${result.objective.state.attempts.map((a, i) => `${i + 1}. ${a.method} — ${a.result}`).join('\n')}
+
+**Findings so far:**
+${result.objective.state.findings.map(f => `- [${f.severity}] ${f.title}`).join('\n') || "No findings"}
+
+**Current Access:** ${result.objective.state.current_access_level}
+**Iterations:** ${result.objective.state.iterations}/${result.objective.max_iterations}
+
+**Need your input:** What strategy should we try next?`
+            }]
+          };
+        } else {
+          return {
+            content: [{
+              type: "text",
+              text: `❌ **Objective FAILED**
+
+${result.narrative}
+
+**Attempts:** ${result.objective.state.iterations}
+**Final Access:** ${result.objective.state.current_access_level}`
+            }]
+          };
+        }
       }
 
       case "invoke_joko": {
