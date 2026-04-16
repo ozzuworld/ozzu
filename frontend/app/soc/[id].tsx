@@ -49,8 +49,6 @@ export default function EngagementDetailScreen() {
   const [output, setOutput] = useState("");
   const [sessionId, setSessionId] = useState("");
 
-  const eventSourceRef = useRef<EventSource | null>(null);
-
   const fetchEngagement = useCallback(async () => {
     try {
       const [engRes, scriptsRes] = await Promise.all([
@@ -78,56 +76,50 @@ export default function EngagementDetailScreen() {
   const executeScript = useCallback(async (script: Script) => {
     if (executing) return;
 
-    setCurrentScript(script);
-    setOutput("");
-    setExecuting(true);
+    Alert.alert(
+      "Execute Script",
+      `This will run:\n\n${script.command}\n\non dev-01 via SSH.\n\nNote: Output will be displayed when complete (polling not implemented yet). For now, this is a proof-of-concept.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Execute",
+          onPress: async () => {
+            setCurrentScript(script);
+            setOutput("Executing on dev-01...\n");
+            setExecuting(true);
 
-    try {
-      // Start SSE connection to stream output
-      const eventSource = new EventSource(
-        `${getBridgeUrl()}/soc/execute?engagement_id=${id}&script_id=${script.id}&command=${encodeURIComponent(script.command)}`
-      );
+            try {
+              const response = await fetch(`${getBridgeUrl()}/soc/execute`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  engagement_id: id,
+                  script_id: script.id,
+                  command: script.command,
+                }),
+              });
 
-      eventSourceRef.current = eventSource;
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+              }
 
-      eventSource.addEventListener('message', (event) => {
-        const data = JSON.parse(event.data);
+              setOutput("Execution started. Check audit log for results.");
+              setExecuting(false);
 
-        if (data.type === 'connected') {
-          setSessionId(data.session_id);
-        } else if (data.type === 'stdout' || data.type === 'stderr') {
-          setOutput((prev) => prev + data.data);
-        } else if (data.type === 'exit') {
-          setExecuting(false);
-          eventSource.close();
-          eventSourceRef.current = null;
-
-          if (data.code === 0) {
-            Alert.alert(
-              "Execution Complete",
-              "Script finished successfully. Submit results to update engagement?",
-              [
-                { text: "Cancel", style: "cancel" },
-                { text: "Submit Results", onPress: () => showSubmitForm() },
-              ]
-            );
-          } else {
-            Alert.alert("Execution Failed", `Script exited with code ${data.code}`);
-          }
-        }
-      });
-
-      eventSource.onerror = () => {
-        setExecuting(false);
-        eventSource.close();
-        eventSourceRef.current = null;
-        Alert.alert("Error", "Lost connection to server");
-      };
-
-    } catch (error: any) {
-      setExecuting(false);
-      Alert.alert("Error", error.message || "Failed to execute script");
-    }
+              Alert.alert(
+                "Execution Started",
+                "Script is running on dev-01. Results will be in the audit log.",
+                [{ text: "OK" }]
+              );
+            } catch (error: any) {
+              setExecuting(false);
+              setOutput("");
+              Alert.alert("Error", error.message || "Failed to execute script");
+            }
+          },
+        },
+      ]
+    );
   }, [id, executing]);
 
   const showSubmitForm = useCallback(() => {
@@ -179,14 +171,6 @@ export default function EngagementDetailScreen() {
     );
   }, [id, sessionId, output, currentScript, engagement, fetchEngagement]);
 
-  const stopExecution = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    setExecuting(false);
-    Alert.alert("Stopped", "Script execution cancelled");
-  }, []);
 
   if (loading) {
     return (
@@ -297,19 +281,9 @@ export default function EngagementDetailScreen() {
         {/* Output Section */}
         {currentScript && (
           <View style={{ marginTop: spacing.lg }}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md }}>
-              <Text style={{ fontSize: fs.md, fontWeight: fw.semibold, color: colors.text.primary }}>
-                Output: {currentScript.name}
-              </Text>
-
-              {executing && (
-                <Pressable onPress={stopExecution} style={{ paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}>
-                  <Text style={{ color: colors.status.error, fontSize: fs.sm, fontWeight: fw.medium }}>
-                    ⏹ Stop
-                  </Text>
-                </Pressable>
-              )}
-            </View>
+            <Text style={{ fontSize: fs.md, fontWeight: fw.semibold, color: colors.text.primary, marginBottom: spacing.md }}>
+              Output: {currentScript.name}
+            </Text>
 
             <View style={styles.outputContainer}>
               <ScrollView style={{ maxHeight: 400 }}>
