@@ -356,8 +356,8 @@ export default function HomeScreen() {
               { id: "intel", icon: "🕵️", label: "Intel", route: "/osint", badge: "" },
             ],
             [
+              { id: "soc", icon: "🔐", label: "SOC", route: "/soc", badge: "" },
               { id: "ops", icon: "🖥️", label: "Ops", route: "/ops", badge: "" },
-              { id: "influence", icon: "🔗", label: "Influence", route: "/influence", badge: "" },
             ],
           ].map((row, ri) => (
             <View key={ri} style={{ flexDirection: "row", gap: gridGap, marginBottom: gridGap }}>
