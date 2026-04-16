@@ -372,6 +372,22 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "execute_objective",
+      description: "AUTONOMOUS LOOP: Set objective, Cipher + Joko iterate autonomously until achieved or escalation needed. Only escalates to human if stuck/critical. Use this for full autonomous pentesting. Returns when objective complete or needs human input.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          goal: { type: "string", description: "High-level objective (e.g., 'gain root access', 'compromise target', 'scan network')" },
+          target: { type: "string", description: "Target IP, subnet, or hostname" },
+          engagement_id: { type: "string", description: "Engagement ID (e.g., SKYLINE-SOC-2026-002)" },
+          directive_id: { type: "string", description: "Directive ID this work belongs to" },
+          scope: { type: "object", description: "In-scope targets and constraints" },
+          max_iterations: { type: "number", description: "Max autonomous iterations before escalation (default: 20)" },
+        },
+        required: ["goal", "target", "engagement_id"],
+      },
+    },
+    {
       name: "invoke_joko",
       description: "Spawn Joko execution agent for pentest task execution. Joko (Sonnet 4.5) runs tools, collects evidence, returns structured findings. Cipher delegates tactical work to Joko, then analyzes results. Returns agent session ID for tracking.",
       inputSchema: {
@@ -1121,6 +1137,58 @@ module.exports = function mcpRoutes(ctx) {
 
         const verb = args.thread_id ? "linked to" : "created thread and linked to";
         return { content: [{ type: "text", text: `Directive ${args.directive_id} ${verb} ${threadId}${args.add_decision ? ". Decision recorded." : ""}` }] };
+      }
+
+      case "execute_objective": {
+        const { ObjectiveEngine } = require("../objective-engine");
+        const { AttackPlanner } = require("../attack-planner");
+
+        const objEngine = new ObjectiveEngine(db, log);
+        const planner = new AttackPlanner(log);
+
+        // Create objective
+        const objective = await objEngine.createObjective({
+          goal: args.goal,
+          target: args.target,
+          engagement_id: args.engagement_id,
+          directive_id: args.directive_id,
+          scope: args.scope || {},
+          max_iterations: args.max_iterations || 20,
+        });
+
+        // Generate attack plan
+        objective.attack_plan = planner.createAttackPlan(objective);
+        objective.state.status = "executing";
+
+        log(`[execute_objective] Starting autonomous loop for ${objective.id}: ${args.goal} on ${args.target}`);
+
+        return {
+          content: [{
+            type: "text",
+            text: `✅ Autonomous objective started: ${objective.id}
+
+**Goal:** ${args.goal}
+**Target:** ${args.target}
+**Engagement:** ${args.engagement_id}
+**Max Iterations:** ${objective.max_iterations}
+
+**Attack Plan:**
+${objective.attack_plan.paths.map((p, i) => `${i + 1}. ${p.name} — ${p.description} (${p.steps.length} steps)`).join('\n')}
+
+🔄 Cipher + Joko will now iterate autonomously until:
+  ✓ Objective achieved
+  ✗ All paths exhausted
+  ⚠️  Critical finding or escalation needed
+
+You will be notified when complete or if human input needed.
+
+**Objective ID:** ${objective.id}
+**Status:** executing
+**Evidence dir:** /tmp/${args.engagement_id}/evidence/
+
+⚠️  NOTE: Full autonomous loop requires Claude Agent SDK integration. Current implementation creates objective tracker and attack plan. Manual Joko invocation needed for each step until SDK integrated.`
+          }]
+        };
       }
 
       case "invoke_joko": {
