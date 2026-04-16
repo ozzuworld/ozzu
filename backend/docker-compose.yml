@@ -30,6 +30,8 @@ services:
     restart: unless-stopped
     network_mode: host
     working_dir: /app
+    # Explicitly disable auto-loading .env (it's git-crypt encrypted)
+    # All config comes from inline environment vars + docker-compose.override.yml
     env_file:
       - path: .env.email
         required: false

@@ -6,4 +6,4 @@
 backend/nginx/cloudflare.ini filter=git-crypt diff=git-crypt
 
 # Environment variables
-backend/.env filter=git-crypt diff=git-crypt
+# backend/.env — removed from git-crypt (causes docker-compose failures, config in docker-compose.yml instead)

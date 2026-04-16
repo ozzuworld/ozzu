@@ -37,3 +37,4 @@ CLAUDE.local.md
 .DS_Store
 Thumbs.db
 whatsapp-mcp/
+backend/.env
