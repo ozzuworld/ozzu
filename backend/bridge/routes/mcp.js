@@ -402,6 +402,78 @@ module.exports = function mcpRoutes(ctx) {
         required: ["task", "engagement_id"],
       },
     },
+    {
+      name: "create_engagement",
+      description: "Create a new pentest engagement with client, scope, and ROE. Returns engagement ID for tracking all work.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          client_name: { type: "string", description: "Client company name" },
+          engagement_type: { type: "string", enum: ["external_pentest", "internal_pentest", "webapp", "redteam", "compliance"], description: "Type of engagement" },
+          scope: { type: "object", description: "Engagement scope: {targets: [], allowed: [], prohibited: [], credentials: {}}" },
+          roe: { type: "object", description: "Rules of Engagement (destructive actions, time windows, etc.)" },
+          start_date: { type: "string", description: "Start date (YYYY-MM-DD)" },
+          end_date: { type: "string", description: "End date (YYYY-MM-DD)" },
+          lead_engineer: { type: "string", description: "Lead engineer name" },
+          sow_url: { type: "string", description: "Link to Statement of Work document" },
+        },
+        required: ["client_name", "engagement_type", "scope"],
+      },
+    },
+    {
+      name: "list_engagements",
+      description: "List all pentest engagements with status and findings count.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["scoping", "approved", "in_progress", "reporting", "completed", "billed"], description: "Filter by status" },
+        },
+      },
+    },
+    {
+      name: "get_engagement",
+      description: "Get full engagement details including scope, findings, and agent activity.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID (e.g., SKYLINE-SOC-2026-001)" },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
+      name: "add_finding",
+      description: "Record a pentest finding (vulnerability, misconfiguration, exposure). Links to engagement and provides structured data for reporting.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+          severity: { type: "string", enum: ["critical", "high", "medium", "low", "info"], description: "Finding severity" },
+          title: { type: "string", description: "Finding title (e.g., 'Exposed Admin Panel with Default Credentials')" },
+          description: { type: "string", description: "Detailed finding description" },
+          cvss_score: { type: "number", description: "CVSS 3.1 score (0.0-10.0)" },
+          cvss_vector: { type: "string", description: "CVSS vector string" },
+          affected_asset: { type: "string", description: "Affected host/service (e.g., '192.168.1.10:80')" },
+          mitre_attack: { type: "array", description: "MITRE ATT&CK technique IDs" },
+          reproduction: { type: "object", description: "Reproduction steps" },
+          remediation: { type: "string", description: "Recommended fix" },
+          evidence_files: { type: "array", description: "Paths to evidence (screenshots, logs, pcaps)" },
+        },
+        required: ["engagement_id", "severity", "title", "description"],
+      },
+    },
+    {
+      name: "list_findings",
+      description: "List findings for an engagement, optionally filtered by severity.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+          severity: { type: "string", enum: ["critical", "high", "medium", "low", "info"], description: "Filter by severity" },
+        },
+        required: ["engagement_id"],
+      },
+    },
   ];
 
   // ── Tool handlers ──
@@ -1309,6 +1381,174 @@ ${result.narrative}
           content: [{
             type: "text",
             text: `✅ Joko agent spawned for ${args.engagement_id}\n\n**Session ID:** ${sessionId}\n**Task:** ${args.task}\n**Evidence:** ${evidenceDir}\n**Audit Log:** agent_audit_log.id=${auditId}\n**Output:** ${tmpOutputFile}\n**PID:** ${jokoProcess.pid}\n\n🔄 Joko is running in background. Results will be logged to output file.`
+          }]
+        };
+      }
+
+      // ── SOC / Pentest Engagement tools ──────────────────────────────────────────────
+
+      case "create_engagement": {
+        // Generate engagement ID
+        const timestamp = Date.now();
+        const engagementId = `SKYLINE-SOC-${new Date().getFullYear()}-${String(timestamp).slice(-3)}`;
+
+        await db.query(`
+          INSERT INTO pentest_engagements (
+            id, client_name, engagement_type, scope, roe, start_date, end_date, lead_engineer, sow_url, status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `, [
+          engagementId,
+          args.client_name,
+          args.engagement_type,
+          JSON.stringify(args.scope),
+          JSON.stringify(args.roe || {}),
+          args.start_date || null,
+          args.end_date || null,
+          args.lead_engineer || null,
+          args.sow_url || null,
+          'scoping'
+        ]);
+
+        return {
+          content: [{
+            type: "text",
+            text: `✅ Pentest engagement created\n\n**ID:** ${engagementId}\n**Client:** ${args.client_name}\n**Type:** ${args.engagement_type}\n**Status:** scoping\n\n**Scope:**\n\`\`\`json\n${JSON.stringify(args.scope, null, 2)}\n\`\`\`\n\n**Next:** Call \`invoke_joko\` to begin reconnaissance with this engagement_id.`
+          }]
+        };
+      }
+
+      case "list_engagements": {
+        let query = `SELECT * FROM pentest_engagements`;
+        const params = [];
+        if (args.status) {
+          query += ` WHERE status = $1`;
+          params.push(args.status);
+        }
+        query += ` ORDER BY created_at DESC`;
+
+        const result = await db.query(query, params);
+        if (result.rows.length === 0) {
+          return { content: [{ type: "text", text: "No pentest engagements found." }] };
+        }
+
+        const lines = await Promise.all(result.rows.map(async (eng) => {
+          const findingsCount = await db.query(
+            `SELECT COUNT(*) as count FROM pentest_findings WHERE engagement_id = $1`,
+            [eng.id]
+          );
+          const count = findingsCount.rows[0].count;
+          return `• **${eng.id}** — ${eng.client_name} (${eng.engagement_type}) — ${eng.status} — ${count} findings`;
+        }));
+
+        return {
+          content: [{
+            type: "text",
+            text: `**Pentest Engagements:**\n\n${lines.join('\n')}`
+          }]
+        };
+      }
+
+      case "get_engagement": {
+        const eng = await db.query(
+          `SELECT * FROM pentest_engagements WHERE id = $1`,
+          [args.engagement_id]
+        );
+        if (eng.rows.length === 0) {
+          return { content: [{ type: "text", text: `Engagement ${args.engagement_id} not found.` }] };
+        }
+
+        const e = eng.rows[0];
+        const findings = await db.query(
+          `SELECT severity, COUNT(*) as count FROM pentest_findings
+           WHERE engagement_id = $1 GROUP BY severity ORDER BY
+           CASE severity
+             WHEN 'critical' THEN 1
+             WHEN 'high' THEN 2
+             WHEN 'medium' THEN 3
+             WHEN 'low' THEN 4
+             WHEN 'info' THEN 5
+           END`,
+          [args.engagement_id]
+        );
+
+        const activity = await db.query(
+          `SELECT agent_name, task, status, started_at FROM agent_audit_log
+           WHERE engagement_id = $1 ORDER BY started_at DESC LIMIT 10`,
+          [args.engagement_id]
+        );
+
+        let findingsSummary = findings.rows.map(f => `  - ${f.severity}: ${f.count}`).join('\n');
+        if (!findingsSummary) findingsSummary = "  (none yet)";
+
+        let activityLog = activity.rows.map(a => `  - ${a.agent_name}: ${a.task.substring(0, 50)}... (${a.status})`).join('\n');
+        if (!activityLog) activityLog = "  (no activity yet)";
+
+        return {
+          content: [{
+            type: "text",
+            text: `**Engagement:** ${e.id}\n**Client:** ${e.client_name}\n**Type:** ${e.engagement_type}\n**Status:** ${e.status}\n**Period:** ${e.start_date || 'TBD'} → ${e.end_date || 'TBD'}\n**Lead:** ${e.lead_engineer || 'unassigned'}\n\n**Scope:**\n\`\`\`json\n${JSON.stringify(e.scope, null, 2)}\n\`\`\`\n\n**Findings:**\n${findingsSummary}\n\n**Recent Activity:**\n${activityLog}`
+          }]
+        };
+      }
+
+      case "add_finding": {
+        await db.query(`
+          INSERT INTO pentest_findings (
+            engagement_id, severity, title, description, cvss_score, cvss_vector,
+            affected_asset, mitre_attack, reproduction, remediation, evidence_files, discovered_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `, [
+          args.engagement_id,
+          args.severity,
+          args.title,
+          args.description,
+          args.cvss_score || null,
+          args.cvss_vector || null,
+          args.affected_asset || null,
+          JSON.stringify(args.mitre_attack || []),
+          JSON.stringify(args.reproduction || {}),
+          args.remediation || null,
+          JSON.stringify(args.evidence_files || []),
+          'cipher'
+        ]);
+
+        return {
+          content: [{
+            type: "text",
+            text: `✅ Finding recorded\n\n**Severity:** ${args.severity.toUpperCase()}\n**Title:** ${args.title}\n**Asset:** ${args.affected_asset || 'N/A'}\n**Engagement:** ${args.engagement_id}\n\nFinding added to engagement report.`
+          }]
+        };
+      }
+
+      case "list_findings": {
+        let query = `SELECT * FROM pentest_findings WHERE engagement_id = $1`;
+        const params = [args.engagement_id];
+        if (args.severity) {
+          query += ` AND severity = $2`;
+          params.push(args.severity);
+        }
+        query += ` ORDER BY
+          CASE severity
+            WHEN 'critical' THEN 1
+            WHEN 'high' THEN 2
+            WHEN 'medium' THEN 3
+            WHEN 'low' THEN 4
+            WHEN 'info' THEN 5
+          END, discovered_at DESC`;
+
+        const result = await db.query(query, params);
+        if (result.rows.length === 0) {
+          return { content: [{ type: "text", text: `No findings for ${args.engagement_id}` }] };
+        }
+
+        const lines = result.rows.map(f =>
+          `• [${f.severity.toUpperCase()}] **${f.title}** — ${f.affected_asset || 'N/A'} — ${f.status}`
+        );
+
+        return {
+          content: [{
+            type: "text",
+            text: `**Findings for ${args.engagement_id}:**\n\n${lines.join('\n')}\n\n**Total:** ${result.rows.length} finding(s)`
           }]
         };
       }
