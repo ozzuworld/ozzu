@@ -429,7 +429,15 @@ public class GlassesModule: Module {
             // Add stream capability to the device session
             let session: StreamSession
             do {
-                session = try devSession.addStream(config: config)
+                guard let streamSession = try devSession.addStream(config: config) else {
+                    GlassesModule.log("Failed to add stream: returned nil")
+                    self.sendEvent("onError", [
+                        "code": "STREAM_ERROR",
+                        "message": "Failed to add stream: returned nil"
+                    ])
+                    return
+                }
+                session = streamSession
             } catch {
                 GlassesModule.log("Failed to add stream: \(error)")
                 self.sendEvent("onError", [
