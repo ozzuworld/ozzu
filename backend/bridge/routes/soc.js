@@ -180,7 +180,13 @@ module.exports = function socRoutes(ctx) {
         ) VALUES ($1, $2, $3, $4, $5, NOW())
       `, [sessionId, engagement_id, 'pa_engineer', command, 'running']);
 
-      // Execute command in background (detached from response)
+      // Return immediately with session_id
+      sendJSON(res, 200, {
+        session_id: sessionId,
+        message: 'Execution started in background. Check audit log for results.'
+      });
+
+      // Execute command in background (after response sent)
       const sshCommand = `ssh -o StrictHostKeyChecking=no dev-01 "${command.replace(/"/g, '\\"')}"`;
       const proc = spawn('bash', ['-c', sshCommand], { detached: false });
 
@@ -196,17 +202,27 @@ module.exports = function socRoutes(ctx) {
 
       proc.on('close', async (code) => {
         // Update audit log when execution completes
-        await db.query(`
-          UPDATE agent_audit_log
-          SET status = $1, completed_at = NOW(), output = $2
-          WHERE session_id = $3
-        `, [code === 0 ? 'completed' : 'failed', fullOutput, sessionId]);
+        try {
+          await db.query(`
+            UPDATE agent_audit_log
+            SET status = $1, completed_at = NOW(), output = $2
+            WHERE session_id = $3
+          `, [code === 0 ? 'completed' : 'failed', fullOutput, sessionId]);
+        } catch (err) {
+          console.error(`Failed to update audit log for ${sessionId}:`, err);
+        }
       });
 
-      // Return immediately with session_id
-      sendJSON(res, 200, {
-        session_id: sessionId,
-        message: 'Execution started in background. Check audit log for results.'
+      proc.on('error', async (err) => {
+        try {
+          await db.query(`
+            UPDATE agent_audit_log
+            SET status = 'failed', completed_at = NOW(), output = $1
+            WHERE session_id = $2
+          `, [`Process error: ${err.message}`, sessionId]);
+        } catch (dbErr) {
+          console.error(`Failed to log process error for ${sessionId}:`, dbErr);
+        }
       });
 
       return true;
