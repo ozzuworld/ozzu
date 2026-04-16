@@ -138,6 +138,7 @@ const whatsappRoutes = require("./routes/whatsapp");
 const influenceRoutes = require("./routes/influence");
 const fleetRoutes = require("./routes/fleet");
 const devDashboardRoutes = require("./routes/dev-dashboard");
+const socRoutes = require("./routes/soc");
 const watchdog = require("./watchdog");
 const recoveryEngine = require("./recovery-engine");
 const cipherDaemon = require("./cipher-agent");
@@ -1579,6 +1580,7 @@ function getRouteHandlers() {
       fleet: fleetRoutes(routeCtx),
       devDashboard: devDashboardRoutes(routeCtx),
       knowledgeGraph: knowledgeGraphRoutes(routeCtx),
+      soc: socRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1705,6 +1707,7 @@ async function handleRequest(req, res) {
   if (await r.fleet(req, res, pathname, url)) return;
   if (await r.devDashboard(req, res, pathname, url)) return;
   if (await r.knowledgeGraph(req, res, pathname, url)) return;
+  if (await r.soc(req, res, pathname, url)) return;
 
   // ── AgroVisión training state poller (SSH to GPU, parse training log) ──
   async function refreshAgrovisionState(vastInstance) {

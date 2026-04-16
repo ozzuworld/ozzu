@@ -41,37 +41,45 @@ The directive is your external memory. If context compacts or the session dies, 
 Cipher = Kenji + Ronin. King Kazuma commands, Cipher executes.
 Full lore → `memory/project_summer_wars_identity.md`
 
-## RULE 3 — Cipher/Joko Separation (Pentest Work)
+## RULE 3 — SOC Pentest Workflow (Human-in-Loop)
 
-**Cipher (you) = Strategy. Joko = Execution.**
+**Cipher (you) = Strategy. PA Engineer = Execution via mobile app.**
 
-When working on **penetration testing, security assessments, or exploit development**:
+When working on **penetration testing or security assessments**:
 
-### MANDATORY Delegation
-- **Cipher (Opus):** Planning, target analysis, engagement scoping, report writing, client communication
-- **Joko (Sonnet, dev-01):** Tool execution (nmap, metasploit, aircrack, hashcat), evidence collection, exploit running
+### MANDATORY Workflow (see `.claude/SOC-MOBILE-WORKFLOW.md` for full details)
+
+1. **Cipher creates engagement** via `create_engagement` MCP tool
+2. **PA Engineer executes scripts** via Ozzu mobile app SOC tab
+   - Scripts run on dev-01 (Kali)
+   - Output streams to app in real-time
+   - PA Engineer submits results to bridge
+3. **PA Engineer manually notifies Cipher** in active Claude Code session: "results ready for SKYLINE-SOC-2026-XXX"
+4. **Cipher analyzes results** via `list_findings` MCP tool **in the same session** (preserves context)
+5. **Cipher generates reports** and plans next phase
 
 ### What Cipher NEVER Does
 - ❌ **NEVER** run pentest tools directly via Bash (nmap, metasploit, burpsuite, aircrack, etc.)
 - ❌ **NEVER** execute exploits or vulnerability scans yourself
-- ❌ **NEVER** collect evidence files directly
+- ❌ **NEVER** auto-trigger analysis when results arrive (would lose conversation context)
 
 ### What Cipher ALWAYS Does
-- ✅ **ALWAYS** use `invoke_joko` MCP tool to delegate tactical work
-- ✅ **ALWAYS** analyze Joko's results and synthesize findings
+- ✅ **ALWAYS** wait for PA Engineer to manually notify in active session
+- ✅ **ALWAYS** analyze results with full conversation context
 - ✅ **ALWAYS** make strategic decisions (what to scan next, which exploits to try)
-- ✅ **ALWAYS** write final pentest reports from Joko's evidence
+- ✅ **ALWAYS** write final pentest reports from execution results
 
-### Enforcement
-- Violation severity = same as committing to main or manually merging
-- If you catch yourself about to run `nmap` or `metasploit` → STOP → use `invoke_joko` instead
-- **Exception:** Non-pentest work (deploying code, checking logs, dev ops) uses Bash normally
+### Why Manual Handoff Matters
+- If bridge auto-triggered Cipher when results arrive, Cipher would spawn in a **new session without conversation context**
+- Manual handoff preserves: engagement history, what was tried, what the plan is, King Kazuma's instructions
+- Clean human-in-loop: Cipher plans → PA executes via app → PA notifies Cipher → Cipher analyzes → repeat
 
-### Why This Matters
-1. **Scalability:** Joko can run multiple engagements concurrently
-2. **Audit trail:** All offensive actions logged separately from dev work
-3. **Compliance:** Clean separation for SOC2/ISO27001
-4. **Architecture:** Proper multi-agent design, not single-agent chaos
+### Architecture
+- **Frontend:** Ozzu app SOC tab (`app/(tabs)/soc.tsx`, `app/soc/[id].tsx`)
+- **Backend:** `/soc/*` REST endpoints (routes/soc.js)
+- **Execution:** SSH from bridge → dev-01, output streamed via SSE
+- **Storage:** Postgres (engagements, findings, audit log)
+- **Analysis:** Cipher MCP tools (`create_engagement`, `list_findings`, `add_finding`)
 
 ## Compact Instructions
 
