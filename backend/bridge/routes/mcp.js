@@ -1267,17 +1267,48 @@ ${result.narrative}
           audit_id: auditId,
         };
 
-        // Spawn Joko agent (using Claude Agent SDK or subprocess)
-        // For now, return a placeholder - actual agent spawning will be implemented via Claude Agent SDK
+        // Spawn Joko agent as separate claude process with joko profile
         const sessionId = `joko_${auditId}_${Date.now()}`;
+        const jokoPrompt = `${JSON.stringify(jokoContext, null, 2)}\n\n${args.task}`;
 
-        log(`[invoke_joko] Spawned Joko session ${sessionId} for engagement ${args.engagement_id}`);
+        log(`[invoke_joko] Spawning Joko session ${sessionId} for engagement ${args.engagement_id}`);
         log(`[invoke_joko] Task: ${args.task}`);
+
+        // Spawn Joko as background task
+        const tmpTaskFile = `/tmp/joko-task-${sessionId}.txt`;
+        const tmpOutputFile = `/tmp/joko-output-${sessionId}.txt`;
+
+        // Read Joko agent persona (on dev-01)
+        // Use base64 to avoid all escaping issues with JSON/newlines
+        const base64Prompt = Buffer.from(jokoPrompt).toString('base64');
+
+        // Spawn Joko on dev-01 with persona injected via append-system-prompt
+        // Note: --agent flag doesn't work, use --append-system-prompt-file instead
+        const fullCommand = `ssh -o StrictHostKeyChecking=no dev-01 "echo '${base64Prompt}' | base64 -d > ${tmpTaskFile} && cat ${tmpTaskFile} | claude --model sonnet --append-system-prompt \\\"\\$(cat /home/hadmin/.claude/joko.md)\\\" > ${tmpOutputFile} 2>&1 &"`;
+
+        const jokoProcess = spawn('bash', ['-c', fullCommand], {
+          detached: true,
+          stdio: 'ignore'
+        });
+
+        jokoProcess.unref(); // Allow parent to exit independently
+
+        // Update audit log with session ID
+        await db.query(`
+          UPDATE agent_audit_log
+          SET metadata = metadata || $1
+          WHERE id = $2
+        `, [
+          JSON.stringify({ session_id: sessionId, output_file: tmpOutputFile }),
+          auditId
+        ]);
+
+        log(`[invoke_joko] Joko spawned with PID ${jokoProcess.pid}, output: ${tmpOutputFile}`);
 
         return {
           content: [{
             type: "text",
-            text: `✅ Joko agent spawned for ${args.engagement_id}\n\n**Session ID:** ${sessionId}\n**Task:** ${args.task}\n**Evidence:** ${evidenceDir}\n**Audit Log:** agent_audit_log.id=${auditId}\n\n⚠️  NOTE: Joko agent spawning is scaffolded. Full implementation requires Claude Agent SDK integration. For now, run tools manually and use this audit trail for compliance.`
+            text: `✅ Joko agent spawned for ${args.engagement_id}\n\n**Session ID:** ${sessionId}\n**Task:** ${args.task}\n**Evidence:** ${evidenceDir}\n**Audit Log:** agent_audit_log.id=${auditId}\n**Output:** ${tmpOutputFile}\n**PID:** ${jokoProcess.pid}\n\n🔄 Joko is running in background. Results will be logged to output file.`
           }]
         };
       }
