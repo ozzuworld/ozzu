@@ -188,7 +188,7 @@ function withMetaDATSPM(config) {
         "https://github.com/facebook/meta-wearables-dat-ios",
       requirement: {
         kind: "upToNextMajorVersion",
-        minimumVersion: "0.4.0",
+        minimumVersion: "0.6.0",
       },
     };
     pbx.XCRemoteSwiftPackageReference[`${pkgRefUuid}_comment`] =
