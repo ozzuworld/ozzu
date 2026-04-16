@@ -169,3 +169,24 @@ CREATE INDEX idx_files_category ON files(category);
 CREATE INDEX idx_files_source ON files(source);
 CREATE INDEX idx_files_created ON files(created_at DESC);
 CREATE INDEX idx_files_temp ON files(is_temp) WHERE is_temp = true;
+
+-- Agent audit trail (for multi-agent pentest system)
+CREATE TABLE agent_audit_log (
+  id              SERIAL PRIMARY KEY,
+  agent_name      VARCHAR(50) NOT NULL,       -- 'cipher', 'joko', etc.
+  engagement_id   VARCHAR(50),                -- links to SOW/client engagement
+  directive_id    VARCHAR(50) REFERENCES directives(id),
+  task            TEXT NOT NULL,              -- what was delegated
+  spawned_by      VARCHAR(50),                -- which agent spawned this
+  status          VARCHAR(20) DEFAULT 'running',  -- 'running', 'completed', 'failed', 'blocked'
+  evidence        JSONB DEFAULT '[]',         -- paths to screenshots, outputs, pcap files
+  findings        JSONB DEFAULT '[]',         -- structured findings for report
+  started_at      TIMESTAMPTZ DEFAULT NOW(),
+  completed_at    TIMESTAMPTZ,
+  output          TEXT,                       -- raw output/logs
+  metadata        JSONB DEFAULT '{}'
+);
+CREATE INDEX idx_agent_audit_engagement ON agent_audit_log(engagement_id, started_at DESC);
+CREATE INDEX idx_agent_audit_agent ON agent_audit_log(agent_name, started_at DESC);
+CREATE INDEX idx_agent_audit_spawned ON agent_audit_log(spawned_by, started_at DESC);
+CREATE INDEX idx_agent_audit_directive ON agent_audit_log(directive_id);

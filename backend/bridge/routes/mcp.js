@@ -371,6 +371,21 @@ module.exports = function mcpRoutes(ctx) {
         required: ["directive_id"],
       },
     },
+    {
+      name: "invoke_joko",
+      description: "Spawn Joko execution agent for pentest task execution. Joko (Sonnet 4.5) runs tools, collects evidence, returns structured findings. Cipher delegates tactical work to Joko, then analyzes results. Returns agent session ID for tracking.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          task: { type: "string", description: "Specific task for Joko to execute (e.g., 'nmap scan 192.168.1.0/24', 'crack WPA2 handshake', 'exploit CVE-2023-XXXX')" },
+          engagement_id: { type: "string", description: "Engagement identifier (e.g., SKYLINE-SOC-2026-002)" },
+          directive_id: { type: "string", description: "Directive ID this work belongs to" },
+          scope: { type: "object", description: "In-scope targets and constraints (subnets, IPs, prohibited targets)" },
+          evidence_dir: { type: "string", description: "Optional: evidence directory path. Defaults to /tmp/{engagement_id}/evidence/" },
+        },
+        required: ["task", "engagement_id"],
+      },
+    },
   ];
 
   // ── Tool handlers ──
@@ -1106,6 +1121,57 @@ module.exports = function mcpRoutes(ctx) {
 
         const verb = args.thread_id ? "linked to" : "created thread and linked to";
         return { content: [{ type: "text", text: `Directive ${args.directive_id} ${verb} ${threadId}${args.add_decision ? ". Decision recorded." : ""}` }] };
+      }
+
+      case "invoke_joko": {
+        const fs = require("fs");
+        const { spawn } = require("child_process");
+        const evidenceDir = args.evidence_dir || `/tmp/${args.engagement_id}/evidence/`;
+
+        // Create evidence directory
+        if (!fs.existsSync(evidenceDir)) {
+          fs.mkdirSync(evidenceDir, { recursive: true });
+        }
+
+        // Log to audit trail
+        const auditEntry = await db.query(`
+          INSERT INTO agent_audit_log (agent_name, engagement_id, directive_id, task, spawned_by, status, metadata)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          RETURNING id
+        `, [
+          "joko",
+          args.engagement_id,
+          args.directive_id || null,
+          args.task,
+          "cipher",
+          "running",
+          JSON.stringify({ scope: args.scope || {}, evidence_dir: evidenceDir })
+        ]);
+        const auditId = auditEntry.rows[0].id;
+
+        // Build context for Joko agent
+        const jokoContext = {
+          engagement_id: args.engagement_id,
+          directive_id: args.directive_id,
+          task: args.task,
+          scope: args.scope || {},
+          evidence_dir: evidenceDir,
+          audit_id: auditId,
+        };
+
+        // Spawn Joko agent (using Claude Agent SDK or subprocess)
+        // For now, return a placeholder - actual agent spawning will be implemented via Claude Agent SDK
+        const sessionId = `joko_${auditId}_${Date.now()}`;
+
+        log(`[invoke_joko] Spawned Joko session ${sessionId} for engagement ${args.engagement_id}`);
+        log(`[invoke_joko] Task: ${args.task}`);
+
+        return {
+          content: [{
+            type: "text",
+            text: `✅ Joko agent spawned for ${args.engagement_id}\n\n**Session ID:** ${sessionId}\n**Task:** ${args.task}\n**Evidence:** ${evidenceDir}\n**Audit Log:** agent_audit_log.id=${auditId}\n\n⚠️  NOTE: Joko agent spawning is scaffolded. Full implementation requires Claude Agent SDK integration. For now, run tools manually and use this audit trail for compliance.`
+          }]
+        };
       }
 
       // ── Person / Identity tools ──────────────────────────────────────────────

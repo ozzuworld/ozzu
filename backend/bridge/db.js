@@ -1014,7 +1014,28 @@ async function init() {
       ));
     END $$`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph)");
+    // Migration: Agent audit trail for multi-agent pentest system
+    await pool.query(`CREATE TABLE IF NOT EXISTS agent_audit_log (
+      id SERIAL PRIMARY KEY,
+      agent_name VARCHAR(50) NOT NULL,
+      engagement_id VARCHAR(50),
+      directive_id VARCHAR(50) REFERENCES directives(id),
+      task TEXT NOT NULL,
+      spawned_by VARCHAR(50),
+      status VARCHAR(20) DEFAULT 'running',
+      evidence JSONB DEFAULT '[]',
+      findings JSONB DEFAULT '[]',
+      started_at TIMESTAMPTZ DEFAULT NOW(),
+      completed_at TIMESTAMPTZ,
+      output TEXT,
+      metadata JSONB DEFAULT '{}'
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_engagement ON agent_audit_log(engagement_id, started_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_agent ON agent_audit_log(agent_name, started_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_spawned ON agent_audit_log(spawned_by, started_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_directive ON agent_audit_log(directive_id)`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph + agent_audit_log)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
