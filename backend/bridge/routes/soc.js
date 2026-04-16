@@ -151,7 +151,7 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
-    // POST /soc/execute - Execute script on dev-01
+    // POST /soc/execute - Execute script on dev-01 (background execution)
     if (req.method === "POST" && pathname === "/soc/execute") {
       const body = await parseBody(req);
       const { engagement_id, script_id, command } = body;
@@ -180,48 +180,33 @@ module.exports = function socRoutes(ctx) {
         ) VALUES ($1, $2, $3, $4, $5, NOW())
       `, [sessionId, engagement_id, 'pa_engineer', command, 'running']);
 
-      // Set response headers for Server-Sent Events
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-
-      // Send initial connection message
-      res.write(`data: ${JSON.stringify({ type: 'connected', session_id: sessionId })}\n\n`);
-
-      // Execute command on dev-01 via SSH
+      // Execute command in background (detached from response)
       const sshCommand = `ssh -o StrictHostKeyChecking=no dev-01 "${command.replace(/"/g, '\\"')}"`;
-      const proc = spawn('bash', ['-c', sshCommand]);
+      const proc = spawn('bash', ['-c', sshCommand], { detached: false });
 
       let fullOutput = '';
 
       proc.stdout.on('data', (data) => {
-        const output = data.toString();
-        fullOutput += output;
-        res.write(`data: ${JSON.stringify({ type: 'stdout', data: output })}\n\n`);
+        fullOutput += data.toString();
       });
 
       proc.stderr.on('data', (data) => {
-        const output = data.toString();
-        fullOutput += output;
-        res.write(`data: ${JSON.stringify({ type: 'stderr', data: output })}\n\n`);
+        fullOutput += data.toString();
       });
 
       proc.on('close', async (code) => {
-        // Update audit log
+        // Update audit log when execution completes
         await db.query(`
           UPDATE agent_audit_log
           SET status = $1, completed_at = NOW(), output = $2
           WHERE session_id = $3
         `, [code === 0 ? 'completed' : 'failed', fullOutput, sessionId]);
-
-        res.write(`data: ${JSON.stringify({ type: 'exit', code, session_id: sessionId })}\n\n`);
-        res.end();
       });
 
-      req.on('close', () => {
-        if (!proc.killed) {
-          proc.kill();
-        }
+      // Return immediately with session_id
+      sendJSON(res, 200, {
+        session_id: sessionId,
+        message: 'Execution started in background. Check audit log for results.'
       });
 
       return true;
@@ -271,6 +256,29 @@ module.exports = function socRoutes(ctx) {
         findings_created: createdFindings.length,
         message: 'Results stored. Notify Cipher manually in active session for analysis.'
       });
+      return true;
+    }
+
+    // GET /soc/audit-log/:engagement_id - Get execution history
+    if (req.method === "GET" && pathname.match(/^\/soc\/audit-log\/[^\/]+$/)) {
+      const engagementId = pathname.split("/")[3];
+
+      const result = await db.query(`
+        SELECT
+          session_id,
+          agent_name,
+          task,
+          status,
+          started_at,
+          completed_at,
+          output
+        FROM agent_audit_log
+        WHERE engagement_id = $1
+        ORDER BY started_at DESC
+        LIMIT 20
+      `, [engagementId]);
+
+      sendJSON(res, 200, { executions: result.rows });
       return true;
     }
 

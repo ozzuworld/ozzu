@@ -35,6 +35,16 @@ type Script = {
   status: "ready" | "completed" | "manual";
 };
 
+type Execution = {
+  session_id: string;
+  agent_name: string;
+  task: string;
+  status: "running" | "completed" | "failed";
+  started_at: string;
+  completed_at: string | null;
+  output: string | null;
+};
+
 export default function EngagementDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -42,25 +52,40 @@ export default function EngagementDetailScreen() {
 
   const [engagement, setEngagement] = useState<EngagementDetail | null>(null);
   const [scripts, setScripts] = useState<Script[]>([]);
+  const [executions, setExecutions] = useState<Execution[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingExecutions, setLoadingExecutions] = useState(false);
 
   const [executing, setExecuting] = useState(false);
-  const [currentScript, setCurrentScript] = useState<Script | null>(null);
-  const [output, setOutput] = useState("");
-  const [sessionId, setSessionId] = useState("");
+
+  const fetchExecutions = useCallback(async () => {
+    setLoadingExecutions(true);
+    try {
+      const response = await fetch(`${getBridgeUrl()}/soc/audit-log/${id}`);
+      const data = await response.json();
+      setExecutions(data.executions || []);
+    } catch (error) {
+      console.error("Error fetching executions:", error);
+    } finally {
+      setLoadingExecutions(false);
+    }
+  }, [id]);
 
   const fetchEngagement = useCallback(async () => {
     try {
-      const [engRes, scriptsRes] = await Promise.all([
+      const [engRes, scriptsRes, execRes] = await Promise.all([
         fetch(`${getBridgeUrl()}/soc/engagements/${id}`),
         fetch(`${getBridgeUrl()}/soc/engagements/${id}/scripts`),
+        fetch(`${getBridgeUrl()}/soc/audit-log/${id}`),
       ]);
 
       const engData = await engRes.json();
       const scriptsData = await scriptsRes.json();
+      const execData = await execRes.json();
 
       setEngagement(engData.engagement);
       setScripts(scriptsData.scripts || []);
+      setExecutions(execData.executions || []);
     } catch (error) {
       console.error("Error fetching engagement:", error);
       Alert.alert("Error", "Failed to load engagement");
@@ -78,14 +103,12 @@ export default function EngagementDetailScreen() {
 
     Alert.alert(
       "Execute Script",
-      `This will run:\n\n${script.command}\n\non dev-01 via SSH.\n\nNote: Output will be displayed when complete (polling not implemented yet). For now, this is a proof-of-concept.`,
+      `This will run:\n\n${script.command}\n\non dev-01 via SSH.`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Execute",
           onPress: async () => {
-            setCurrentScript(script);
-            setOutput("Executing on dev-01...\n");
             setExecuting(true);
 
             try {
@@ -103,73 +126,33 @@ export default function EngagementDetailScreen() {
                 throw new Error(`HTTP ${response.status}`);
               }
 
-              setOutput("Execution started. Check audit log for results.");
-              setExecuting(false);
+              const data = await response.json();
 
               Alert.alert(
                 "Execution Started",
-                "Script is running on dev-01. Results will be in the audit log.",
-                [{ text: "OK" }]
+                `Session: ${data.session_id}\n\nScript is running on dev-01. Refresh the execution history below to see results.`,
+                [
+                  {
+                    text: "Refresh Now",
+                    onPress: () => {
+                      // Wait 2 seconds for script to complete
+                      setTimeout(() => fetchExecutions(), 2000);
+                    },
+                  },
+                  { text: "OK" },
+                ]
               );
             } catch (error: any) {
-              setExecuting(false);
-              setOutput("");
               Alert.alert("Error", error.message || "Failed to execute script");
+            } finally {
+              setExecuting(false);
             }
           },
         },
       ]
     );
-  }, [id, executing]);
+  }, [id, executing, fetchExecutions]);
 
-  const showSubmitForm = useCallback(() => {
-    Alert.prompt(
-      "Submit Results",
-      "Describe the findings from this execution:",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Submit",
-          onPress: async (findings: string = "") => {
-            try {
-              await fetch(`${getBridgeUrl()}/soc/submit-results`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  engagement_id: id,
-                  session_id: sessionId,
-                  findings: [
-                    {
-                      title: currentScript?.name || "Finding",
-                      description: findings || output.substring(0, 500),
-                      severity: "info",
-                      affected_asset: engagement?.scope?.targets?.[0] || "Unknown",
-                    },
-                  ],
-                }),
-              });
-
-              Alert.alert(
-                "Results Submitted",
-                "Results saved. Notify Cipher in the active session to analyze."
-              );
-
-              // Reset state
-              setCurrentScript(null);
-              setOutput("");
-              setSessionId("");
-
-              // Refresh scripts to update status
-              fetchEngagement();
-            } catch (error: any) {
-              Alert.alert("Error", error.message || "Failed to submit results");
-            }
-          },
-        },
-      ],
-      "plain-text"
-    );
-  }, [id, sessionId, output, currentScript, engagement, fetchEngagement]);
 
 
   if (loading) {
@@ -278,48 +261,126 @@ export default function EngagementDetailScreen() {
           ))}
         </View>
 
-        {/* Output Section */}
-        {currentScript && (
-          <View style={{ marginTop: spacing.lg }}>
-            <Text style={{ fontSize: fs.md, fontWeight: fw.semibold, color: colors.text.primary, marginBottom: spacing.md }}>
-              Output: {currentScript.name}
+        {/* Execution History Section */}
+        <View style={{ marginTop: spacing.xl }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md }}>
+            <Text style={{ fontSize: fs.md, fontWeight: fw.semibold, color: colors.text.primary }}>
+              Execution History
             </Text>
-
-            <View style={styles.outputContainer}>
-              <ScrollView style={{ maxHeight: 400 }}>
-                <Text style={styles.outputText}>{output || "No output yet..."}</Text>
-              </ScrollView>
-            </View>
-
-            {executing && (
-              <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacing.sm }}>
-                <ActivityIndicator size="small" color={colors.accent.blue} />
-                <Text style={{ color: colors.text.disabled, fontSize: fs.sm, marginLeft: spacing.sm }}>
-                  Executing on dev-01...
-                </Text>
-              </View>
-            )}
-
-            {!executing && output && (
-              <Pressable
-                onPress={showSubmitForm}
-                style={({ pressed }) => [
-                  {
-                    backgroundColor: colors.status.success,
-                    padding: spacing.md,
-                    borderRadius: radius.md,
-                    marginTop: spacing.md,
-                    opacity: pressed ? 0.9 : 1,
-                  },
-                ]}
-              >
-                <Text style={{ color: colors.bg.primary, fontSize: fs.md, fontWeight: fw.semibold, textAlign: "center" }}>
-                  Submit Results to Cipher
-                </Text>
-              </Pressable>
-            )}
+            <Pressable
+              onPress={fetchExecutions}
+              disabled={loadingExecutions}
+              style={({ pressed }) => [
+                {
+                  backgroundColor: colors.bg.secondary,
+                  paddingHorizontal: spacing.md,
+                  paddingVertical: spacing.sm,
+                  borderRadius: radius.md,
+                  opacity: loadingExecutions ? 0.5 : pressed ? 0.9 : 1,
+                },
+              ]}
+            >
+              <Text style={{ color: colors.accent.blue, fontSize: fs.sm, fontWeight: fw.medium }}>
+                {loadingExecutions ? "⟳ Refreshing..." : "↻ Refresh"}
+              </Text>
+            </Pressable>
           </View>
-        )}
+
+          {executions.length === 0 ? (
+            <View style={{ padding: spacing.lg, alignItems: "center" }}>
+              <Text style={{ color: colors.text.disabled, fontSize: fs.sm }}>
+                No executions yet. Run a script above to get started.
+              </Text>
+            </View>
+          ) : (
+            <View style={{ gap: spacing.md }}>
+              {executions.map((exec) => (
+                <View key={exec.session_id} style={styles.executionCard}>
+                  {/* Status indicator */}
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: 4,
+                      backgroundColor:
+                        exec.status === "completed"
+                          ? colors.status.success
+                          : exec.status === "failed"
+                          ? colors.status.error
+                          : colors.status.working,
+                      borderTopLeftRadius: radius.md,
+                      borderBottomLeftRadius: radius.md,
+                    }}
+                  />
+
+                  <View style={{ paddingLeft: spacing.md }}>
+                    {/* Header */}
+                    <View style={{ flexDirection: "row", alignItems: "center", marginBottom: spacing.xs }}>
+                      <Text style={{ fontSize: 16, marginRight: spacing.xs }}>
+                        {exec.status === "completed" ? "✅" : exec.status === "failed" ? "❌" : "⏳"}
+                      </Text>
+                      <Text style={{ fontSize: fs.sm, fontWeight: fw.medium, color: colors.text.primary, flex: 1 }}>
+                        {exec.session_id}
+                      </Text>
+                      <View
+                        style={{
+                          paddingHorizontal: spacing.sm,
+                          paddingVertical: 3,
+                          backgroundColor: withAlpha(
+                            exec.status === "completed"
+                              ? colors.status.success
+                              : exec.status === "failed"
+                              ? colors.status.error
+                              : colors.status.working,
+                            0.15
+                          ),
+                          borderRadius: radius.sm,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: fs.xs,
+                            color:
+                              exec.status === "completed"
+                                ? colors.status.success
+                                : exec.status === "failed"
+                                ? colors.status.error
+                                : colors.status.working,
+                            fontWeight: fw.medium,
+                          }}
+                        >
+                          {exec.status.toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Command */}
+                    <Text style={{ fontSize: fs.xs, color: colors.text.disabled, marginBottom: spacing.sm, fontFamily: "monospace" }}>
+                      {exec.task.length > 80 ? exec.task.substring(0, 80) + "..." : exec.task}
+                    </Text>
+
+                    {/* Timestamps */}
+                    <Text style={{ fontSize: fs.xs, color: colors.text.disabled }}>
+                      Started: {new Date(exec.started_at).toLocaleTimeString()}
+                      {exec.completed_at && ` • Completed: ${new Date(exec.completed_at).toLocaleTimeString()}`}
+                    </Text>
+
+                    {/* Output (if available) */}
+                    {exec.output && (
+                      <View style={styles.outputContainer}>
+                        <ScrollView style={{ maxHeight: 200 }}>
+                          <Text style={styles.outputText}>{exec.output}</Text>
+                        </ScrollView>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
       </ScrollView>
     </View>
   );
@@ -333,12 +394,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border.subtle,
   },
+  executionCard: {
+    backgroundColor: colors.bg.secondary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    position: "relative",
+  },
   outputContainer: {
     backgroundColor: colors.bg.tertiary,
     borderRadius: radius.md,
     padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.border.subtle,
+    marginTop: spacing.sm,
   },
   outputText: {
     fontFamily: "monospace",
