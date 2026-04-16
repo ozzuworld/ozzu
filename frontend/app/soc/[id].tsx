@@ -12,6 +12,7 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
+import { getBridgeUrl } from "../../lib/bridge-api";
 import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha } from "../../lib/design-tokens";
 
 type EngagementDetail = {
@@ -53,8 +54,8 @@ export default function EngagementDetailScreen() {
   const fetchEngagement = useCallback(async () => {
     try {
       const [engRes, scriptsRes] = await Promise.all([
-        fetch(`http://localhost:3030/soc/engagements/${id}`),
-        fetch(`http://localhost:3030/soc/engagements/${id}/scripts`),
+        fetch(`${getBridgeUrl()}/soc/engagements/${id}`),
+        fetch(`${getBridgeUrl()}/soc/engagements/${id}/scripts`),
       ]);
 
       const engData = await engRes.json();
@@ -84,7 +85,7 @@ export default function EngagementDetailScreen() {
     try {
       // Start SSE connection to stream output
       const eventSource = new EventSource(
-        `http://localhost:3030/soc/execute?engagement_id=${id}&script_id=${script.id}&command=${encodeURIComponent(script.command)}`
+        `${getBridgeUrl()}/soc/execute?engagement_id=${id}&script_id=${script.id}&command=${encodeURIComponent(script.command)}`
       );
 
       eventSourceRef.current = eventSource;
@@ -139,7 +140,7 @@ export default function EngagementDetailScreen() {
           text: "Submit",
           onPress: async (findings: string = "") => {
             try {
-              await fetch(`http://localhost:3030/soc/submit-results`, {
+              await fetch(`${getBridgeUrl()}/soc/submit-results`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({

@@ -11,6 +11,7 @@ import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import HamburgerMenu from "../../components/HamburgerMenu";
+import { getBridgeUrl } from "../../lib/bridge-api";
 import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha } from "../../lib/design-tokens";
 
 const TOP_BAR_HEIGHT = 48;
@@ -36,7 +37,7 @@ export default function SOCScreen() {
 
   const fetchEngagements = useCallback(async () => {
     try {
-      const response = await fetch(`http://localhost:3030/soc/engagements`);
+      const response = await fetch(`${getBridgeUrl()}/soc/engagements`);
       const data = await response.json();
       setEngagements(data.engagements || []);
     } catch (error) {
