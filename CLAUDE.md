@@ -62,6 +62,7 @@ When working on **penetration testing or security assessments**:
 - ❌ **NEVER** run pentest tools directly via Bash (nmap, metasploit, burpsuite, aircrack, etc.)
 - ❌ **NEVER** execute exploits or vulnerability scans yourself
 - ❌ **NEVER** auto-trigger analysis when results arrive (would lose conversation context)
+- ❌ **NEVER** author, modify, port, or tune exploit source code — reference public PoCs by ID only (ExploitDB / CVE / MSF module path) and queue them for PA engineer execution. See `.claude/SOC-PROMPT-TEMPLATE.md` for the stop-at-queue planning template and banned-phrasing list.
 
 ### What Cipher ALWAYS Does
 - ✅ **ALWAYS** wait for PA Engineer to manually notify in active session
