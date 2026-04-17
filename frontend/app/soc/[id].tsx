@@ -45,6 +45,22 @@ type Execution = {
   output: string | null;
 };
 
+type QueueItem = {
+  id: number;
+  engagement_id: string;
+  seq: number;
+  title: string;
+  description: string | null;
+  command: string;
+  expected_artifact: string | null;
+  status: "pending" | "running" | "done" | "failed" | "skipped";
+  session_id: string | null;
+  output: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
 export default function EngagementDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -53,10 +69,23 @@ export default function EngagementDetailScreen() {
   const [engagement, setEngagement] = useState<EngagementDetail | null>(null);
   const [scripts, setScripts] = useState<Script[]>([]);
   const [executions, setExecutions] = useState<Execution[]>([]);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingExecutions, setLoadingExecutions] = useState(false);
+  const [runningQueueItem, setRunningQueueItem] = useState<number | null>(null);
+  const [expandedQueueItem, setExpandedQueueItem] = useState<number | null>(null);
 
   const [executing, setExecuting] = useState(false);
+
+  const fetchQueue = useCallback(async () => {
+    try {
+      const response = await fetch(`${getBridgeUrl()}/soc/engagements/${id}/queue`);
+      const data = await response.json();
+      setQueue(data.queue || []);
+    } catch (error) {
+      console.error("Error fetching queue:", error);
+    }
+  }, [id]);
 
   const fetchExecutions = useCallback(async () => {
     setLoadingExecutions(true);
@@ -73,19 +102,22 @@ export default function EngagementDetailScreen() {
 
   const fetchEngagement = useCallback(async () => {
     try {
-      const [engRes, scriptsRes, execRes] = await Promise.all([
+      const [engRes, scriptsRes, execRes, queueRes] = await Promise.all([
         fetch(`${getBridgeUrl()}/soc/engagements/${id}`),
         fetch(`${getBridgeUrl()}/soc/engagements/${id}/scripts`),
         fetch(`${getBridgeUrl()}/soc/audit-log/${id}`),
+        fetch(`${getBridgeUrl()}/soc/engagements/${id}/queue`),
       ]);
 
       const engData = await engRes.json();
       const scriptsData = await scriptsRes.json();
       const execData = await execRes.json();
+      const queueData = await queueRes.json();
 
       setEngagement(engData.engagement);
       setScripts(scriptsData.scripts || []);
       setExecutions(execData.executions || []);
+      setQueue(queueData.queue || []);
     } catch (error) {
       console.error("Error fetching engagement:", error);
       Alert.alert("Error", "Failed to load engagement");
@@ -97,6 +129,53 @@ export default function EngagementDetailScreen() {
   useEffect(() => {
     fetchEngagement();
   }, [fetchEngagement]);
+
+  // Auto-refresh queue while anything is running
+  useEffect(() => {
+    const anyRunning = queue.some((q) => q.status === "running");
+    if (!anyRunning) return;
+    const t = setInterval(() => {
+      fetchQueue();
+    }, 3000);
+    return () => clearInterval(t);
+  }, [queue, fetchQueue]);
+
+  const runQueueItem = useCallback(async (item: QueueItem) => {
+    if (runningQueueItem != null) return;
+    setRunningQueueItem(item.id);
+    try {
+      const response = await fetch(`${getBridgeUrl()}/soc/queue/${item.id}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      // Optimistically mark running, then refresh
+      setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: "running" } : q)));
+      setTimeout(() => fetchQueue(), 1500);
+    } catch (error: any) {
+      Alert.alert("Run failed", error.message || "Could not start step");
+    } finally {
+      setRunningQueueItem(null);
+    }
+  }, [runningQueueItem, fetchQueue]);
+
+  const skipQueueItem = useCallback(async (item: QueueItem) => {
+    Alert.alert("Skip step?", `Mark "${item.title}" as skipped?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Skip",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await fetch(`${getBridgeUrl()}/soc/queue/${item.id}/skip`, { method: "POST" });
+            fetchQueue();
+          } catch (error: any) {
+            Alert.alert("Skip failed", error.message || "Could not skip step");
+          }
+        },
+      },
+    ]);
+  }, [fetchQueue]);
 
   const executeScript = useCallback(async (script: Script) => {
     if (executing) return;
@@ -199,6 +278,133 @@ export default function EngagementDetailScreen() {
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md }}>
+        {/* Queued Steps Section (Cipher-driven) */}
+        {queue.length > 0 && (
+          <View style={{ marginBottom: spacing.xl }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md }}>
+              <Text style={{ fontSize: fs.md, fontWeight: fw.semibold, color: colors.text.primary }}>
+                Queued Steps
+              </Text>
+              <Pressable
+                onPress={fetchQueue}
+                style={({ pressed }) => [{
+                  backgroundColor: colors.bg.secondary,
+                  paddingHorizontal: spacing.md,
+                  paddingVertical: spacing.sm,
+                  borderRadius: radius.md,
+                  opacity: pressed ? 0.9 : 1,
+                }]}
+              >
+                <Text style={{ color: colors.accent.blue, fontSize: fs.sm, fontWeight: fw.medium }}>↻ Refresh</Text>
+              </Pressable>
+            </View>
+
+            <View style={{ gap: spacing.md }}>
+              {queue.map((item) => {
+                const statusColor =
+                  item.status === "done" ? colors.status.success :
+                  item.status === "failed" ? colors.status.error :
+                  item.status === "running" ? colors.status.working :
+                  item.status === "skipped" ? colors.text.disabled :
+                  colors.accent.blue;
+                const expanded = expandedQueueItem === item.id;
+                return (
+                  <View key={item.id} style={[styles.queueCard, { borderLeftColor: statusColor, borderLeftWidth: 3 }]}>
+                    <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: spacing.xs }}>
+                      <Text style={{ color: colors.text.disabled, fontSize: fs.xs, fontWeight: fw.medium, marginRight: spacing.sm, marginTop: 2 }}>
+                        #{item.seq}
+                      </Text>
+                      <Text style={{ flex: 1, fontSize: fs.md, fontWeight: fw.medium, color: colors.text.primary }}>
+                        {item.title}
+                      </Text>
+                      <View style={{
+                        paddingHorizontal: spacing.sm,
+                        paddingVertical: 3,
+                        backgroundColor: withAlpha(statusColor, 0.15),
+                        borderRadius: radius.sm,
+                      }}>
+                        <Text style={{ fontSize: fs.xs, color: statusColor, fontWeight: fw.medium }}>
+                          {item.status.toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {item.description && (
+                      <Text style={{ fontSize: fs.sm, color: colors.text.secondary, marginBottom: spacing.sm }}>
+                        {item.description}
+                      </Text>
+                    )}
+
+                    <Pressable onPress={() => setExpandedQueueItem(expanded ? null : item.id)}>
+                      <Text style={{ fontSize: fs.xs, color: colors.accent.blue, marginBottom: spacing.sm }}>
+                        {expanded ? "▾ Hide command" : "▸ Show command"}
+                      </Text>
+                    </Pressable>
+                    {expanded && (
+                      <View style={styles.outputContainer}>
+                        <Text style={[styles.outputText, { color: colors.text.secondary }]}>{item.command}</Text>
+                      </View>
+                    )}
+
+                    {item.expected_artifact && (
+                      <Text style={{ fontSize: fs.xs, color: colors.text.disabled, marginBottom: spacing.sm }}>
+                        Expected: {item.expected_artifact}
+                      </Text>
+                    )}
+
+                    {item.output && (
+                      <View style={[styles.outputContainer, { marginTop: spacing.sm }]}>
+                        <ScrollView style={{ maxHeight: 220 }}>
+                          <Text style={styles.outputText}>{item.output}</Text>
+                        </ScrollView>
+                      </View>
+                    )}
+
+                    {item.status === "pending" && (
+                      <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm }}>
+                        <Pressable
+                          onPress={() => runQueueItem(item)}
+                          disabled={runningQueueItem != null}
+                          style={({ pressed }) => [{
+                            flex: 1,
+                            backgroundColor: colors.accent.blue,
+                            paddingVertical: spacing.sm,
+                            borderRadius: radius.md,
+                            alignItems: "center",
+                            opacity: runningQueueItem != null ? 0.5 : pressed ? 0.9 : 1,
+                          }]}
+                        >
+                          <Text style={{ color: colors.text.primary, fontSize: fs.sm, fontWeight: fw.medium }}>▶ Run</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => skipQueueItem(item)}
+                          style={({ pressed }) => [{
+                            backgroundColor: colors.bg.tertiary,
+                            paddingVertical: spacing.sm,
+                            paddingHorizontal: spacing.md,
+                            borderRadius: radius.md,
+                            opacity: pressed ? 0.9 : 1,
+                          }]}
+                        >
+                          <Text style={{ color: colors.text.secondary, fontSize: fs.sm }}>Skip</Text>
+                        </Pressable>
+                      </View>
+                    )}
+                    {item.status === "running" && (
+                      <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacing.sm }}>
+                        <ActivityIndicator size="small" color={colors.status.working} />
+                        <Text style={{ marginLeft: spacing.sm, color: colors.text.secondary, fontSize: fs.sm }}>
+                          Running on dev-01…
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
         {/* Scripts Section */}
         <Text style={{ fontSize: fs.md, fontWeight: fw.semibold, color: colors.text.primary, marginBottom: spacing.md }}>
           Available Scripts
@@ -388,6 +594,13 @@ export default function EngagementDetailScreen() {
 
 const styles = StyleSheet.create({
   scriptCard: {
+    backgroundColor: colors.bg.secondary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+  },
+  queueCard: {
     backgroundColor: colors.bg.secondary,
     borderRadius: radius.md,
     padding: spacing.md,

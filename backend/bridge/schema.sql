@@ -190,3 +190,22 @@ CREATE INDEX idx_agent_audit_engagement ON agent_audit_log(engagement_id, starte
 CREATE INDEX idx_agent_audit_agent ON agent_audit_log(agent_name, started_at DESC);
 CREATE INDEX idx_agent_audit_spawned ON agent_audit_log(spawned_by, started_at DESC);
 CREATE INDEX idx_agent_audit_directive ON agent_audit_log(directive_id);
+
+-- SOC Cipher-queued command steps (per-engagement ordered list of steps PA engineer runs from app)
+CREATE TABLE IF NOT EXISTS soc_queue_items (
+  id                SERIAL PRIMARY KEY,
+  engagement_id     VARCHAR(50) NOT NULL REFERENCES pentest_engagements(id) ON DELETE CASCADE,
+  seq               INTEGER NOT NULL,
+  title             TEXT NOT NULL,
+  description       TEXT,
+  command           TEXT NOT NULL,             -- shell command to run on dev-01
+  expected_artifact TEXT,                       -- e.g. 'evidence/3.0.1-fingerprint.txt'
+  status            VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending|running|done|failed|skipped
+  session_id        TEXT,                       -- links to agent_audit_log.session_id when executed
+  output            TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  started_at        TIMESTAMPTZ,
+  completed_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_soc_queue_engagement ON soc_queue_items(engagement_id, seq);
+CREATE INDEX IF NOT EXISTS idx_soc_queue_status ON soc_queue_items(engagement_id, status);

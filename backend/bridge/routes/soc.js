@@ -284,6 +284,155 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // GET /soc/engagements/:id/queue - Get queued steps for engagement
+    if (req.method === "GET" && pathname.match(/^\/soc\/engagements\/[^\/]+\/queue$/)) {
+      const id = pathname.split("/")[3];
+      const result = await db.query(
+        `SELECT id, engagement_id, seq, title, description, command, expected_artifact,
+                status, session_id, output, created_at, started_at, completed_at
+         FROM soc_queue_items
+         WHERE engagement_id = $1
+         ORDER BY seq ASC`,
+        [id]
+      );
+      sendJSON(res, 200, { queue: result.rows });
+      return true;
+    }
+
+    // POST /soc/engagements/:id/queue - Replace pending queue items (Cipher pushes a new queue)
+    // Body: { items: [{title, description, command, expected_artifact}], replace_pending?: bool (default true) }
+    // done/failed/running items are preserved; pending items are replaced unless replace_pending=false.
+    if (req.method === "POST" && pathname.match(/^\/soc\/engagements\/[^\/]+\/queue$/)) {
+      try {
+        const id = pathname.split("/")[3];
+        const body = await parseBody(req);
+        const items = Array.isArray(body.items) ? body.items : [];
+        const replacePending = body.replace_pending !== false;
+
+        const engResult = await db.query(`SELECT 1 FROM pentest_engagements WHERE id = $1`, [id]);
+        if (engResult.rows.length === 0) {
+          sendJSON(res, 404, { error: 'Engagement not found' });
+          return true;
+        }
+
+        if (replacePending) {
+          await db.query(`DELETE FROM soc_queue_items WHERE engagement_id = $1 AND status = 'pending'`, [id]);
+        }
+
+        const maxSeqRes = await db.query(
+          `SELECT COALESCE(MAX(seq), 0) AS max_seq FROM soc_queue_items WHERE engagement_id = $1`,
+          [id]
+        );
+        let seq = parseInt(maxSeqRes.rows[0].max_seq, 10) || 0;
+
+        const inserted = [];
+        for (const item of items) {
+          if (!item || !item.title || !item.command) continue;
+          seq += 1;
+          const r = await db.query(
+            `INSERT INTO soc_queue_items (engagement_id, seq, title, description, command, expected_artifact, status)
+             VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id, seq`,
+            [id, seq, item.title, item.description || null, item.command, item.expected_artifact || null]
+          );
+          inserted.push(r.rows[0]);
+        }
+
+        sendJSON(res, 200, { inserted, total_pending: inserted.length });
+        return true;
+      } catch (error) {
+        console.error('[soc queue POST] Error:', error);
+        if (!res.headersSent) sendJSON(res, 500, { error: 'Internal server error', details: error.message });
+        return true;
+      }
+    }
+
+    // POST /soc/queue/:itemId/run - Execute a queued item on dev-01 (background, same pattern as /soc/execute)
+    if (req.method === "POST" && pathname.match(/^\/soc\/queue\/\d+\/run$/)) {
+      try {
+        const itemId = parseInt(pathname.split("/")[3], 10);
+        const itemRes = await db.query(`SELECT * FROM soc_queue_items WHERE id = $1`, [itemId]);
+        if (itemRes.rows.length === 0) {
+          sendJSON(res, 404, { error: 'Queue item not found' });
+          return true;
+        }
+        const item = itemRes.rows[0];
+        if (item.status === 'running') {
+          sendJSON(res, 409, { error: 'Item already running' });
+          return true;
+        }
+
+        const sessionId = `pa_queue_${item.id}_${Date.now()}`;
+        await db.query(
+          `UPDATE soc_queue_items SET status = 'running', session_id = $1, started_at = NOW(), output = NULL, completed_at = NULL WHERE id = $2`,
+          [sessionId, item.id]
+        );
+        await db.query(
+          `INSERT INTO agent_audit_log (session_id, engagement_id, agent_name, task, status, started_at)
+           VALUES ($1, $2, $3, $4, 'running', NOW())`,
+          [sessionId, item.engagement_id, 'pa_engineer', `[queue #${item.seq}] ${item.title}\n${item.command}`]
+        );
+
+        sendJSON(res, 200, { session_id: sessionId, queue_item_id: item.id });
+
+        const sshCommand = `ssh -o StrictHostKeyChecking=no dev-01 "${String(item.command).replace(/"/g, '\\"')}"`;
+        const proc = spawn('bash', ['-c', sshCommand], { detached: false });
+        let fullOutput = '';
+        proc.stdout.on('data', (d) => { fullOutput += d.toString(); });
+        proc.stderr.on('data', (d) => { fullOutput += d.toString(); });
+        proc.on('close', async (code) => {
+          const finalStatus = code === 0 ? 'done' : 'failed';
+          try {
+            await db.query(
+              `UPDATE soc_queue_items SET status = $1, output = $2, completed_at = NOW() WHERE id = $3`,
+              [finalStatus, fullOutput, item.id]
+            );
+            await db.query(
+              `UPDATE agent_audit_log SET status = $1, completed_at = NOW(), output = $2 WHERE session_id = $3`,
+              [code === 0 ? 'completed' : 'failed', fullOutput, sessionId]
+            );
+          } catch (err) {
+            console.error(`[soc queue run] DB update failed for item ${item.id}:`, err);
+          }
+        });
+        proc.on('error', async (err) => {
+          try {
+            await db.query(
+              `UPDATE soc_queue_items SET status = 'failed', output = $1, completed_at = NOW() WHERE id = $2`,
+              [`Process error: ${err.message}`, item.id]
+            );
+            await db.query(
+              `UPDATE agent_audit_log SET status = 'failed', completed_at = NOW(), output = $1 WHERE session_id = $2`,
+              [`Process error: ${err.message}`, sessionId]
+            );
+          } catch (dbErr) {
+            console.error(`[soc queue run] Error logging failure for item ${item.id}:`, dbErr);
+          }
+        });
+
+        return true;
+      } catch (error) {
+        console.error('[soc queue run] Error:', error);
+        if (!res.headersSent) sendJSON(res, 500, { error: 'Internal server error', details: error.message });
+        return true;
+      }
+    }
+
+    // POST /soc/queue/:itemId/skip - Mark queued item as skipped
+    if (req.method === "POST" && pathname.match(/^\/soc\/queue\/\d+\/skip$/)) {
+      const itemId = parseInt(pathname.split("/")[3], 10);
+      const r = await db.query(
+        `UPDATE soc_queue_items SET status = 'skipped', completed_at = NOW()
+         WHERE id = $1 AND status = 'pending' RETURNING id`,
+        [itemId]
+      );
+      if (r.rows.length === 0) {
+        sendJSON(res, 404, { error: 'Queue item not found or not pending' });
+        return true;
+      }
+      sendJSON(res, 200, { success: true, id: r.rows[0].id });
+      return true;
+    }
+
     // GET /soc/audit-log/:engagement_id - Get execution history
     if (req.method === "GET" && pathname.match(/^\/soc\/audit-log\/[^\/]+$/)) {
       const engagementId = pathname.split("/")[3];

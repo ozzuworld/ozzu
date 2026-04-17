@@ -474,6 +474,43 @@ module.exports = function mcpRoutes(ctx) {
         required: ["engagement_id"],
       },
     },
+    {
+      name: "soc_queue_steps",
+      description: "Push a numbered queue of orchestration steps to the SOC app for a pentest engagement. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Use this to give PA a concrete, ordered task list (recon commands, fingerprint capture, queued public PoC runs, etc). Each item is a single shell command to run on dev-01. By default, any existing pending items are replaced.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID (e.g. SKYLINE-SOC-2026-001)" },
+          items: {
+            type: "array",
+            description: "Ordered list of steps. Each item = one command.",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Short human-readable title (e.g. 'Kernel fingerprint capture')" },
+                description: { type: "string", description: "Why this step, what it produces" },
+                command: { type: "string", description: "Shell command to run on dev-01" },
+                expected_artifact: { type: "string", description: "Expected evidence file path or summary" },
+              },
+              required: ["title", "command"],
+            },
+          },
+          replace_pending: { type: "boolean", description: "Replace existing pending items (default true). If false, items are appended." },
+        },
+        required: ["engagement_id", "items"],
+      },
+    },
+    {
+      name: "soc_get_queue",
+      description: "Get the current queue of SOC steps for an engagement (pending + in-flight + completed).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+        },
+        required: ["engagement_id"],
+      },
+    },
   ];
 
   // ── Tool handlers ──
@@ -1549,6 +1586,71 @@ ${result.narrative}
           content: [{
             type: "text",
             text: `**Findings for ${args.engagement_id}:**\n\n${lines.join('\n')}\n\n**Total:** ${result.rows.length} finding(s)`
+          }]
+        };
+      }
+
+      case "soc_queue_steps": {
+        const items = Array.isArray(args.items) ? args.items : [];
+        const replacePending = args.replace_pending !== false;
+
+        const engRes = await db.query(`SELECT 1 FROM pentest_engagements WHERE id = $1`, [args.engagement_id]);
+        if (engRes.rows.length === 0) {
+          return { content: [{ type: "text", text: `Engagement ${args.engagement_id} not found.` }], isError: true };
+        }
+
+        if (replacePending) {
+          await db.query(`DELETE FROM soc_queue_items WHERE engagement_id = $1 AND status = 'pending'`, [args.engagement_id]);
+        }
+
+        const maxSeqRes = await db.query(
+          `SELECT COALESCE(MAX(seq), 0) AS max_seq FROM soc_queue_items WHERE engagement_id = $1`,
+          [args.engagement_id]
+        );
+        let seq = parseInt(maxSeqRes.rows[0].max_seq, 10) || 0;
+
+        const inserted = [];
+        for (const item of items) {
+          if (!item || !item.title || !item.command) continue;
+          seq += 1;
+          const r = await db.query(
+            `INSERT INTO soc_queue_items (engagement_id, seq, title, description, command, expected_artifact, status)
+             VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id, seq, title`,
+            [args.engagement_id, seq, item.title, item.description || null, item.command, item.expected_artifact || null]
+          );
+          inserted.push(r.rows[0]);
+        }
+
+        const lines = inserted.map(r => `  ${r.seq}. ${r.title} (id=${r.id})`).join('\n');
+        return {
+          content: [{
+            type: "text",
+            text: `✅ Queued ${inserted.length} step(s) for ${args.engagement_id}:\n\n${lines}\n\nPA engineer will see these in the SOC tab and can run each one individually.`
+          }]
+        };
+      }
+
+      case "soc_get_queue": {
+        const result = await db.query(
+          `SELECT id, seq, title, description, status, session_id, started_at, completed_at,
+                  CASE WHEN output IS NULL THEN NULL ELSE substr(output, 1, 500) END AS output_preview,
+                  (output IS NOT NULL) AS has_output
+           FROM soc_queue_items
+           WHERE engagement_id = $1
+           ORDER BY seq ASC`,
+          [args.engagement_id]
+        );
+        if (result.rows.length === 0) {
+          return { content: [{ type: "text", text: `No queue items for ${args.engagement_id}.` }] };
+        }
+        const lines = result.rows.map(r => {
+          const marker = { pending: '⏳', running: '▶', done: '✅', failed: '❌', skipped: '⊘' }[r.status] || '•';
+          return `${marker} [${r.status}] ${r.seq}. ${r.title} (id=${r.id})${r.has_output ? ' — output available via list_findings/audit log' : ''}`;
+        });
+        return {
+          content: [{
+            type: "text",
+            text: `**Queue for ${args.engagement_id}:**\n\n${lines.join('\n')}`
           }]
         };
       }
