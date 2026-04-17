@@ -153,79 +153,88 @@ module.exports = function socRoutes(ctx) {
 
     // POST /soc/execute - Execute script on dev-01 (background execution)
     if (req.method === "POST" && pathname === "/soc/execute") {
-      const body = await parseBody(req);
-      const { engagement_id, script_id, command } = body;
+      try {
+        const body = await parseBody(req);
+        const { engagement_id, script_id, command } = body;
 
-      if (!engagement_id || !command) {
-        sendJSON(res, 400, { error: 'Missing required fields' });
+        if (!engagement_id || !command) {
+          sendJSON(res, 400, { error: 'Missing required fields' });
+          return true;
+        }
+
+        // Verify engagement exists
+        const engResult = await db.query(
+          `SELECT * FROM pentest_engagements WHERE id = $1`,
+          [engagement_id]
+        );
+
+        if (engResult.rows.length === 0) {
+          sendJSON(res, 404, { error: 'Engagement not found' });
+          return true;
+        }
+
+        // Create audit log entry
+        const sessionId = `pa_exec_${Date.now()}`;
+        await db.query(`
+          INSERT INTO agent_audit_log (
+            session_id, engagement_id, agent_name, task, status, started_at
+          ) VALUES ($1, $2, $3, $4, $5, NOW())
+        `, [sessionId, engagement_id, 'pa_engineer', command, 'running']);
+
+        // Return immediately with session_id
+        sendJSON(res, 200, {
+          session_id: sessionId,
+          message: 'Execution started in background. Check audit log for results.'
+        });
+
+        // Execute command in background (after response sent)
+        const sshCommand = `ssh -o StrictHostKeyChecking=no dev-01 "${command.replace(/"/g, '\\"')}"`;
+        const proc = spawn('bash', ['-c', sshCommand], { detached: false });
+
+        let fullOutput = '';
+
+        proc.stdout.on('data', (data) => {
+          fullOutput += data.toString();
+        });
+
+        proc.stderr.on('data', (data) => {
+          fullOutput += data.toString();
+        });
+
+        proc.on('close', async (code) => {
+          // Update audit log when execution completes
+          try {
+            await db.query(`
+              UPDATE agent_audit_log
+              SET status = $1, completed_at = NOW(), output = $2
+              WHERE session_id = $3
+            `, [code === 0 ? 'completed' : 'failed', fullOutput, sessionId]);
+          } catch (err) {
+            console.error(`Failed to update audit log for ${sessionId}:`, err);
+          }
+        });
+
+        proc.on('error', async (err) => {
+          try {
+            await db.query(`
+              UPDATE agent_audit_log
+              SET status = 'failed', completed_at = NOW(), output = $1
+              WHERE session_id = $2
+            `, [`Process error: ${err.message}`, sessionId]);
+          } catch (dbErr) {
+            console.error(`Failed to log process error for ${sessionId}:`, dbErr);
+          }
+        });
+
+        return true;
+      } catch (error) {
+        console.error('[soc/execute] Error:', error);
+        // Only send error if headers not sent yet
+        if (!res.headersSent) {
+          sendJSON(res, 500, { error: 'Internal server error', details: error.message });
+        }
         return true;
       }
-
-      // Verify engagement exists
-      const engResult = await db.query(
-        `SELECT * FROM pentest_engagements WHERE id = $1`,
-        [engagement_id]
-      );
-
-      if (engResult.rows.length === 0) {
-        sendJSON(res, 404, { error: 'Engagement not found' });
-        return true;
-      }
-
-      // Create audit log entry
-      const sessionId = `pa_exec_${Date.now()}`;
-      await db.query(`
-        INSERT INTO agent_audit_log (
-          session_id, engagement_id, agent_name, task, status, started_at
-        ) VALUES ($1, $2, $3, $4, $5, NOW())
-      `, [sessionId, engagement_id, 'pa_engineer', command, 'running']);
-
-      // Return immediately with session_id
-      sendJSON(res, 200, {
-        session_id: sessionId,
-        message: 'Execution started in background. Check audit log for results.'
-      });
-
-      // Execute command in background (after response sent)
-      const sshCommand = `ssh -o StrictHostKeyChecking=no dev-01 "${command.replace(/"/g, '\\"')}"`;
-      const proc = spawn('bash', ['-c', sshCommand], { detached: false });
-
-      let fullOutput = '';
-
-      proc.stdout.on('data', (data) => {
-        fullOutput += data.toString();
-      });
-
-      proc.stderr.on('data', (data) => {
-        fullOutput += data.toString();
-      });
-
-      proc.on('close', async (code) => {
-        // Update audit log when execution completes
-        try {
-          await db.query(`
-            UPDATE agent_audit_log
-            SET status = $1, completed_at = NOW(), output = $2
-            WHERE session_id = $3
-          `, [code === 0 ? 'completed' : 'failed', fullOutput, sessionId]);
-        } catch (err) {
-          console.error(`Failed to update audit log for ${sessionId}:`, err);
-        }
-      });
-
-      proc.on('error', async (err) => {
-        try {
-          await db.query(`
-            UPDATE agent_audit_log
-            SET status = 'failed', completed_at = NOW(), output = $1
-            WHERE session_id = $2
-          `, [`Process error: ${err.message}`, sessionId]);
-        } catch (dbErr) {
-          console.error(`Failed to log process error for ${sessionId}:`, dbErr);
-        }
-      });
-
-      return true;
     }
 
     // POST /soc/submit-results - Submit execution results
