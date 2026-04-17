@@ -7,6 +7,15 @@ const { spawn } = require('child_process');
 // Entry shape: { proc, itemId, timeoutHandle, timedOut }
 const runningProcs = new Map();
 
+// Postgres TEXT columns reject NUL bytes (0x00) with "invalid byte sequence for
+// encoding UTF8". Remote commands like `cat` on binary configs will emit NULs,
+// which wedged queue items in 'running' when the UPDATE threw. Strip them so
+// hex dumps/logs remain legible but the write always succeeds.
+function sanitizeOutput(s) {
+  if (typeof s !== 'string') return s;
+  return s.replace(/\x00/g, '\\x00');
+}
+
 module.exports = function socRoutes(ctx) {
   const { sendJSON, parseBody, db } = ctx;
 
@@ -415,34 +424,59 @@ module.exports = function socRoutes(ctx) {
           const timedOut = entry.timedOut;
           const finalStatus = (code === 0 && !timedOut) ? 'done' : 'failed';
           const appendMsg = timedOut ? `\n\n[TIMEOUT after ${timeoutSec}s — process killed]` : '';
+          const rawLen = fullOutput.length;
+          const safeOutput = sanitizeOutput(fullOutput + appendMsg);
           try {
             // Conditional update — if /cancel already wrote 'failed', don't overwrite.
             await db.query(
               `UPDATE soc_queue_items SET status = $1, output = $2, completed_at = NOW() WHERE id = $3 AND status = 'running'`,
-              [finalStatus, fullOutput + appendMsg, item.id]
+              [finalStatus, safeOutput, item.id]
             );
             await db.query(
               `UPDATE agent_audit_log SET status = $1, completed_at = NOW(), output = $2 WHERE session_id = $3 AND status = 'running'`,
-              [finalStatus === 'done' ? 'completed' : 'failed', fullOutput + appendMsg, sessionId]
+              [finalStatus === 'done' ? 'completed' : 'failed', safeOutput, sessionId]
             );
           } catch (err) {
             console.error(`[soc queue run] DB update failed for item ${item.id}:`, err);
+            // Fallback: row MUST leave 'running'. Write a diagnostic-only payload
+            // so we never wedge the queue on UTF-8 / size / constraint errors.
+            const diag = `[DB write failed: ${err && err.code ? err.code : 'unknown'} — ${err && err.message ? err.message : String(err)}]\n[raw output was ${rawLen} bytes; dropped to unblock queue]`;
+            try {
+              await db.query(
+                `UPDATE soc_queue_items SET status = 'failed', output = $1, completed_at = NOW() WHERE id = $2 AND status = 'running'`,
+                [diag, item.id]
+              );
+              await db.query(
+                `UPDATE agent_audit_log SET status = 'failed', completed_at = NOW(), output = $1 WHERE session_id = $2 AND status = 'running'`,
+                [diag, sessionId]
+              );
+            } catch (fallbackErr) {
+              console.error(`[soc queue run] Fallback UPDATE also failed for item ${item.id}:`, fallbackErr);
+            }
           }
         });
         proc.on('error', async (err) => {
           clearTimeout(entry.timeoutHandle);
           runningProcs.delete(sessionId);
+          const errMsg = sanitizeOutput(`Process error: ${err.message}`);
           try {
             await db.query(
               `UPDATE soc_queue_items SET status = 'failed', output = $1, completed_at = NOW() WHERE id = $2 AND status = 'running'`,
-              [`Process error: ${err.message}`, item.id]
+              [errMsg, item.id]
             );
             await db.query(
               `UPDATE agent_audit_log SET status = 'failed', completed_at = NOW(), output = $1 WHERE session_id = $2 AND status = 'running'`,
-              [`Process error: ${err.message}`, sessionId]
+              [errMsg, sessionId]
             );
           } catch (dbErr) {
             console.error(`[soc queue run] Error logging failure for item ${item.id}:`, dbErr);
+            // Last-ditch: ensure row leaves 'running' with a minimal diagnostic.
+            try {
+              await db.query(
+                `UPDATE soc_queue_items SET status = 'failed', output = $1, completed_at = NOW() WHERE id = $2 AND status = 'running'`,
+                [`[process error + DB write failed: ${dbErr && dbErr.code ? dbErr.code : 'unknown'}]`, item.id]
+              );
+            } catch (_) { /* give up */ }
           }
         });
 
