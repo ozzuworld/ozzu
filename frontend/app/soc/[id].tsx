@@ -159,6 +159,32 @@ export default function EngagementDetailScreen() {
     }
   }, [runningQueueItem, fetchQueue]);
 
+  const cancelQueueItem = useCallback(async (item: QueueItem) => {
+    Alert.alert(
+      "Cancel running step?",
+      `Kill "${item.title}" on dev-01? Any partial output will be saved.`,
+      [
+        { text: "Keep running", style: "cancel" },
+        {
+          text: "Cancel step",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const response = await fetch(`${getBridgeUrl()}/soc/queue/${item.id}/cancel`, {
+                method: "POST",
+              });
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: "failed" } : q)));
+              setTimeout(() => fetchQueue(), 800);
+            } catch (error: any) {
+              Alert.alert("Cancel failed", error.message || "Could not cancel step");
+            }
+          },
+        },
+      ]
+    );
+  }, [fetchQueue]);
+
   const skipQueueItem = useCallback(async (item: QueueItem) => {
     Alert.alert("Skip step?", `Mark "${item.title}" as skipped?`, [
       { text: "Cancel", style: "cancel" },
@@ -391,11 +417,27 @@ export default function EngagementDetailScreen() {
                       </View>
                     )}
                     {item.status === "running" && (
-                      <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacing.sm }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm }}>
                         <ActivityIndicator size="small" color={colors.status.working} />
-                        <Text style={{ marginLeft: spacing.sm, color: colors.text.secondary, fontSize: fs.sm }}>
+                        <Text style={{ flex: 1, marginLeft: spacing.sm, color: colors.text.secondary, fontSize: fs.sm }}>
                           Running on dev-01…
                         </Text>
+                        <Pressable
+                          onPress={() => cancelQueueItem(item)}
+                          style={({ pressed }) => [{
+                            backgroundColor: withAlpha(colors.status.error, 0.15),
+                            borderWidth: 1,
+                            borderColor: colors.status.error,
+                            paddingVertical: spacing.xs,
+                            paddingHorizontal: spacing.md,
+                            borderRadius: radius.md,
+                            opacity: pressed ? 0.8 : 1,
+                          }]}
+                        >
+                          <Text style={{ color: colors.status.error, fontSize: fs.sm, fontWeight: fw.medium }}>
+                            Cancel
+                          </Text>
+                        </Pressable>
                       </View>
                     )}
                   </View>

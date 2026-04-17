@@ -3,8 +3,18 @@
 
 const { spawn } = require('child_process');
 
+// In-memory registry of running SSH children, keyed by session_id.
+// Entry shape: { proc, itemId, timeoutHandle, timedOut }
+const runningProcs = new Map();
+
 module.exports = function socRoutes(ctx) {
   const { sendJSON, parseBody, db } = ctx;
+
+  // Lazy idempotent migration — docker-entrypoint-initdb.d only runs on fresh volumes.
+  db.query(
+    `ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS pid INTEGER;
+     ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS timeout_seconds INTEGER NOT NULL DEFAULT 300;`
+  ).catch((err) => console.error('[soc] schema migration failed:', err.message));
 
   return async function handleSocRoutes(req, res, pathname, url) {
 
@@ -362,8 +372,12 @@ module.exports = function socRoutes(ctx) {
         }
 
         const sessionId = `pa_queue_${item.id}_${Date.now()}`;
+        const timeoutSec = Number.isInteger(item.timeout_seconds) && item.timeout_seconds > 0
+          ? item.timeout_seconds
+          : 300;
+
         await db.query(
-          `UPDATE soc_queue_items SET status = 'running', session_id = $1, started_at = NOW(), output = NULL, completed_at = NULL WHERE id = $2`,
+          `UPDATE soc_queue_items SET status = 'running', session_id = $1, started_at = NOW(), output = NULL, completed_at = NULL, pid = NULL WHERE id = $2`,
           [sessionId, item.id]
         );
         await db.query(
@@ -372,36 +386,59 @@ module.exports = function socRoutes(ctx) {
           [sessionId, item.engagement_id, 'pa_engineer', `[queue #${item.seq}] ${item.title}\n${item.command}`]
         );
 
-        sendJSON(res, 200, { session_id: sessionId, queue_item_id: item.id });
+        sendJSON(res, 200, { session_id: sessionId, queue_item_id: item.id, timeout_seconds: timeoutSec });
 
-        const sshCommand = `ssh -o StrictHostKeyChecking=no dev-01 "${String(item.command).replace(/"/g, '\\"')}"`;
-        const proc = spawn('bash', ['-c', sshCommand], { detached: false });
+        // Hardened SSH: short connect timeout + keepalives so a wedged nested SSH chain
+        // (bridge→dev-01→target) eventually drops instead of hanging forever.
+        const sshCommand = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o BatchMode=yes dev-01 "${String(item.command).replace(/"/g, '\\"')}"`;
+        // detached:true gives the child its own process group, so we can kill the
+        // whole group (ssh + remote shell pipeline) with process.kill(-pid).
+        const proc = spawn('bash', ['-c', sshCommand], { detached: true });
         let fullOutput = '';
+        const entry = { proc, itemId: item.id, timeoutHandle: null, timedOut: false };
+        runningProcs.set(sessionId, entry);
+
+        entry.timeoutHandle = setTimeout(() => {
+          entry.timedOut = true;
+          try { process.kill(-proc.pid, 'SIGKILL'); } catch (_) {}
+        }, timeoutSec * 1000);
+
+        try {
+          await db.query(`UPDATE soc_queue_items SET pid = $1 WHERE id = $2`, [proc.pid, item.id]);
+        } catch (_) { /* non-fatal */ }
+
         proc.stdout.on('data', (d) => { fullOutput += d.toString(); });
         proc.stderr.on('data', (d) => { fullOutput += d.toString(); });
         proc.on('close', async (code) => {
-          const finalStatus = code === 0 ? 'done' : 'failed';
+          clearTimeout(entry.timeoutHandle);
+          runningProcs.delete(sessionId);
+          const timedOut = entry.timedOut;
+          const finalStatus = (code === 0 && !timedOut) ? 'done' : 'failed';
+          const appendMsg = timedOut ? `\n\n[TIMEOUT after ${timeoutSec}s — process killed]` : '';
           try {
+            // Conditional update — if /cancel already wrote 'failed', don't overwrite.
             await db.query(
-              `UPDATE soc_queue_items SET status = $1, output = $2, completed_at = NOW() WHERE id = $3`,
-              [finalStatus, fullOutput, item.id]
+              `UPDATE soc_queue_items SET status = $1, output = $2, completed_at = NOW() WHERE id = $3 AND status = 'running'`,
+              [finalStatus, fullOutput + appendMsg, item.id]
             );
             await db.query(
-              `UPDATE agent_audit_log SET status = $1, completed_at = NOW(), output = $2 WHERE session_id = $3`,
-              [code === 0 ? 'completed' : 'failed', fullOutput, sessionId]
+              `UPDATE agent_audit_log SET status = $1, completed_at = NOW(), output = $2 WHERE session_id = $3 AND status = 'running'`,
+              [finalStatus === 'done' ? 'completed' : 'failed', fullOutput + appendMsg, sessionId]
             );
           } catch (err) {
             console.error(`[soc queue run] DB update failed for item ${item.id}:`, err);
           }
         });
         proc.on('error', async (err) => {
+          clearTimeout(entry.timeoutHandle);
+          runningProcs.delete(sessionId);
           try {
             await db.query(
-              `UPDATE soc_queue_items SET status = 'failed', output = $1, completed_at = NOW() WHERE id = $2`,
+              `UPDATE soc_queue_items SET status = 'failed', output = $1, completed_at = NOW() WHERE id = $2 AND status = 'running'`,
               [`Process error: ${err.message}`, item.id]
             );
             await db.query(
-              `UPDATE agent_audit_log SET status = 'failed', completed_at = NOW(), output = $1 WHERE session_id = $2`,
+              `UPDATE agent_audit_log SET status = 'failed', completed_at = NOW(), output = $1 WHERE session_id = $2 AND status = 'running'`,
               [`Process error: ${err.message}`, sessionId]
             );
           } catch (dbErr) {
@@ -412,6 +449,54 @@ module.exports = function socRoutes(ctx) {
         return true;
       } catch (error) {
         console.error('[soc queue run] Error:', error);
+        if (!res.headersSent) sendJSON(res, 500, { error: 'Internal server error', details: error.message });
+        return true;
+      }
+    }
+
+    // POST /soc/queue/:itemId/cancel - Kill a running queue item
+    if (req.method === "POST" && pathname.match(/^\/soc\/queue\/\d+\/cancel$/)) {
+      try {
+        const itemId = parseInt(pathname.split("/")[3], 10);
+        const itemRes = await db.query(
+          `SELECT id, session_id, status, output FROM soc_queue_items WHERE id = $1`,
+          [itemId]
+        );
+        if (itemRes.rows.length === 0) {
+          sendJSON(res, 404, { error: 'Queue item not found' });
+          return true;
+        }
+        const row = itemRes.rows[0];
+        if (row.status !== 'running') {
+          sendJSON(res, 409, { error: `Item is ${row.status}, not running` });
+          return true;
+        }
+
+        const entry = runningProcs.get(row.session_id);
+        const cancelMsg = '\n\n[CANCELLED by user]';
+        // Mark DB 'failed' FIRST so the 'close' handler (which uses WHERE status='running')
+        // won't overwrite our cancellation message with a natural-exit result.
+        await db.query(
+          `UPDATE soc_queue_items SET status = 'failed', output = COALESCE(output, '') || $1, completed_at = NOW() WHERE id = $2`,
+          [cancelMsg, itemId]
+        );
+        await db.query(
+          `UPDATE agent_audit_log SET status = 'failed', completed_at = NOW(), output = COALESCE(output, '') || $1 WHERE session_id = $2`,
+          [cancelMsg, row.session_id]
+        );
+
+        if (entry) {
+          clearTimeout(entry.timeoutHandle);
+          try { process.kill(-entry.proc.pid, 'SIGKILL'); } catch (_) {}
+          runningProcs.delete(row.session_id);
+          sendJSON(res, 200, { success: true, id: itemId, killed: true });
+        } else {
+          // Stale 'running' state with no tracked process (e.g. bridge restarted).
+          sendJSON(res, 200, { success: true, id: itemId, killed: false, reason: 'no tracked process; state cleared' });
+        }
+        return true;
+      } catch (error) {
+        console.error('[soc queue cancel] Error:', error);
         if (!res.headersSent) sendJSON(res, 500, { error: 'Internal server error', details: error.message });
         return true;
       }

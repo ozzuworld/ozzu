@@ -209,3 +209,5 @@ CREATE TABLE IF NOT EXISTS soc_queue_items (
 );
 CREATE INDEX IF NOT EXISTS idx_soc_queue_engagement ON soc_queue_items(engagement_id, seq);
 CREATE INDEX IF NOT EXISTS idx_soc_queue_status ON soc_queue_items(engagement_id, status);
+ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS pid INTEGER;
+ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS timeout_seconds INTEGER NOT NULL DEFAULT 300;
