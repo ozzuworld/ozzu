@@ -40,6 +40,11 @@ export function HAProvider({ children }: { children: React.ReactNode }) {
   const connectionRef = useRef<Connection | null>(null);
 
   useEffect(() => {
+    // TEMP FIX: Disable HA connection - causing iOS app freeze due to error spam
+    setStatus("disconnected");
+    return;
+
+    /* ORIGINAL CODE - DISABLED
     if (!HA_TOKEN) {
       setStatus("disconnected");
       return;
@@ -92,6 +97,7 @@ export function HAProvider({ children }: { children: React.ReactNode }) {
       connectionRef.current?.close();
       connectionRef.current = null;
     };
+    */
   }, []);
 
   const callService = useCallback(
