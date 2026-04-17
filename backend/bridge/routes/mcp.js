@@ -476,14 +476,25 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "soc_queue_steps",
-      description: "Push a numbered queue of orchestration steps to the SOC app for a pentest engagement. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Use this to give PA a concrete, ordered task list (recon commands, fingerprint capture, queued public PoC runs, etc). Each item is a single shell command to run on dev-01. By default, any existing pending items are replaced.",
+      description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
         type: "object",
         properties: {
           engagement_id: { type: "string", description: "Engagement ID (e.g. SKYLINE-SOC-2026-001)" },
+          item: {
+            type: "object",
+            description: "Single step (atomic form — preferred). Exactly one of `item` or `items` must be provided.",
+            properties: {
+              title: { type: "string", description: "Short human-readable title (e.g. 'Kernel fingerprint capture')" },
+              description: { type: "string", description: "Why this step, what it produces" },
+              command: { type: "string", description: "Shell command to run on dev-01" },
+              expected_artifact: { type: "string", description: "Expected evidence file path or summary" },
+            },
+            required: ["title", "command"],
+          },
           items: {
             type: "array",
-            description: "Ordered list of steps. Each item = one command.",
+            description: "Ordered list of steps (batch form). Exactly one of `item` or `items` must be provided.",
             items: {
               type: "object",
               properties: {
@@ -495,9 +506,9 @@ module.exports = function mcpRoutes(ctx) {
               required: ["title", "command"],
             },
           },
-          replace_pending: { type: "boolean", description: "Replace existing pending items (default true). If false, items are appended." },
+          replace_pending: { type: "boolean", description: "Replace existing pending items (default true). Set false when appending follow-up items in a multi-call batch." },
         },
-        required: ["engagement_id", "items"],
+        required: ["engagement_id"],
       },
     },
     {
@@ -1591,7 +1602,76 @@ ${result.narrative}
       }
 
       case "soc_queue_steps": {
-        const items = Array.isArray(args.items) ? args.items : [];
+        // Normalize input: accept singular `item` (atomic, preferred) or `items` array.
+        // Defensively parse JSON-string forms — some MCP clients serialize nested objects as strings.
+        const parseMaybeJson = (v) => {
+          if (typeof v !== "string") return v;
+          const s = v.trim();
+          if (!s) return v;
+          if (s[0] !== "{" && s[0] !== "[") return v;
+          try { return JSON.parse(s); } catch { return v; }
+        };
+
+        const rawItem = parseMaybeJson(args.item);
+        const rawItems = parseMaybeJson(args.items);
+
+        let items;
+        let inputForm;
+        if (rawItem !== undefined && rawItem !== null) {
+          items = [rawItem];
+          inputForm = "item";
+        } else if (rawItems !== undefined && rawItems !== null) {
+          items = Array.isArray(rawItems) ? rawItems : null;
+          inputForm = "items";
+        } else {
+          return {
+            content: [{ type: "text", text: `❌ soc_queue_steps requires either \`item\` (single, preferred) or \`items\` (array). Neither was provided.` }],
+            isError: true,
+          };
+        }
+
+        if (items === null) {
+          return {
+            content: [{ type: "text", text: `❌ \`items\` must be an array (or JSON-encoded array). Received type=${typeof args.items}${typeof args.items === "string" ? `, value-preview=${String(args.items).slice(0, 80)}` : ""}.` }],
+            isError: true,
+          };
+        }
+
+        if (items.length === 0) {
+          return {
+            content: [{ type: "text", text: `❌ \`${inputForm}\` parsed to 0 entries. At least one step is required.` }],
+            isError: true,
+          };
+        }
+
+        // Per-item validation — surface offending indices instead of silently skipping.
+        const invalid = [];
+        const valid = [];
+        items.forEach((it, idx) => {
+          const obj = parseMaybeJson(it);
+          if (!obj || typeof obj !== "object") {
+            invalid.push({ index: idx, reason: `not an object (type=${typeof it})` });
+            return;
+          }
+          if (!obj.title || typeof obj.title !== "string") {
+            invalid.push({ index: idx, reason: "missing/invalid title" });
+            return;
+          }
+          if (!obj.command || typeof obj.command !== "string") {
+            invalid.push({ index: idx, reason: "missing/invalid command" });
+            return;
+          }
+          valid.push(obj);
+        });
+
+        if (invalid.length > 0) {
+          const detail = invalid.map(e => `  [${e.index}] ${e.reason}`).join("\n");
+          return {
+            content: [{ type: "text", text: `❌ ${invalid.length} of ${items.length} item(s) invalid — nothing queued.\n\n${detail}` }],
+            isError: true,
+          };
+        }
+
         const replacePending = args.replace_pending !== false;
 
         const engRes = await db.query(`SELECT 1 FROM pentest_engagements WHERE id = $1`, [args.engagement_id]);
@@ -1610,8 +1690,7 @@ ${result.narrative}
         let seq = parseInt(maxSeqRes.rows[0].max_seq, 10) || 0;
 
         const inserted = [];
-        for (const item of items) {
-          if (!item || !item.title || !item.command) continue;
+        for (const item of valid) {
           seq += 1;
           const r = await db.query(
             `INSERT INTO soc_queue_items (engagement_id, seq, title, description, command, expected_artifact, status)
@@ -1625,7 +1704,7 @@ ${result.narrative}
         return {
           content: [{
             type: "text",
-            text: `✅ Queued ${inserted.length} step(s) for ${args.engagement_id}:\n\n${lines}\n\nPA engineer will see these in the SOC tab and can run each one individually.`
+            text: `✅ Queued ${inserted.length} step(s) for ${args.engagement_id} (form=${inputForm}):\n\n${lines}\n\nPA engineer will see these in the SOC tab and can run each one individually.`
           }]
         };
       }
