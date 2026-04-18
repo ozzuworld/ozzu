@@ -206,9 +206,18 @@ module.exports = function socRoutes(ctx) {
           message: 'Execution started in background. Check audit log for results.'
         });
 
-        // Execute command in background (after response sent)
-        const sshCommand = `ssh -o StrictHostKeyChecking=no dev-01 "${command.replace(/"/g, '\\"')}"`;
-        const proc = spawn('bash', ['-c', sshCommand], { detached: false });
+        // Execute command in background (after response sent).
+        // IMPORTANT: pipe the script via ssh stdin instead of inlining it in a
+        // double-quoted argument. Otherwise the LOCAL bash expands $VAR in the
+        // command string BEFORE ssh sends it to dev-01, which silently breaks
+        // any multi-statement script that uses variable assignments.
+        const proc = spawn(
+          'ssh',
+          ['-o', 'StrictHostKeyChecking=no', 'dev-01', 'bash', '-s'],
+          { detached: false, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        proc.stdin.write(command);
+        proc.stdin.end();
 
         let fullOutput = '';
 
@@ -399,10 +408,28 @@ module.exports = function socRoutes(ctx) {
 
         // Hardened SSH: short connect timeout + keepalives so a wedged nested SSH chain
         // (bridge→dev-01→target) eventually drops instead of hanging forever.
-        const sshCommand = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o BatchMode=yes dev-01 "${String(item.command).replace(/"/g, '\\"')}"`;
+        // IMPORTANT: pipe the script via ssh stdin (`bash -s`) instead of inlining it
+        // in a double-quoted argument. Otherwise the LOCAL bash expands $VAR in the
+        // command string BEFORE ssh sends it to dev-01, silently breaking any
+        // multi-statement script that uses variable assignments. See
+        // .claude/rules/soc-command-execution.md for the full contract.
         // detached:true gives the child its own process group, so we can kill the
         // whole group (ssh + remote shell pipeline) with process.kill(-pid).
-        const proc = spawn('bash', ['-c', sshCommand], { detached: true });
+        const proc = spawn(
+          'ssh',
+          [
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'ConnectTimeout=10',
+            '-o', 'ServerAliveInterval=30',
+            '-o', 'ServerAliveCountMax=3',
+            '-o', 'BatchMode=yes',
+            'dev-01',
+            'bash', '-s',
+          ],
+          { detached: true, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        proc.stdin.write(String(item.command));
+        proc.stdin.end();
         let fullOutput = '';
         const entry = { proc, itemId: item.id, timeoutHandle: null, timedOut: false };
         runningProcs.set(sessionId, entry);
