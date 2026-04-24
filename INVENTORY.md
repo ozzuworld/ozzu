@@ -1,6 +1,6 @@
 # OZZU PROJECT INVENTORY
 # CHECK THIS BEFORE BUILDING ANYTHING. If it exists here, USE IT. Do NOT rebuild.
-# Last updated: 2026-04-13
+# Last updated: 2026-04-24
 
 ---
 
@@ -109,6 +109,103 @@ These took 1 week to build and tune on embed-pipeline-v2.py:
 | Full redeploy | `POST /directives/{id}/merge-and-deploy` via MCP |
 
 smartDeploy auto-triggers after every merge — **NEVER manually trigger builds**.
+
+---
+
+## Backup Locations
+
+**Two independent backup systems exist — check BOTH when recovering data.**
+
+### 1. App-triggered backups (encrypted)
+- **Path:** `/home/gcp/ozzu/backups/`
+- **Format:** `ozzu-backup-YYYYMMDD_HHMMSS.tar.gz.enc`
+- **Encryption:** AES-256-CBC + PBKDF2 (100k iterations)
+- **Passphrase:** value of `BRIDGE_API_KEY` from `backend/.env`
+- **Trigger:** Ozzu app → Backup screen (`frontend/app/backup.tsx`) → `POST /api/backups` → `scripts/backup.sh`
+- **Contents:** pg dump + `state/*.json` + uploads + HA config + env files + redis dump
+- **Retention:** last 7 (script prunes)
+
+### 2. Cron-driven postgres dumps (plaintext)
+- **Path:** `/home/gcp/backups/postgres/`
+- **Format:** `ozzu_YYYYMMDD_HHMMSS.sql`
+- **Cron:** `0 3 * * *` in root crontab → `scripts/backup-postgres.sh`
+- **Log:** `/home/gcp/logs/backup.log`  *(dir must exist or cron silently fails)*
+- **Retention:** 7 days
+
+### 3. GCP disk snapshots (legacy)
+- **List:** `gcloud compute snapshots list`
+- Only one exists: `ozzu-migration-snapshot` from 2026-03-10 (pre-migration artifact, 250GB full disk).
+
+### Decrypt an app backup
+```bash
+KEY=$(grep '^BRIDGE_API_KEY=' /home/gcp/ozzu/backend/.env | cut -d= -f2)
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -pass "pass:$KEY" \
+  -in /home/gcp/ozzu/backups/ozzu-backup-YYYYMMDD_HHMMSS.tar.gz.enc \
+  -out /tmp/restore.tar.gz
+tar -xzf /tmp/restore.tar.gz -C /tmp
+# → /tmp/ozzu-backup-YYYYMMDD_HHMMSS/{database.dump, state/, env/, redis-dump.rdb, ...}
+```
+
+### Restore selected tables without trashing live DB
+1. `CREATE DATABASE ozzu_restore` in ozzu-postgres.
+2. `pg_restore -U ozzu -d ozzu_restore --no-owner --no-privileges /tmp/restore.dump`
+3. Cross-DB pipe: `psql -d ozzu_restore -c "COPY (SELECT ... WHERE ...) TO STDOUT" | psql -d ozzu -c "COPY target FROM STDIN"`
+4. Bump sequences: `SELECT setval('<table>_id_seq', (SELECT MAX(id) FROM <table>))`
+5. `DROP DATABASE ozzu_restore`
+
+---
+
+## Forensic Queries
+
+Fast one-liners for "what is the actual state of X right now." Use these instead of guessing from memory.
+
+### Find every backup on the box (both systems)
+```bash
+find /home/gcp/ozzu/backups /home/gcp/backups -type f \
+  \( -name "*backup*" -o -name "ozzu_*.sql*" \) -printf "%T+  %8s  %p\n" 2>/dev/null | sort -r
+```
+
+### Current ventures in live DB
+```bash
+docker exec ozzu-postgres psql -U ozzu -d ozzu -c \
+  "SELECT id, emoji, name, status FROM business_projects ORDER BY id"
+```
+
+### When was the postgres volume created (wipe detector)
+```bash
+docker volume inspect backend_postgres-data | grep CreatedAt
+# If CreatedAt is recent, the volume was recreated → data wipe happened then.
+```
+
+### Bridge API health + ventures as the app sees them
+```bash
+docker exec bridge curl -s http://127.0.0.1:3333/business/projects | jq '. | length'
+```
+
+### Audit trail — most recent Cipher sessions
+```bash
+ls -t /root/.claude/projects/-home-gcp-ozzu-scripts/*.jsonl 2>/dev/null | head -3
+# Grep any transcript for a suspect command:
+#   grep -l "docker volume rm\|prune -af --volumes" /root/.claude/projects/-home-gcp-ozzu-scripts/*.jsonl
+```
+
+### Face DB live count
+```bash
+curl -s http://localhost:6333/collections/faces | jq '.result.points_count'
+```
+
+### Cron state
+```bash
+sudo crontab -u root -l | grep -v '^#'
+sudo crontab -u gcp  -l | grep -v '^#'
+```
+
+### Docker disk usage (triggered the Apr 16 wipe — `prune -af --volumes` is NOT safe)
+```bash
+sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
+# If overlay2 is huge, clean images SAFELY: `docker image prune -af` (no --volumes).
+# NEVER `docker volume prune` or `docker system prune --volumes` on this box.
+```
 
 ---
 
