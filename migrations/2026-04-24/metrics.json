@@ -95,7 +95,137 @@
       "throughput_mbps": 40.6,
       "failures": [],
       "notes": "/home/gcp/ozzu 4.88GB + /root/.claude 1.64GB (compressed to 284MB, 5.77x speedup). Ownership fixup applied correctly."
+    },
+    {
+      "phase": "02b-missing-root-files",
+      "status": "done",
+      "duration_s": 375,
+      "manual_steps": 0,
+      "bytes_transferred": 178000000,
+      "failures": [],
+      "notes": "Discovered mid-migration that bridge container bind-mounts /root/.claude.json, /root/.local, /root/.config/gh, /root/.ssh, /root/.gitconfig \u2014 all missing from Phase 2. Also installed gh CLI (v2.45.0). Ran in parallel with Phase 3 so no additional wall-clock impact. Lesson for cycle 2: bake these paths into Phase 2 exclude/include list."
+    },
+    {
+      "phase": "03-bulk-volumes",
+      "status": "done",
+      "duration_s": null,
+      "manual_steps": 0,
+      "volumes_synced": {
+        "backend_postgres-data": "260M",
+        "backend_redis-data": "32M",
+        "backend_face-models": "601M",
+        "backend_letsencrypt": "6K",
+        "backend_qdrant-data": "117G (source 113G, +4G live-writes during rsync)"
+      },
+      "failures": [
+        {
+          "step": "docker image pre-pull in parallel",
+          "cause": "TLS handshake timeout to Docker Hub \u2014 qdrant rsync saturated network",
+          "resolution": "retry after Phase 3 finishes"
+        }
+      ],
+      "notes": "Qdrant 4GB larger on target due to writes during rsync (running qdrant created new segments). Delta sync in Phase 5 will reconcile."
+    },
+    {
+      "phase": "04-freeze",
+      "status": "done",
+      "duration_s": 20,
+      "manual_steps": 0,
+      "failures": [
+        {
+          "step": "pg_dump after stop",
+          "cause": "docker compose stop already stopped postgres, pg_dump can't run on stopped container",
+          "resolution": "skipped dump; volume rsync is authoritative copy"
+        }
+      ],
+      "notes": "All services stopped cleanly. Downtime window starts here. Redis BGSAVE succeeded (22KB rdb) via brief restart."
+    },
+    {
+      "phase": "05-delta-sync",
+      "status": "done",
+      "duration_s": 9,
+      "manual_steps": 0,
+      "failures": [],
+      "notes": "Very fast (9s) because Phase 3 captured most data and services were stopped during Phase 5 = truly consistent."
+    },
+    {
+      "phase": "06-bringup",
+      "status": "partial",
+      "duration_s": 1800,
+      "manual_steps": 8,
+      "failures": [
+        {
+          "step": "osint-tools build",
+          "cause": "pip install maigret/holehe/h8mail fails (pycairo build needs C compiler not in image)",
+          "resolution": "deferred \u2014 workload moved to dev-01 (Kali) per King Kazuma"
+        },
+        {
+          "step": "bridge build",
+          "cause": "same OSINT pip install in Dockerfile",
+          "resolution": "patched Dockerfile to comment out OSINT layer (#OSINT-MOVED-TO-DEV01#) \u2014 bridge built clean in 34s"
+        },
+        {
+          "step": "/usr/bin/adb missing",
+          "cause": "compose mount of /usr/bin/adb -> container, host file didn't exist, docker auto-created stale empty dir, mount failed with 'not a directory'",
+          "resolution": "rmdir + apt install android-tools-adb"
+        },
+        {
+          "step": "qdrant slow startup",
+          "cause": "loading 113GB faces collection / 192 segments \u2014 cold disk reads, no progress logging during shard recovery, took 30+ min and still going",
+          "resolution": "let it load in background; flipped DNS once bridge was up since face features are minority of usage"
+        }
+      ],
+      "notes": "All services up except osint-tools (deferred) and qdrant (still loading). Bridge serving venture API. DNS flip came before qdrant ready \u2014 accepted 30 min face-feature downtime instead of 60 min total downtime."
+    },
+    {
+      "phase": "07-dns-cutover",
+      "status": "done",
+      "duration_s": 5,
+      "manual_steps": 0,
+      "failures": [],
+      "notes": "Single PATCH to Cloudflare API. TTL 300s, propagation expected 0-5 min. Token at /root/.ssh/cloudflare_token, zone+record IDs cached in metrics."
+    },
+    {
+      "phase": "06b-firewall-fixup",
+      "status": "done",
+      "duration_s": 60,
+      "manual_steps": 1,
+      "failures": [
+        {
+          "step": "all external ports unreachable post-DNS-flip",
+          "cause": "GCP firewall rules default-allow-http/https NOT auto-created on new GCP projects in 2026 even with http-server/https-server tags",
+          "resolution": "single rule: gcloud compute firewall-rules create allow-ozzu-public --allow=tcp:80,tcp:443,tcp:3333,tcp:6333,tcp:6969,udp:1194 --source-ranges=0.0.0.0/0 --target-tags=ozzu-vm. Now baked into Phase 0."
+        }
+      ],
+      "notes": "BIGGEST AUTOMATION WIN for cycle 2 \u2014 bake firewall create into Phase 0 bootstrap script."
+    },
+    {
+      "phase": "08-soak",
+      "status": "in_progress",
+      "manual_steps": 1,
+      "notes": "King Kazuma confirmed app works on iPhone \u2014 bridge API responding 200 to /bridge/approvals + /bridge/positioning/state from iOS. Qdrant face features still loading."
     }
   ],
-  "directive_id": "dir_1777067209669"
+  "directive_id": "dir_1777067209669",
+  "cloudflare": {
+    "zone": "ozzu.world",
+    "zone_id": "0bd328c71ae1fe4255f837389fe8fb39",
+    "record_name": "home.ozzu.world",
+    "record_id": "5069d0fef3212f43446bf4c6b096d71d",
+    "current_ip": "34.135.158.92",
+    "target_ip": "35.222.38.140",
+    "token_location": "/root/.ssh/cloudflare_token (600, root)"
+  },
+  "totals": {
+    "wall_clock_minutes": 180,
+    "downtime_minutes": 50,
+    "manual_steps_total": 25,
+    "failure_count": 9,
+    "key_fixes_baked_into_phase0": [
+      "OS Login disable at project level",
+      "Single firewall rule for all ports",
+      "gcloud compute ssh --command for pubkey injection (bypasses OS-Login fight)",
+      "Single-line VM create (Cloud Shell paste-safe)"
+    ]
+  }
 }
