@@ -32,9 +32,25 @@ config/
 
 # Auto-generated Cipher context (local-only)
 CLAUDE.local.md
+CLAUDE.local.md.bak
 
 # OS
 .DS_Store
 Thumbs.db
 whatsapp-mcp/
 backend/.env
+
+# Encrypted env files — never commit even if encrypted (key sits next to ciphertext on host)
+backend/.env.encrypted
+backend/.env.encrypted.bak
+
+# Encrypted app backups (227 MB tar.gz.enc tarballs, canonical location per INVENTORY.md)
+/backups/
+
+# Local Dockerfile patches (per-cycle OSINT comment, machine-specific)
+backend/bridge/Dockerfile.bak
+backend/Dockerfile.joko
+
+# Local docker-compose overrides
+docker-compose.override.yml
+backend/docker-compose.override.yml
