@@ -133,3 +133,16 @@ services:
       - "6881:6881"
       - "6881:6881/udp"
     restart: unless-stopped
+
+  maintainerr:
+    image: ghcr.io/jorenn92/maintainerr:latest
+    container_name: maintainerr
+    networks: [media]
+    environment:
+      TZ: America/Bogota
+      BASE_PATH: /
+    volumes:
+      - ./config/maintainerr:/opt/data
+    ports:
+      - "6246:6246"
+    restart: unless-stopped
