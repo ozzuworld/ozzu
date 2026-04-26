@@ -40,9 +40,9 @@ persist-key
 persist-tun
 
 cipher AES-256-CBC
-data-ciphers AES-256-CBC
+data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC
 data-ciphers-fallback AES-256-CBC
-auth SHA1
+auth SHA256
 
 remote-cert-tls server
 verb 3
