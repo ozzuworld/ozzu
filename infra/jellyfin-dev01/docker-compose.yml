@@ -1,0 +1,135 @@
+# Jellyfin + *arr stack on dev-01 (i5-1135G7 / Iris Xe / Kali / Docker 28)
+# LAN-only delivery to KTC TV (192.168.1.5). Zero GCP egress.
+# Live on dev-01 at /srv/jellyfin. Inter-service comms on the `media` network.
+
+networks:
+  media:
+
+services:
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+      JELLYFIN_PublishedServerUrl: http://192.168.1.11:8096
+    volumes:
+      - ./config/jellyfin:/config
+      - /srv/media:/media
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "44"   # video group — for /dev/dri access
+      - "991"  # render group on this Kali install (verified getent group render)
+    ports:
+      - "8096:8096"
+      - "8920:8920"
+      - "7359:7359/udp"
+    restart: unless-stopped
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    networks: [media]
+    environment:
+      LOG_LEVEL: info
+      TZ: America/Bogota
+    volumes:
+      - ./config/jellyseerr:/app/config
+    ports:
+      - "5055:5055"
+    restart: unless-stopped
+    depends_on: [jellyfin]
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+    volumes:
+      - ./config/prowlarr:/config
+    ports:
+      - "9696:9696"
+    restart: unless-stopped
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    networks: [media]
+    environment:
+      LOG_LEVEL: info
+      TZ: America/Bogota
+    ports:
+      - "8191:8191"
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+    volumes:
+      - ./config/sonarr:/config
+      - /srv/downloads:/downloads
+      - /srv/media/tv:/tv
+    ports:
+      - "8989:8989"
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+    volumes:
+      - ./config/radarr:/config
+      - /srv/downloads:/downloads
+      - /srv/media/movies:/movies
+    ports:
+      - "7878:7878"
+    restart: unless-stopped
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+    volumes:
+      - ./config/bazarr:/config
+      - /srv/media/movies:/movies
+      - /srv/media/tv:/tv
+    ports:
+      - "6767:6767"
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+      WEBUI_PORT: 8080
+    volumes:
+      - ./config/qbittorrent:/config
+      - /srv/downloads:/downloads
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    restart: unless-stopped
