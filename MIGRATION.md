@@ -319,31 +319,53 @@ ssh $SSH_OPTS $DEST 'until curl -sf http://localhost:6333/collections/faces -o /
 
 ## Phase 7 — DNS cutover (Cloudflare)
 
-**Owner: Cipher. Duration: ~5 sec API + 5 min TTL propagation.**
+**Owner: Cipher. Duration: ~5 sec API + 1-5 min TTL propagation.**
 
-Token saved at `/root/.ssh/cloudflare_token` (600 perms). Zone + record IDs cached in metrics.json from cycle 1, but verify before flip:
+Token saved at `/root/.ssh/cloudflare_token` (600 perms). Zone + record IDs:
+
+| FQDN | Record ID | Purpose | TTL |
+|---|---|---|---|
+| `home.ozzu.world` | `5069d0fef3212f43446bf4c6b096d71d` | Bridge HTTPS (TV, dashboard) | 60 |
+| `vpn.ozzu.world` | `80075d173aee86202ad2838a65ab1848` | OpenVPN — `.ovpn` files reference this | 60 |
+| `ozzu.world` (apex) | `9d75b460201d9f1bfee9b9fefa8fe6e0` | Marketing root | 300 |
 
 ```bash
 TOKEN=$(sudo cat /root/.ssh/cloudflare_token)
-ZONE=0bd328c71ae1fe4255f837389fe8fb39      # ozzu.world
-RECORD=5069d0fef3212f43446bf4c6b096d71d    # home.ozzu.world
+ZONE=0bd328c71ae1fe4255f837389fe8fb39
 NEW_IP=<new VM static IP>
 
-curl -sX PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records/$RECORD \
-  -d "{\"type\":\"A\",\"name\":\"home.ozzu.world\",\"content\":\"$NEW_IP\",\"ttl\":300,\"proxied\":false}"
+# Update ALL THREE — missing one will silently break a service.
+for REC in 5069d0fef3212f43446bf4c6b096d71d 80075d173aee86202ad2838a65ab1848 9d75b460201d9f1bfee9b9fefa8fe6e0; do
+  curl -sX PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records/$REC" \
+    -d "{\"content\":\"$NEW_IP\"}" | jq '{success, name: .result.name, content: .result.content}'
+done
 ```
 
-Verify propagation (will take 0-5 min depending on your local resolver cache):
+Verify propagation (authoritative, skips resolver cache):
 
 ```bash
-dig home.ozzu.world +short @1.1.1.1
-dig home.ozzu.world +short @8.8.8.8
+for h in home.ozzu.world vpn.ozzu.world ozzu.world; do
+  printf "%-25s " "$h"
+  dig +short "$h" @brynne.ns.cloudflare.com
+done
 ```
 
-Both should print the new IP. Until they do, your phone may still be on old IP.
+All three should print the new IP. Until they do, your phone may still be on old IP and OVPN clients (laptop, dev-01, ozzu-android) won't reconnect.
 
 **If Cloudflare token has changed:** generate new at cloudflare.com → My Profile → API Tokens → "Edit zone DNS" template → zone `ozzu.world` → save.
+
+### VPN configs use FQDN — do NOT regenerate per cycle
+
+`.ovpn` files in `artifacts/` reference `remote vpn.ozzu.world 1194 udp`, not the raw IP. After the DNS PATCH above, all clients reconnect on their own. **No client reissue is required during a normal migration cycle.**
+
+If a client cert/key is ever rotated (security event), regenerate that one file with `scripts/regen-ovpn.sh <client>` and ship the new `.ovpn` to the device once.
+
+**Pre-flight check before cycle ships:**
+```bash
+grep '^remote ' artifacts/*.ovpn   # should be vpn.ozzu.world on every line
+```
+If anything else appears, fix the `.ovpn` before cutover or that client will dial a dead IP.
 
 ---
 
@@ -405,6 +427,12 @@ Old project sits idle until free credits expire (Google auto-suspends).
 8. **Pre-pulling Docker images during qdrant rsync fails with TLS handshake timeouts** — qdrant saturates network bandwidth, Docker Hub registry can't respond fast enough. **Solution:** do pulls in Phase 5b (after Phase 3), not in parallel. **Cost: 3 min.**
 
 9. **`docker compose stop` then `pg_dump`/`redis BGSAVE` fails** — containers are stopped, those commands need running containers. Volume rsync IS the authoritative consistent copy. **Solution baked into Phase 4:** skip the dumps entirely. **Cost: 3 min.**
+
+### Cycle 1 follow-up (discovered 2026-04-26)
+
+10. **OVPN client configs hardcoded the raw GCP IP, not an FQDN.** Two days post-cycle every VPN client (laptop, phone, dev-01) was looping on "connecting" — they were dialing 34.135.158.92, which now belongs to a different GCP customer. Root cause: `home.ozzu.world` got updated by Phase 7 but `.ovpn` files never used it. **Solution baked into Phase 7 (this commit):** `vpn.ozzu.world` added as separate Cloudflare record (TTL 60); `.ovpn` files regenerated via `scripts/regen-ovpn.sh` to use `remote vpn.ozzu.world 1194 udp`; phase doc adds explicit "PATCH all three records" loop and a pre-flight grep over `artifacts/*.ovpn`. **Cost: 1.5 days of nobody being able to reach dev-01 over VPN, +30 min to fix.**
+
+11. **`ozzu.world` apex record drift.** Cycle 1 Phase 7 updated only `home.ozzu.world`; the apex still pointed at the old IP. No one hit it (apex isn't load-bearing for the app), but it was a latent bug. **Solution:** Phase 7's PATCH loop now hits all three records, including apex.
 
 **Soft-fail observations** (didn't break the migration, worth noting):
 - `qdrant` takes 5-30 min to load 113 GB / ~200 segments. No progress logging during shard recovery — looks "stuck" but isn't (look at `docker stats qdrant` Block I/O growth).
