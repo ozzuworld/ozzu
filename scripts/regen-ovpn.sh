@@ -20,7 +20,9 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CFG="$REPO_ROOT/backend/openvpn/config"
 
-for f in ca.crt ta.key "$CLIENT.crt" "$CLIENT.key"; do
+# tls-auth is disabled in server.conf — do NOT embed ta.key in the client bundle.
+# Client tls-auth without server tls-auth = HMAC envelope mismatch, server silently drops.
+for f in ca.crt "$CLIENT.crt" "$CLIENT.key"; do
   [[ -f "$CFG/$f" ]] || { echo "missing $CFG/$f" >&2; exit 1; }
 done
 
@@ -41,7 +43,6 @@ cipher AES-256-CBC
 data-ciphers AES-256-CBC
 data-ciphers-fallback AES-256-CBC
 auth SHA1
-key-direction 1
 
 remote-cert-tls server
 verb 3
@@ -64,10 +65,6 @@ HEADER
   echo '<key>'
   cat "$CFG/$CLIENT.key"
   echo '</key>'
-  echo
-  echo '<tls-auth>'
-  cat "$CFG/ta.key"
-  echo '</tls-auth>'
 } > "$REPO_ROOT/$OUT"
 
 chmod 600 "$REPO_ROOT/$OUT"
