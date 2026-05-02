@@ -12,12 +12,15 @@
 
 set -e
 
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/infra.sh"
+
 REPO="ozzuworld/ozzu"
-DEV01="dev-01"  # SSH alias (hadmin@172.168.0.61)
+DEV01="${DEV_01_HOST:-dev-01}"
 IPA_DIR="/tmp/ozzu-ios"
 REMOTE_IPA_DIR="/tmp/ozzu-ios"
 STAGED_IPA_DIR="/tmp/ozzu-ios-staged"
-ANISETTE_URL="${ANISETTE_URL:-http://10.8.0.1:6969}"  # Anisette runs on GCP VM, reachable via VPN
+ANISETTE_URL="${ANISETTE_URL:-http://${GCP_WG_IP}:${ANISETTE_PORT}}"  # Anisette on GCP, reachable via WG
 
 # Load credentials from .env if not already set
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

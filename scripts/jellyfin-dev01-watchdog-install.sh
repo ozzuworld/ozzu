@@ -11,10 +11,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/lib/infra.sh"
 WATCHDOG="$REPO_ROOT/infra/jellyfin-dev01/disk-watchdog.sh"
-SUDO_PASS="Pokemon123!"
+SUDO_PASS="${HADMIN_SUDO_PASS:?HADMIN_SUDO_PASS not set; copy infra/secrets.example to \$HOME/.ozzu-secrets and fill in}"
 JELLYFIN_USER="hadmin"
-JELLYFIN_PASS="Pokemon123!"
+JELLYFIN_PASS="${JELLYFIN_ADMIN_PASS:?JELLYFIN_ADMIN_PASS not set; copy infra/secrets.example to \$HOME/.ozzu-secrets and fill in}"
 
 [[ -f "$WATCHDOG" ]] || { echo "missing $WATCHDOG"; exit 1; }
 
@@ -93,7 +95,7 @@ Disk watchdog:
 Maintainerr:
   http://192.168.1.11:6246
   Wizard on first visit: paste the Jellyfin/Sonarr/Radarr details below.
-  (Sign in with your Jellyfin admin: hadmin / Pokemon123!)
+  (Sign in with your Jellyfin admin: hadmin / \$JELLYFIN_ADMIN_PASS from \$HOME/.ozzu-secrets)
 
 Connection details for the maintainerr wizard:
   Jellyfin URL:  http://jellyfin:8096    (or http://192.168.1.11:8096 from outside)

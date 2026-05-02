@@ -13,6 +13,13 @@ backend/config/.HA_VERSION
 # Volts local state (machine-specific, not shared)
 .volts/
 
+# Infra secrets — passwords, tokens — must NEVER enter the repo.
+# Real values live in ~/.ozzu-secrets (chmod 600). See infra/secrets.example.
+infra/secrets
+infra/secrets.local
+infra/*.secrets
+.ozzu-secrets
+
 # OpenVPN runtime files
 backend/openvpn/config/ipp.txt
 backend/openvpn/config/openvpn-status.log

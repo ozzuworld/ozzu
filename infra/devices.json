@@ -1,0 +1,99 @@
+{
+  "_doc": "Canonical Ozzu infra registry. Edit THIS file when topology changes — scripts/lib/infra.sh and backend/bridge/lib/devices.js consume it. Human-prose context (history, decisions, lessons) lives in ~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md.",
+  "_secrets_doc": "Secret values live in ~/.ozzu-secrets (gitignored; see infra/secrets.example for template). This file references them by env-var name only via *_secret_var fields.",
+
+  "gcp": {
+    "hostname": "ozzu-vm.us-central1-a.c.project-80de6b4a-6079-4dcd-a34.internal",
+    "public_ip": "35.222.38.140",
+    "internal_ip": "10.128.0.2",
+    "wg_ip": "10.9.0.1",
+    "project_id": "project-80de6b4a-6079-4dcd-a34",
+    "project_number": "700980343543",
+    "zone": "us-central1-a",
+    "fqdn": {
+      "apex": "ozzu.world",
+      "bridge": "home.ozzu.world",
+      "wg": "vpn.ozzu.world"
+    },
+    "ports": {
+      "bridge": 3333,
+      "wg": 51820,
+      "qdrant": 6333,
+      "anisette": 6969,
+      "face_api": 5555,
+      "ota": 5501,
+      "websocket": 8765
+    }
+  },
+
+  "devices": {
+    "dev-01": {
+      "wg_ip": "10.9.0.5",
+      "lan_ip": "172.168.0.50",
+      "wifi_ip": "192.168.1.11",
+      "ssh_user": "hadmin",
+      "ssh_alias": "dev-01",
+      "ssh_key": "~/.ssh/dev01_key",
+      "sudo_secret_var": "HADMIN_SUDO_PASS",
+      "os": "kali",
+      "role": "local-compute,pentest"
+    },
+
+    "kazuma-pc": {
+      "wg_ip": "10.9.0.4",
+      "lan_ip": "192.168.1.2",
+      "ssh_user": "hadmin",
+      "ssh_alias": "kazuma-pc",
+      "os": "windows-11",
+      "role": "primary-windows,altstore-host"
+    },
+
+    "orangepi5": {
+      "wg_ip": "10.9.0.6",
+      "lan_ip": "172.168.0.61",
+      "ssh_user": "ubuntu",
+      "ssh_alias": "opi5",
+      "ssh_key": "~/.ssh/dev01_key",
+      "os": "ubuntu-24.04-arm64",
+      "role": "drone-gcs"
+    },
+
+    "rockpi": {
+      "lan_ip": "172.168.0.55",
+      "ssh_user": "root",
+      "ssh_jump": "dev-01",
+      "ap_ip": "10.0.50.1",
+      "ap_subnet": "10.0.50.0/24",
+      "os": "armbian",
+      "role": "positioning-hub",
+      "_note": "no WG yet; reach via ssh -J dev-01"
+    },
+
+    "r605": {
+      "lan_ip": "172.168.0.1",
+      "ssh_user": "hadmin",
+      "ssh_jump": "dev-01",
+      "ssh_secret_var": "R605_SSH_PASS",
+      "ssh_kex_legacy": true,
+      "_note": "TP-Link Omada ER605, locked stock firmware, not a WG candidate; LAN switch only"
+    },
+
+    "ozzu-android": {
+      "wg_ip": "10.9.0.3",
+      "_note": "WG config exists but not yet installed on the device"
+    },
+
+    "ktc-tv": {
+      "wifi_ip": "192.168.1.18",
+      "model": "KTC Challenger 4K COL 24GV1",
+      "_note": "ISP WiFi standalone, no VPN; bridge↔TV via app outbound to home.ozzu.world only"
+    }
+  },
+
+  "esp32_nodes": {
+    "node-1": {"room": "living",  "ap_ip": "10.0.50.21", "mac": "ac:15:18:d7:bd:38"},
+    "node-2": {"room": "master",  "ap_ip": "10.0.50.23", "mac": "88:13:bf:62:d9:8c"},
+    "node-3": {"room": "office",  "ap_ip": "10.0.50.22", "mac": "88:13:bf:63:2f:28", "_note": "USB to dev-01"},
+    "node-4": {"room": "rooftop", "ap_ip": "10.0.50.24", "_note": "config exists, not deployed"}
+  }
+}

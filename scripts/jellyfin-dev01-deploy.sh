@@ -8,8 +8,10 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/lib/infra.sh"
 COMPOSE="$REPO_ROOT/infra/jellyfin-dev01/docker-compose.yml"
-SUDO_PASS="Pokemon123!"  # registry-documented; not a secret to anyone holding repo access
+SUDO_PASS="${HADMIN_SUDO_PASS:?HADMIN_SUDO_PASS not set; copy infra/secrets.example to \$HOME/.ozzu-secrets and fill in}"
 
 [[ -f "$COMPOSE" ]] || { echo "missing $COMPOSE" >&2; exit 1; }
 

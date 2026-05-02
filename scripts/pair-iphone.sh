@@ -7,7 +7,11 @@
 
 set -e
 
-DEV01="dev-01"  # SSH alias (hadmin@172.168.0.61)
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "$0")" && pwd)/lib/infra.sh"
+
+DEV01="${DEV_01_HOST:-dev-01}"
+ANISETTE_URL="${ANISETTE_URL:-http://${GCP_WG_IP}:${ANISETTE_PORT}}"
 
 echo "=== iPhone Pairing ==="
 echo ""
@@ -55,7 +59,7 @@ read -r
 # Validate by trying to list with sideloader
 echo "Checking device connection..."
 SIDELOADER_BIN="\$HOME/bin/sideloader"
-DEVICE_CHECK=$(ssh "$DEV01" "ALTSERVER_ANISETTE_SERVER=http://10.8.0.1:6969 $SIDELOADER_BIN team --help 2>&1" || true)
+DEVICE_CHECK=$(ssh "$DEV01" "ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL $SIDELOADER_BIN team --help 2>&1" || true)
 
 echo ""
 echo "=== Pairing Setup Complete ==="
@@ -66,7 +70,7 @@ echo "  (iPhone will restart, then confirm the prompt)"
 echo ""
 echo "Next steps:"
 echo "  1. Install SideStore:"
-echo "     ssh $DEV01 'ALTSERVER_ANISETTE_SERVER=http://10.8.0.1:6969 \$HOME/bin/sideloader install \$HOME/ozzu-ios-setup/SideStore.ipa -i'"
+echo "     ssh $DEV01 'ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL \$HOME/bin/sideloader install \$HOME/ozzu-ios-setup/SideStore.ipa -i'"
 echo ""
 echo "  2. Install ozzu app:"
 echo "     ./scripts/deploy-ios.sh"

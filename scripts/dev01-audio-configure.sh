@@ -14,10 +14,13 @@
 
 set -euo pipefail
 
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "$0")" && pwd)/lib/infra.sh"
+
 REAPER_VER="769"
 REAPER_TGZ="reaper${REAPER_VER}_linux_x86_64.tar.xz"
 REAPER_URL="https://www.reaper.fm/files/7.x/${REAPER_TGZ}"
-SUDO_PASS="Pokemon123!"
+SUDO_PASS="${HADMIN_SUDO_PASS:?HADMIN_SUDO_PASS not set; copy infra/secrets.example to \$HOME/.ozzu-secrets and fill in}"
 
 ssh_sudo() { ssh dev-01 "echo '$SUDO_PASS' | sudo -S bash -c '$1'"; }
 

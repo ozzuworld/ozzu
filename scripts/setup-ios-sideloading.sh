@@ -6,7 +6,7 @@
 # Architecture:
 #   GCP VM: runs Anisette server (Docker, port 6969)
 #   dev-01: runs Sideloader CLI + usbmuxd (iPhone connected via USB)
-#   Sideloader on dev-01 talks to Anisette at http://10.8.0.1:6969 (VPN)
+#   Sideloader on dev-01 talks to Anisette via WireGuard tunnel at $GCP_WG_IP:$ANISETTE_PORT
 #
 # After running this script, connect iPhone via USB and run:
 #   ./scripts/pair-iphone.sh
@@ -15,7 +15,11 @@
 
 set -e
 
-DEV01="dev-01"  # SSH alias (hadmin@172.168.0.61)
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "$0")" && pwd)/lib/infra.sh"
+
+DEV01="${DEV_01_HOST:-dev-01}"
+ANISETTE_URL="${ANISETTE_URL:-http://${GCP_WG_IP}:${ANISETTE_PORT}}"
 SIDELOADER_VERSION="1.0-pre4"
 SIDELOADER_URL="https://github.com/Dadoum/Sideloader/releases/download/${SIDELOADER_VERSION}/sideloader-cli-x86_64-linux-gnu.zip"
 SIDESTORE_VERSION="0.6.2"
@@ -96,11 +100,11 @@ else
 fi
 
 # Verify dev-01 can reach Anisette
-REMOTE_CODE=$(ssh "$DEV01" 'curl -s -o /dev/null -w "%{http_code}" http://10.8.0.1:6969 2>/dev/null' || echo "000")
+REMOTE_CODE=$(ssh "$DEV01" "curl -s -o /dev/null -w '%{http_code}' $ANISETTE_URL 2>/dev/null" || echo "000")
 if [ "$REMOTE_CODE" = "200" ]; then
-  echo "  dev-01 can reach Anisette via VPN (HTTP 200)."
+  echo "  dev-01 can reach Anisette via WG (HTTP 200) at $ANISETTE_URL."
 else
-  echo "  Warning: dev-01 cannot reach Anisette (HTTP $REMOTE_CODE). Check VPN."
+  echo "  Warning: dev-01 cannot reach Anisette at $ANISETTE_URL (HTTP $REMOTE_CODE). Check WG tunnel."
 fi
 
 # Cleanup
@@ -115,5 +119,5 @@ echo "  2. Unlock the iPhone screen"
 echo "  3. Run: ./scripts/pair-iphone.sh"
 echo ""
 echo "Then install SideStore + ozzu:"
-echo "  ssh $DEV01 'ALTSERVER_ANISETTE_SERVER=http://10.8.0.1:6969 ~/bin/sideloader install ~/ozzu-ios-setup/SideStore.ipa -i'"
+echo "  ssh $DEV01 'ALTSERVER_ANISETTE_SERVER=$ANISETTE_URL ~/bin/sideloader install ~/ozzu-ios-setup/SideStore.ipa -i'"
 echo "  ./scripts/deploy-ios.sh"

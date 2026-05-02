@@ -8,8 +8,10 @@
 
 set -euo pipefail
 
-SUDO_PASS="Pokemon123!"
-DEV01="dev-01"
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "$0")" && pwd)/lib/infra.sh"
+SUDO_PASS="${HADMIN_SUDO_PASS:?HADMIN_SUDO_PASS not set; copy infra/secrets.example to \$HOME/.ozzu-secrets and fill in}"
+DEV01="${DEV_01_HOST:-dev-01}"
 QBIT_NEW_PASS="ozzu-jellyfin-2026"
 QBIT_TEMP_PASS=$(ssh "$DEV01" "docker logs qbittorrent 2>&1" | grep -oE 'temporary password is provided for this session: [A-Za-z0-9]+' | tail -1 | sed 's/.*: //')
 echo "qBit temp pass: $QBIT_TEMP_PASS"

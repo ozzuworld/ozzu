@@ -6,10 +6,12 @@
 
 const https = require("https");
 const crypto = require("crypto");
+const { getDevice } = require("./lib/devices");
 
-const ROUTER_IP = "172.168.0.1";
-const USERNAME = "hadmin";
-const PASSWORD = "Pokemon123!";
+const _r605 = getDevice("r605");
+const ROUTER_IP = _r605.lan_ip;
+const USERNAME = _r605.ssh_user;
+const PASSWORD = process.env[_r605.ssh_secret_var || "R605_SSH_PASS"] || "";
 const BASE_URL = `https://${ROUTER_IP}`;
 const REFERER_LOGIN = `${BASE_URL}/webpages/login.html`;
 const REFERER_INDEX = `${BASE_URL}/webpages/index.html`;
