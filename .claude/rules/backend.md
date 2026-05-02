@@ -5,8 +5,10 @@ paths:
 
 # Backend Architecture
 
+> **Infra facts (device IPs, SSH paths, VPN topology, ports, credentials) live in `~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md` — read it before assuming any address. This file describes code architecture only.**
+
 ## WhatsApp
-- Baileys runs on physical Android phone (CAT S41, 10.8.0.3) — NOT on GCP
+- Baileys runs on physical Android phone (CAT S41 — see registry §1 "Ozzu Android" for current WG IP / install state). Not on GCP.
 - Bridge proxies via SSH reverse tunnel: GCP:8766 → Android:8765
 - Text only currently, no media support
 - Send: `POST /whatsapp/send` → bridge → SSH tunnel → Android Baileys
@@ -24,22 +26,11 @@ paths:
 - Bridge server: localhost:3333
 
 ## Docker Services
-| Service | Port |
-|---------|------|
-| bridge | 3333 |
-| postgres | 5432 |
-| qdrant | 6333/6334 |
-| redis | 6379 |
-| face-recognition | 5555 |
-| nginx | 80/443 |
-| openvpn | 1194 |
-| browser | 9222 |
-| osint-tools | 8080 |
-| anisette | 6969 |
+See registry §3 (Services) for the canonical container list and ports. WireGuard server is on the host kernel (not a container); OpenVPN is decommissioned (2026-05-02).
 
 ## Android Agent
-- Physical CAT S41 phone, connected via VPN (10.8.0.3)
-- ADB: 10.8.0.3:5555
+- Physical CAT S41 phone — see registry §1 for current network state (WG install pending as of 2026-05-02).
+- ADB: connect to the phone's current WG IP on port 5555 once installed.
 - Runs Baileys + agent services
 - Deploy: `./scripts/deploy.sh [device-names]`
 

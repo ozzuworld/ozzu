@@ -5,15 +5,17 @@ paths:
 
 # Hardware / Positioning
 
+> **Infra facts (Rock Pi IP / SSH path, ESP32 node IPs, dev-01 access) live in `~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md` — read it before assuming any address. This file describes hardware/firmware architecture only.**
+
 ## Indoor Positioning System
-- 3 ESP32 nodes deployed → WiFi AP on Rock Pi (10.0.50.1) → hub.py → bridge /positioning/
+- 3 ESP32 nodes deployed → WiFi AP on Rock Pi → hub.py → bridge /positioning/
 - CSI (Channel State Information) based positioning
 - Config: `hardware/positioning/esp32-csi/nvs-configs/`
 
 ## Rock Pi
-- SSH: `root@172.168.0.55`
-- NOT on VPN — reach via r605 iroute (192.168.2.0/24 → 10.8.0.2)
-- Runs: WiFi AP (10.0.50.1), hub.py, OTA server for ESP32 nodes
+- See registry §1 (Rock Pi 4B) and §2 (How to reach devices from GCP) for the current SSH path.
+  As of 2026-05-02, Rock Pi is **not** a WG peer; reach it via `ssh -J dev-01 root@172.168.0.55` (LAN jump). The old r605-iroute-over-OpenVPN path is gone (OpenVPN decommissioned).
+- Runs: WiFi AP, hub.py, OTA server for ESP32 nodes
 
 ## ESP32 Firmware
 - Build: `cd hardware/positioning/esp32-csi && idf.py build`

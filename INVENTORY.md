@@ -1,13 +1,18 @@
 # OZZU PROJECT INVENTORY
 # CHECK THIS BEFORE BUILDING ANYTHING. If it exists here, USE IT. Do NOT rebuild.
-# Last updated: 2026-04-24
+# Last updated: 2026-05-02
+
+> **Canonical infra source:** `~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md`
+> All device IPs, SSH paths, VPN topology, DNS, and credentials live there.
+> This file lists what *exists in the repo/deployments* (containers, scripts, modules) — not network facts.
+> If you need an IP, hostname, key, or VPN endpoint, READ THE REGISTRY.
 
 ---
 
 ## Active Infrastructure
 
-### GCP VM (34.135.158.92 / 10.128.0.4)
-Primary compute — always on. All services run here via Docker.
+### GCP VM
+Primary compute — always on. All services run here via Docker. See registry §1 (GCP VM) for IPs/hostname/scopes.
 
 | Container | Port | Purpose | Status |
 |-----------|------|---------|--------|
@@ -16,7 +21,6 @@ Primary compute — always on. All services run here via Docker.
 | redis | 6379 | Session cache, ephemeral state | ✅ running |
 | qdrant | 6333 | Vector DB — 51M+ face embeddings | ✅ running |
 | nginx | 80/443 | SSL proxy (home.ozzu.world) | ✅ running |
-| openvpn | 1194/UDP | VPN tunnel — clients connect here | ✅ running |
 | anisette | 6969 | Apple auth for iOS sideloading | ✅ running |
 | face-recognition | 5555 | Face embedding + search API | ✅ running |
 | osint-tools | internal | OSINT scan engine | ✅ running |
@@ -25,11 +29,10 @@ Primary compute — always on. All services run here via Docker.
 | whatsapp-mcp | 8081 | WhatsApp MCP — Python MCP server (SSE) | ✅ running |
 | whatsapp-web-ui | 8090 | WhatsApp MCP — QR pairing + webhook UI | ✅ running |
 
-### VPN Clients (OpenVPN 10.8.0.0/24)
-| Client | IP | Device |
-|--------|----|--------|
-| kazuma-laptop | 10.8.0.2 | Windows laptop (primary) |
-| ozzu-android | 10.8.0.3 | CAT S41 Android — WhatsApp agent |
+WireGuard runs on the host (kernel `wg0`, udp/51820), not as a container. OpenVPN was decommissioned 2026-05-02 — see registry §4.
+
+### VPN clients
+**See registry §4 (WireGuard Configuration) for the authoritative peer list.** Briefly: dev-01 / kazuma-pc / orangepi5 active on WG 10.9.0.0/24; ozzu-android config exists but not yet installed.
 
 ### Android Phone — WhatsApp Agent
 | Item | Value |
