@@ -1421,7 +1421,7 @@ function sendJSON(res, status, data, req) {
 // ── Auth gate for public-facing requests (via nginx reverse proxy) ──
 // LAN/VPN requests pass through without auth. Public requests (through nginx) need API key.
 const TRUSTED_NETS = [
-  { prefix: "10.8.0.", label: "VPN" },
+  { prefix: "10.9.0.", label: "WireGuard" },
   { prefix: "172.168.0.", label: "LAN" },
   { prefix: "127.0.0.", label: "localhost" },
   { prefix: "10.128.0.", label: "GCP-internal" },
@@ -2718,18 +2718,14 @@ const CODEBASE_SNAPSHOT =
 const INFRA_MAP =
   "\n\nINFRASTRUCTURE MAP (use with run_command tool):\n" +
   "Docker services (all network_mode: host on GCP VM 10.128.0.8):\n" +
-  "- homeassistant: HA container, port 8123, image ghcr.io/home-assistant/home-assistant:stable\n" +
   "- bridge: this server, port 3333, Node.js, manages Gemini sessions + device relay\n" +
   "- nginx: reverse proxy, ports 80/443, SSL via Let's Encrypt + Cloudflare DNS, serves home.ozzu.world\n" +
-  "- openvpn: VPN server, UDP 1194, connects home ER605 router\n" +
+  "- WireGuard: VPN server, UDP 51820 (replaced OpenVPN as of 2026-05-02)\n" +
   "- ozzu-postgres: PostgreSQL 16, port 5432, structured data (memories, conversations, directives, entity snapshots)\n" +
   "- ozzu-redis: Redis 7, port 6379, ephemeral state (session cache, audio stats)\n" +
   "- certbot: SSL cert renewal (runs on-demand, not always up)\n\n" +
-  "Network topology:\n" +
-  "- GCP VM: 10.128.0.8 (ens4), 10.8.0.1 (tun0 VPN endpoint)\n" +
-  "- Home router ER605: 10.8.0.2 (VPN client), bridges home LAN 172.168.0.0/24\n" +
-  "- Devices: tab-roaming (172.168.0.53), tab-lroom (172.168.0.57), tv-lroom (172.168.0.56)\n" +
-  "- dev-01 (172.168.0.59): runs wyze-bridge for camera streams\n\n" +
+  "Network topology: see /home/gcp/ozzu/infra/devices.json (machine-readable) " +
+  "and ~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md (prose context).\n\n" +
   "Bridge HTTP API (localhost:3333): POST /status, GET /status, POST /notify, " +
   "POST /approvals, GET /approvals, POST /directives, GET /directives, GET /templates, PATCH /directives/:id, " +
   "POST /directives/:id/unblock, POST /directives/:id/comment, POST /directives/bulk, GET /agents, DELETE /agents/:directiveId\n\n" +
@@ -5856,7 +5852,7 @@ async function startCipherPipeline() {
     "- What King Kazuma said — his exact requirements and preferences\n" +
     "- Expected entity IDs or naming patterns\n" +
     "- Integration method (e.g. 'HACS custom component midea_ac_lan from wuwentao fork')\n" +
-    "- Network details: GCP VM (10.128.0.8), VPN (10.8.0.1), home LAN (172.168.0.x), dev-01 (172.168.0.59)\n" +
+    "- Network details: see /home/gcp/ozzu/infra/devices.json (canonical) — do NOT inline IPs in directive descriptions, point the worker agent there.\n" +
     "- The implementing agent can: read/write files, run Bash, SSH to LAN devices, use Docker, git push, " +
     "curl APIs, install packages. It runs on the GCP VM with full access.\n" +
     "ALWAYS include King Kazuma's original words in the 'context' field of send_dev_directive. " +

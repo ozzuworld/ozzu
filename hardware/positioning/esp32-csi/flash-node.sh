@@ -2,7 +2,10 @@
 # flash-node.sh — Flash and configure an ESP32-S3 room node
 # Usage: ./flash-node.sh <node_id> <room_name> <wifi_ssid> <wifi_pass> [hub_ip]
 #
-# Example: ./flash-node.sh 1 kitchen "MyWiFi" "password123" 10.8.0.1
+# Example: ./flash-node.sh 1 kitchen "MyWiFi" "password123" 10.0.50.1
+#
+# hub_ip defaults to the Rock Pi's hostapd AP IP (10.0.50.1) — the address
+# ESP32 nodes see when they associate to the ozzu-nodes SSID.
 #
 # Prerequisites:
 #   - ESP-IDF v5.1+ installed and sourced (. $IDF_PATH/export.sh)
@@ -15,7 +18,7 @@ NODE_ID="${1:?Usage: $0 <node_id> <room_name> <wifi_ssid> <wifi_pass> [hub_ip]}"
 ROOM_NAME="${2:?Missing room_name}"
 WIFI_SSID="${3:?Missing wifi_ssid}"
 WIFI_PASS="${4:?Missing wifi_pass}"
-HUB_IP="${5:-10.8.0.1}"
+HUB_IP="${5:-10.0.50.1}"
 HUB_PORT="${6:-5500}"
 PORT="${IDF_PORT:-/dev/ttyUSB0}"
 

@@ -6,6 +6,7 @@
 const { execSync } = require("child_process");
 const http = require("http");
 const https = require("https");
+const { getDevice } = require("./lib/devices");
 
 // ── Service definitions ──
 
@@ -13,9 +14,7 @@ const SERVICES = {
   postgres:         { severity: "critical", interval: 30000, timeout: 3000 },
   redis:            { severity: "critical", interval: 30000, timeout: 3000 },
   nginx:            { severity: "critical", interval: 30000, timeout: 5000 },
-  openvpn:          { severity: "high",     interval: 30000, timeout: 5000 },
   qdrant:           { severity: "medium",   interval: 30000, timeout: 3000 },
-  homeassistant:    { severity: "medium",   interval: 30000, timeout: 5000 },
   "face-recognition": { severity: "medium", interval: 30000, timeout: 5000 },
   "osint-tools":    { severity: "low",      interval: 30000, timeout: 5000 },
   browser:          { severity: "low",      interval: 30000, timeout: 3000 },
@@ -166,24 +165,32 @@ async function checkNginx() {
   }
 }
 
-async function checkOpenvpn() {
+async function checkWireguard() {
+  // Replaces the old checkOpenvpn (decommissioned 2026-05-02). Healthy when
+  // wg0 exists on the host AND at least one peer (dev-01 or orangepi5) pings.
   const start = Date.now();
   try {
-    // Container may not have `ip` command — check /sys/class/net or ping directly
     const fs = require("fs");
-    const tun0Exists = fs.existsSync("/sys/class/net/tun0");
-    if (!tun0Exists) {
-      return { ok: false, latencyMs: Date.now() - start, details: { tun0: false } };
+    const wg0Exists = fs.existsSync("/sys/class/net/wg0");
+    if (!wg0Exists) {
+      return { ok: false, latencyMs: Date.now() - start, details: { wg0: false } };
     }
-    // Ping home router through VPN
-    try {
-      execSync("ping -c 1 -W 2 10.8.0.2", { timeout: 4000, stdio: "pipe" });
-      return { ok: true, latencyMs: Date.now() - start, details: { tun0: true, routerReachable: true } };
-    } catch {
-      return { ok: true, latencyMs: Date.now() - start, details: { tun0: true, routerReachable: false } };
+    let peerOk = false;
+    let peerHit = null;
+    for (const candidate of [getDevice("dev-01")?.wg_ip, getDevice("orangepi5")?.wg_ip]) {
+      if (!candidate) continue;
+      try {
+        execSync(`ping -c 1 -W 2 ${candidate}`, { timeout: 4000, stdio: "pipe" });
+        peerOk = true; peerHit = candidate; break;
+      } catch {}
     }
+    return {
+      ok: true, // wg0 up alone counts as healthy; peer reachability is informational
+      latencyMs: Date.now() - start,
+      details: { wg0: true, peerReachable: peerOk, peer: peerHit },
+    };
   } catch {
-    return { ok: false, latencyMs: Date.now() - start, details: { tun0: false } };
+    return { ok: false, latencyMs: Date.now() - start, details: { wg0: false } };
   }
 }
 
@@ -291,7 +298,7 @@ const CHECK_FNS = {
   postgres: checkPostgres,
   redis: checkRedis,
   nginx: checkNginx,
-  openvpn: checkOpenvpn,
+  wireguard: checkWireguard,
   qdrant: checkQdrant,
   homeassistant: checkHomeAssistant,
   "face-recognition": checkFaceRecognition,

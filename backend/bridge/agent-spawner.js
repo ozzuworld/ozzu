@@ -6,6 +6,7 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const metrics = require("./metrics-tracker");
+const { getDevice } = require("./lib/devices");
 
 const BRIDGE = "http://localhost:3333";
 const WORKDIR = "/home/gcp/ozzu";
@@ -107,8 +108,7 @@ BLOCKED DIRECTIVE RULE — READ THIS CAREFULLY:
 Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md FIRST — it has all project context.
 
 SYSTEM ARCHITECTURE:
-- GCP VM (10.128.0.8) runs all services. Bridge at :3333, HA at :8123, Postgres :5432, Redis :6379
-- Home LAN (172.168.0.0/24) via VPN tunnel. Devices: tablets (.53, .57), TV (.56), dev-01 (.59)
+- Infra topology: canonical at /home/gcp/ozzu/infra/devices.json (machine-readable). Prose context: ~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md. READ ONE OF THESE before assuming any IP/hostname.
 - Bridge runs in Docker. Do NOT restart it yourself — smartDeploy auto-restarts after you mark complete.
 - Frontend: Expo React Native. CI builds on push to main. smartDeploy auto-deploys after you mark complete.
 - Bridge API: /directives, /status, /notify, /approvals, /health, /dashboard
@@ -204,9 +204,7 @@ function buildImplementationPrompt(directive) {
 Read CLAUDE.md at /home/gcp/ozzu/CLAUDE.md FIRST — it has all project context.
 
 SYSTEM ARCHITECTURE:
-- GCP VM (10.128.0.8) runs: Home Assistant (:8123), Bridge server (:3333), PostgreSQL (:5432), Redis (:6379)
-- Home LAN (172.168.0.0/24) via VPN: tablets (.53, .57), TV (.56), dev-01 (.59)
-- dev-01 is a Linux server at 172.168.0.59, reachable via SSH from this VM
+- Infra topology: canonical at /home/gcp/ozzu/infra/devices.json (machine-readable). Prose context: ~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md. READ ONE OF THESE before assuming any IP/hostname.
 - Bridge runs in Docker. Do NOT restart it yourself — smartDeploy auto-restarts after you mark complete.
 - Frontend: Expo React Native. Do NOT deploy manually — smartDeploy auto-deploys after you mark complete.
 - Bridge API at ${BRIDGE} has endpoints: /directives, /status, /notify, /approvals, /health
@@ -1670,11 +1668,15 @@ function smartDeploy(directive) {
   if (firmwareChanged) {
     log("Firmware deploy: Docker build + SCP + OTA broadcast");
     notify("Firmware update building — ESP32 nodes will update automatically.");
+    const _rockpi = getDevice("rockpi");
+    const _rockpiSsh = `${_rockpi.ssh_user}@${_rockpi.lan_ip}`;
+    const _jumpFlag = _rockpi.ssh_jump ? `-o ProxyJump=${_rockpi.ssh_jump}` : "";
+    const _sshJumpFlag = _rockpi.ssh_jump ? `-J ${_rockpi.ssh_jump}` : "";
     spawnDetachedDeploy("firmware", [
       `cd ${WORKDIR}/hardware/positioning/esp32-csi`,
       `docker run --rm -v "$(pwd):/project" -w /project espressif/idf:v5.2.3 bash -c "idf.py build" 2>&1 | tail -20`,
-      `scp build/ozzu-room-node.bin root@172.168.0.55:/opt/ozzu-positioning/ota/firmware.bin`,
-      `ssh root@172.168.0.55 "python3 -c \\"import socket,struct;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1);s.sendto(struct.pack('<I',0x4F544155),('10.0.50.255',5502));s.close();print('OTA trigger sent')\\""`,
+      `scp ${_jumpFlag} build/ozzu-room-node.bin ${_rockpiSsh}:/opt/ozzu-positioning/ota/firmware.bin`,
+      `ssh ${_sshJumpFlag} ${_rockpiSsh} "python3 -c \\"import socket,struct;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1);s.sendto(struct.pack('<I',0x4F544155),('10.0.50.255',5502));s.close();print('OTA trigger sent')\\""`,
     ].join(" && "));
   }
 

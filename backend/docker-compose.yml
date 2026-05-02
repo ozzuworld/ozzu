@@ -43,6 +43,8 @@ services:
       - /usr/bin/docker:/usr/local/bin/docker:ro
       - /usr/bin/adb:/usr/local/bin/adb:ro
       - /tmp/osint-data:/tmp/osint-data
+      # Infra secrets — bridge code reads via lib/devices.js bootstrap
+      - /root/.ozzu-secrets:/root/.ozzu-secrets:ro
     environment:
       - BRIDGE_PIN=${BRIDGE_PIN:-1234}
       - HA_URL=${HA_URL:-http://localhost:8123}

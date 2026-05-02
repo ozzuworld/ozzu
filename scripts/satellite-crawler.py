@@ -29,7 +29,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
-BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://10.8.0.1:3333")
+BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://10.9.0.1:3333")  # GCP via WireGuard
 LOCAL_FACE_API = "http://127.0.0.1:5555"  # Local ArcFace on dev-01
 STATE_FILE = os.path.expanduser("~/.ozzu-crawler-state.json")
 CYCLE_INTERVAL = 120  # 2 minutes between cycles

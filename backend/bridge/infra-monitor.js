@@ -8,37 +8,45 @@
 
 const { execSync } = require("child_process");
 const fs = require("fs");
+const { getDevice, getEsp32Nodes } = require("./lib/devices");
 const er605 = (() => { try { return require("./er605-client"); } catch { return null; } })();
 
 // ── Device & service definitions ──
+// Addresses + SSH paths come from infra/devices.json via getDevice().
+// Operational fields (role, services, portChecks) stay here — they're probe
+// behavior, not topology.
+
+const _rockpi = getDevice("rockpi");
+const _dev01 = getDevice("dev-01");
 
 const DEVICES = {
   "rockpi": {
     name: "Rock Pi 4B",
     hostname: "ozzu-rockpi-lroom-01",
-    ip: "172.168.0.55",
+    ip: _rockpi.lan_ip,
     role: "ESP32 positioning hub — runs hostapd AP (ozzu-nodes SSID, 10.0.50.1/24), ESP32 nodes connect HERE via WiFi. Runs ozzu-positioning service + OTA server on port 5501.",
-    ssh: { user: "root", timeout: 5 },
+    ssh: { user: _rockpi.ssh_user, jump: _rockpi.ssh_jump || null, timeout: 5 },
     services: ["hostapd", "dnsmasq", "ozzu-positioning"],
     portChecks: [{ name: "ota-server", port: 5501 }],
   },
   "dev-01": {
     name: "dev-01 (local Linux)",
     hostname: "dev-01",
-    ip: "172.168.0.57",
+    ip: _dev01.wg_ip || _dev01.lan_ip,
     role: "Local x86 Linux workstation — NOT the Rock Pi. Used for compute, Docker, BLE testing. ESP32 nodes do NOT connect to this machine.",
-    ssh: { user: "hadmin", key: "~/.ssh/dev01_key", timeout: 5 },
+    ssh: { user: _dev01.ssh_user, key: _dev01.ssh_key, timeout: 5 },
     services: ["bluetooth"],
     portChecks: [],
   },
 };
 
-const ESP32_NODES = [
-  { id: 1, room: "living",  ip: "10.0.50.21", mac: "ac:15:18:d7:bd:38" },
-  { id: 2, room: "master",  ip: "10.0.50.23", mac: "88:13:bf:62:d9:8c" },
-  { id: 3, room: "office",  ip: "10.0.50.22", mac: "88:13:bf:63:2f:28" },
-  { id: 4, room: "rooftop", ip: "10.0.50.24", mac: null, deployed: false },
-];
+const ESP32_NODES = Object.entries(getEsp32Nodes()).map(([key, n]) => ({
+  id: parseInt(key.split("-")[1], 10),
+  room: n.room,
+  ip: n.ap_ip,
+  mac: n.mac || null,
+  deployed: !((n._note || "").toLowerCase().includes("not deployed")),
+}));
 
 // ── State ──
 
@@ -61,8 +69,9 @@ function sshExec(deviceKey, remoteCmd, timeoutMs = 15000) {
   const d = DEVICES[deviceKey];
   if (!d) return null;
   const keyFlag = d.ssh.key ? `-i ${d.ssh.key}` : "";
+  const jumpFlag = d.ssh.jump ? `-J ${d.ssh.jump}` : "";
   const escaped = remoteCmd.replace(/'/g, "'\\''");
-  const cmd = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=${d.ssh.timeout} -o BatchMode=yes ${keyFlag} ${d.ssh.user}@${d.ip} '${escaped}'`;
+  const cmd = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=${d.ssh.timeout} -o BatchMode=yes ${jumpFlag} ${keyFlag} ${d.ssh.user}@${d.ip} '${escaped}'`;
   return execQuiet(cmd, timeoutMs);
 }
 

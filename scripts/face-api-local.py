@@ -39,7 +39,7 @@ os.environ["ONNXRUNTIME_NUM_THREADS"] = "1"
 _app = None
 _qdrant = None
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://10.8.0.1:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://10.9.0.1:6333")  # GCP via WireGuard
 COLLECTION = "faces"
 EMBEDDING_DIM = 512
 MODEL_DIR = os.path.expanduser("~/.insightface")

@@ -7,7 +7,11 @@
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROCK_PI="root@172.168.0.55"
+# shellcheck disable=SC1091
+source "$(cd "$SCRIPT_DIR/../../.." && pwd)/scripts/lib/infra.sh"
+ROCK_PI="${ROCKPI_USER}@${ROCKPI_LAN}"
+SSH_JUMP_FLAG="${ROCKPI_JUMP:+-J $ROCKPI_JUMP}"
+SCP_JUMP_FLAG="${ROCKPI_JUMP:+-o ProxyJump=$ROCKPI_JUMP}"
 OTA_DIR="/opt/ozzu-ota"
 OTA_CMD_PORT=5502
 BROADCAST="10.0.50.255"
@@ -24,13 +28,15 @@ docker run --rm -v "$(pwd)/esp32-csi:/project" -w /project espressif/idf:v5.4.1 
 
 echo ""
 echo "=== Deploying to Rock Pi OTA server ==="
-scp "$SCRIPT_DIR/build/ozzu-room-node.bin" "${ROCK_PI}:${OTA_DIR}/firmware.bin"
+# shellcheck disable=SC2086
+scp $SCP_JUMP_FLAG "$SCRIPT_DIR/build/ozzu-room-node.bin" "${ROCK_PI}:${OTA_DIR}/firmware.bin"
 
 if [ "$TRIGGER" = true ]; then
   echo ""
   echo "=== Triggering instant OTA on all nodes ==="
   # Send OTA trigger magic (0x4F544155 = "OTAU") via UDP broadcast
-  ssh "$ROCK_PI" "python3 -c \"
+  # shellcheck disable=SC2086
+  ssh $SSH_JUMP_FLAG "$ROCK_PI" "python3 -c \"
 import socket, struct
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)

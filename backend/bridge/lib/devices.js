@@ -13,8 +13,40 @@
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_PATH = path.resolve(__dirname, '..', '..', '..', 'infra', 'devices.json');
-const INFRA_PATH = process.env.OZZU_INFRA_JSON || DEFAULT_PATH;
+// Locate devices.json. Explicit env var wins. Otherwise try (a) repo-root
+// relative to this file (works on the host) and (b) the in-container repo
+// mount path /home/gcp/ozzu/infra/devices.json (bridge container mounts it).
+function _resolveInfraPath() {
+  if (process.env.OZZU_INFRA_JSON) return process.env.OZZU_INFRA_JSON;
+  const candidates = [
+    path.resolve(__dirname, '..', '..', '..', 'infra', 'devices.json'),
+    '/home/gcp/ozzu/infra/devices.json',
+  ];
+  for (const p of candidates) {
+    try { fs.accessSync(p); return p; } catch {}
+  }
+  return candidates[0];
+}
+const INFRA_PATH = _resolveInfraPath();
+
+// Load secret env vars from a bash-style file ($HOME/.ozzu-secrets by default)
+// into process.env, on first require. Failing-soft: missing file is fine, and
+// vars already set in process.env take precedence over the file.
+function _loadSecrets() {
+  const secretsPath = process.env.OZZU_SECRETS || '/root/.ozzu-secrets';
+  let text;
+  try { text = fs.readFileSync(secretsPath, 'utf8'); } catch { return; }
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(?:'([^']*)'|"([^"]*)"|(.*))$/);
+    if (!m) continue;
+    const [, key, sq, dq, bare] = m;
+    if (process.env[key] !== undefined) continue;
+    process.env[key] = sq ?? dq ?? bare ?? '';
+  }
+}
+_loadSecrets();
 
 let _cache = null;
 let _cacheStat = null;

@@ -5,7 +5,7 @@ pushes updates to Bridge server.
 
 Usage:
     python3 hub.py --config hub.yaml
-    python3 hub.py --hub-port 5500 --bridge-url http://10.8.0.1:3333
+    python3 hub.py --hub-port 5500 --bridge-url http://10.9.0.1:3333
 """
 
 import argparse
@@ -37,7 +37,9 @@ log = logging.getLogger("hub")
 
 DEFAULT_CONFIG = {
     "hub_port": 5500,
-    "bridge_url": "http://10.8.0.1:3333",
+    # WireGuard tunnel address of the GCP bridge.
+    # If Rock Pi has no WG client, override via --bridge-url or hub.yaml.
+    "bridge_url": "http://10.9.0.1:3333",
     "bridge_push_interval": 1.0,  # seconds between bridge updates
     "rooms": {
         1: "kitchen",

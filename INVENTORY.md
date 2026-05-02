@@ -2,8 +2,8 @@
 # CHECK THIS BEFORE BUILDING ANYTHING. If it exists here, USE IT. Do NOT rebuild.
 # Last updated: 2026-05-02
 
-> **Canonical infra source:** `~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md`
-> All device IPs, SSH paths, VPN topology, DNS, and credentials live there.
+> **Canonical infra source:** `infra/devices.json` (machine-readable, scripts/code consume it via `scripts/lib/infra.sh` and `backend/bridge/lib/devices.js`) and `~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md` (prose context).
+> All device IPs, SSH paths, VPN topology, DNS, ports, and credentials live there.
 > This file lists what *exists in the repo/deployments* (containers, scripts, modules) — not network facts.
 > If you need an IP, hostname, key, or VPN endpoint, READ THE REGISTRY.
 
@@ -29,7 +29,7 @@ Primary compute — always on. All services run here via Docker. See registry §
 | whatsapp-mcp | 8081 | WhatsApp MCP — Python MCP server (SSE) | ✅ running |
 | whatsapp-web-ui | 8090 | WhatsApp MCP — QR pairing + webhook UI | ✅ running |
 
-WireGuard runs on the host (kernel `wg0`, udp/51820), not as a container. OpenVPN was decommissioned 2026-05-02 — see registry §4.
+WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a container. OpenVPN was decommissioned 2026-05-02 — see registry §4.
 
 ### VPN clients
 **See registry §4 (WireGuard Configuration) for the authoritative peer list.** Briefly: dev-01 / kazuma-pc / orangepi5 active on WG 10.9.0.0/24; ozzu-android config exists but not yet installed.

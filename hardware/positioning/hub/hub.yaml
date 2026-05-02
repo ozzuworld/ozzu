@@ -2,7 +2,7 @@
 # Copy this to the Rock Pi and edit for your setup
 
 hub_port: 5500
-bridge_url: "http://10.8.0.1:3333"   # Bridge via VPN
+bridge_url: "http://10.9.0.1:3333"   # Bridge via WireGuard tunnel (OpenVPN decommissioned 2026-05-02)
 bridge_push_interval: 1.0             # seconds between updates
 
 # Node ID → Room name mapping (must match ESP32 NVS config)

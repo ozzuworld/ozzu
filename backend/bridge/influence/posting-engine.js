@@ -46,8 +46,10 @@ function ensureXvfb() {
   }
 }
 
-// Dolphin Anty local API — runs on user's PC (accessible via VPN)
-const DOLPHIN_LOCAL_API = process.env.DOLPHIN_HOST || "http://10.8.0.2:3001";
+// Dolphin Anty local API — runs on kazuma-pc (Windows), accessible via WireGuard tunnel
+const { getDevice } = require("../lib/devices");
+const _kazumaIp = getDevice("kazuma-pc").wg_ip;
+const DOLPHIN_LOCAL_API = process.env.DOLPHIN_HOST || `http://${_kazumaIp}:3001`;
 
 async function startDolphinProfile(profileId) {
   const url = `${DOLPHIN_LOCAL_API}/v1.0/browser_profiles/${profileId}/start?automation=1`;
@@ -56,7 +58,7 @@ async function startDolphinProfile(profileId) {
   if (!resp.ok) throw new Error(`Dolphin start failed: ${resp.status} ${await resp.text()}`);
   const data = await resp.json();
   if (!data.automation) throw new Error("Dolphin did not return automation data");
-  const wsUrl = `ws://10.8.0.2:${data.automation.port}${data.automation.wsEndpoint}`;
+  const wsUrl = `ws://${_kazumaIp}:${data.automation.port}${data.automation.wsEndpoint}`;
   console.log(`[influence] Dolphin WS: ${wsUrl}`);
   return wsUrl;
 }
