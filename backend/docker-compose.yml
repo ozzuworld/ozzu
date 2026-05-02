@@ -1,17 +1,9 @@
 services:
-  openvpn:
-    build: ./openvpn
-    container_name: openvpn
-    restart: unless-stopped
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    volumes:
-      - ./openvpn/config:/etc/openvpn:ro
-    environment:
-      - TZ=${TZ}
+  # openvpn: DECOMMISSIONED 2026-05-02 — replaced by WireGuard (host wg0, port udp/51820).
+  # Migration: dev-01, kazuma-pc, orangepi5 are WG peers (10.9.0.4/5/6); GCP firewall
+  # rule "wireguard" allows udp:51820, "allow-ozzu-public" had udp:1194 removed.
+  # Server certs/configs preserved at backend/openvpn/ for archival; image build kept
+  # for emergency rollback. To revive: uncomment, restore udp:1194 to allow-ozzu-public.
 
   # homeassistant: DECOMMISSIONED 2026-04-09 — LAN offline, moving to Spain
 
