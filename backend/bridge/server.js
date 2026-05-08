@@ -137,6 +137,7 @@ const financeRoutes = require("./routes/finance");
 const whatsappRoutes = require("./routes/whatsapp");
 const influenceRoutes = require("./routes/influence");
 const fleetRoutes = require("./routes/fleet");
+const octoprintRoutes = require("./routes/octoprint");
 const devDashboardRoutes = require("./routes/dev-dashboard");
 const socRoutes = require("./routes/soc");
 const watchdog = require("./watchdog");
@@ -1578,6 +1579,7 @@ function getRouteHandlers() {
       whatsapp: whatsappRoutes(routeCtx),
       influence: influenceRoutes(routeCtx),
       fleet: fleetRoutes(routeCtx),
+      octoprint: octoprintRoutes(routeCtx),
       devDashboard: devDashboardRoutes(routeCtx),
       knowledgeGraph: knowledgeGraphRoutes(routeCtx),
       soc: socRoutes(routeCtx),
@@ -1705,6 +1707,7 @@ async function handleRequest(req, res) {
   if (await r.whatsapp(req, res, pathname, url)) return;
   if (await r.influence(req, res, pathname, url)) return;
   if (await r.fleet(req, res, pathname, url)) return;
+  if (await r.octoprint(req, res, pathname, url)) return;
   if (await r.devDashboard(req, res, pathname, url)) return;
   if (await r.knowledgeGraph(req, res, pathname, url)) return;
   if (await r.soc(req, res, pathname, url)) return;
