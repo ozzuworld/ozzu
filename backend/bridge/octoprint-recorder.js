@@ -50,26 +50,34 @@ function startRecording(opts = {}) {
   sshSync(`mkdir -p ${REMOTE_DIR}`);
 
   // ffmpeg flags:
-  // -re : read at native rate
-  // -f mjpeg : format hint (server identifies as multipart, ffmpeg auto-detects too,
-  //            but giving a hint avoids probing delays)
+  // -r N : capture at N fps (timelapse-friendly)
   // -i URL : MJPEG stream
-  // -c:v libx264 -preset veryfast : H.264 fast encode for social media
-  // -pix_fmt yuv420p : QuickTime/iOS compatibility
-  // -movflags +faststart : web playback
-  const fps = parseInt(opts.fps || "10", 10); // 10 fps is plenty for a print timelapse
-  const ffmpegCmd = [
-    "ffmpeg -y",
-    `-r ${fps}`,
-    `-i '${MJPEG_URL}'`,
-    "-c:v libx264 -preset veryfast -crf 23",
-    "-pix_fmt yuv420p -movflags +faststart",
-    `'${remotePath}' > ${REMOTE_DIR}/${jobName}.log 2>&1 &`,
-    `echo $!`,
-  ].join(" ");
+  // -c:v libx264 -preset veryfast -crf 23 : H.264 fast encode for social media
+  // -pix_fmt yuv420p -movflags +faststart : iOS/web compatibility
+  const fps = parseInt(opts.fps || "10", 10);
+  const logPath = `${REMOTE_DIR}/${jobName}.log`;
+  const pidPath = `${REMOTE_DIR}/${jobName}.pid`;
+  // Heredoc wrapper script — robust against shell escaping issues. Writes
+  // the script to a temp file, executes it, captures the ffmpeg PID via $!.
+  const wrapperPath = `${REMOTE_DIR}/${jobName}.start.sh`;
+  const wrapperScript = `#!/bin/bash
+set -e
+nohup ffmpeg -y -r ${fps} -i '${MJPEG_URL}' \\
+  -c:v libx264 -preset veryfast -crf 23 \\
+  -pix_fmt yuv420p -movflags +faststart \\
+  '${remotePath}' > '${logPath}' 2>&1 &
+echo $! > '${pidPath}'
+echo "PID=$!"
+`;
+  // Write wrapper via heredoc, then execute
+  sshSync(`cat > '${wrapperPath}' <<'EOFOZZU'\n${wrapperScript}\nEOFOZZU\nbash '${wrapperPath}'`);
 
-  const pidOut = sshSync(`bash -c "${ffmpegCmd.replace(/"/g, '\\"')}"`);
-  const remotePid = parseInt(pidOut.trim().split("\n").pop(), 10) || null;
+  // Read pid file
+  let remotePid = null;
+  try {
+    const pidOut = sshSync(`cat '${pidPath}' 2>/dev/null`).trim();
+    remotePid = parseInt(pidOut, 10) || null;
+  } catch (_) {}
 
   _state = {
     jobName,
@@ -83,15 +91,20 @@ function startRecording(opts = {}) {
 }
 
 async function stopRecording(opts = {}) {
-  if (!_state || !_state.remotePid) {
+  if (!_state) {
     return { ok: false, reason: "not_recording" };
   }
 
   const { jobName, remotePath, remotePid, directiveId } = _state;
 
   // Send SIGINT so ffmpeg flushes the moov atom and closes the file cleanly.
+  // If remotePid is null (parse failed earlier), fall back to pkill by remotePath match.
   try {
-    sshSync(`kill -INT ${remotePid} 2>/dev/null || true; sleep 2; kill -TERM ${remotePid} 2>/dev/null || true`);
+    if (remotePid) {
+      sshSync(`kill -INT ${remotePid} 2>/dev/null || true; sleep 2; kill -TERM ${remotePid} 2>/dev/null || true`);
+    } else {
+      sshSync(`pkill -INT -f 'ffmpeg.*${jobName}' 2>/dev/null || true; sleep 2; pkill -TERM -f 'ffmpeg.*${jobName}' 2>/dev/null || true`);
+    }
   } catch (_) {}
 
   // Verify file exists + has size

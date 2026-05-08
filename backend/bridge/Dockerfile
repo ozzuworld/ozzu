@@ -3,7 +3,8 @@ FROM node:22-slim
 # System packages: Docker CLI, curl, git, Python 3, ExifTool
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git git-lfs git-crypt unzip ca-certificates \
-    python3 python3-pip python3-venv libimage-exiftool-perl && \
+    python3 python3-pip python3-venv libimage-exiftool-perl \
+    openssh-client && \
     rm -rf /var/lib/apt/lists/*
 
 # Python OSINT tools in isolated venv (light — heavy tools live in osint-tools container)
