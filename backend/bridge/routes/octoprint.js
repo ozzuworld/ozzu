@@ -5,6 +5,7 @@
 const fs = require("fs");
 const octoprint = require("../octoprint-client");
 const pipeline = require("../octoprint-pipeline");
+const recorder = require("../octoprint-recorder");
 
 module.exports = function octoprintRoutes(ctx) {
   const { sendJSON, parseBody, requireAuth, db, log } = ctx;
@@ -92,6 +93,42 @@ module.exports = function octoprintRoutes(ctx) {
       return true;
     }
 
+    // GET /octoprint/record/status — current recording state
+    if (req.method === "GET" && pathname === "/octoprint/record/status") {
+      sendJSON(res, 200, recorder.status());
+      return true;
+    }
+
+    // POST /octoprint/record/start — manually start recording
+    // body: { job_name?, fps?, directive_id? }
+    if (req.method === "POST" && pathname === "/octoprint/record/start") {
+      if (!requireAuth(req, res)) return true;
+      try {
+        const body = await parseBody(req).catch(() => ({}));
+        const r = recorder.startRecording({
+          jobName: body.job_name,
+          fps: body.fps,
+          directiveId: body.directive_id,
+        });
+        sendJSON(res, r.ok ? 200 : 409, r);
+      } catch (e) {
+        sendJSON(res, 500, { error: e.message });
+      }
+      return true;
+    }
+
+    // POST /octoprint/record/stop — stop + save to Files
+    if (req.method === "POST" && pathname === "/octoprint/record/stop") {
+      if (!requireAuth(req, res)) return true;
+      try {
+        const r = await recorder.stopRecording({ db });
+        sendJSON(res, r.ok ? 200 : 409, r);
+      } catch (e) {
+        sendJSON(res, 500, { error: e.message });
+      }
+      return true;
+    }
+
     // POST /octoprint/webhook — OctoPrint Webhooks plugin posts events here
     // Event payload: { topic, message, currentTime, deviceIdentifier, extra }
     if (req.method === "POST" && pathname === "/octoprint/webhook") {
@@ -100,6 +137,23 @@ module.exports = function octoprintRoutes(ctx) {
         const topic = body.topic || body.event || "?";
         const message = body.message || body.payload?.name || "";
         log("info", "[octoprint webhook]", topic, message);
+
+        // Auto-record: start on PrintStarted, stop+save on PrintDone/Failed/Cancelled
+        try {
+          if (/PrintStarted/i.test(topic)) {
+            const jobName = (body.payload?.name || message || "print").replace(/\.gcode$/i, "");
+            const r = recorder.startRecording({
+              jobName,
+              directiveId: body.extra?.directive_id || body.directive_id,
+            });
+            log("info", "[octoprint webhook] auto-record start", JSON.stringify(r).slice(0, 200));
+          } else if (/PrintDone|PrintFailed|PrintCancelled/i.test(topic)) {
+            const r = await recorder.stopRecording({ db });
+            log("info", "[octoprint webhook] auto-record stop", JSON.stringify(r).slice(0, 200));
+          }
+        } catch (e) {
+          log("error", "[octoprint webhook] auto-record error", e.message);
+        }
         // Persist as a generic event row if db has an events table; otherwise skip silently
         if (db && db.query) {
           try {
