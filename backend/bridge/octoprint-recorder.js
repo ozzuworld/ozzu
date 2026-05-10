@@ -1,91 +1,75 @@
-// octoprint-recorder.js — record the print camera MJPEG to MP4 via dev-01 ffmpeg
-// Directive: dir_1778273179581
+// octoprint-recorder.js — record the print camera MJPEG to MP4 LOCALLY on the bridge
+// Directive: dir_1778273179581 (original), dir_1778450259617 (dev-01 removal 2026-05-10)
 //
-// dev-01 has ffmpeg + a fast disk. Bridge spawns ffmpeg there to pull the
-// MJPEG stream from the tablet (http://10.9.0.7:5001/mjpeg), encode H.264
-// MP4, and write to /tmp/ozzu-rec/. On stop, the MP4 is rsync'd back to the
-// bridge's FILES_DIR and registered in the files DB under the
-// "3D Prints" folder.
+// ffmpeg runs in the bridge container (apt package). It pulls the MJPEG stream
+// from the tablet (http://10.9.0.7:5001/mjpeg) over WG, encodes H.264 MP4, and
+// writes to /tmp/ozzu-rec/. On stop, the MP4 is moved into FILES_DIR/3d-prints/
+// and registered in the postgres files table under the "3D Prints" folder.
+//
+// dev-01 is no longer in the recorder path — King Kazuma's standing rule that
+// dev-01 must NOT be in the print pipeline applies here too. This was the same
+// anti-pattern as the slicer fix (dir_1778425211161 / commit da077176).
 
 "use strict";
 
-const { spawn, execSync } = require("child_process");
+const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const SSH_HOST = process.env.OCTOPRINT_SLICE_HOST || "dev-01";
-const SSH_KEY = process.env.OCTOPRINT_SLICE_SSH_KEY || "/root/.ssh/dev01_key";
-const REMOTE_DIR = process.env.OCTOPRINT_REC_REMOTE_DIR || "/tmp/ozzu-rec";
+const LOCAL_REC_DIR = process.env.OCTOPRINT_REC_LOCAL_DIR || "/tmp/ozzu-rec";
 const MJPEG_URL = process.env.OCTOPRINT_MJPEG_URL || "http://10.9.0.7:5001/mjpeg";
 const FOLDER_NAME = process.env.OCTOPRINT_REC_FOLDER || "3D Prints";
 const FILES_DIR = "/home/gcp/ozzu/data/files";
+const FFMPEG_BIN = process.env.FFMPEG_BIN || "ffmpeg";
 
-let _state = null; // { jobName, remotePath, localPath, sshPid, startedAt, directiveId }
-
-function sshArgs() {
-  const userHost = SSH_HOST.includes("@") ? SSH_HOST : `hadmin@${SSH_HOST}`;
-  return [
-    "-i", SSH_KEY,
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "IdentitiesOnly=yes",
-    userHost,
-  ];
-}
-
-function sshSync(cmd) {
-  return execSync(
-    `ssh ${sshArgs().join(" ")} '${cmd.replace(/'/g, "'\\''")}'`,
-    { encoding: "utf8" },
-  );
-}
+let _state = null; // { jobName, tmpPath, pid, startedAt, directiveId, ffmpegLogPath }
 
 function startRecording(opts = {}) {
-  if (_state && _state.sshPid) {
+  if (_state && _state.pid) {
     return { ok: false, reason: "already_recording", state: _state };
   }
   const jobName = (opts.jobName || `print-${Date.now()}`).replace(/[^a-zA-Z0-9_.-]/g, "_");
-  const remotePath = `${REMOTE_DIR}/${jobName}.mp4`;
+  const tmpPath = path.join(LOCAL_REC_DIR, `${jobName}.mp4`);
+  const logPath = path.join(LOCAL_REC_DIR, `${jobName}.log`);
 
-  // Make remote dir + start ffmpeg in background. Keep stderr to a logfile.
-  sshSync(`mkdir -p ${REMOTE_DIR}`);
+  fs.mkdirSync(LOCAL_REC_DIR, { recursive: true });
+
+  // Open log file before spawn so ffmpeg's stderr is captured
+  const logFd = fs.openSync(logPath, "a");
 
   // ffmpeg flags:
   // -r N : capture at N fps (timelapse-friendly)
   // -i URL : MJPEG stream
   // -c:v libx264 -preset veryfast -crf 23 : H.264 fast encode for social media
   // -pix_fmt yuv420p -movflags +faststart : iOS/web compatibility
+  // -y : overwrite existing file (in case of retry)
   const fps = parseInt(opts.fps || "10", 10);
-  const logPath = `${REMOTE_DIR}/${jobName}.log`;
-  const pidPath = `${REMOTE_DIR}/${jobName}.pid`;
-  // Heredoc wrapper script — robust against shell escaping issues. Writes
-  // the script to a temp file, executes it, captures the ffmpeg PID via $!.
-  const wrapperPath = `${REMOTE_DIR}/${jobName}.start.sh`;
-  const wrapperScript = `#!/bin/bash
-set -e
-nohup ffmpeg -y -r ${fps} -i '${MJPEG_URL}' \\
-  -c:v libx264 -preset veryfast -crf 23 \\
-  -pix_fmt yuv420p -movflags +faststart \\
-  '${remotePath}' > '${logPath}' 2>&1 &
-echo $! > '${pidPath}'
-echo "PID=$!"
-`;
-  // Write wrapper via heredoc, then execute
-  sshSync(`cat > '${wrapperPath}' <<'EOFOZZU'\n${wrapperScript}\nEOFOZZU\nbash '${wrapperPath}'`);
+  const args = [
+    "-y",
+    "-r", String(fps),
+    "-i", MJPEG_URL,
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "23",
+    "-pix_fmt", "yuv420p",
+    "-movflags", "+faststart",
+    tmpPath,
+  ];
 
-  // Read pid file
-  let remotePid = null;
-  try {
-    const pidOut = sshSync(`cat '${pidPath}' 2>/dev/null`).trim();
-    remotePid = parseInt(pidOut, 10) || null;
-  } catch (_) {}
+  const child = spawn(FFMPEG_BIN, args, {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+  });
+  // Detach so ffmpeg keeps running if bridge restarts (parent disowns the child)
+  child.unref();
 
   _state = {
     jobName,
-    remotePath,
-    localPath: null,
-    remotePid,
+    tmpPath,
+    pid: child.pid,
     startedAt: Date.now(),
     directiveId: opts.directiveId || null,
+    ffmpegLogPath: logPath,
   };
   return { ok: true, state: _state };
 }
@@ -95,44 +79,49 @@ async function stopRecording(opts = {}) {
     return { ok: false, reason: "not_recording" };
   }
 
-  const { jobName, remotePath, remotePid, directiveId } = _state;
+  const { jobName, tmpPath, pid, directiveId } = _state;
 
   // Send SIGINT so ffmpeg flushes the moov atom and closes the file cleanly.
-  // If remotePid is null (parse failed earlier), fall back to pkill by remotePath match.
+  // Then SIGTERM after 2s if still alive.
   try {
-    if (remotePid) {
-      sshSync(`kill -INT ${remotePid} 2>/dev/null || true; sleep 2; kill -TERM ${remotePid} 2>/dev/null || true`);
-    } else {
-      sshSync(`pkill -INT -f 'ffmpeg.*${jobName}' 2>/dev/null || true; sleep 2; pkill -TERM -f 'ffmpeg.*${jobName}' 2>/dev/null || true`);
+    if (pid) {
+      try { process.kill(pid, "SIGINT"); } catch (_) {}
+      await new Promise(r => setTimeout(r, 2000));
+      try { process.kill(pid, "SIGTERM"); } catch (_) {}
     }
   } catch (_) {}
 
   // Verify file exists + has size
-  let remoteStatRaw = "";
+  let sizeBytes = 0;
   try {
-    remoteStatRaw = sshSync(`stat -c '%s' ${remotePath} 2>/dev/null || echo 0`);
+    sizeBytes = fs.statSync(tmpPath).size;
   } catch (_) {}
-  const sizeBytes = parseInt(remoteStatRaw.trim(), 10) || 0;
+
   if (sizeBytes < 1024) {
     _state = null;
-    return { ok: false, reason: "empty_recording", remotePath };
+    // Best-effort cleanup of empty/tiny file
+    try { fs.unlinkSync(tmpPath); } catch (_) {}
+    return { ok: false, reason: "empty_recording", tmpPath };
   }
 
-  // Pull file to bridge
+  // Move file into FILES_DIR/3d-prints/<date>/<timestamp>_<jobName>.mp4
   const dateDir = new Date().toISOString().slice(0, 10);
   const folderId = await ensureFolderId(opts.db);
-  // Save under the 3D Prints folder. Files API expects FILES_DIR/<category>/<date>/<filename>.
   const localDir = path.join(FILES_DIR, "3d-prints", dateDir);
   fs.mkdirSync(localDir, { recursive: true });
   const localFile = `${Date.now()}_${jobName}.mp4`;
   const localPath = path.join(localDir, localFile);
-  execSync(
-    `scp -i ${SSH_KEY} -o StrictHostKeyChecking=no -o IdentitiesOnly=yes ${SSH_HOST.includes("@") ? SSH_HOST : `hadmin@${SSH_HOST}`}:${remotePath} ${localPath}`,
-    { encoding: "utf8" },
-  );
 
-  // Remote cleanup
-  try { sshSync(`rm -f ${remotePath} ${REMOTE_DIR}/${jobName}.log`); } catch (_) {}
+  // Try rename (fast if same filesystem); fall back to copy+unlink across mounts
+  try {
+    fs.renameSync(tmpPath, localPath);
+  } catch (e) {
+    fs.copyFileSync(tmpPath, localPath);
+    try { fs.unlinkSync(tmpPath); } catch (_) {}
+  }
+
+  // Cleanup ffmpeg log
+  try { fs.unlinkSync(_state.ffmpegLogPath); } catch (_) {}
 
   // Register in files DB
   let dbRow = null;
