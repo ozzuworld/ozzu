@@ -1,11 +1,12 @@
 // octoprint-pipeline.js — STL → slice → print orchestration
-// Directive: dir_1778272304525
+// Directive: dir_1778272304525, updated dir_1778425211161
 //
-// Slicing happens on dev-01 (PrusaSlicer 2.9.4 installed there).
-// Bridge SCPs the STL to dev-01, runs prusa-slicer with sane Ender V3 SE
-// defaults (Marlin2, 0.4mm nozzle, 0.2mm layer, PETG 230/80°C, 99%
-// rectilinear infill), SCPs the .gcode back, then uploads and starts the
-// print via octoprint-client.
+// Slicing happens LOCALLY on the bridge VM (PrusaSlicer 2.7.2 from apt).
+// dev-01 is no longer in the slice path — that introduced a single point of
+// failure (dev-01 dropped off WG twice in 24h, blocking all prints).
+// Bridge runs prusa-slicer in-process with Ender V3 SE defaults (Marlin2,
+// 0.4mm nozzle, 0.2mm layer, PETG 230/80°C, 99% rectilinear infill), then
+// uploads and starts the print via octoprint-client.
 "use strict";
 
 const { execSync } = require("child_process");
@@ -13,10 +14,8 @@ const fs = require("fs");
 const path = require("path");
 const octoprint = require("./octoprint-client");
 
-const SSH_HOST = process.env.OCTOPRINT_SLICE_HOST || "dev-01";
-const SSH_KEY = process.env.OCTOPRINT_SLICE_SSH_KEY || "/root/.ssh/dev01_key";
-const REMOTE_DIR = process.env.OCTOPRINT_SLICE_REMOTE_DIR || "/tmp/ozzu-slice";
 const LOCAL_DIR = process.env.OCTOPRINT_SLICE_LOCAL_DIR || "/tmp/ozzu-bridge/slice";
+const PRUSA_SLICER_BIN = process.env.PRUSA_SLICER_BIN || "prusa-slicer";
 
 // Default profile is Ender V3 SE-compatible (220x220x250 bed, Marlin2).
 // Override per-call via options.
@@ -39,54 +38,28 @@ const DEFAULT_PROFILE = {
   filament_type: "PETG",
 };
 
-function ssh(cmd) {
-  return execSync(
-    `ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no -o IdentitiesOnly=yes hadmin@${SSH_HOST.replace(/^.*@/, "")} '${cmd.replace(/'/g, "'\\''")}'`,
-    { encoding: "utf8" },
-  );
-}
-
-function scp(src, dst) {
-  return execSync(
-    `scp -i ${SSH_KEY} -o StrictHostKeyChecking=no -o IdentitiesOnly=yes ${src} ${dst}`,
-    { encoding: "utf8" },
-  );
-}
-
 function buildSlicerArgs(profile, inputPath, outputPath) {
   const flagOf = (k) => "--" + k.replace(/_/g, "-");
   const args = [];
   for (const [k, v] of Object.entries(profile)) {
     args.push(`${flagOf(k)} '${String(v).replace(/'/g, "'\\''")}'`);
   }
-  return `prusa-slicer --slice -o ${outputPath} ${args.join(" ")} ${inputPath}`;
+  return `${PRUSA_SLICER_BIN} --slice -o ${outputPath} ${args.join(" ")} ${inputPath}`;
 }
 
-async function sliceOnDev01(stlPath, optionsProfile = {}) {
+async function sliceLocal(stlPath, optionsProfile = {}) {
   const profile = { ...DEFAULT_PROFILE, ...optionsProfile };
   const stlName = path.basename(stlPath);
   const baseName = stlName.replace(/\.stl$/i, "");
-  const remoteStl = `${REMOTE_DIR}/${stlName}`;
-  const remoteGcode = `${REMOTE_DIR}/${baseName}.gcode`;
-
-  // Ensure dirs
-  ssh(`mkdir -p ${REMOTE_DIR}`);
-  fs.mkdirSync(LOCAL_DIR, { recursive: true });
-
-  // Push STL
-  scp(stlPath, `dev-01:${remoteStl}`);
-
-  // Slice
-  const cmd = buildSlicerArgs(profile, remoteStl, remoteGcode);
-  const out = ssh(`${cmd} 2>&1 | tail -10`);
-
-  // Pull G-code
   const localGcode = path.join(LOCAL_DIR, `${baseName}.gcode`);
-  scp(`dev-01:${remoteGcode}`, localGcode);
 
-  // Cleanup remote
-  try { ssh(`rm -f ${remoteStl} ${remoteGcode}`); } catch (_) {}
+  fs.mkdirSync(LOCAL_DIR, { recursive: true });
+  const cmd = buildSlicerArgs(profile, stlPath, localGcode);
+  const out = execSync(`${cmd} 2>&1 | tail -10`, { encoding: "utf8" });
 
+  if (!fs.existsSync(localGcode)) {
+    throw new Error(`Slicer ran but produced no gcode: ${out}`);
+  }
   return { localGcode, slicerOutput: out, baseName };
 }
 
@@ -96,7 +69,7 @@ async function printSTL(stlPath, options = {}) {
   const startedAt = new Date().toISOString();
 
   // Step 1: slice on dev-01
-  const sliceResult = await sliceOnDev01(stlPath, options.slicer || {});
+  const sliceResult = await sliceLocal(stlPath, options.slicer || {});
 
   // Step 2: ensure printer connection
   const status = await octoprint.getStatus().catch(e => ({ error: e.message }));
@@ -130,4 +103,4 @@ async function printSTL(stlPath, options = {}) {
   };
 }
 
-module.exports = { printSTL, sliceOnDev01 };
+module.exports = { printSTL, sliceLocal };
