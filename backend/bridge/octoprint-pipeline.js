@@ -40,11 +40,13 @@ const DEFAULT_PROFILE = {
 
 function buildSlicerArgs(profile, inputPath, outputPath) {
   const flagOf = (k) => "--" + k.replace(/_/g, "-");
+  const sq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
   const args = [];
   for (const [k, v] of Object.entries(profile)) {
-    args.push(`${flagOf(k)} '${String(v).replace(/'/g, "'\\''")}'`);
+    args.push(`${flagOf(k)} ${sq(v)}`);
   }
-  return `${PRUSA_SLICER_BIN} --slice -o ${outputPath} ${args.join(" ")} ${inputPath}`;
+  // Quote the file paths so spaces (and other shell-special chars) survive.
+  return `${PRUSA_SLICER_BIN} --slice -o ${sq(outputPath)} ${args.join(" ")} ${sq(inputPath)}`;
 }
 
 async function sliceLocal(stlPath, optionsProfile = {}) {
