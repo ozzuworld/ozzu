@@ -75,7 +75,7 @@ module.exports = function octoprintRoutes(ctx) {
         }
         sendJSON(res, 200, result);
       } catch (e) {
-        log("error", "octoprint print failed", e.message);
+        log.bridge.error(`[octoprint print] ${e.message}\n${e.stack?.split("\n").slice(0, 5).join("\n") || ""}`);
         sendJSON(res, 500, { error: e.message, stack: e.stack?.split("\n").slice(0, 5).join("\n") });
       }
       return true;
@@ -136,7 +136,7 @@ module.exports = function octoprintRoutes(ctx) {
         const body = await parseBody(req);
         const topic = body.topic || body.event || "?";
         const message = body.message || body.payload?.name || "";
-        log("info", "[octoprint webhook]", topic, message);
+        log.bridge.info(`[octoprint webhook] ${topic} ${message}`);
 
         // Auto-record: start on PrintStarted, stop+save on PrintDone/Failed/Cancelled
         try {
@@ -146,13 +146,13 @@ module.exports = function octoprintRoutes(ctx) {
               jobName,
               directiveId: body.extra?.directive_id || body.directive_id,
             });
-            log("info", "[octoprint webhook] auto-record start", JSON.stringify(r).slice(0, 200));
+            log.bridge.info(`[octoprint webhook] auto-record start ${JSON.stringify(r).slice(0, 200)}`);
           } else if (/PrintDone|PrintFailed|PrintCancelled/i.test(topic)) {
             const r = await recorder.stopRecording({ db });
-            log("info", "[octoprint webhook] auto-record stop", JSON.stringify(r).slice(0, 200));
+            log.bridge.info(`[octoprint webhook] auto-record stop ${JSON.stringify(r).slice(0, 200)}`);
           }
         } catch (e) {
-          log("error", "[octoprint webhook] auto-record error", e.message);
+          log.bridge.error(`[octoprint webhook] auto-record error: ${e.message}`);
         }
         // Persist as a generic event row if db has an events table; otherwise skip silently
         if (db && db.query) {

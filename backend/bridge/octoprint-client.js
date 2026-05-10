@@ -14,9 +14,15 @@ const path = require("path");
 
 const ADB_BIN = fs.existsSync("/app/adb") ? "/app/adb" : "adb";
 const TABLET_ADDR = process.env.OCTOPRINT_TABLET_ADB || "10.9.0.7:5555";
+const TABLET_HOST = process.env.OCTOPRINT_TABLET_HOST || "10.9.0.7";
 const FORWARD_PORT = parseInt(process.env.OCTOPRINT_FORWARD_PORT || "5500", 10);
 const TABLET_PORT = parseInt(process.env.OCTOPRINT_TABLET_PORT || "5000", 10);
-const BASE_URL = process.env.OCTOPRINT_URL || `http://localhost:${FORWARD_PORT}`;
+// Default to direct WG path (verified working 2026-05-09 + 2026-05-10).
+// ADB-forward path kept as legacy fallback when OCTOPRINT_USE_ADB=1.
+// dir_1778425211161: removing dev-01 + adb dependencies from print pipeline.
+const USE_ADB = process.env.OCTOPRINT_USE_ADB === "1";
+const BASE_URL = process.env.OCTOPRINT_URL ||
+  (USE_ADB ? `http://localhost:${FORWARD_PORT}` : `http://${TABLET_HOST}:${TABLET_PORT}`);
 const USER = process.env.OCTOPRINT_USER || "hadmin";
 const PASS = process.env.OCTOPRINT_PASS || "";
 const PRINTER_PORT = process.env.OCTOPRINT_PRINTER_PORT || "/dev/ttyOcto4a";
@@ -69,7 +75,14 @@ function http_request({ method = "GET", url, headers = {}, body = null, timeoutM
   });
 }
 
-function parseCsrfFromSetCookies(setCookies, port = FORWARD_PORT) {
+// Derive the port we're ACTUALLY hitting from BASE_URL — the cookie name is
+// `csrf_token_P<port>` where port is the port OctoPrint sees, which is the
+// port we connect to (5500 via ADB, 5000 via WG direct).
+const _BASE_PORT = (() => {
+  try { return parseInt(new URL(BASE_URL).port || "80", 10); } catch (_) { return FORWARD_PORT; }
+})();
+
+function parseCsrfFromSetCookies(setCookies, port = _BASE_PORT) {
   // OctoPrint sets `csrf_token_PNNNN=<value>; ...`
   const cookieName = `csrf_token_P${port}`;
   for (const c of setCookies) {
@@ -80,7 +93,7 @@ function parseCsrfFromSetCookies(setCookies, port = FORWARD_PORT) {
 }
 
 async function login() {
-  ensureAdbForward();
+  if (USE_ADB) ensureAdbForward();  // only when explicitly opted in
   if (!PASS) throw new Error("OCTOPRINT_PASS not configured");
 
   // 1. GET / to obtain csrf cookie
