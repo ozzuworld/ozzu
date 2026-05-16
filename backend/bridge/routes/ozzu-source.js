@@ -140,13 +140,13 @@ module.exports = function createOzzuSourceRoutes(ctx) {
   <a class="btn" href="sidestore://source?url=${encodeURIComponent('https://home.ozzu.world/ozzu.json')}">Add Ozzu source to SideStore</a>
 </div>
 
-<h2>Step 3 — Manual (SideStore doesn't have a deep link for these)</h2>
+<h2>Step 3 — Manual (no deep links exist for these)</h2>
 <div class="card">
   <p><b>Both live under: Settings tab → scroll to the bottom → "ADVANCED SETTINGS" section.</b></p>
-  <p style="margin-top:14px"><b>3a. Anisette server</b> → tap <code>Anisette Servers</code> → tap + → paste:</p>
-  <p><code>https://home.ozzu.world/anisette/</code></p>
-  <p>Then tap your new server to set it as active.</p>
-  <p style="margin-top:14px"><b>3b. VPN</b> → tap <code>VPN Configuration</code> → enable it. iOS will prompt for VPN permission — approve. (This is what we've been calling "StosVPN" — SideStore now labels it "VPN Configuration".)</p>
+  <p style="margin-top:14px"><b>3a. Anisette server</b> → tap <code>Anisette Servers</code>. There's a text field at the bottom labeled <b>"Anisette Server List"</b> (it already has <code>https://servers.sidestore.io/servers.json</code>). Replace it with:</p>
+  <p><code>https://home.ozzu.world/anisette-servers.json</code></p>
+  <p>Tap <b>Refresh Servers</b>. An entry called <b>"Ozzu"</b> appears in the list. Tap it (a checkmark shows up). Tap <b>Back</b>.</p>
+  <p style="margin-top:14px"><b>3b. VPN</b> → tap <code>VPN Configuration</code> → enable it. iOS will prompt for VPN permission — approve.</p>
 </div>
 
 <h2>Done</h2>
@@ -188,6 +188,25 @@ module.exports = function createOzzuSourceRoutes(ctx) {
       });
       res.end(buf);
       log(`[ozzu-source] iphone-pairing file delivered (${buf.length} bytes); file + token preserved for re-fetch`);
+      return true;
+    }
+
+    // GET /anisette-servers.json — server list manifest SideStore polls.
+    // SideStore 0.6.3 doesn't let you add a single server — the "Anisette
+    // Server List" text field in Settings takes a URL pointing to JSON of
+    // this shape. Format per AnisetteServerList.swift: {servers:[{name,address}]}.
+    if (req.method === "GET" && pathname === "/anisette-servers.json") {
+      const list = {
+        servers: [
+          { name: "Ozzu", address: `${PUBLIC_BASE}/anisette/` },
+        ],
+      };
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify(list));
       return true;
     }
 
