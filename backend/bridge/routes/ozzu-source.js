@@ -19,6 +19,13 @@ module.exports = function createOzzuSourceRoutes(ctx) {
   const APP_JSON_PATH = "/home/gcp/ozzu/frontend/app.json";
   const PUBLIC_BASE = process.env.BRIDGE_PUBLIC_URL || "https://home.ozzu.world";
 
+  // One-shot pairing-file delivery for King Kazuma's iPhone → SideStore import.
+  // Cipher writes /tmp/ozzu-bridge/iphone-pairing.mobiledevicepairing + /tmp/ozzu-bridge/iphone-pairing.token
+  // before telling King Kazuma the URL. First successful download deletes both
+  // files so the URL self-expires.
+  const PAIR_FILE = "/tmp/ozzu-bridge/iphone-pairing.mobiledevicepairing";
+  const PAIR_TOKEN_FILE = "/tmp/ozzu-bridge/iphone-pairing.token";
+
   function readAppMetadata() {
     try {
       const raw = JSON.parse(fs.readFileSync(APP_JSON_PATH, "utf8"));
@@ -89,6 +96,95 @@ module.exports = function createOzzuSourceRoutes(ctx) {
       });
       res.end(JSON.stringify(manifest, null, 2));
       log(`[ozzu-source] served manifest (apps=${manifest.apps.length}, ipa=${stat ? "present" : "missing"})`);
+      return true;
+    }
+
+    // GET /ios-setup?t=<token> — landing page King Kazuma opens on iPhone Safari.
+    // Two big tap-buttons: import pairing file + add Ozzu source via sidestore:// deep link.
+    if (req.method === "GET" && pathname === "/ios-setup") {
+      const queryToken = (req.url.match(/[?&]t=([A-Za-z0-9_-]+)/) || [])[1];
+      let expected = null;
+      try { expected = fs.readFileSync(PAIR_TOKEN_FILE, "utf8").trim(); } catch {}
+      if (!expected || !queryToken || queryToken !== expected) {
+        res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+        res.end("<h1>404</h1><p>Token invalid or expired. Ask Cipher for a fresh /ios-setup URL.</p>");
+        return true;
+      }
+      const html = `<!doctype html><html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ozzu — SideStore setup</title>
+<style>
+  body { font: 17px -apple-system, sans-serif; max-width:480px; margin:0 auto; padding:20px; background:#000; color:#eee; }
+  h1 { font-size:22px; margin:8px 0 4px; }
+  h2 { font-size:14px; color:#888; text-transform:uppercase; letter-spacing:1px; margin-top:30px; }
+  .card { background:#1a1a1a; border:1px solid #2a2a2a; border-radius:14px; padding:16px; margin:12px 0; }
+  .btn { display:block; background:#3b82f6; color:#fff; text-decoration:none; padding:14px 18px; border-radius:10px; font-weight:600; text-align:center; margin:10px 0; }
+  .btn-secondary { background:#374151; }
+  code { background:#222; padding:2px 6px; border-radius:4px; font-size:13px; word-break:break-all; }
+  p { color:#bbb; margin:6px 0; }
+  ol { padding-left:22px; color:#bbb; }
+</style></head><body>
+<h1>Ozzu — SideStore setup</h1>
+<p>Three steps, then you're done. Tap them in order.</p>
+
+<h2>Step 1 — Pairing file</h2>
+<div class="card">
+  <p>Downloads <code>iphone-pairing.mobiledevicepairing</code>. After tapping, iOS will offer to "Open in SideStore" — pick that.</p>
+  <a class="btn" href="/iphone-pairing?t=${queryToken}">Download pairing file</a>
+</div>
+
+<h2>Step 2 — Add Ozzu source</h2>
+<div class="card">
+  <p>Opens SideStore and asks to confirm adding the Ozzu source.</p>
+  <a class="btn" href="sidestore://source?url=${encodeURIComponent('https://home.ozzu.world/ozzu.json')}">Add Ozzu source to SideStore</a>
+</div>
+
+<h2>Step 3 — Manual (SideStore doesn't have a deep link for these)</h2>
+<div class="card">
+  <p><b>3a. Anisette server</b> — Open SideStore → Settings → Anisette Servers → tap + → paste:</p>
+  <p><code>https://home.ozzu.world/anisette/</code></p>
+  <p>Set it as the active server.</p>
+  <p style="margin-top:14px"><b>3b. Enable StosVPN</b> — toggle it ON in SideStore home screen. iOS will prompt for VPN permission — approve.</p>
+</div>
+
+<h2>Done</h2>
+<p>SideStore will now re-sign itself + Ozzu every ~7 days. Open SideStore once a week to keep iOS background-refresh budget alive.</p>
+<p style="color:#666;font-size:12px;margin-top:30px">This page expires after the pairing file is downloaded (single use).</p>
+</body></html>`;
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end(html);
+      log(`[ozzu-source] ios-setup landing page served`);
+      return true;
+    }
+
+    // GET /iphone-pairing?t=<token> — one-shot pairing file delivery to iPhone Safari
+    if (req.method === "GET" && pathname === "/iphone-pairing") {
+      const queryToken = (req.url.match(/[?&]t=([A-Za-z0-9_-]+)/) || [])[1];
+      let expected = null;
+      try { expected = fs.readFileSync(PAIR_TOKEN_FILE, "utf8").trim(); } catch {}
+      if (!expected || !queryToken || queryToken !== expected) {
+        sendJSON(res, 404, { error: "Pairing file unavailable or token invalid" });
+        return true;
+      }
+      if (!fs.existsSync(PAIR_FILE)) {
+        sendJSON(res, 404, { error: "Pairing file already consumed" });
+        return true;
+      }
+      const buf = fs.readFileSync(PAIR_FILE);
+      res.writeHead(200, {
+        "Content-Type": "application/x-apple-aspen-config",
+        "Content-Disposition": `attachment; filename="iphone-pairing.mobiledevicepairing"`,
+        "Content-Length": buf.length,
+        "Cache-Control": "no-store",
+      });
+      res.end(buf);
+      try { fs.unlinkSync(PAIR_FILE); } catch {}
+      try { fs.unlinkSync(PAIR_TOKEN_FILE); } catch {}
+      log(`[ozzu-source] iphone-pairing file delivered + deleted (was ${buf.length} bytes)`);
       return true;
     }
 
