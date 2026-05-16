@@ -288,6 +288,54 @@ sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
 - `private/` — gitignored as of 2026-05-16. Contains cucm creds, legal case, drone secrets.
 
 ### Known compromised → must rotate
-- **5 Gmail app passwords** (eng.hsuarezp, eng.ozzu/flokiozzu, jokoozzu, mkazu704, nat88970) — in committed git history at `5b74f1d5`. Revoke at https://myaccount.google.com/apppasswords for each account.
-- **Wyze account password** (`Pokemon123!`) — leaked in chat transcript 2026-05-16 during V4 cam bridge work.
-- **`Pokemon123!` / `Onepiece123!` universal pattern** — used across dev-01 sudo, r605, Kazuma-PC, OctoPrint, Obico, Jellyfin, Wyze. Web-admin services use the new `OZZU_WEB_ADMIN_PASS` value (rotate via each service's UI when convenient).
+- **6 Gmail app passwords ROTATED 2026-05-16** (hsuarezp, ozzu, floki, joko, mkazu, nat) — old values still readable in committed git history at `5b74f1d5` but no longer authenticate (King Kazuma revoked + regenerated, IMAP-verified 6/6).
+- **Wyze account password ROTATED 2026-05-16** by King Kazuma.
+- **`Pokemon123!` / `Onepiece123!` universal pattern** — still in use on dev-01 sudo, r605, Kazuma-PC SSH (now key-only since dir_1778954447412 — sudo prompts still use it). Web-admin services use the new `OZZU_WEB_ADMIN_PASS` value (rotate via each service UI when convenient).
+
+---
+
+## iOS Sideload Self-Service (dir_1778958643514, 2026-05-16)
+
+**Goal:** iPhone refreshes its own apps without King Kazuma's PC every 7 days, and pulls new Ozzu builds OTA.
+
+**Architecture:** SideStore on iPhone + dadoum/anisette-v3-server on GCP VM + AltStore Source manifest served by bridge.
+
+### Server-side (already deployed)
+
+| Component | Path | Purpose |
+|---|---|---|
+| `anisette` container | `127.0.0.1:6969`, nginx-proxied to `https://home.ozzu.world/anisette/` | Apple authentication for SideStore on cellular. No PII, safe to publish over TLS. |
+| Bridge route | `GET /ozzu.json` → `https://home.ozzu.world/ozzu.json` | AltStore Source manifest. Reads `frontend/app.json` for version + `artifacts/ozzu-latest.ipa` for size/mtime. |
+| Bridge route | `GET /ozzu-latest.ipa` → `https://home.ozzu.world/ozzu-latest.ipa` | IPA binary stream. Returns 404 if no cached IPA. |
+| `jitterbugpair` + `idevicepair` | dev-01 `/usr/local/bin/` | One-time pairing-file generator. Run when iPhone is USB-connected to dev-01. |
+
+### Phone-side — one-time bootstrap procedure
+
+1. **Install SideStore on iPhone**:
+   - On Kazuma-PC, install AltServer + AltStore as usual (last PC trip).
+   - In AltStore, add source `https://provisional.sidestore.io/apps.json`.
+   - Install SideStore from that source.
+   - Open SideStore once on phone.
+
+2. **Generate pairing file on dev-01**:
+   - Connect iPhone to dev-01 via USB cable.
+   - Tap "Trust" on iPhone when prompted.
+   - On dev-01: `idevicepair pair` (or `jitterbugpair` for the alt format).
+   - Output: pairing file at `/var/lib/lockdown/<UDID>.plist` (idevicepair) or `./*.mobiledevicepairing` (jitterbugpair).
+   - AirDrop / email / cloud-transfer the `.mobiledevicepairing` file to the iPhone.
+   - In SideStore, tap "Import pairing file" → select the file.
+
+3. **Configure SideStore**:
+   - Settings → Anisette Servers → add `https://home.ozzu.world/anisette/` → set as active.
+   - Settings → Sources → add `https://home.ozzu.world/ozzu.json`.
+   - Settings → enable StosVPN (it's a local-loopback VPN, won't affect cellular data).
+
+4. **Test**:
+   - Open Ozzu app source → install Ozzu (re-signs with King Kazuma Apple ID, ~30s).
+   - From now on, every CI iOS build that caches to `artifacts/ozzu-latest.ipa` becomes available in SideStore for one-tap update.
+
+### Maintenance
+
+- **Every iOS major update**: regenerate pairing file (cable trip to dev-01). The old one stops working. Keep the generated file in `/root/.ozzu-secrets/iphone-pairing/` as backup.
+- **Cert refresh**: open SideStore at least once per week so iOS BackgroundAppRefresh budget stays alive. SideStore + StosVPN re-sign all apps automatically. No PC.
+- **New Ozzu build**: after CI completes + IPA caches to `artifacts/ozzu-latest.ipa`, SideStore detects the new version on next source-refresh and shows an Update button.

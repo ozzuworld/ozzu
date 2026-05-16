@@ -139,6 +139,23 @@ services:
 
   # agrovision: DECOMMISSIONED 2026-04-09 — feature cancelled
 
+  # Apple Anisette server — required for SideStore (iOS sideload self-refresh)
+  # and AltServer-Linux. Speaks Apple's mostly-undocumented anisette protocol on
+  # port 6969. No PII, no auth. Re-deployed 2026-05-16 (dir_1778958643514) —
+  # previously running ad-hoc, INVENTORY had it as "✅ running" but container
+  # was missing. Reachable internally as 127.0.0.1:6969; nginx exposes it as
+  # https://home.ozzu.world/anisette/ for SideStore-on-cellular.
+  anisette:
+    container_name: anisette
+    image: dadoum/anisette-v3-server:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - anisette-data:/home/Alcoholic/.config/anisette-v3
+    environment:
+      - ANISETTE_HOST=127.0.0.1
+      - ANISETTE_PORT=6969
+
   browser:
     build: ./browser
     container_name: browser
@@ -193,3 +210,4 @@ volumes:
   postgres-data:
   face-models:
   qdrant-data:
+  anisette-data:
