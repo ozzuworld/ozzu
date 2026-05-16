@@ -175,16 +175,18 @@ module.exports = function createOzzuSourceRoutes(ctx) {
         return true;
       }
       const buf = fs.readFileSync(PAIR_FILE);
+      // application/octet-stream + .mobiledevicepairing extension lets iOS Safari
+      // hand off via share-sheet → "Open in SideStore" instead of the previous
+      // x-apple-aspen-config which tells iOS "this is a config profile" and routes
+      // it into Settings → Profile Installer (which then fails with parse errors).
       res.writeHead(200, {
-        "Content-Type": "application/x-apple-aspen-config",
+        "Content-Type": "application/octet-stream",
         "Content-Disposition": `attachment; filename="iphone-pairing.mobiledevicepairing"`,
         "Content-Length": buf.length,
         "Cache-Control": "no-store",
       });
       res.end(buf);
-      try { fs.unlinkSync(PAIR_FILE); } catch {}
-      try { fs.unlinkSync(PAIR_TOKEN_FILE); } catch {}
-      log(`[ozzu-source] iphone-pairing file delivered + deleted (was ${buf.length} bytes)`);
+      log(`[ozzu-source] iphone-pairing file delivered (${buf.length} bytes); file + token preserved for re-fetch`);
       return true;
     }
 
