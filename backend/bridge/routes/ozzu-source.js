@@ -142,10 +142,11 @@ module.exports = function createOzzuSourceRoutes(ctx) {
 
 <h2>Step 3 — Manual (SideStore doesn't have a deep link for these)</h2>
 <div class="card">
-  <p><b>3a. Anisette server</b> — Open SideStore → Settings → Anisette Servers → tap + → paste:</p>
+  <p><b>Both live under: Settings tab → scroll to the bottom → "ADVANCED SETTINGS" section.</b></p>
+  <p style="margin-top:14px"><b>3a. Anisette server</b> → tap <code>Anisette Servers</code> → tap + → paste:</p>
   <p><code>https://home.ozzu.world/anisette/</code></p>
-  <p>Set it as the active server.</p>
-  <p style="margin-top:14px"><b>3b. Enable StosVPN</b> — toggle it ON in SideStore home screen. iOS will prompt for VPN permission — approve.</p>
+  <p>Then tap your new server to set it as active.</p>
+  <p style="margin-top:14px"><b>3b. VPN</b> → tap <code>VPN Configuration</code> → enable it. iOS will prompt for VPN permission — approve. (This is what we've been calling "StosVPN" — SideStore now labels it "VPN Configuration".)</p>
 </div>
 
 <h2>Done</h2>
