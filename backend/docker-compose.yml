@@ -154,8 +154,28 @@ services:
     environment:
       - BROWSER_PORT=3334
 
-  # wyze-bridge now runs on dev-01 (172.168.0.59) for LAN camera access
-  # See ~/wyze-bridge/docker-compose.yml on dev-01
+  # wyze-bridge — DOES NOT RUN HERE. (dir_1778948739228, 2026-05-16)
+  #
+  # V4 firmware ≥ 4.52.9.5332 killed the old binary-SDK TUTK path that mrlt8 and
+  # IDisposable forks use (IOTC_ER_TIMEOUT). Wyze still speaks TUTK+DTLS-1.2 but
+  # ThroughTek's binary SDK can't negotiate the new handshake; AlexxIT/go2rtc
+  # PR #2011 (seydx, merged 2026-01-18) shipped a clean-room reimplementation
+  # that works on 4.52.9.5332.
+  #
+  # Also: cams are on Colombian residential LAN (192.168.1.0/24). Bridge VM is
+  # on GCP — cannot punch UDP to that NAT and not on the cam's LAN. So bridge
+  # MUST run on a host that is on the cam's LAN.
+  #
+  # Deployment: alexxit/go2rtc:latest on dev-01 (10.9.0.5 over WG, 192.168.1.14
+  # on FAMILIA SUAREZ WiFi — same LAN as the cam). Docker daemon enabled
+  # on boot; container restart=unless-stopped auto-resurrects. Picked dev-01
+  # over Kazuma-PC because Kazuma-PC moves around (laptop) while dev-01 is the
+  # permanent always-on machine at King Kazuma's house.
+  # Config: /home/hadmin/go2rtc/config/go2rtc.yaml on dev-01.
+  # Streams: rtsp://10.9.0.5:8554/ozzu-cam-loving   (V4 2560x1440 H.264/AAC)
+  #          rtsp://10.9.0.5:8554/ozzu-lroom-cam-01 (V4, offline since Feb 2026)
+  # WebUI:   http://10.9.0.5:1984/
+  # Creds in /root/.ozzu-secrets (WYZE_EMAIL/WYZE_PASSWORD/API_ID/API_KEY) for re-discovery if needed.
 
   certbot:
     container_name: certbot

@@ -416,13 +416,16 @@ const ENTITY_CONFIG = [
 
 // ── Camera config ──
 
-const WYZE_BRIDGE_HOST = "172.168.0.59"; // dev-01 on home LAN
+// Cameras live behind go2rtc on dev-01 (10.9.0.5 over WG, 192.168.1.14 on home LAN).
+// See backend/docker-compose.yml comment block for the full deployment story.
+const WYZE_BRIDGE_HOST = "10.9.0.5";
 const CAMERAS = [
-  { id: 'living_room_cam', name: 'Living Room Camera', streamName: 'izzy-cam-lroom-01' },
+  { id: 'cam_loving', name: 'Loving Cam',         streamName: 'ozzu-cam-loving' },
+  { id: 'cam_lroom',  name: 'Living Room Camera', streamName: 'ozzu-lroom-cam-01' },
 ];
 
 function getCameraStreamUrl(streamName) {
-  return `http://${WYZE_BRIDGE_HOST}:8888/${streamName}/`;
+  return `http://${WYZE_BRIDGE_HOST}:1984/api/stream.m3u8?src=${streamName}`;
 }
 
 const CONTROLLABLE_DOMAINS = new Set(["switch", "siren", "media_player", "number", "climate", "select"]);
@@ -3062,7 +3065,7 @@ const GEMINI_BRIDGE_TOOLS = [
     parameters: {
       type: "OBJECT",
       properties: {
-        camera_id: { type: "STRING", description: "Camera ID, e.g. living_room_cam" },
+        camera_id: { type: "STRING", description: "Camera ID, e.g. cam_loving or cam_lroom" },
       },
       required: ["camera_id"],
     },
