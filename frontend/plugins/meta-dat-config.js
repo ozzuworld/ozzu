@@ -186,9 +186,14 @@ function withMetaDATSPM(config) {
       isa: "XCRemoteSwiftPackageReference",
       repositoryURL:
         "https://github.com/facebook/meta-wearables-dat-ios",
+      // Pin to exact 0.6.0 — 0.7.0 (released 2026-05) removed
+      // StreamSession/StreamSessionConfig types and broke GlassesModule.swift.
+      // upToNextMajorVersion("0.6.0") in SPM semantics means >=0.6.0, <1.0.0
+      // which auto-upgraded to 0.7.0 on the next CI build. Use exactVersion
+      // until GlassesModule is ported to the 0.7+ API.
       requirement: {
-        kind: "upToNextMajorVersion",
-        minimumVersion: "0.6.0",
+        kind: "exactVersion",
+        version: "0.6.0",
       },
     };
     pbx.XCRemoteSwiftPackageReference[`${pkgRefUuid}_comment`] =
