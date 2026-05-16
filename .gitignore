@@ -45,7 +45,17 @@ CLAUDE.local.md.bak
 .DS_Store
 Thumbs.db
 whatsapp-mcp/
-backend/.env
+
+# All .env files anywhere under backend/ — names like .env.gmail, .env.email, .env.encrypted,
+# backend/bridge/.env, etc. have repeatedly leaked plaintext secrets into git history
+# (5b74f1d5 committed Gmail app passwords + OctoPrint password — those values must be rotated).
+# Real secret values live in ~/.ozzu-secrets (chmod 600). See infra/secrets.example.
+backend/**/.env
+backend/**/.env.*
+
+# Private workspace — cucm creds, legal case files, drone secrets, evidence, etc.
+# Has been UNTRACKED but unprotected against `git add private/` accidents.
+private/
 
 # Encrypted env files — never commit even if encrypted (key sits next to ciphertext on host)
 backend/.env.encrypted

@@ -128,12 +128,15 @@ smartDeploy auto-triggers after every merge — **NEVER manually trigger builds*
 - **Contents:** pg dump + `state/*.json` + uploads + HA config + env files + redis dump
 - **Retention:** last 7 (script prunes)
 
-### 2. Cron-driven postgres dumps (plaintext)
-- **Path:** `/home/gcp/backups/postgres/`
-- **Format:** `ozzu_YYYYMMDD_HHMMSS.sql`
+### 2. Cron-driven postgres dumps (plaintext) — KNOWN BROKEN as of 2026-05-16
+- **Path:** `/home/gcp/backups/postgres/` — directory does NOT exist on disk; the cron
+  job has been silently failing because its log dir `/home/gcp/logs/` also doesn't exist.
 - **Cron:** `0 3 * * *` in root crontab → `scripts/backup-postgres.sh`
-- **Log:** `/home/gcp/logs/backup.log`  *(dir must exist or cron silently fails)*
-- **Retention:** 7 days
+- **App-backup cron:** `0 4 * * *` → `scripts/backup.sh` (encrypted at-rest) — also stale.
+  Latest tar.gz.enc in `/home/gcp/ozzu/backups/` is from 2026-04-25.
+- **Fix:** `sudo mkdir -p /home/gcp/logs /home/gcp/backups/postgres && sudo chown gcp:gcp /home/gcp/logs /home/gcp/backups/postgres`.
+  Then check cron after next 03:00 run. Plaintext dumps should also be encrypted
+  with the same BRIDGE_API_KEY passphrase pattern as app backups before re-enabling.
 
 ### 3. GCP disk snapshots (legacy)
 - **List:** `gcloud compute snapshots list`
