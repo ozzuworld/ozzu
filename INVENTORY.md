@@ -256,3 +256,38 @@ sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
 - **Moving to Spain soon** — no persistent LAN. Only always-on devices: iPhone, Android (3226033350), Windows laptop (sometimes)
 - **Disk**: 82% used after 2026-04-09 cleanup (44GB free, 111GB is Qdrant face DB)
 - **git-crypt**: repo uses git-crypt for secrets. `ca.key` (OpenVPN CA) is NOT encrypted — security gap, noted.
+
+---
+
+## Security Posture (last reviewed 2026-05-16, dir_1778953920389 + dir_1778954447412)
+
+### SSH
+- **dev-01**: `PasswordAuthentication no` enforced via `/etc/ssh/sshd_config.d/99-ozzu-key-only.conf`.
+  Auth = ed25519 key (`~/.ssh/dev01_key` on bridge VM). Sudo prompts still require password
+  (`$HADMIN_SUDO_PASS` from `~/.ozzu-secrets`).
+- **Kazuma-PC**: `PasswordAuthentication no`, `PubkeyAuthentication yes` set in
+  `C:\ProgramData\ssh\sshd_config`. Backup: `sshd_config.bak-20260516`.
+- **orangepi5**: cloud-init seeded key, NOPASSWD sudo (unchanged).
+- **GCP VM**: SSH on port 22 is currently `0.0.0.0/0` via `default-allow-ssh` — FLAGGED but not yet restricted.
+
+### GCP firewall (post-2026-05-16)
+| Rule | Allowed | Source |
+|---|---|---|
+| allow-ozzu-public | tcp:80, 443, 3333 | 0.0.0.0/0 — nginx HTTPS + bridge API |
+| wireguard | udp:51820 | 0.0.0.0/0 — VPN |
+| default-allow-ssh | tcp:22 | 0.0.0.0/0 — **FLAGGED, restrict in next pass** |
+| default-allow-rdp | tcp:3389 | 0.0.0.0/0 — **FLAGGED, no RDP service runs on VM, can delete** |
+| default-allow-internal | all | 10.128.0.0/9 (GCP VPC) |
+| default-allow-icmp | icmp | 0.0.0.0/0 |
+- **Removed from public**: tcp:6333 (qdrant) + tcp:6969 (anisette). Reach via WG only at `10.9.0.1:6333` / `10.9.0.1:6969`.
+
+### Secrets — what's where
+- `/root/.ozzu-secrets` (chmod 600, root:root) — universal sudo, web admin passwords, Wyze creds, web-admin rotation key (`OZZU_WEB_ADMIN_PASS`).
+- `backend/bridge/.env`, `backend/.env.gmail`, `backend/docker-compose.override.yml` — on disk, gitignored (matched by `backend/**/.env*`). **Values previously leaked in commit `5b74f1d5`; must be rotated.**
+- `backend/wireguard/clients/*.conf` — WG private keys; gcp:gcp 0600; not in git.
+- `private/` — gitignored as of 2026-05-16. Contains cucm creds, legal case, drone secrets.
+
+### Known compromised → must rotate
+- **5 Gmail app passwords** (eng.hsuarezp, eng.ozzu/flokiozzu, jokoozzu, mkazu704, nat88970) — in committed git history at `5b74f1d5`. Revoke at https://myaccount.google.com/apppasswords for each account.
+- **Wyze account password** (`Pokemon123!`) — leaked in chat transcript 2026-05-16 during V4 cam bridge work.
+- **`Pokemon123!` / `Onepiece123!` universal pattern** — used across dev-01 sudo, r605, Kazuma-PC, OctoPrint, Obico, Jellyfin, Wyze. Web-admin services use the new `OZZU_WEB_ADMIN_PASS` value (rotate via each service's UI when convenient).
