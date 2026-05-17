@@ -481,7 +481,7 @@ async function executePost(account, content) {
     });
 
     // Screenshot for verification
-    const screenshotPath = `/tmp/ozzu-bridge/uploads/influence-${platform}-${account.username}-${Date.now()}.png`;
+    const screenshotPath = `/home/gcp/ozzu/data/uploads/influence-${platform}-${account.username}-${Date.now()}.png`;
     try {
       await fs.promises.mkdir(path.dirname(screenshotPath), { recursive: true });
       await page.screenshot({ path: screenshotPath, fullPage: false });
@@ -492,7 +492,7 @@ async function executePost(account, content) {
   } catch (err) {
     // Screenshot on failure for debugging
     try {
-      const errPath = `/tmp/ozzu-bridge/uploads/influence-error-${platform}-${Date.now()}.png`;
+      const errPath = `/home/gcp/ozzu/data/uploads/influence-error-${platform}-${Date.now()}.png`;
       await fs.promises.mkdir(path.dirname(errPath), { recursive: true });
       await page.screenshot({ path: errPath });
     } catch {}
@@ -521,7 +521,7 @@ async function checkGoogleLogin(proxyPort) {
       return !location.href.includes("signin") && !location.href.includes("ServiceLogin");
     });
 
-    const screenshotPath = `/tmp/ozzu-bridge/uploads/google-check-${Date.now()}.png`;
+    const screenshotPath = `/home/gcp/ozzu/data/uploads/google-check-${Date.now()}.png`;
     await fs.promises.mkdir(path.dirname(screenshotPath), { recursive: true });
     await page.screenshot({ path: screenshotPath });
 
@@ -560,7 +560,7 @@ async function loginGoogleSSO(proxyPort, email, password) {
     await delay(3000, 5000);
 
     // Screenshot after email step to see what Google showed
-    const afterEmailPath = `/tmp/ozzu-bridge/uploads/google-after-email-${Date.now()}.png`;
+    const afterEmailPath = `/home/gcp/ozzu/data/uploads/google-after-email-${Date.now()}.png`;
     await fs.promises.mkdir(path.dirname(afterEmailPath), { recursive: true });
     await page.screenshot({ path: afterEmailPath });
 
@@ -576,7 +576,7 @@ async function loginGoogleSSO(proxyPort, email, password) {
         inputs: Array.from(document.querySelectorAll("input")).map((i) => ({ type: i.type, name: i.name, id: i.id })),
       }));
 
-      const diagPath = `/tmp/ozzu-bridge/uploads/google-diag-${Date.now()}.png`;
+      const diagPath = `/home/gcp/ozzu/data/uploads/google-diag-${Date.now()}.png`;
       await page.screenshot({ path: diagPath });
 
       return {
@@ -599,7 +599,7 @@ async function loginGoogleSSO(proxyPort, email, password) {
     await delay(5000, 8000);
 
     // Screenshot after password
-    const afterPwPath = `/tmp/ozzu-bridge/uploads/google-after-pw-${Date.now()}.png`;
+    const afterPwPath = `/home/gcp/ozzu/data/uploads/google-after-pw-${Date.now()}.png`;
     await page.screenshot({ path: afterPwPath });
 
     // Check for 2FA or security challenge
@@ -618,7 +618,7 @@ async function loginGoogleSSO(proxyPort, email, password) {
     const finalUrl = page.url();
     const loggedIn = finalUrl.includes("myaccount") || finalUrl.includes("mail.google") || !finalUrl.includes("signin");
 
-    const finalPath = `/tmp/ozzu-bridge/uploads/google-final-${Date.now()}.png`;
+    const finalPath = `/home/gcp/ozzu/data/uploads/google-final-${Date.now()}.png`;
     await page.screenshot({ path: finalPath });
 
     return {

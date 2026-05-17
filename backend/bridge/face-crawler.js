@@ -19,8 +19,10 @@ const path = require("path");
 const crypto = require("crypto");
 
 const FACE_API = "http://127.0.0.1:5555";
-const CRAWL_STATE_FILE = "/tmp/osint-data/crawl-state.json";
-const CRAWL_NAMES_FILE = "/tmp/osint-data/crawl-names.json";
+const CRAWL_STATE_DIR = "/home/gcp/ozzu/data/osint-crawler";
+const CRAWL_STATE_FILE = `${CRAWL_STATE_DIR}/crawl-state.json`;
+const CRAWL_NAMES_FILE = `${CRAWL_STATE_DIR}/crawl-names.json`;
+try { fs.mkdirSync(CRAWL_STATE_DIR, { recursive: true }); } catch {}
 
 // Tuning — be aggressive but not abusive
 const WIKI_BATCH = 100;        // pages per Wikipedia API call

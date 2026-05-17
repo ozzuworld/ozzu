@@ -112,7 +112,8 @@ When in doubt about a fork, defer to King Kazuma. When the path is obvious withi
 |---|---|---|---|
 | `/home/gcp/ozzu/**` | `/home/gcp/ozzu/**` | **read-write** | **Any repo file.** Bridge has the entire repo bind-mounted. Read assets, configs, source files. Use canonical paths — do NOT copy to /tmp first. |
 | `/app/**` | `/home/gcp/ozzu/backend/bridge/**` | read-write | Bridge's own source (also visible via `/home/gcp/ozzu/backend/bridge/`). |
-| `/tmp/ozzu-bridge/**` | `/tmp/ozzu-bridge/**` | read-write | **Only ephemeral / cross-restart messaging.** Deploy scripts, pairing files, upload temp. **Never persistent user artifacts** — auto-cleaned by systemd-tmpfiles. |
+| `/tmp/ozzu-bridge/**` | `/tmp/ozzu-bridge/**` | read-write | **Only ephemeral / cross-restart messaging.** Deploy scripts, pairing files, 24h bridge-shares (`/files/bridge-share`), build verifier bundles. **Never persistent user artifacts** — auto-cleaned by systemd-tmpfiles. |
+| `/home/gcp/ozzu/data/**` | `/home/gcp/ozzu/data/**` | read-write | **Persistent user artifacts.** Mobile/glasses uploads (`data/uploads/`), business attachments (`data/business-attachments/`), face-crawler resume state (`data/osint-crawler/`), pipeline/training state (`data/state/`), files DB blob storage (`data/files/`). Survives bridge restart AND host reboot. |
 | `/root/.config/gh/**`, `/root/.ssh/**`, `/root/.gitconfig` | host equivalents | read-only | gh CLI auth, ssh keys, git config |
 | `/var/run/docker.sock` | host | read-write | bridge can spawn other containers (used by spawnDetachedDeploy) |
 | `/usr/local/bin/{gh,docker,adb,claude}` | host bin equivalents | read-only | CLI tools |

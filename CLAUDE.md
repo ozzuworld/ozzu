@@ -144,7 +144,7 @@ The `android-mcp` MCP server provides `State-Tool` (screenshot + UI tree) and in
 ### Before Writing UI Code
 1. Read `frontend/Components.md` — does a component already exist for this?
 2. Read `frontend/lib/design-tokens.ts` — use ONLY these values
-3. If King Kazuma sent reference images to the bridge, READ THEM at `/tmp/ozzu-bridge/uploads/` and match the visual language — not just the data fields
+3. If King Kazuma sent reference images to the bridge, READ THEM at `/home/gcp/ozzu/data/uploads/` and match the visual language — not just the data fields
 4. After writing, screenshot the mirror device and compare against the reference — not just the data fields
 
 ## Reference

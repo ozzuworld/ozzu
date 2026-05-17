@@ -462,6 +462,9 @@ redis.on("ready", () => {
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  for (const dir of ["/home/gcp/ozzu/data/uploads", "/home/gcp/ozzu/data/state", "/home/gcp/ozzu/data/business-attachments"]) {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  }
 }
 
 function readJSON(file, fallback) {
@@ -1803,11 +1806,11 @@ async function handleRequest(req, res) {
         gpuUtil, gpuMemUsed, gpuMemTotal, gpuTemp,
         modelReady, timestamp: Date.now(),
       };
-      fs.writeFileSync("/tmp/agrovision-training-state.json", JSON.stringify(state));
+      fs.writeFileSync("/home/gcp/ozzu/data/state/agrovision-training-state.json", JSON.stringify(state));
     } catch (e) {
       // SSH failed — write error state
       try {
-        fs.writeFileSync("/tmp/agrovision-training-state.json", JSON.stringify({
+        fs.writeFileSync("/home/gcp/ozzu/data/state/agrovision-training-state.json", JSON.stringify({
           phase: "unreachable", error: e.message, timestamp: Date.now(),
         }));
       } catch {}
@@ -1858,7 +1861,7 @@ async function handleRequest(req, res) {
       let pipelineState = null;
       try {
         const fs = require("fs");
-        const stateFile = "/tmp/pipeline-state.json";
+        const stateFile = "/home/gcp/ozzu/data/state/pipeline-state.json";
         if (fs.existsSync(stateFile)) {
           pipelineState = JSON.parse(fs.readFileSync(stateFile, "utf8"));
         }
@@ -1868,7 +1871,7 @@ async function handleRequest(req, res) {
       let datasetProgress = {};
       try {
         const fs = require("fs");
-        const progressFile = "/tmp/pipeline-progress.json";
+        const progressFile = "/home/gcp/ozzu/data/state/pipeline-progress.json";
         if (fs.existsSync(progressFile)) {
           const prog = JSON.parse(fs.readFileSync(progressFile, "utf8"));
           datasetProgress = prog.datasets || {};
@@ -1930,7 +1933,7 @@ async function handleRequest(req, res) {
       let agrovision = null;
       try {
         const fs = require("fs");
-        const avFile = "/tmp/agrovision-training-state.json";
+        const avFile = "/home/gcp/ozzu/data/state/agrovision-training-state.json";
         if (fs.existsSync(avFile)) {
           const av = JSON.parse(fs.readFileSync(avFile, "utf8"));
           const age = (Date.now() - (av.timestamp || 0)) / 1000;
@@ -2012,7 +2015,7 @@ async function handleRequest(req, res) {
       const body = Buffer.concat(chunks).toString();
       const state = JSON.parse(body);
       const fs = require("fs");
-      fs.writeFileSync("/tmp/pipeline-state.json", JSON.stringify(state));
+      fs.writeFileSync("/home/gcp/ozzu/data/state/pipeline-state.json", JSON.stringify(state));
       // Record heartbeat for training recovery watchdog
       try { const wd = require("./watchdog"); wd.recordHeartbeat(); } catch {}
       sendJSON(res, 200, { ok: true });
@@ -2030,7 +2033,7 @@ async function handleRequest(req, res) {
       const body = Buffer.concat(chunks).toString();
       const progress = JSON.parse(body);
       const fs = require("fs");
-      fs.writeFileSync("/tmp/pipeline-progress.json", JSON.stringify(progress));
+      fs.writeFileSync("/home/gcp/ozzu/data/state/pipeline-progress.json", JSON.stringify(progress));
       sendJSON(res, 200, { ok: true });
     } catch (e) {
       sendJSON(res, 400, { error: e.message });
@@ -2042,7 +2045,7 @@ async function handleRequest(req, res) {
   if (req.method === "GET" && pathname === "/api/pipeline-progress") {
     try {
       const fs = require("fs");
-      const file = "/tmp/pipeline-progress.json";
+      const file = "/home/gcp/ozzu/data/state/pipeline-progress.json";
       if (fs.existsSync(file)) {
         const data = JSON.parse(fs.readFileSync(file, "utf8"));
         sendJSON(res, 200, data);
@@ -6283,7 +6286,7 @@ wss.on("connection", (ws, req) => {
 
         // Persist uploads to disk so they can be referenced later
         try {
-          const uploadsDir = "/tmp/ozzu-bridge/uploads";
+          const uploadsDir = "/home/gcp/ozzu/data/uploads";
           const fs = require("fs");
           fs.mkdirSync(uploadsDir, { recursive: true });
           const ts = Date.now();
@@ -6427,7 +6430,7 @@ wss.on("connection", (ws, req) => {
         log.bridge.info(`Glasses photo captured from ${info?.deviceId}`);
         // Save to disk
         try {
-          const uploadsDir = "/tmp/ozzu-bridge/uploads";
+          const uploadsDir = "/home/gcp/ozzu/data/uploads";
           fs.mkdirSync(uploadsDir, { recursive: true });
           const ts = Date.now();
           const savePath = `${uploadsDir}/${ts}-glasses-capture.jpg`;

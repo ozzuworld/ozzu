@@ -1369,25 +1369,10 @@
     "mtime": 1773151050670.2856,
     "indexed_at": 1779025504259
   },
-  "backend/bridge/routes/cipher.js": {
-    "intent": "Exports route handlers for Cipher's conversation history and session management — `/conversations/recent` returns recent conversation metadata (persona, topics, duration), and `/cipher/history` retrieves full transcripts with filters for date/content-types. Integrates with the bridge's postgres conversation store and proactive reporter to persist and surface Cipher's context across sessions.",
-    "mtime": 1776091230735.2478,
-    "indexed_at": 1779025504691
-  },
-  "backend/bridge/routes/dashboard.js": {
-    "intent": "Provides a real-time HTML dashboard (`GET /dashboard`) that displays system state including directives, running agents, database/Redis health, uptime, and priority-colored status indicators. Used for operational monitoring of the bridge backend service and agent execution pipeline.",
-    "mtime": 1773151050670.8755,
-    "indexed_at": 1779025505105
-  },
   "backend/bridge/routes/dev-dashboard.js": {
     "intent": "This route provides a split-screen dev dashboard (`/dev-dashboard`) that displays a device mirror (redroid/iOS) on the left and live git diffs on the right, streaming code changes via SSE when files in `frontend/app`, `frontend/components`, `frontend/lib`, and `tv/` change. It exists to let King Kazuma visually validate UI changes against the running device in real-time without switching windows.",
     "mtime": 1776275244166.77,
     "indexed_at": 1779025506542
-  },
-  "backend/bridge/routes/business.js": {
-    "intent": "This file provides AI-powered document verification for the Business/Ventures feature, using Google's Gemini API to analyze uploaded documents against task-specific requirements and return structured verification results (document type, matched requirements, confidence scores, issues). It exposes endpoints like `POST /business/task/:id/verify-document` that handle file attachments and metrics computation, feeding verification data back to the Business screen when entrepreneurs submit supporting documents for venture validation.",
-    "mtime": 1773151050670.2856,
-    "indexed_at": 1779025507184
   },
   "backend/bridge/routes/designer.js": {
     "intent": "Provides a `/designer` HTTP route that serves a browser-based drag-and-drop canvas where King Kazuma can grab real Ozzu UI components (ProjectCard, DirectiveListItem, TabBar, ServiceCard, etc.) and arrange them into custom layouts. Persists layouts to disk so Cipher can read the JSON and translate it into actual React Native code for deployment.",
@@ -1439,30 +1424,15 @@
     "mtime": 1773606630711.3281,
     "indexed_at": 1779025517568
   },
-  "backend/bridge/routes/mcp.js": {
-    "intent": "MCP server that exposes directive management (create, list, verify, merge-and-deploy) as native Claude Code tools, allowing Cipher to orchestrate code changes as tracked work items. Integrates with git worktrees, build verification, approval gates, and smart deployment to auto-detect iOS/Android build tier.",
-    "mtime": 1777163224327.3613,
-    "indexed_at": 1779025518564
-  },
   "backend/bridge/routes/ops.js": {
     "intent": "This file provides REST endpoints for the **Ops screen** to monitor service health and incident history: `GET /ops/status` returns real-time service states (via the watchdog module), and `GET /ops/incidents` retrieves recent incidents with optional historical queries from the database. It's the observability backbone that powers the Operations dashboard King Kazuma uses to track system health.",
     "mtime": 1775417105990.4397,
     "indexed_at": 1779025519647
   },
-  "backend/bridge/routes/knowledge-graph.js": {
-    "intent": "Provides REST API endpoints (`/kg/subjects`, `/kg/relationships`, `/kg/query`, etc.) for storing and querying knowledge graph entities, relationships, and findings from the intelligence pipeline. Backs the 6-stage OSINT platform (COLLECT→NORMALIZE→ENRICH→STORE→ANALYZE→ACT) that powers threat analysis and SOC research workflows in Ozzu.",
-    "mtime": 1776009015566.7988,
-    "indexed_at": 1779025520554
-  },
   "backend/bridge/routes/ozzu-source.js": {
     "intent": "Exposes `/ozzu.json` as an AltStore source manifest and `/download/ozzu.ipa` as the IPA download endpoint, letting King Kazuma's iPhone auto-update Ozzu via AltStore without PC sideloading each time. Reads version/bundleId from `frontend/app.json` and supports one-shot pairing-file delivery for SideStore initialization.",
     "mtime": 1778964494292.0977,
     "indexed_at": 1779025522451
-  },
-  "backend/bridge/routes/osint.js": {
-    "intent": "Provides REST endpoints (`POST /osint/profiles`, `GET /osint/profiles`) to create and list OSINT profiles (email, username, phone, domain, IP, image, cedula, NIT) that feed into the intelligence collection pipeline. Part of the Ozzu intelligence system (COLLECT stage of the 6-stage Palantir pipeline) that supports reconnaissance and profile scanning for the red-team consulting services.",
-    "mtime": 1773151050671.8755,
-    "indexed_at": 1779025522662
   },
   "backend/bridge/routes/positioning.js": {
     "intent": "Manages indoor positioning endpoints that receive real-time location updates from a Rock Pi hub (via `POST /positioning/update`) and broadcast current location + room state to the Ozzu app via WebSocket. Provides GET endpoints to query location history and geo-fence by room, feeding data to map and device-tracking screens on the mobile app.",
@@ -1473,11 +1443,6 @@
     "intent": "Defines REST endpoints that orchestrate Ozzu's 3D print pipeline: `/octoprint/print` triggers slicing (PrusaSlicer on bridge), uploads gcode to the tablet's OctoPrint, and starts printing with video recording. Bridges the mobile app to hardware via the OctoPrint API running at `10.9.0.7:5000`.",
     "mtime": 1778953268127.8743,
     "indexed_at": 1779025524558
-  },
-  "backend/bridge/routes/pipeline.js": {
-    "intent": "Orchestrates merge-and-deploy via `POST /api/post-merge-deploy` with auto-detection of build tier (HOT for JS-only with parallel OTA + CI, WARM for native) and debouncing to prevent duplicate runs. Also serves TV APK updates with caching and coordinates OTA delivery across Android and iOS devices.",
-    "mtime": 1776268453954.1155,
-    "indexed_at": 1779025526672
   },
   "backend/bridge/routes/schedules.js": {
     "intent": "This module provides REST endpoints (`/schedules`) to create, list, and manage cron-based automation rules for connected devices—each rule triggers a service call (like a light toggle) on a schedule. It computes next execution times based on cron expressions (day of week, hour, minute) and timezone, storing schedules in the database for the bridge's automation engine.",
@@ -1528,5 +1493,40 @@
     "intent": "Monitors health of backend services (postgres, redis, nginx, qdrant, face-recognition, osint-tools, browser, vast-gpu) on 30s intervals and tracks state transitions. Powers the Ops screen dashboard and feeds alerts to the recovery-engine for automatic container restarts and cipher-agent for autonomous infrastructure recovery decisions.",
     "mtime": 1777738371159.4204,
     "indexed_at": 1779025543255
+  },
+  "backend/bridge/routes/dashboard.js": {
+    "intent": "Provides a `GET /dashboard` endpoint that renders an HTML page aggregating bridge server health metrics (postgres, redis, uptime, restart count, latency stats) and lists active directives and running agents with real-time status indicators. Serves as the backend's operational status dashboard for monitoring Ozzu's core infrastructure and agent execution state.",
+    "mtime": 1773151050670.8755,
+    "indexed_at": 1779042683923
+  },
+  "backend/bridge/routes/osint.js": {
+    "intent": "Exposes REST API endpoints (`POST /osint/profiles`, `GET /osint/profiles`, etc.) for the SOC platform to create, list, and manage OSINT target profiles (email, username, phone, domain, IP, cedula, NIT, etc.) with configurable tags and masking rules. Integrates with `osintEngine` and `osintMonitor` to queue and execute open-source intelligence scans against registered targets for security assessments and red-team engagements.",
+    "mtime": 1773151050671.8755,
+    "indexed_at": 1779042685102
+  },
+  "backend/bridge/routes/business.js": {
+    "intent": "Provides REST endpoints for the Business screen to upload documents and verify them against task requirements using Gemini AI analysis. Stores attachments in `/tmp/ozzu-bridge/business-attachments`, tracks verification results, and computes task completion metrics based on matched requirements.",
+    "mtime": 1773151050670.2856,
+    "indexed_at": 1779042687114
+  },
+  "backend/bridge/routes/mcp.js": {
+    "intent": "Implements the MCP server that exposes Claude Code tools for directive lifecycle management (`create_directive`, `list_directives`, `merge-and-deploy`, `verify`), SOC engagement tracking (`create_engagement`, `list_findings`), build verification, and infrastructure monitoring. Allows Claude to programmatically manage the entire Ozzu dev pipeline—creating work tickets, merging branches, deploying to Android/iOS, and managing security assessments—without requiring manual CLI calls.",
+    "mtime": 1777163224327.3613,
+    "indexed_at": 1779042689401
+  },
+  "backend/bridge/routes/cipher.js": {
+    "intent": "Provides HTTP endpoints (`/conversations/recent`, `/cipher/history`, proactive summary triggers) that expose Cipher's conversation transcripts, persona state, and session metadata to the frontend and bridge services. Enables the Work tab and context-aware routing to query Cipher's decision history and current active state.",
+    "mtime": 1776091230735.2478,
+    "indexed_at": 1779042689918
+  },
+  "backend/bridge/routes/knowledge-graph.js": {
+    "intent": "This file provides REST endpoints (`/kg/subjects`, `/kg/relationships`, `/kg/tags`) for a knowledge graph database that stores interconnected entities (directives, ventures, concepts) and their relationships with type and status metadata. It enables Ozzu's backend to query and model domain knowledge as structured graphs rather than flat records.",
+    "mtime": 1776009015566.7988,
+    "indexed_at": 1779042691937
+  },
+  "backend/bridge/routes/pipeline.js": {
+    "intent": "Exports pipeline route handlers for the bridge server, primarily the `/api/post-merge-deploy` endpoint that triggers smartDeploy with safety checks (60s cooldown) to orchestrate automated deploys after code merges. Manages build status, OTA updates, system health checks, and multi-device deployment context (directives) across Android tablets, Redroid mirror, iOS CI builds, and TV targets.",
+    "mtime": 1776268453954.1155,
+    "indexed_at": 1779042695934
   }
 }

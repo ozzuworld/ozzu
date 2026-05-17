@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const https = require("https");
 
-const ATTACHMENTS_DIR = "/tmp/ozzu-bridge/business-attachments";
+const ATTACHMENTS_DIR = "/home/gcp/ozzu/data/business-attachments";
 
 // ── Gemini Document Verification ──
 

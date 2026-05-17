@@ -1504,7 +1504,7 @@ module.exports = function directiveRoutes(ctx) {
     // GET /uploads — List persisted uploads
     if (req.method === "GET" && pathname === "/uploads") {
       try {
-        const uploadsDir = "/tmp/ozzu-bridge/uploads";
+        const uploadsDir = "/home/gcp/ozzu/data/uploads";
         const files = require("fs").readdirSync(uploadsDir).filter(f => f.endsWith(".meta.json")).sort().reverse();
         const limit = parseInt(new URL(req.url, "http://localhost").searchParams.get("limit") || "50");
         const metas = files.slice(0, limit).map(f => {
