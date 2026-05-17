@@ -211,21 +211,39 @@ export default function IdentityScreen() {
 
       <GroupNav group="me" />
 
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerName}>{profile?.full_name ?? "…"}</Text>
-          <Text style={styles.headerSub}>🇨🇴 Colombian · CC {profile?.cedula ?? "…"}</Text>
-        </View>
-        <Pressable
-          onPress={() => setAuthenticated(false)}
-          style={({ pressed }) => [
-            styles.lockBtn,
-            pressed && { opacity: 0.7, transform: [{ scale: 0.95 }] },
-          ]}
+      {/* ── HERO identity card ── */}
+      <View style={styles.hero}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            backgroundColor: colors.gray[800],
+            borderRadius: 14,
+            borderLeftWidth: 3,
+            borderLeftColor: colors.brand.purple,
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.04)",
+            padding: 16,
+            gap: 14,
+          }}
         >
-          <Text style={styles.lockBtnTxt}>🔒</Text>
-        </Pressable>
+          <Text style={{ fontSize: 38 }}>🇨🇴</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerName} numberOfLines={1}>{profile?.full_name ?? "…"}</Text>
+            <Text style={styles.headerSub}>
+              Colombian · CC <Text style={{ fontFamily: "monospace" }}>{profile?.cedula ?? "…"}</Text>
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => setAuthenticated(false)}
+            style={({ pressed }) => [
+              styles.lockBtn,
+              pressed && { opacity: 0.7, transform: [{ scale: 0.95 }] },
+            ]}
+          >
+            <Text style={styles.lockBtnTxt}>🔒</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* ── Expiry alerts ── */}
@@ -265,7 +283,7 @@ export default function IdentityScreen() {
           {/* ── OVERVIEW ── */}
           {section === "overview" && profile && (
             <>
-              <InfoCard title="Personal">
+              <InfoCard title="Personal" accent={colors.brand.purple}>
                 <InfoRow label="Full Name" value={profile.full_name} />
                 <InfoRow label="Date of Birth" value={formatLongDate(profile.date_of_birth)} />
                 <InfoRow label="Place of Birth" value={profile.place_of_birth} />
@@ -273,14 +291,18 @@ export default function IdentityScreen() {
                 <InfoRow label="Cédula" value={`CC ${profile.cedula}`} mono />
               </InfoCard>
 
-              <InfoCard title="Passport">
+              <InfoCard title="Passport" accent={colors.brand.blue}>
                 <InfoRow label="Number" value={profile.passport_number} mono />
                 <InfoRow label="Issued" value={`${formatLongDate(profile.passport_issued)} · ${profile.passport_issuing_authority}`} />
                 <InfoRow label="Expires" value={formatLongDate(profile.passport_expires)} urgent={daysUntil(profile.passport_expires) < 180} />
               </InfoCard>
 
               {visas.map((v, i) => (
-                <InfoCard key={i} title={v.status === "cancelled" ? `${v.type} (Cancelled)` : v.type}>
+                <InfoCard
+                  key={i}
+                  title={v.status === "cancelled" ? `${v.type} (Cancelled)` : v.type}
+                  accent={v.status === "cancelled" ? colors.gray[500] : (v.status === "active" && daysUntil(v.expires) < 180 ? colors.brand.amber : colors.success)}
+                >
                   <InfoRow label="Country" value={v.country} />
                   <InfoRow label="Control No." value={v.number} mono />
                   <InfoRow label="Issued" value={`${formatLongDate(v.issued)} · ${v.issued_at}`} />
@@ -289,7 +311,7 @@ export default function IdentityScreen() {
                 </InfoCard>
               ))}
 
-              <InfoCard title={`Countries Visited (${countriesVisited.length})`} >
+              <InfoCard title={`Countries Visited (${countriesVisited.length})`} accent={colors.success}>
                 <View style={styles.flagGrid}>
                   {countriesVisited.map((c) => (
                     <View key={c} style={styles.flagItem}>
@@ -358,10 +380,11 @@ export default function IdentityScreen() {
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
-function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
+function InfoCard({ title, children, accent }: { title: string; children: React.ReactNode; accent?: string }) {
+  const accentColor = accent || colors.brand.purple;
   return (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>{title}</Text>
+    <View style={[styles.card, { borderLeftWidth: 3, borderLeftColor: accentColor }]}>
+      <Text style={[styles.cardTitle, { color: accentColor }]}>{title}</Text>
       {children}
     </View>
   );
@@ -385,9 +408,9 @@ const styles = StyleSheet.create({
   lockSub: { fontSize: 14, color: "#64748b", textAlign: "center", marginBottom: 32 },
   unlockBtn: { backgroundColor: "#7c3aed", paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 },
   unlockTxt: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 60, paddingBottom: 12 },
-  headerName: { fontSize: 20, fontWeight: "700", color: "#f1f5f9" },
-  headerSub: { fontSize: 13, color: colors.gray[250], marginTop: 2 },
+  hero: { paddingHorizontal: 16, paddingTop: 56, paddingBottom: 8 },
+  headerName: { fontSize: 18, fontWeight: "700", color: colors.gray[50] },
+  headerSub: { fontSize: 12, color: colors.gray[300], marginTop: 3 },
   lockBtn: { padding: 8 },
   lockBtnTxt: { fontSize: 20 },
   expiryRow: { paddingHorizontal: 16, marginBottom: 4 },
