@@ -266,6 +266,8 @@ export default function HomeScreen() {
                 borderRadius: radius.xl,
                 borderWidth: 1,
                 borderColor: CARD_BORDER,
+                borderLeftWidth: 3,
+                borderLeftColor: colors.accent,
                 padding: 16,
                 justifyContent: "space-between",
                 minHeight: 126,
@@ -310,6 +312,8 @@ export default function HomeScreen() {
                 borderRadius: radius.xl,
                 borderWidth: 1,
                 borderColor: CARD_BORDER,
+                borderLeftWidth: 3,
+                borderLeftColor: colors.brand.purple,
                 padding: 16,
                 justifyContent: "space-between",
                 minHeight: 126,
@@ -358,12 +362,12 @@ export default function HomeScreen() {
         <View style={{ paddingHorizontal: SIDE, width: "100%" }}>
           {[
             [
-              { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", badge: stats.ventureCount > 0 ? `${stats.ventureCount}` : "" },
-              { id: "soc", icon: "🔐", label: "SOC", route: "/soc", badge: "" },
+              { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", accent: colors.accent, badge: stats.ventureCount > 0 ? `${stats.ventureCount}` : "" },
+              { id: "soc", icon: "🔐", label: "SOC", route: "/soc", accent: colors.error, badge: "" },
             ],
             [
-              { id: "files", icon: "📦", label: "Files", route: "/files", badge: "" },
-              { id: "music", icon: "🎵", label: "Music", route: "/music", badge: "" },
+              { id: "files", icon: "📦", label: "Files", route: "/files", accent: colors.brand.amber, badge: "" },
+              { id: "music", icon: "🎵", label: "Music", route: "/music", accent: colors.brand.spotify, badge: "" },
             ],
           ].map((row, ri) => (
             <View key={ri} style={{ flexDirection: "row", gap: gridGap, marginBottom: gridGap }}>
@@ -377,6 +381,8 @@ export default function HomeScreen() {
                     borderRadius: radius.xl,
                     borderWidth: 1,
                     borderColor: TILE_BORDER,
+                    borderLeftWidth: 3,
+                    borderLeftColor: tile.accent,
                     paddingHorizontal: 14,
                     paddingVertical: 10,
                     justifyContent: "space-between",
@@ -388,12 +394,12 @@ export default function HomeScreen() {
                     <Text style={{ fontSize: 22 }}>{tile.icon}</Text>
                     {tile.badge !== "" && (
                       <View style={{
-                        backgroundColor: withAlpha(colors.accent, 0.15),
+                        backgroundColor: withAlpha(tile.accent, 0.15),
                         paddingHorizontal: 7,
                         paddingVertical: 2,
                         borderRadius: radius.full,
                       }}>
-                        <Text style={{ color: colors.accentLight, fontSize: fs.xs, fontWeight: fw.medium }}>
+                        <Text style={{ color: tile.accent, fontSize: fs.xs, fontWeight: fw.medium }}>
                           {tile.badge}
                         </Text>
                       </View>
