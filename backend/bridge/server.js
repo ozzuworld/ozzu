@@ -123,6 +123,7 @@ const businessInvoiceRoutes = require("./routes/business-invoices");
 const businessInvestmentRoutes = require("./routes/business-investments");
 const backupRoutes = require("./routes/backup");
 const ozzuSourceRoutes = require("./routes/ozzu-source");
+const designerRoutes = require("./routes/designer");
 const fileRoutes = require("./routes/files");
 const scheduleRoutes = require("./routes/schedules");
 const profileRoutes = require("./routes/profile");
@@ -1588,6 +1589,7 @@ function getRouteHandlers() {
       knowledgeGraph: knowledgeGraphRoutes(routeCtx),
       soc: socRoutes(routeCtx),
       ozzuSource: ozzuSourceRoutes(routeCtx),
+      designer: designerRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1717,6 +1719,7 @@ async function handleRequest(req, res) {
   if (await r.knowledgeGraph(req, res, pathname, url)) return;
   if (await r.soc(req, res, pathname, url)) return;
   if (await r.ozzuSource(req, res, pathname, url)) return;
+  if (await r.designer(req, res, pathname, url)) return;
 
   // ── AgroVisión training state poller (SSH to GPU, parse training log) ──
   async function refreshAgrovisionState(vastInstance) {
