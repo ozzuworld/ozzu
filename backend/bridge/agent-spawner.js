@@ -1550,13 +1550,14 @@ function smartDeploy(directive) {
   // ────────────────────────────────────────────────────────────────
   // Deploy Pipeline — Three Tiers
   //
-  // HOT  (~25s) — JS-only changes → Android OTA only. No iOS build.
-  //               iOS gets updated when King Kazuma runs /stage-ios.
+  // HOT  (~25s OTA + ~10m iOS CI in parallel) — JS-only changes.
+  //               iPhone is King Kazuma's PRIMARY device — iOS is built every deploy.
+  //               No manual /stage-ios required.
   //
   // WARM (~10m) — Native changes → Android CI + iOS CI in parallel.
   //               Both platforms need full rebuild.
   //
-  // STAGING     — Explicit /stage-ios command → iOS CI build only.
+  // STAGING     — Recovery only: rebuild iOS if HOT CI failed/cancelled.
   //               Caches IPA to artifacts/ozzu-latest.ipa for AltStore.
   //
   // Each product (phone, TV, firmware) has independent detection.
@@ -1608,9 +1609,10 @@ function smartDeploy(directive) {
     // iOS CI — only on native changes (WARM), never on JS-only (HOT)
     spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
   } else {
-    // HOT tier — JS-only, Android OTA only (~25s). NO iOS build.
-    log("HOT deploy: Android OTA only (iOS skipped — use /stage-ios when ready)");
-    notify("Quick update going out to tablets now (~25s).");
+    // HOT tier — JS-only. Android OTA (~25s) + iOS CI build (~10 min) in parallel.
+    // iPhone is King Kazuma's PRIMARY device — iOS is built every deploy. No manual /stage-ios.
+    log("HOT deploy: Android OTA + iOS CI build (parallel — iPhone is primary)");
+    notify("Quick update going out — tablets ~25s, iPhone IPA ~10 min.");
 
     exec(`cd ${WORKDIR} && ./scripts/ota-deploy.sh --restart`, {
       cwd: WORKDIR,
@@ -1621,9 +1623,12 @@ function smartDeploy(directive) {
         notify("Tablet update failed — might need a full rebuild.");
       } else {
         log("HOT deploy complete — tablets updated");
-        notify("Tablets updated. Run /stage-ios when ready for iPhone.");
+        notify("Tablets updated. iPhone IPA still building — will land at artifacts/ozzu-latest.ipa.");
       }
     });
+
+    // iOS CI in parallel — iPhone is the primary device, always build
+    spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
   }
 
   // ── TV APP ──
