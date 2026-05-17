@@ -39,10 +39,12 @@ function formatNumber(n: number): string {
 function StatCard({
   value,
   label,
+  icon,
   color = CYAN,
 }: {
   value: string;
   label: string;
+  icon?: string;
   color?: string;
 }) {
   return (
@@ -52,36 +54,122 @@ function StatCard({
         backgroundColor: CARD_BG,
         borderWidth: 1,
         borderColor: BORDER,
+        borderLeftWidth: 3,
+        borderLeftColor: color,
         borderRadius: 8,
-        paddingVertical: 12,
-        paddingHorizontal: 8,
-        alignItems: "center",
+        paddingVertical: 10,
+        paddingHorizontal: 10,
         minWidth: 80,
       }}
     >
+      {/* Header row: icon + label */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        {icon ? <Text style={{ fontSize: 11 }}>{icon}</Text> : null}
+        <Text
+          style={{
+            color: colors.gray[400],
+            fontSize: 9,
+            fontFamily: "monospace",
+            fontWeight: "bold",
+            letterSpacing: 1.2,
+            flex: 1,
+          }}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+      </View>
+      {/* Focal value */}
       <Text
         style={{
           color,
-          fontSize: 24,
+          fontSize: 22,
           fontFamily: "monospace",
           fontWeight: "bold",
         }}
+        numberOfLines={1}
+        adjustsFontSizeToFit
       >
         {value}
       </Text>
+    </View>
+  );
+}
+
+function HeroUptime({
+  uptimeSeconds,
+  httpRequests,
+  memoryMB,
+}: {
+  uptimeSeconds: number;
+  httpRequests: number;
+  memoryMB: number;
+}) {
+  const healthy = uptimeSeconds > 60 && memoryMB < 400;
+  const accentColor = healthy ? colors.success : colors.warning;
+  return (
+    <View
+      style={{
+        backgroundColor: CARD_BG,
+        borderRadius: 14,
+        borderLeftWidth: 3,
+        borderLeftColor: accentColor,
+        borderWidth: 1,
+        borderColor: BORDER,
+        padding: 18,
+        marginBottom: 4,
+      }}
+    >
+      {/* Header */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: accentColor }} />
+        <Text style={{ color: colors.gray[400], fontSize: 10, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 2 }}>
+          BRIDGE
+        </Text>
+        <Text style={{ color: accentColor, fontSize: 10, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1, marginLeft: "auto" }}>
+          {healthy ? "HEALTHY" : "WARNING"}
+        </Text>
+      </View>
+      {/* Focal uptime */}
       <Text
         style={{
-          color: colors.gray[300],
-          fontSize: 10,
+          color: colors.gray[50],
+          fontSize: 28,
           fontFamily: "monospace",
           fontWeight: "bold",
-          letterSpacing: 1,
-          marginTop: 4,
-          textAlign: "center",
+          marginTop: 6,
         }}
+        numberOfLines={1}
+        adjustsFontSizeToFit
       >
-        {label}
+        {formatUptime(uptimeSeconds)}
       </Text>
+      <Text style={{ color: colors.gray[500], fontSize: 11, fontFamily: "monospace", marginTop: 2 }}>
+        uptime
+      </Text>
+      {/* Metadata row */}
+      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.04)" }}>
+        <View>
+          <Text style={{ color: colors.gray[500], fontSize: 9, fontFamily: "monospace", letterSpacing: 1 }}>HTTP</Text>
+          <Text style={{ color: colors.gray[200], fontSize: 13, fontFamily: "monospace", fontWeight: "bold", marginTop: 2 }}>
+            {formatNumber(httpRequests)}
+          </Text>
+        </View>
+        <View>
+          <Text style={{ color: colors.gray[500], fontSize: 9, fontFamily: "monospace", letterSpacing: 1 }}>MEM</Text>
+          <Text
+            style={{
+              color: memoryMB > 300 ? colors.error : colors.gray[200],
+              fontSize: 13,
+              fontFamily: "monospace",
+              fontWeight: "bold",
+              marginTop: 2,
+            }}
+          >
+            {memoryMB} MB
+          </Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -405,36 +493,49 @@ export default function MetricsScreen() {
 
         {data && (
           <>
+            {/* Hero — bridge status focal point */}
+            <HeroUptime
+              uptimeSeconds={live?.uptimeSeconds || 0}
+              httpRequests={today?.bridge?.httpRequests || 0}
+              memoryMB={live?.memoryMB?.heap || 0}
+            />
+
             {/* Today's Usage */}
             <SectionHeader title="TODAY'S USAGE" />
             <View style={{ flexDirection: "row", gap: 8 }}>
               <StatCard
+                icon="💎"
                 value={String(today?.gemini?.sessions || 0)}
                 label="GEMINI SESS"
               />
               <StatCard
+                icon="🤖"
                 value={String(today?.cipher?.agentSpawns || 0)}
-                label="CIPHER AGENTS"
+                label="CIPHER"
               />
               <StatCard
+                icon="🎵"
                 value={String(today?.spotify?.apiCalls || 0)}
-                label="SPOTIFY CALLS"
+                label="SPOTIFY"
               />
             </View>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
               <StatCard
+                icon="🔊"
                 value={formatNumber(today?.gemini?.audioChunksSent || 0)}
-                label="AUDIO SENT"
+                label="AUDIO"
                 color="#A78BFA"
               />
               <StatCard
+                icon="🔧"
                 value={String(today?.gemini?.toolCalls || 0)}
-                label="TOOL CALLS"
+                label="TOOLS"
                 color="#FBBF24"
               />
               <StatCard
+                icon="🌐"
                 value={formatNumber(today?.bridge?.httpRequests || 0)}
-                label="HTTP REQS"
+                label="HTTP"
                 color="#6EE7B7"
               />
             </View>
@@ -1030,28 +1131,12 @@ export default function MetricsScreen() {
                       return (
                         <>
                           <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
-                            <StatCard
-                              value={formatNumber(totals.input)}
-                              label="INPUT"
-                              color="#A78BFA"
-                            />
-                            <StatCard
-                              value={formatNumber(totals.output)}
-                              label="OUTPUT"
-                              color="#FBBF24"
-                            />
+                            <StatCard icon="📥" value={formatNumber(totals.input)} label="INPUT" color="#A78BFA" />
+                            <StatCard icon="📤" value={formatNumber(totals.output)} label="OUTPUT" color="#FBBF24" />
                           </View>
                           <View style={{ flexDirection: "row", gap: 8 }}>
-                            <StatCard
-                              value={formatNumber(totals.cacheRead)}
-                              label="CACHE READ"
-                              color={colors.success}
-                            />
-                            <StatCard
-                              value={formatNumber(totals.cacheCreation)}
-                              label="CACHE CREATE"
-                              color="#6EE7B7"
-                            />
+                            <StatCard icon="📖" value={formatNumber(totals.cacheRead)} label="CACHE READ" color={colors.success} />
+                            <StatCard icon="💾" value={formatNumber(totals.cacheCreation)} label="CACHE NEW" color="#6EE7B7" />
                           </View>
                         </>
                       );
@@ -1089,16 +1174,8 @@ export default function MetricsScreen() {
                       const weekCost = anthropicData.costs.reduce((sum, c) => sum + c.amountCents, 0);
                       return (
                         <View style={{ flexDirection: "row", gap: 8 }}>
-                          <StatCard
-                            value={`$${(todayCost / 100).toFixed(2)}`}
-                            label="TODAY"
-                            color="#FBBF24"
-                          />
-                          <StatCard
-                            value={`$${(weekCost / 100).toFixed(2)}`}
-                            label="7-DAY TOTAL"
-                            color={CYAN}
-                          />
+                          <StatCard icon="💵" value={`$${(todayCost / 100).toFixed(2)}`} label="TODAY" color="#FBBF24" />
+                          <StatCard icon="📊" value={`$${(weekCost / 100).toFixed(2)}`} label="7-DAY" color={CYAN} />
                         </View>
                       );
                     })()}
