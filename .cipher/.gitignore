@@ -1,0 +1,15 @@
+# Node modules for Cipher's analysis tooling — installed via npm install in tools/
+tools/node_modules/
+
+# Layer 1 outputs (regenerated on every commit by post-commit hook)
+layer1/.last-run
+layer1/repomap.txt
+layer1/*.log
+
+# Layer 2 outputs (persisted in postgres/qdrant; local cache is regenerable)
+layer2/cache/
+layer2/.last-run
+
+# Layer 3 outputs (regenerated on every commit by post-commit hook)
+layer3/.last-run
+layer3/*.log

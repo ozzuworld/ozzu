@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "frontend/app/_layout.tsx",
+        "frontend/app/(tabs)/**/*.tsx",
+        "frontend/app/*.tsx",
+        "frontend/app/index.tsx"
+      ],
+      "project": [
+        "frontend/app/**/*.{ts,tsx}",
+        "frontend/components/**/*.{ts,tsx}",
+        "frontend/lib/**/*.{ts,tsx}",
+        "frontend/modules/**/*.{ts,tsx}"
+      ],
+      "ignore": [
+        "frontend/node_modules/**",
+        "frontend/.expo/**",
+        "frontend/android/**",
+        "frontend/ios/**"
+      ]
+    }
+  }
+}

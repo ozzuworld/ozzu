@@ -1,0 +1,1532 @@
+{
+  "frontend/app/(tabs)/business.tsx": {
+    "intent": "The Business screen manages Ozzu's ventures (ProjectCards) with a tabbed interface showing Dashboard, Projects, Pipeline, and Contacts views. It fetches project data via the `useBusiness()` hook and provides modals for creating/editing ventures and viewing project details.",
+    "mtime": 1779023346823.2124,
+    "indexed_at": 1779025184123
+  },
+  "frontend/app/(tabs)/cipher.tsx": {
+    "intent": "The Cipher tab provides real-time voice/text conversation with the autonomous Cipher agent, streaming audio via StreamingPlayer/MicRecorder with transcript bubbles, and managing approval workflows fetched from the bridge endpoint. Includes PIN/biometric authentication via Keypad, camera overlay for FaceID or screen sharing, and content panels for displaying Cipher responses and pending user actions.",
+    "mtime": 1779023346823.2124,
+    "indexed_at": 1779025184636
+  },
+  "frontend/app/(tabs)/_layout.tsx": {
+    "intent": "Defines the root tab navigation structure for Ozzu's 10 main screens (home, directives, cipher, business, files, music, ops, identity, finance, soc) using Expo Router, with the tab bar itself hidden but routes accessible via screen-switching logic. This is the app's primary navigation backbone—each Tabs.Screen registers a navigable section that corresponds to a directory under `frontend/app/(tabs)/`.",
+    "mtime": 1779023346823.2124,
+    "indexed_at": 1779025184712
+  },
+  "frontend/app/(tabs)/directives.tsx": {
+    "intent": "Renders the Directives tab screen with a filterable/grouped list of directive cards (`DirectiveListItem`), pull-to-refresh, and action modals (plan review, status change). Calls bridge API endpoints (`cancelDirective`, `retryDirective`, `unblockDirective`, etc.) to manage directive lifecycle and display real-time status updates.",
+    "mtime": 1779023346823.2124,
+    "indexed_at": 1779025185307
+  },
+  "frontend/app/(tabs)/finance.tsx": {
+    "intent": "Displays financial summary data (monthly income/expenses and transaction counts by type) fetched from the bridge's `/api/finance/summary` endpoint, with a refreshable transaction table and balance overview. Serves as the Finance tab in the main Ozzu app navigation.",
+    "mtime": 1779023346824.2124,
+    "indexed_at": 1779025185972
+  },
+  "frontend/app/(tabs)/files.tsx": {
+    "intent": "Personal cloud file storage screen (iCloud-like) providing folder navigation, multi-file upload/download, preview, and storage gauge. Integrates with bridge API endpoints (`fetchFiles`, `uploadFile`, `deleteFile`) and supports image/document picking, file sharing, and folder creation via modals.",
+    "mtime": 1779023346824.2124,
+    "indexed_at": 1779025185986
+  },
+  "frontend/app/(tabs)/identity.tsx": {
+    "intent": "Manages personal identity data (name, passport, cedula, visa information) and document storage for the Ozzu app with biometric authentication via LocalAuthentication. Provides a tab-based screen that fetches identity profiles from the bridge API and displays documents in a modal gallery.",
+    "mtime": 1779023346824.2124,
+    "indexed_at": 1779025186776
+  },
+  "frontend/app/(tabs)/home.tsx": {
+    "intent": "Home screen dashboard that displays live stats (directive and project counts), glassmorphic shortcut tiles for quick navigation, and the Ozzu logo with pull-to-refresh. Serves as the primary entry point providing access to Directives, Business ventures, Ops monitoring, and other core features via tab navigation.",
+    "mtime": 1779023346824.2124,
+    "indexed_at": 1779025188615
+  },
+  "frontend/app/(tabs)/music.tsx": {
+    "intent": "This tab screen renders a Spotify-like music player interface with library browsing, playlist management, and a now-playing mini-player, pulling media metadata from Home Assistant via the bridge API. It's one of Ozzu's core UI tabs for managing and controlling playback across the smart home ecosystem.",
+    "mtime": 1775426362050.7478,
+    "indexed_at": 1779025191680
+  },
+  "frontend/app/_layout.tsx": {
+    "intent": "Root layout that wraps all Ozzu app screens with context providers (HAProvider for home automation, GlassesProvider for wearables) and initializes platform-level services: crash reporting to `/api/crash-reports`, push notifications, BLE beacon, and immersive mode callbacks. Provides the Expo Router Stack navigator that all child routes (Directives, Business, Ops, etc.) inherit from.",
+    "mtime": 1776139559069.733,
+    "indexed_at": 1779025194315
+  },
+  "frontend/app/(tabs)/ops.tsx": {
+    "intent": "Ops tab displays real-time health monitoring for services (GPU status, incidents), network connectivity, and infrastructure devices (GCP, router, positioning systems, tablets) through a tabbed interface. It surfaces operational bottlenecks and failures across the Ozzu fleet at a glance.",
+    "mtime": 1779023346825.2124,
+    "indexed_at": 1779025194505
+  },
+  "frontend/app/(tabs)/soc.tsx": {
+    "intent": "Renders the SOC tab displaying security testing engagements fetched from the bridge API (`/soc/engagements`), with status, findings counts, and navigation to detail screens. Enables King Kazuma to manage the penetration testing workflow (create engagements, track findings, coordinate execution via the mobile app SOC tab) as part of the human-in-loop security assessment process.",
+    "mtime": 1779023346825.2124,
+    "indexed_at": 1779025194801
+  },
+  "frontend/app/backup.tsx": {
+    "intent": "Provides a backup management screen (`/backup` route) where users can view existing backups from the bridge, create new ones via `triggerBackup()`, delete old backups, and download/share them via `getBackupDownloadUrl()`. Integrates with the bridge API endpoints (`fetchBackups`, `deleteBackup`) and uses `GroupNav` for tab navigation alongside other screens.",
+    "mtime": 1779023346825.2124,
+    "indexed_at": 1779025195150
+  },
+  "frontend/app/directive/[id].tsx": {
+    "intent": "Displays the detail view for a single directive, fetching its status, history, and work updates from the bridge API while exposing actions like cancel, retry, unblock, and comment. Implements refresh-on-focus and auto-polling to keep directive state synchronized with the backend.",
+    "mtime": 1776200131327.6272,
+    "indexed_at": 1779025195607
+  },
+  "frontend/app/glasses.tsx": {
+    "intent": "This screen provides a lightweight connection/status UI for smart glasses, displaying connection state (CONNECTED/CONNECTING/DISCONNECTED), live FPS when streaming, and buttons to connect/disconnect or capture photos. It delegates all processing to the GlassesProvider context, making it primarily a control panel for real-time glasses video input in the Ozzu app.",
+    "mtime": 1779023346825.2124,
+    "indexed_at": 1779025196343
+  },
+  "frontend/app/index.tsx": {
+    "intent": "Acts as the root app entry point that redirects users from \"/\" to the home tab screen at \"/home\", establishing the default landing destination. This ensures the navigation stack always starts at the home screen when the app launches.",
+    "mtime": 1776275244169.7703,
+    "indexed_at": 1779025199013
+  },
+  "frontend/app/metrics.tsx": {
+    "intent": "Metrics screen that fetches and displays system usage metrics and Anthropic API quotas from the bridge (`fetchUsageMetrics`, `fetchAnthropicUsage`), rendering them as styled cards with status badges. Provides King Kazuma real-time visibility into service uptime, token consumption, and API costs via pull-to-refresh dashboard.",
+    "mtime": 1779023346825.2124,
+    "indexed_at": 1779025202498
+  },
+  "frontend/app/upload.tsx": {
+    "intent": "A file upload screen supporting images, documents, audio, video, 3D models, and text input up to 50MB, with preview and bridge-based upload integration. Provides the primary interface for users to submit various content types to the Ozzu backend, including 3D scans and security-relevant documents for the SOC workflow.",
+    "mtime": 1776091230737.4707,
+    "indexed_at": 1779025203175
+  },
+  "frontend/components/GlobalApprovalGate.tsx": {
+    "intent": "Polls the bridge API every 3 seconds for pending `message_send` approvals and displays a `MessageApprovalModal` to capture user confirmation. Ensures directive-triggered messages require explicit approval before dispatch, preventing automated message sends without user intent verification.",
+    "mtime": 1776139559070.733,
+    "indexed_at": 1779025204834
+  },
+  "frontend/app/soc/[id].tsx": {
+    "intent": "Shows a specific SOC engagement's metadata (client, scope, ROE, start/end dates) and allows PA Engineers to queue security testing scripts organized by phase, execute them on dev-01 (Kali), and view real-time command output and execution logs. This is the mobile UI for step 2 of the Cipher → PA Engineer → Cipher pentest workflow (CLAUDE.md Rule 3).",
+    "mtime": 1776435526268.009,
+    "indexed_at": 1779025206048
+  },
+  "frontend/components/GroupNav.tsx": {
+    "intent": "Provides grouped tab navigation for the main Ozzu app, organizing 11 screens across four categories: Cipher (directives, voice, training, metrics), Work (ventures, SOC), Me (identity, finance, files, backups), and Ops (infra, glasses). Handles screen routing and highlights the active route.",
+    "mtime": 1779023346826.2126,
+    "indexed_at": 1779025207820
+  },
+  "frontend/components/CameraOverlay.tsx": {
+    "intent": "Displays a fullscreen video-stream overlay with fade-in/glow animations and a close button, supporting live camera feeds from networked devices like the KTC TV. Integrates with Ozzu's design-token color system and supports both mobile and TV platforms via `TVPressable` and `expo-video`.",
+    "mtime": 1773151050683.8765,
+    "indexed_at": 1779025207826
+  },
+  "frontend/components/ContentPanel.tsx": {
+    "intent": "ContentPanel is a reusable modal overlay component that slides in with shimmer and particle-burst animations to display rich content (title + markdown body) with visual rarity-color styling. It's used throughout Ozzu's game-like interfaces (rooms, loot, inventory) to present detailed information with animated visual polish.",
+    "mtime": 1773151050684.3347,
+    "indexed_at": 1779025209932
+  },
+  "frontend/components/Keypad.tsx": {
+    "intent": "A modal numeric keypad component (0-9, backspace, submit) for PIN entry with up to 8 character limit, used across Ozzu screens that require secure numeric authentication or input. It manages internal state and fires `onSubmit` callbacks when the user completes their entry, supporting security-gated operations in the mobile app.",
+    "mtime": 1773151050684.3347,
+    "indexed_at": 1779025210001
+  },
+  "frontend/components/SciFiOrb.tsx": {
+    "intent": "SciFiOrb renders a sci-fi-styled animated orb with three concentric cyan rings that pulse or gently animate based on voice input state: idle (dim), ambient (gentle pulse when mic is open), or active (fast pulse during speech processing). It provides real-time visual feedback for voice-activated features in the mobile app, showing users whether the system is listening, detecting ambient sound, or actively transcribing speech.",
+    "mtime": 1773151050684.3347,
+    "indexed_at": 1779025210729
+  },
+  "frontend/components/StatusBadge.tsx": {
+    "intent": "Displays the Home Assistant connection status (green/yellow/gray/red dot) and synced time in HH:MM format, typically in an app header or navigation bar. Updates time at minute boundaries and watches the HA context hook to reflect connect/disconnect/error states in real-time.",
+    "mtime": 1773151050684.3347,
+    "indexed_at": 1779025211965
+  },
+  "frontend/app/training.tsx": {
+    "intent": "Face training progress screen with high-performance animated visualizations (Skia Canvas for graphics, React Native Reanimated for transitions including blur and gradient effects). Displays training metrics in card and grid layouts with pull-to-refresh capability for real-time data updates on face recognition model training.",
+    "mtime": 1779023346826.2126,
+    "indexed_at": 1779025212892
+  },
+  "frontend/components/HamburgerMenu.tsx": {
+    "intent": "Provides an animated side-panel menu for TV and app navigation, featuring a toggleable hamburger button that scales and fades in a modal overlay with menu items (currently MUSIC route) that trigger navigation or custom actions. Exists as a reusable UI component for the TV app and mobile frontend to expose secondary navigation without cluttering the main screen.",
+    "mtime": 1779023346826.2126,
+    "indexed_at": 1779025213459
+  },
+  "frontend/components/StreamingText.tsx": {
+    "intent": "Renders real-time streaming text output with a blinking cursor indicator, auto-scrolling to show the latest content. Used throughout Ozzu for displaying live LLM responses, SOC command execution logs, and other streaming data feeds.",
+    "mtime": 1773151050684.3347,
+    "indexed_at": 1779025215123
+  },
+  "frontend/components/TVPressable.tsx": {
+    "intent": "Wraps React Native Pressable to add dynamic rarity-based glow effects (common/rare/epic/legendary) for the TV UI. Provides visual focus feedback for interactive elements with platform-specific rendering—shadow on native, boxShadow on web.",
+    "mtime": 1773151050684.3347,
+    "indexed_at": 1779025215897
+  },
+  "frontend/components/business/AddContactModal.tsx": {
+    "intent": "Modal form for adding business contacts (buyers, suppliers, brokers, etc.) to the Business screen; captures name, company, contact type, email, phone, location, and notes, then posts to the bridge `createBusinessContact` endpoint. Resets and closes on success.",
+    "mtime": 1773151050684.8765,
+    "indexed_at": 1779025216713
+  },
+  "frontend/components/TranscriptBubble.tsx": {
+    "intent": "Displays real-time voice command transcripts and AI responses in the Ozzu mobile app, with fade-in animation when content appears and auto-fade after 8 seconds of inactivity. Shows a cursor indicator while the response streams, and auto-scrolls to keep text visible—likely used in the SOC tab or voice-driven interaction screens.",
+    "mtime": 1773151050684.3347,
+    "indexed_at": 1779025216904
+  },
+  "frontend/components/business/AddInvestmentModal.tsx": {
+    "intent": "Modal form for creating business investments with fields for amount, category (equipment, infrastructure, inventory, etc.), currency, status (planned/committed/paid/recovered), and ROI notes—calls `createBusinessInvestment` endpoint. Appears in the Business venture screen to track capital allocation and returns.",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025218448
+  },
+  "frontend/components/business/AddInvoiceModal.tsx": {
+    "intent": "A modal dialog for creating business invoices, with form fields for amount, currency, contact, invoice number, and due date. It calls the `createBusinessInvoice` bridge endpoint and accepts prefill data from shipments (shipmentId, amount, currency, contact).",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025219490
+  },
+  "frontend/components/business/AddProjectModal.tsx": {
+    "intent": "Modal dialog for creating new business projects with customizable name, description, emoji, and color—used in the Business screen to let users add ventures to their portfolio. Calls the `createBusinessProject` bridge endpoint and refreshes the parent list on success.",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025220135
+  },
+  "frontend/components/business/AddExpenseModal.tsx": {
+    "intent": "Modal for creating expense records within the Business venture management screen. Allows task-linked cost tracking with category selection (Materials, Labor, Services, etc.), payment status management (PENDING/PAID/PARTIAL/OVERDUE), receipt image attachment with OCR extraction, and cost field management via the bridge API.",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025221173
+  },
+  "frontend/components/business/AddTaskModal.tsx": {
+    "intent": "Modal dialog for creating business tasks with title, description, priority level, project phases, and cost tracking (category + estimated amount). Integrates with the Business venture feature by calling `createBusinessTask` API endpoint to persist task data.",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025222028
+  },
+  "frontend/components/business/AddShipmentModal.tsx": {
+    "intent": "Modal form for creating coffee shipments in the Business venture—collects order details (coffee type, quantity, pricing, buyer, ports, dates) and submits via the bridge API. Enables supply chain management and tracking for coffee import/export operations.",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025223053
+  },
+  "frontend/components/business/ContactDetailSheet.tsx": {
+    "intent": "Modal sheet UI for viewing and editing business contacts (buyers, suppliers, logistics partners) in the Business tab with fields for name, company, type, email, phone, and location. Handles CRUD operations via bridge API endpoints `fetchBusinessContacts`, `updateBusinessContact`, and `deleteBusinessContact`.",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025225712
+  },
+  "frontend/components/business/ContactsView.tsx": {
+    "intent": "ContactsView displays a categorized, filterable contact list for supply chain partners (buyers, suppliers, logistics, brokers) with drill-down detail sheets and add-contact modals. It serves the Business tab's partner management workflow, fetching contact data from the bridge and rendering metadata like company, email, phone, and country flags.",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025226218
+  },
+  "frontend/components/business/CostField.tsx": {
+    "intent": "`CostField` is a currency input component for Colombian Peso amounts with automatic formatting, thousands separators, and compact notation (M/K). It's used in the Directives and Business screens for entering costs, budgets, and financial data in venture management.",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025226655
+  },
+  "frontend/components/business/DashboardView.tsx": {
+    "intent": "Renders a dashboard screen in the Business module that displays financial metrics (net P&L, revenue, shipments) filtered by time period (month/quarter/year/all), with color-coded status indicators and a period selector. It consumes metrics from the bridge via the `useDashboardMetrics` hook and formats currency/shipment data for display.",
+    "mtime": 1773151050685.21,
+    "indexed_at": 1779025226941
+  },
+  "frontend/components/business/ExpenseDetailSheet.tsx": {
+    "intent": "Modal component for viewing and editing business expenses, with fields for amount, IVA, category, vendor, payment status, and receipt scanning via image picker + OCR extraction. Integrates with the Business tab expense workflow to track and manage venture costs with attachment support.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025227044
+  },
+  "frontend/components/business/FinancialSummaryCard.tsx": {
+    "intent": "Renders a collapsible financial summary card for ventures showing budget utilization, actual vs. estimated costs, category breakdown (materials, labor, services, etc.), and phase-level spending with color-coded progress bars. Used on the Business screen to track venture spend and flag budget overruns in real time.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025229622
+  },
+  "frontend/components/business/ExpenseRow.tsx": {
+    "intent": "Renders individual expense rows in the Business venture details screen with color-coded payment status indicators (yellow=pending, green=paid, orange=partial, red=overdue). Provides tap-to-edit and long-press-to-delete interactions for managing venture operating expenses.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025230843
+  },
+  "frontend/components/business/InvestmentCard.tsx": {
+    "intent": "This component renders individual investment cards on the Business tab, displaying the investment status (planned/committed/paid/recovered), category emoji, formatted amount, and optional ROI notes in a pressable, dark-themed card. It's consumed by the investments list view to show business investment tracking data from the bridge API.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025231297
+  },
+  "frontend/components/business/PipelineView.tsx": {
+    "intent": "Displays shipments in a Kanban-style pipeline organized by six stages (Preparing → Customs → In Transit → Arrived → Delivered → Paid), with pull-to-refresh, detail sheets, and add-shipment modals. Provides the Business tab's supply chain tracking interface, feeding from the `/api/shipments` endpoint.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025234988
+  },
+  "frontend/components/business/ShipmentDetailSheet.tsx": {
+    "intent": "Modal component for the Business feature that displays detailed shipment information (tracking status across 6 stages: preparing → customs → in transit → arrived → delivered → paid) and allows King Kazuma to advance shipment status and edit notes via the bridge API. Fetches and updates individual `BusinessShipment` records tied to ventures.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025236762
+  },
+  "frontend/components/business/ProgressBar.tsx": {
+    "intent": "This component renders a customizable progress bar showing a filled-to-unfilled ratio with optional glow effect, used across Ozzu screens (Directives, Business ventures, ProjectCard) to visualize completion status. It's a reusable design-system primitive that accepts color, height, and glow parameters to match the dark-mode linear aesthetic defined in design-tokens.ts.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025237294
+  },
+  "frontend/components/business/ProjectCard.tsx": {
+    "intent": "Renders a business venture card with status indicator (green/yellow/cyan), left accent border, progress bar, task completion %, and cost display for the Business/Ventures screen. Reusable component used throughout the portfolio view with press feedback (scale + opacity) for navigation.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025237759
+  },
+  "frontend/components/business/TaskCard.tsx": {
+    "intent": "Renders individual business tasks as collapsible cards within the Business screen, displaying status (pending/in_progress/done), priority badge, due date with urgency coloring, estimated cost, and task requirements with a \"DETAILS\" button to navigate deeper into task editing/tracking. Part of Ozzu's business operations module for managing ventures' tasks and deliverables alongside cost and resource tracking.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025239878
+  },
+  "frontend/components/devices/ACWidget.tsx": {
+    "intent": "ACWidget is a Home Assistant-integrated air conditioning control component that renders a temperature slider (61–86°F), HVAC mode buttons (COOL/HEAT/AUTO/DRY/FAN/OFF), and fan speed selector for smart climate devices. It calls Home Assistant services to execute temperature and mode changes from the device's control screen.",
+    "mtime": 1773151050686.8767,
+    "indexed_at": 1779025240274
+  },
+  "frontend/components/devices/VacuumMapCard.tsx": {
+    "intent": "Displays a live map image from a connected smart vacuum device (fetched via `useVacuum` hook) as a dark-themed card in the device dashboard. Allows users to tap the map to view full vacuum navigation details.",
+    "mtime": 1779023346826.2126,
+    "indexed_at": 1779025240359
+  },
+  "frontend/components/business/ProjectDetailSheet.tsx": {
+    "intent": "Displays detailed business project information (tasks, expenses, financial summary) in a modal sheet for the Business/Ventures tab, with status switching between \"active/paused/completed\" and nested modals for adding/editing tasks and expenses. Integrates with bridge API endpoints (`updateBusinessProject`, `toggleBusinessTaskStatus`, `getProjectExpenses`, etc.) to persist all changes.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025240410
+  },
+  "frontend/components/business/TaskDetailSheet.tsx": {
+    "intent": "Modal sheet component that displays a Business task's full details—including status, attachments with verification, linked requirements, and associated expenses—with controls to cycle task status, upload/download files, and manage expense entries. Provides the detailed view layer for Ozzu's Business venture workflow, pulling task context from bridge endpoints (`fetchTaskAttachments`, `getTaskExpenses`, `reverifyAttachment`, etc.) and enabling document/cost verification.",
+    "mtime": 1773151050685.8767,
+    "indexed_at": 1779025242163
+  },
+  "frontend/components/directives/AuditTrail.tsx": {
+    "intent": "AuditTrail renders a collapsible activity log for directives, displaying timestamped entries (work updates, state changes, actor information) with progressive disclosure—showing only the last N entries by default and expanding on tap to reveal full history. It's embedded in directive detail screens to surface work progress and decision timestamps without cluttering the main view.",
+    "mtime": 1776184681684.0933,
+    "indexed_at": 1779025244436
+  },
+  "frontend/components/devices/VacuumWidget.tsx": {
+    "intent": "Renders an interactive control card for a robot vacuum, showing real-time state (cleaning/docked/paused/error), battery level, and action buttons (start, pause, dock). Integrates with a home automation backend via the `useVacuum()` hook and likely appears on a device dashboard or home screen for controlling smart appliances.",
+    "mtime": 1773151050687.117,
+    "indexed_at": 1779025245228
+  },
+  "frontend/components/directives/BuildRunBadge.tsx": {
+    "intent": "Displays a status badge for GitHub Actions build runs (iOS/Android) triggered by directives, showing platform emoji, real-time status (building/queued/success/failure), and a download button for artifacts like IPA and APK files. Enables directive screens to surface build progress and allow users to download compiled binaries directly into the app.",
+    "mtime": 1776184681684.0933,
+    "indexed_at": 1779025245337
+  },
+  "frontend/components/directives/DirectiveCard.tsx": {
+    "intent": "Renders a single directive card in the Directives list screen, displaying status/type emoji, metadata (branch, duration, created/updated timestamps), build run badges, and an expandable audit trail. Provides interactive actions (chips) like deploy, cancel, and status updates via `onPress` handlers that trigger directive API calls.",
+    "mtime": 1773606630718.3286,
+    "indexed_at": 1779025247587
+  },
+  "frontend/components/directives/PlanReviewModal.tsx": {
+    "intent": "Displays a bottom-sheet modal overlay showing the plan or description text for a selected directive, rendered as markdown with the directive's type emoji. Part of the directives management UI that lets users review plan details without navigating away from the main list.",
+    "mtime": 1776184681685.0933,
+    "indexed_at": 1779025248732
+  },
+  "frontend/components/directives/DirectiveListItem.tsx": {
+    "intent": "Renders an individual directive card in list and board views with status badges, type indicators (feature/epic/explore), priority markers, and epic phase progress bars. Powers the directive navigation UI that King Kazuma uses to browse and tap into active work across the app.",
+    "mtime": 1776198818370.0728,
+    "indexed_at": 1779025248775
+  },
+  "frontend/components/directives/StatusChangeSheet.tsx": {
+    "intent": "A modal sheet that displays valid status transitions for a directive (e.g., pending → in_progress → completed) and calls the bridge's `updateDirective` endpoint to persist the change. Enables King Kazuma to advance directive lifecycles from the directives list UI.",
+    "mtime": 1776184681685.0933,
+    "indexed_at": 1779025249015
+  },
+  "frontend/components/directives/MessageApprovalModal.tsx": {
+    "intent": "A modal dialog that requests user approval before sending messages, emails, or files through integrated communication tools (WhatsApp, Gmail, Chat). Requires biometric (Face ID) authentication to approve sensitive outbound communications.",
+    "mtime": 1776180504361.5864,
+    "indexed_at": 1779025249628
+  },
+  "frontend/components/directives/SummaryStatsBar.tsx": {
+    "intent": "SummaryStatsBar renders a horizontal scrollable row of status chips (needs action, active, epics, completed, success rate %) that count and filter directives by status category. It sits atop the Directives screen to give King Kazuma a quick health summary and one-tap filtering without scrolling the full list.",
+    "mtime": 1773151050687.4019,
+    "indexed_at": 1779025252413
+  },
+  "frontend/components/glasses/ExerciseHUD.tsx": {
+    "intent": "ExerciseHUD renders a real-time overlay displaying exercise metadata (type, rep count, joint angles, form quality) for the glasses app during workouts, color-coding form feedback (good/warning/bad) to guide user form. It's the visual feedback layer for the exercise-tracker library's ExerciseState, providing immediate form guidance during live movement capture.",
+    "mtime": 1773151050687.8767,
+    "indexed_at": 1779025252516
+  },
+  "frontend/components/glasses/FaceMatchOverlay.tsx": {
+    "intent": "Displays real-time face recognition results in an overlay on the glasses camera view, showing matched identity (cedula, name, similarity score) from the face database when a match is found, or indicating when a face search is in progress. Provides user controls to trigger scans and dismiss the overlay, with state-based visual feedback (amber border for scanning, green for match found).",
+    "mtime": 1773151050687.8767,
+    "indexed_at": 1779025253457
+  },
+  "frontend/components/glasses/ObjectOverlay.tsx": {
+    "intent": "Renders real-time detected object bounding boxes with class labels on a camera feed, sourcing detection data from expo-mediapipe. Supports visual states for a locked target (solid green) and candidate objects (pulsing yellow) to enable tracking and interaction workflows in wearable/AR camera contexts.",
+    "mtime": 1773151050687.8767,
+    "indexed_at": 1779025256700
+  },
+  "frontend/components/glasses/PoseOverlay.tsx": {
+    "intent": "Renders a live skeletal overlay from MediaPipe PoseLandmarker (33 joints + 24 bone connections) as an SVG on top of camera feeds, with form-quality visual feedback for exercise tracking. Used by fitness/workout screens in the Ozzu app to display real-time body position detection during form verification or movement analysis.",
+    "mtime": 1773151050687.8767,
+    "indexed_at": 1779025258821
+  },
+  "frontend/components/glasses/HandOverlay.tsx": {
+    "intent": "Renders real-time hand pose skeleton (finger bones and joint landmarks) as SVG overlays using MediaPipe hand tracking — enables gesture recognition and hand-based interaction for the AR glasses interface. Part of Ozzu's wearables subsystem (glasses module) for augmented-reality feedback on hand position/movement.",
+    "mtime": 1773151050687.8767,
+    "indexed_at": 1779025259276
+  },
+  "frontend/components/glasses/SettingsSheet.tsx": {
+    "intent": "Defines a modal settings sheet for the smart glasses feature, exposing controls for vision analysis modes (OCR, identification, translation, description), quality/streaming settings, and debugging tools like diagnostics and log viewing. Acts as the configuration UI for the glasses vision overlay system, coordinating between multiple vision pipelines and diagnostic telemetry.",
+    "mtime": 1773151050687.8767,
+    "indexed_at": 1779025259992
+  },
+  "frontend/components/glasses/PhotoCaptureOverlay.tsx": {
+    "intent": "Displays a full-screen preview of photos captured by the glasses hardware with fade-in animation and auto-dismiss after 10s or swipe-down gesture. Provides quick-action buttons to save locally, share via OS, or route to the intelligence pipeline (`sendToIntel`) via the Bridge API.",
+    "mtime": 1773151050687.8767,
+    "indexed_at": 1779025260500
+  },
+  "frontend/components/home/BLEPairingModal.tsx": {
+    "intent": "Modal that pairs iPhones with distributed ESP32 room nodes via Bluetooth, automatically extracting and storing IRK (Identity Resolving Key) values for persistent person tracking across rooms. Enables the Ozzu positioning system to recognize devices even when advertising identity changes, critical for the room-level location awareness that feeds directives and presence logic.",
+    "mtime": 1773537041649.2085,
+    "indexed_at": 1779025261544
+  },
+  "frontend/components/glasses/FaceOverlay.tsx": {
+    "intent": "Renders colored bounding boxes and expression labels over detected faces in the smart glasses' real-time camera feed, powered by MediaPipe face detection. Converts normalized coordinates to pixel positions and color-codes up to three simultaneous detections for the glasses' live face-recognition UI.",
+    "mtime": 1773151050687.8767,
+    "indexed_at": 1779025261917
+  },
+  "frontend/components/glasses/VisionOverlay.tsx": {
+    "intent": "Displays real-time vision AI analysis results (describe, OCR, identify, translate) as colored overlays on the glasses video feed, with mode-specific labels and scrollable text output. Enables King Kazuma's smart glasses to present vision-mode results directly during capture, supporting multi-modal AI interactions (Claude vision API) without switching between apps.",
+    "mtime": 1773151050687.8767,
+    "indexed_at": 1779025263631
+  },
+  "frontend/components/home/DevicePin.tsx": {
+    "intent": "Renders interactive map pins for smart home devices on the home screen, encoding their operational state (online/heating/cooling/etc.) as color indicators. Allows tapping to interact with device control/details and integrates with the positioning system to display real-time device status at physical locations.",
+    "mtime": 1773151050688.877,
+    "indexed_at": 1779025265207
+  },
+  "frontend/components/home/DeviceSheet.tsx": {
+    "intent": "Opens a modal when a map pin is tapped to display the linked Home Assistant entity state and a toggle button for power control. Routes to device-specific sheets (ACSheet, CameraSheet, VacuumSheet, MediaSheet) based on the pin type, giving each device class its own control UI integrated into the home screen map.",
+    "mtime": 1773151050688.877,
+    "indexed_at": 1779025266254
+  },
+  "frontend/components/home/FloorPlanMap.tsx": {
+    "intent": "This component renders an interactive floor plan map in the home screen, loading a floor plan image and overlaying device/location pins from `MAP_PINS` config. When the user taps a pin, it triggers the `onPinPress` callback to show device details or controls.",
+    "mtime": 1773151050688.877,
+    "indexed_at": 1779025266834
+  },
+  "frontend/components/home/HomeMap3D.tsx": {
+    "intent": "Renders a fullscreen 3D apartment interior using Three.js with interactive device markers positioned in rooms, supporting touch rotation/zoom and edit mode for placing/repositioning smart home entities. Provides the spatial visualization layer for the home screen, bridging device state data with floor plan geometry to display positioning confidence and allow device interaction by room.",
+    "mtime": 1773667099299.1904,
+    "indexed_at": 1779025269411
+  },
+  "frontend/components/home/sheets/MediaSheet.tsx": {
+    "intent": "The MediaSheet component renders a control panel for Home Assistant media_player entities pinned on the map, displaying current playback state, source, and app name. It provides a toggle button to turn media devices on/off via Home Assistant service calls.",
+    "mtime": 1773151050689.3057,
+    "indexed_at": 1779025270806
+  },
+  "frontend/components/ops/DeviceRow.tsx": {
+    "intent": "Renders a connectivity status row in the Ops dashboard showing the home LAN devices (TAB-R, TAB-L, TV, DEV) with visual indicators for VPN health and router reachability over the home WireGuard network. This component lets King Kazuma monitor at a glance whether critical devices are reachable from the GCP VM and if the home VPN tunnel is up.",
+    "mtime": 1773185645460.5073,
+    "indexed_at": 1779025272053
+  },
+  "frontend/components/home/sheets/VacuumSheet.tsx": {
+    "intent": "A bottom sheet component that displays and controls a connected robot vacuum, showing real-time status (cleaning, docked, paused, etc.) with color-coded state indicators and action buttons. Uses the `useVacuum` hook to manage vacuum operations as part of Ozzu's broader home automation device control surface.",
+    "mtime": 1779023346827.2126,
+    "indexed_at": 1779025272087
+  },
+  "frontend/components/home/sheets/ACSheet.tsx": {
+    "intent": "Provides a Home Assistant HVAC control interface accessible from the Ozzu home screen, enabling temperature adjustment (61–86°F), mode selection (cool/heat/auto/dry/fan/off), and fan speed control with live temperature feedback. It integrates Ozzu's home automation capabilities with Home Assistant, allowing users to manage connected AC units directly from the mobile app.",
+    "mtime": 1773151050688.877,
+    "indexed_at": 1779025272156
+  },
+  "frontend/components/ops/GcpCard.tsx": {
+    "intent": "Displays a collapsible infrastructure card in the Ops screen showing GCP VM Docker container status (running/stopped indicators) and resource metrics (CPU, memory, disk usage with progress bars). Provides the visual component for infrastructure health monitoring and container lifecycle visibility in the ops dashboard.",
+    "mtime": 1773608075966.6584,
+    "indexed_at": 1779025272912
+  },
+  "frontend/components/ops/GpuCard.tsx": {
+    "intent": "This component renders a status card for GPU instances in the Ops dashboard, displaying metrics like utilization, memory, temperature, and power consumption with color-coded health states (green for running, yellow for idle, red for offline). It's part of the operations monitoring interface for tracking VAST.ai or similar GPU rental instances.",
+    "mtime": 1773185645461.9993,
+    "indexed_at": 1779025273808
+  },
+  "frontend/components/home/sheets/CameraSheet.tsx": {
+    "intent": "CameraSheet provides a modal control panel for Home Assistant entities—toggle switches (cameras, relays) with live state via `callService`, plus an emergency siren trigger button. It surfaces quick-access security and automation controls on the home screen.",
+    "mtime": 1773151050689.3057,
+    "indexed_at": 1779025273963
+  },
+  "frontend/components/ops/IncidentList.tsx": {
+    "intent": "Renders a scrollable list of infrastructure incidents with color-coded status indicators (healthy/degraded/down) and relative timestamps (e.g., \"5m ago\"), used in the Ops tab to display real-time service health at a glance. Supports loading state while fetching incidents and displays \"No recent incidents\" when the list is empty.",
+    "mtime": 1773185645461.9993,
+    "indexed_at": 1779025276053
+  },
+  "frontend/components/ops/InfraDeviceCard.tsx": {
+    "intent": "This component renders expandable device cards for the Ops screen, displaying real-time resource utilization (CPU, memory, disk) with color-coded status bars and a collapsible services list for each infrastructure device. It gives operators at-a-glance visibility into device health and resource constraints, with drill-down detail on demand.",
+    "mtime": 1773615104600.5544,
+    "indexed_at": 1779025277853
+  },
+  "frontend/components/ops/PositioningCard.tsx": {
+    "intent": "Displays real-time status of the positioning system infrastructure in the Ops screen—ESP32 nodes deployed across rooms (living, master, office, rooftop) with their IP/MAC addresses, online/offline status, and RSSI signal strength, plus the central positioning hub metrics. Provides a collapsible view to monitor the distributed localization network that powers indoor positioning features.",
+    "mtime": 1773615104600.5544,
+    "indexed_at": 1779025280815
+  },
+  "frontend/components/ops/RouterCard.tsx": {
+    "intent": "Displays the ER605 router's network health: DHCP clients with their IPs and MACs, WAN status, and VPN connection state, with color-coded indicators (green = up, red = down). Used in the Ops tab to monitor residential proxy router and network connectivity at a glance.",
+    "mtime": 1775427896546.9426,
+    "indexed_at": 1779025280848
+  },
+  "frontend/components/ops/SystemBanner.tsx": {
+    "intent": "Displays a colored status banner in the Ops screen showing whether system services are healthy, degraded, or down, with service names listed. Used for at-a-glance infrastructure health visibility on the operations dashboard.",
+    "mtime": 1773185645461.9993,
+    "indexed_at": 1779025281261
+  },
+  "frontend/components/ops/ServiceCard.tsx": {
+    "intent": "Renders individual service health status cards in the Ops screen, displaying each service's name (with emoji), status indicator, latency, and last-check timestamp—expandable to show metadata like version and uptime. Monitors infrastructure services (postgres, redis, nginx, openvpn, qdrant, face-recognition, vast-gpu, etc.) with color-coded status states (healthy/degraded/down/unknown).",
+    "mtime": 1773185645461.9993,
+    "indexed_at": 1779025281895
+  },
+  "frontend/components/ops/NetworkBanner.tsx": {
+    "intent": "This component displays VPN status (up/down indicator with peer IP) and network metrics (route count, probe latency) as a colored banner in the Ops infrastructure dashboard. It provides King Kazuma real-time visibility into WireGuard connectivity and topology health for managing the distributed system (dev-01, Rock Pi, tablets, drones).",
+    "mtime": 1773608075967.6584,
+    "indexed_at": 1779025283541
+  },
+  "frontend/lib/biometric-auth.ts": {
+    "intent": "Biometric authentication (fingerprint/face ID) for Ozzu screens requiring user verification — login, SOC execution, sensitive operations. Exports `canUseBiometric()` to detect device capability and `authenticateWithBiometric()` to trigger native auth dialogs with PIN fallback.",
+    "mtime": 1776138429277.2566,
+    "indexed_at": 1779025284422
+  },
+  "frontend/lib/bridge-api.ts": {
+    "intent": "The Bridge API client manages HTTP communication with the Command Bridge backend, auto-detecting between LAN (`home.ozzu.world/bridge`) and public URLs with automatic failover if the LAN is unreachable. It also provides currency formatting utilities (COP, USD, JPY) used across directives, ventures, and financial screens.",
+    "mtime": 1776202661240.419,
+    "indexed_at": 1779025284634
+  },
+  "frontend/lib/bridge-session.ts": {
+    "intent": "WebSocket client that connects tablets (as microphones) and the TV (as speakers) to the bridge server for real-time PCM audio streaming and multi-device audio coordination. Manages connection state, device identification, and automatic reconnection across LAN and remote modes (supporting both `home.ozzu.world/bridge` and local network paths).",
+    "mtime": 1773675018891.7559,
+    "indexed_at": 1779025287734
+  },
+  "frontend/lib/business-hooks.ts": {
+    "intent": "This file exports custom React hooks that encapsulate all API calls and state management for the Business tab — projects, tasks, expenses, invoices, shipments, contacts, investments, and dashboard metrics. Each hook handles fetching, creating, updating, deleting, and toggling entities with loading states and error handling, so screens like Business.tsx can call `useBusinessProjects()` instead of managing API calls directly.",
+    "mtime": 1773151050691.877,
+    "indexed_at": 1779025287887
+  },
+  "frontend/lib/audio.ts": {
+    "intent": "Exposes `StreamingPlayer` for low-latency, gapless PCM audio playback (chunk writes + flush) and `MicRecorder` for live microphone capture with real-time data callbacks, both backed by native Android/iOS audio modules. Enables real-time audio streaming use cases throughout the Ozzu app—likely for SOC monitoring dashboards and live threat assessment features.",
+    "mtime": 1773151050691.877,
+    "indexed_at": 1779025289544
+  },
+  "frontend/lib/directive-hooks.ts": {
+    "intent": "`useDirectives()` fetches the directive list, build status, and summary from the bridge API via WebSocket with HTTP polling fallback, providing real-time updates to the Directives screen. It manages loading, error, and refresh states while automatically adjusting poll interval based on whether a build is in progress.",
+    "mtime": 1776181674142.738,
+    "indexed_at": 1779025291527
+  },
+  "frontend/lib/config.ts": {
+    "intent": "Centralizes Home Assistant API and WebSocket connection configuration, exporting `HA_URL`, `HA_TOKEN`, and `HA_WS_URL` constants that screens and services use for device control, automation state, and real-time updates. Handles HTTPS/WSS protocol detection so the app works across web (nginx), mobile, and localhost environments without hardcoding connection details.",
+    "mtime": 1773157639241.2158,
+    "indexed_at": 1779025292552
+  },
+  "frontend/lib/directive-constants.ts": {
+    "intent": "This file centralizes emoji and color mappings for directive statuses (pending, approved, in_progress, etc.), types, and priorities—ensuring consistent visual representation across all directive UI components like the Directives list, detail screens, and cards. It exists as a single source of truth to prevent duplicate constant definitions and enable global updates to visual branding with one edit.",
+    "mtime": 1773606630722.3289,
+    "indexed_at": 1779025292603
+  },
+  "frontend/lib/design-tokens.ts": {
+    "intent": "Centralized color and styling constants that define the Linear-inspired dark theme across all UI components (ProjectCard, DirectiveListItem, TabBar, etc.) and screens (Directives, Business, Ops). Enforces consistent visual hierarchy—status badges, text contrast levels, surface elevation, and semantic colors—so the app maintains a cohesive design without scattered inline hex values.",
+    "mtime": 1776186472526.1772,
+    "indexed_at": 1779025293321
+  },
+  "frontend/lib/exercise-tracker.ts": {
+    "intent": "Analyzes MediaPipe pose landmarks to detect and count exercise reps (squat, deadlift, pushup) while scoring form quality in real-time. Powers workout/exercise tracking screens in the Ozzu mobile app with live feedback on movement correctness.",
+    "mtime": 1773151050691.877,
+    "indexed_at": 1779025296005
+  },
+  "frontend/lib/expressions.ts": {
+    "intent": "Detects and classifies facial expressions (smile, surprise, wink, frown, etc.) from MediaPipe FaceLandmarker blendshape data in real-time, returning a confidence score and emoji for each detected expression. Powers interactive camera features and training screens that respond to your face movements—used anywhere Ozzu needs to react to how you're looking at the phone.",
+    "mtime": 1773151050691.877,
+    "indexed_at": 1779025296544
+  },
+  "frontend/lib/gemini.ts": {
+    "intent": "Provides streaming AI chat via Google Gemini 2.5 Flash with smart home entity context — used by Ozzu screens for natural language control of devices. Also enables image analysis from cameras or visual feeds by sending frames to Gemini for inference.",
+    "mtime": 1773151050692.8772,
+    "indexed_at": 1779025300229
+  },
+  "frontend/lib/device-map.ts": {
+    "intent": "Maps Home Assistant entities (climate, media_player, vacuum, switch) to rooms so swipe-down gestures cycle through controllable devices based on the user's current location from the positioning system. Enables continuous controls like temperature and volume adjustment, with `findDeviceByEntityId()` providing the lookup that UI components need to resolve Home Assistant entities to controllable targets.",
+    "mtime": 1773675997138.302,
+    "indexed_at": 1779025300340
+  },
+  "frontend/lib/gesture-actions.ts": {
+    "intent": "This file maps hand gesture commands (pinch, grab, peace sign, finger counts) to smart home actions like toggle lights, dim, select rooms, or trigger scenes, with emoji HUD feedback for user confirmation. It interfaces with the bridge server to send gesture-triggered commands that orchestrate actual device control across smart home domains (lights, scenes, room selection).",
+    "mtime": 1773668297963.2834,
+    "indexed_at": 1779025301662
+  },
+  "frontend/lib/glasses-context.tsx": {
+    "intent": "Manages AR glasses connection, MediaPipe gesture detection, and Home Assistant device control—translates hand gestures (swipe, pinch, thumbs_up, grab) into commands targeting smart home devices (switches, climate, vacuums, media players). Runs background streaming with a global photo capture overlay that appears on top of any active screen for hands-free operation.",
+    "mtime": 1773675997139.302,
+    "indexed_at": 1779025302799
+  },
+  "frontend/lib/gestures.ts": {
+    "intent": "Provides hand gesture recognition using MediaPipe hand landmarks to detect gestures like pinch, point, grab, swipes, and finger counting with confidence scoring. Enables gesture-based control for Ozzu's tablets and mobile interfaces—critical for no-hands operation during device-mounted use (drone, gimbal, surveillance scenarios).",
+    "mtime": 1773677622479.5464,
+    "indexed_at": 1779025302879
+  },
+  "frontend/lib/gesture-commands.ts": {
+    "intent": "Converts raw per-frame gesture input into reliable discrete commands using debounce, cooldown, and multi-frame confirmation to prevent accidental triggers on mobile. Enables gesture-based navigation and interaction (point, pinch, hold, compound gestures) across Ozzu screens like the Directives list, Business ventures, and Operations dashboard without spam or false positives.",
+    "mtime": 1773668297963.2834,
+    "indexed_at": 1779025303554
+  },
+  "frontend/lib/gesture-target.ts": {
+    "intent": "Gesture targeting engine that uses MediaPipe to detect when your index fingertip points at UI objects/devices, locking onto them after 500ms of sustained pointing. Powers gesture-based device selection and control throughout the Ozzu app.",
+    "mtime": 1773151050692.8772,
+    "indexed_at": 1779025303720
+  },
+  "frontend/lib/ha-connection.ts": {
+    "intent": "Establishes a WebSocket connection to a Home Assistant instance for integrating smart home device control and monitoring into Ozzu dashboards (likely Ops screen). Implements token auth with a 15-second timeout safeguard to reliably bridge between Ozzu's intelligence platform and HA's device automation ecosystem.",
+    "mtime": 1773151050692.8772,
+    "indexed_at": 1779025304298
+  },
+  "frontend/lib/immersive-events.ts": {
+    "intent": "Provides a callback bridge for the backend (bridge-session) to toggle immersive mode on any React Native screen without tight coupling. Screens register via `setImmersiveCallback`, allowing the bridge to trigger immersive glasses/AR mode globally via `triggerImmersive(enable)`.",
+    "mtime": 1773151050692.8772,
+    "indexed_at": 1779025307734
+  },
+  "frontend/lib/ha-context.tsx": {
+    "intent": "Manages the Home Assistant WebSocket connection and exposes real-time device state (entities) and service-calling capabilities to Ozzu components through a React Context hook. Enables the Ops or Dashboard screen to display and control connected smart home devices (lights, switches, sensors) directly from the app.",
+    "mtime": 1776388174180.5835,
+    "indexed_at": 1779025309321
+  },
+  "frontend/lib/infra-hooks.ts": {
+    "intent": "This file provides React hooks (`useInfraState()`, `useServiceStatus()`, etc.) that poll the bridge's `/infra/state` endpoint to fetch live device status, resources (CPU/memory/disk), Docker containers, and network services for display in the Ops screens. It abstracts the polling logic, error handling, and type definitions for infrastructure monitoring across the app.",
+    "mtime": 1773608075967.6584,
+    "indexed_at": 1779025311701
+  },
+  "frontend/lib/ops-hooks.ts": {
+    "intent": "Provides custom React hooks (`useServiceStatus`, `useIncidents`) that fetch service health, incidents, and GPU status from the bridge API for the OPS tab, polling every 30 seconds and managing state for degraded/down services. Decouples data-fetching logic from the OPS screen components so they can display real-time infrastructure health and alert history.",
+    "mtime": 1773185645461.9993,
+    "indexed_at": 1779025312966
+  },
+  "frontend/lib/push-notifications.ts": {
+    "intent": "Registers the Ozzu app for iOS push notifications via Expo, requesting user permissions and obtaining a device token. Sends the token to the bridge API so the backend can target this specific device with remote notifications.",
+    "mtime": 1775769081907.737,
+    "indexed_at": 1779025314983
+  },
+  "frontend/lib/immersive-state.ts": {
+    "intent": "Manages the lifecycle of AR glasses immersion with state transitions (idle → activating → immersive → deactivating) and a 10-minute auto-idle timeout that resets if inactive. Provides a singleton state machine with listener notifications so screens/endpoints can react to glasses activation/deactivation and error conditions.",
+    "mtime": 1773151050692.8772,
+    "indexed_at": 1779025315302
+  },
+  "frontend/lib/osint-hooks.ts": {
+    "intent": "Provides React hooks (`useOsint`, `useOsintFindings`, `useOsintScore`, `useOsintAlerts`, `useOsintTimeline`, etc.) that fetch and poll OSINT data from the bridge API — profiles, exposure scores, security findings, identity clusters, correlation graphs, and timeline events — with built-in refresh and error handling for the intelligence pipeline UI screens.",
+    "mtime": 1773151050692.8772,
+    "indexed_at": 1779025315307
+  },
+  "frontend/lib/osint-constants.ts": {
+    "intent": "Provides unified severity levels, categories, colors, and score-to-label mappings for OSINT findings across the Intelligence pipeline screens and SOC reports. Ensures consistent visual hierarchy (emojis, hex colors, risk labels) when displaying threats, breaches, exposed accounts, and infrastructure metadata.",
+    "mtime": 1773151050692.8772,
+    "indexed_at": 1779025316125
+  },
+  "frontend/lib/kg-hooks.ts": {
+    "intent": "Provides `useKnowledgeGraph()` hook to fetch and continuously poll knowledge graph subjects, facts, observations, and connections from the backend with 30-second refresh intervals. Powers screens displaying the intelligence pipeline's entity data and relationship analysis (STORE and ANALYZE stages) in real-time.",
+    "mtime": 1775986387855.2527,
+    "indexed_at": 1779025316723
+  },
+  "frontend/lib/map-config.ts": {
+    "intent": "Configures device placement and entity bindings for a smart-home floorplan dashboard, positioning HVAC, cameras, media, and appliances by x/y coordinates on a Home Assistant-integrated map. Powers a home-control screen that renders device icons and manages state for each IoT device (AC, TV, vacuum, etc.) by their entity IDs.",
+    "mtime": 1773151050692.8772,
+    "indexed_at": 1779025317032
+  },
+  "frontend/lib/remote-logger.ts": {
+    "intent": "Intercepts console.log/warn/error and uncaught exceptions, shipping them to the bridge's `/api/device-logs` endpoint with device metadata (OS + version). Enables remote debugging of tablets, mirror device, and iOS without needing direct SSH/ADB access.",
+    "mtime": 1775433917382.0435,
+    "indexed_at": 1779025317609
+  },
+  "frontend/lib/rooms.ts": {
+    "intent": "Defines rarity-based visual theming (color palettes for legendary/epic/rare/common) and room/venue data structures with associated entities (like todo lists, shopping lists, etc.). Powers the app's rooms/venues display with styling hooks and content data that UI components consume for rendering differentiated card layouts and entity navigation.",
+    "mtime": 1773151050692.8772,
+    "indexed_at": 1779025320200
+  },
+  "frontend/modules/ble-beacon/index.ts": {
+    "intent": "Exposes native BLE peripheral advertising—allows the Ozzu phone to broadcast itself as a Bluetooth beacon with a device name (`startAdvertising`, `stopAdvertising`, state/error events). Used for proximity-based discovery and communication in the security SOC platform and fleet operations.",
+    "mtime": 1773608563382.8298,
+    "indexed_at": 1779025325259
+  },
+  "frontend/lib/useMediaPlayer.ts": {
+    "intent": "Provides a React hook that exposes Spotify playback state (track, artist, position, volume) and controls (play/pause, next, seek, shuffle, repeat) by wrapping the Home Assistant `media_player.spotify_king_kazuma` entity. Lets Ozzu screens and components access Spotify playback without directly calling HA services.",
+    "mtime": 1773151050693.8772,
+    "indexed_at": 1779025325749
+  },
+  "frontend/lib/usePhoneLayout.ts": {
+    "intent": "Exports screen dimensions, safe area insets for status bars/notches, and an `isPhone` flag to distinguish phones (width < 500) from tablets. Enables responsive layouts across Ozzu's multi-device UI (iPhone, Android tablets, TV, Redroid mirror).",
+    "mtime": 1773151050693.8772,
+    "indexed_at": 1779025325820
+  },
+  "frontend/lib/useVacuum.ts": {
+    "intent": "Provides a React hook that connects to Home Assistant's vacuum entity (\"dusk_vader\") to expose real-time state (battery, brush wear, cleaning progress, room data) and control methods (start, pause, dock, clean specific rooms, adjust suction/mode). Used by any frontend component that displays or controls the vacuum—likely the Home/Directives screens or a dedicated vacuum card in the dashboard.",
+    "mtime": 1773151050693.8772,
+    "indexed_at": 1779025327077
+  },
+  "frontend/lib/usePosition.ts": {
+    "intent": "Provides real-time indoor positioning data (room, presence, BLE device, coordinates) to frontend components by polling the bridge's `/positioning/state` endpoint every 2s and listening for WebSocket updates. Enables location-aware features across Ozzu (presence detection, room context, furniture awareness) with automatic reconnection fallback.",
+    "mtime": 1773630498377.2334,
+    "indexed_at": 1779025327362
+  },
+  "frontend/modules/cipher-voice/index.ts": {
+    "intent": "This module wraps native iOS/Android speech-to-text and text-to-speech APIs through Expo's native modules system, enabling the Ozzu app to capture voice input and synthesize audio output via event-based listeners. It supports real-time STT streaming and base64-encoded PCM audio delivery for the Cipher voice agent integration (likely used in directive execution or voice-driven UI commands).",
+    "mtime": 1773151050694.4102,
+    "indexed_at": 1779025327891
+  },
+  "frontend/modules/expo-glasses/index.ts": {
+    "intent": "This Expo native module provides TypeScript bindings to smart glasses hardware, exposing event listeners for real-time video streaming (with quality/framerate control), photo capture, connection state changes, and device feedback. It enables Ozzu screens to display live video feeds from the glasses device and manage hardware lifecycle.",
+    "mtime": 1773151050717.5757,
+    "indexed_at": 1779025329226
+  },
+  "frontend/modules/expo-mediapipe/index.ts": {
+    "intent": "Exports a TypeScript wrapper around a native MediaPipe module for real-time computer vision tasks: hand landmark detection (21 points per hand), face detection with blendshapes, and object detection. Provides graceful fallback when the native module isn't available and manages the native module lifecycle with disposal methods.",
+    "mtime": 1773151050863.9778,
+    "indexed_at": 1779025332652
+  },
+  "frontend/modules/pcm-player/index.ts": {
+    "intent": "This module bridges React Native to native audio playback and microphone recording APIs, exposing functions to stream base64-encoded PCM audio and capture mic data as events. It enables real-time audio I/O for features like voice communication, recording, and audio stream processing across iOS and Android.",
+    "mtime": 1773151051007.4497,
+    "indexed_at": 1779025334195
+  },
+  "backend/bridge/anthropic-usage.js": {
+    "intent": "Fetches and caches Anthropic Admin API token usage, hourly metrics, and cost data with 5-minute TTL, exposing daily/hourly breakdowns and rate limits. Powers admin dashboards or cost-tracking endpoints that monitor Claude API consumption across the Ozzu platform.",
+    "mtime": 1773151049564.9048,
+    "indexed_at": 1779025335460
+  },
+  "backend/bridge/action-queue.js": {
+    "intent": "Redis-backed task queue for async handoff between the bridge backend and Cipher agent—backend pushes actions (deploy failures, service alerts, blocked directives) from daemons and endpoints; Cipher pulls the queue at session start via `/cipher/context`, deduplicates by type+key, and acknowledges completed items to prevent repeat notifications.",
+    "mtime": 1773246045944.4563,
+    "indexed_at": 1779025335685
+  },
+  "backend/bridge/attack-planner.js": {
+    "intent": "Analyzes penetration testing findings and objectives to strategically determine the next attack vector (e.g., root access paths, wireless exploitation, enumeration) — part of Ozzu's SOC platform that feeds tactical recommendations to guide PA Engineer execution via the mobile app. Implements the \"Cipher plans strategy, PA executes\" workflow where findings from dev-01 (Kali) testing feed back into the planner to refine the next phase without Cipher manually re-deriving attack paths.",
+    "mtime": 1776379066647.0483,
+    "indexed_at": 1779025339298
+  },
+  "backend/bridge/agent-spawner.js": {
+    "intent": "Handles post-directive git operations and smart deployment: merges worktree branches to main, auto-detects deployment tier (HOT for JS-only changes → Android OTA ~25s + iOS CI in parallel; WARM for native changes → both CI builds), and exposes `smartDeploy` to the `merge-and-deploy` endpoint. Manages branch cleanup, log rotation, and runtime configuration (concurrency limits, timeouts, stall detection) for the directive pipeline.",
+    "mtime": 1779023717078.4421,
+    "indexed_at": 1779025340682
+  },
+  "backend/bridge/approval-gate.js": {
+    "intent": "Gates outbound messages (WhatsApp, Gmail personal/ozzu, Chat) by requiring FaceID biometric approval from the mobile app before the bridge relays them—blocks sends until the user scans their face within 5 minutes. Defines a hardcoded policy mapping which tool methods trigger approval, extracts recipient/message summary for the approval UI, and polls for approval status before returning success or timeout.",
+    "mtime": 1776180504356.5862,
+    "indexed_at": 1779025341174
+  },
+  "frontend/lib/useEntity.ts": {
+    "intent": "Provides a React hook that retrieves Home Assistant entity state from a shared HA context, enabling components to fetch smart home device data (sensors, lights, switches) by ID without managing individual HA connections. Decouples Home Assistant integration from individual components for reusability across Ozzu's UI.",
+    "mtime": 1773151050693.8772,
+    "indexed_at": 1779025341948
+  },
+  "backend/bridge/autonomous-loop.js": {
+    "intent": "AutonomousLoop coordinates autonomous security objective execution by cycling Cipher's analysis and planning (via AttackPlanner) with Joko agent execution, tracking state through ObjectiveEngine until the objective is met or escalation occurs. It's the orchestrator for SOC/pentest campaigns where strategy decisions and execution steps iterate until success or human intervention is needed.",
+    "mtime": 1776379066648.0486,
+    "indexed_at": 1779025342649
+  },
+  "backend/bridge/build-verifier.js": {
+    "intent": "Detects whether a directive branch has frontend-only, backend, or native changes by diffing against main, then runs appropriate verification checks to gate the merge-and-deploy pipeline. This ensures the right build tier (HOT for JS-only, WARM for native) is triggered when the directive completes, avoiding expensive iOS/Android CI builds for code-only changes.",
+    "mtime": 1773431284458.0374,
+    "indexed_at": 1779025342972
+  },
+  "backend/bridge/cipher-daemon.js": {
+    "intent": "This daemon automatically spawns Claude agents to investigate and recover from infrastructure failures (service outages, deploy failures, GPU errors, directive blocks) without waiting for manual intervention, routing tasks between Haiku (cheap status checks) and Sonnet (complex fixes) to optimize cost. It implements rate-limiting (max 1 event type per 5 min, 5 spawns/hour total) and supports autonomous enrichment (KAIROS) and dream-search features for the intelligence pipeline.",
+    "mtime": 1777738202151.4524,
+    "indexed_at": 1779025342997
+  },
+  "backend/bridge/correlation-engine.js": {
+    "intent": "Correlates disparate OSINT findings into linked identities by pattern-matching names, emails, usernames, shared breaches, and platform overlap—feeding the Intelligence Pipeline's analysis stage. Exposed via endpoints like `getGraphData()` and `getProfileCorrelations()` to render identity graphs and relationship networks in the SOC console during red-team intelligence work.",
+    "mtime": 1773151049565.7947,
+    "indexed_at": 1779025347890
+  },
+  "backend/bridge/db.js": {
+    "intent": "Provides PostgreSQL connection pooling and query helpers for the Ozzu bridge server, enabling persistent storage for directives, ventures, SOC engagements, service status, and approvals across the mobile app and backend systems. Includes automatic reconnection logic and migration helpers from Redis.",
+    "mtime": 1776379066650.0486,
+    "indexed_at": 1779025349392
+  },
+  "backend/bridge/cipher-agent.js": {
+    "intent": "Runs a persistent Claude Agent session that autonomously monitors Ozzu's infrastructure services (postgres, redis, nginx, vast-gpu) via the bridge REST API, responds to watchdog/recovery alerts, and processes approved directives from the work queue. Replaces the subprocess-based cipher-daemon with a warm, long-running agent that maintains session continuity and enforces rate limits (10 runs/hour, 30 turns per run).",
+    "mtime": 1777738202150.4524,
+    "indexed_at": 1779025351114
+  },
+  "backend/bridge/cipher-pipeline.js": {
+    "intent": "Deepgram STT/TTS pipeline that powers voice conversations with the Cipher assistant, supporting both on-device audio for iPhone (SFSpeechRecognizer/AVSpeechSynthesizer) and remote Deepgram audio. Routes voice requests through Claude Opus Agent SDK to execute operational tasks via MCP bridge tools, keeping Cipher as a conversational router rather than direct code executor.",
+    "mtime": 1773151049565.7947,
+    "indexed_at": 1779025351522
+  },
+  "backend/bridge/er605-client.js": {
+    "intent": "Provides authenticated access to the TP-Link ER605 router's JSON API, querying DHCP clients, WAN status, VPN state, and system info via RSA-encrypted login. Powers the Ops/infrastructure dashboards by exposing network telemetry from the proxy router to the bridge backend, enabling real-time visibility into residential VPN connectivity and device assignments.",
+    "mtime": 1777738371155.4202,
+    "indexed_at": 1779025351800
+  },
+  "backend/bridge/face-search-scraper.js": {
+    "intent": "Automates reverse image searches on Google Lens, Yandex, and Bing to scrape face matches from public web results. Part of the Intelligence Pipeline's COLLECT phase — feeds the OSINT reconnaissance loop for target identification and social media correlation in the SOC platform.",
+    "mtime": 1773151049566.7947,
+    "indexed_at": 1779025352518
+  },
+  "backend/bridge/face-engine.js": {
+    "intent": "Provides ArcFace face embedding + Qdrant vector search for biometric matching across candidate images (browser scrapers, APIs, enrichment sources) used in the intelligence pipeline's recon phase. Exposes `/embed`, `/index`, and `/search` endpoints to ingest target faces and match them against collected candidates with configurable similarity thresholds.",
+    "mtime": 1773151049566.7947,
+    "indexed_at": 1779025353386
+  },
+  "backend/bridge/face-crawler.js": {
+    "intent": "Continuously crawls Wikipedia, Reddit, news sites, and other public sources for face images, embeds them via ArcFace, and indexes into Qdrant to build a searchable face database. Supports facial identification capabilities across the intelligence pipeline and SOC red team platform.",
+    "mtime": 1773151049566.7947,
+    "indexed_at": 1779025354226
+  },
+  "backend/bridge/fleet/fleet-manager.js": {
+    "intent": "Manages the Redroid Android device fleet (emulators), handling device provisioning, health checks, start/stop lifecycle, and proxy routing for network isolation across instances. Provides endpoints to list/register devices, assign proxy accounts, and monitor fleet health — enabling distributed automation and multi-account testing across isolated Android instances.",
+    "mtime": 1776091230735.2478,
+    "indexed_at": 1779025357113
+  },
+  "backend/bridge/face-sources.js": {
+    "intent": "Aggregates face image candidates from 10+ public sources (reverse image search via Yandex/Bing/Google Lens, name-based searches, Wikipedia/Wikidata, social media scraping, and paid APIs) to build bulk candidate pools for the Qdrant face identification engine. Feeds the intelligence pipeline and SOC red-team platform to improve re-identification accuracy by collecting 300+ candidates per target instead of single-source results.",
+    "mtime": 1773151049567.795,
+    "indexed_at": 1779025358747
+  },
+  "backend/bridge/influence/account-pool.js": {
+    "intent": "Manages a rotating pool of social media accounts (Twitter, LinkedIn, Facebook, TikTok, etc.) for the Influence OSINT collection platform, tracking health status (good/cooldown/restricted/banned), enforcing rate-limit cooldowns, and rotating accounts when exhausted or blocked. Feeds into the Intelligence Pipeline's COLLECT stage and provides account selection logic for automated scraping sessions across multiple platforms.",
+    "mtime": 1775979515715.931,
+    "indexed_at": 1779025358904
+  },
+  "backend/bridge/influence/auto-discover.js": {
+    "intent": "This is the OSINT auto-discovery engine for the **Influence** platform, using tools like holehe, sherlock, maigret, h8mail, phoneinfoga, and theHarvester to resolve email/username/phone to social profiles and breach data across multiple platforms. It feeds enriched identity data into the intelligence pipeline stages (collect → normalize → enrich → store → analyze → act) that power the social media management and red team consulting services.",
+    "mtime": 1776009015565.7988,
+    "indexed_at": 1779025359446
+  },
+  "backend/bridge/influence/enricher.js": {
+    "intent": "Enriches normalized OSINT observations by matching faces across 51M+ vectors in Qdrant (cross-platform identity resolution), extracting entities via Claude NLP, and inferring relationships to auto-link observations to knowledge graph subjects. This is stage 3 (ENRICH) of the intelligence pipeline (`dir_1775980363354`) that powers the Influence venture's identity-resolution backbone.",
+    "mtime": 1775984220995.3022,
+    "indexed_at": 1779025361312
+  },
+  "backend/bridge/influence/collector.js": {
+    "intent": "Automates social media profile scraping on a Redroid Android instance (via ADB) to collect public OSINT data—handles account pooling, CAPTCHA solving, and profile normalization—then stores raw observations into the `kg_observations` table as the COLLECT stage of the Intelligence Pipeline. Exists as a backend service (runs on port 3335) that feeds the Influence venture's knowledge graph with social media intelligence.",
+    "mtime": 1776009015565.7988,
+    "indexed_at": 1779025361674
+  },
+  "backend/bridge/influence/captcha-solver.js": {
+    "intent": "Solves reCAPTCHA v2 and hCaptcha challenges during automated WebView interactions by extracting sitekeys, calling CapSolver API, and injecting solution tokens via Chrome DevTools Protocol. Enables the Influence social media automation platform to bypass CAPTCHA on account creation and login flows.",
+    "mtime": 1775978431925.4502,
+    "indexed_at": 1779025362247
+  },
+  "backend/bridge/influence/discovery.js": {
+    "intent": "Crawls Twitter follower/following lists via ADB on the phone to discover new subjects, auto-creates Knowledge Graph entries for them, and indexes faces into the KG_faces store. Feeds discovered subjects into the Intelligence Pipeline's COLLECT stage to expand the network graph for the Influence (social media management) platform.",
+    "mtime": 1775985025607.3738,
+    "indexed_at": 1779025362510
+  },
+  "backend/bridge/influence/index.js": {
+    "intent": "Manages real social media accounts (with consent) by orchestrating Dolphin Anty browser profiles, Decodo proxies, and CapSolver CAPTCHA solving for automated content posting and account operations. Provides encrypted credential storage and REST endpoints for account lifecycle management (create, list, delete profiles) backing the Influence venture's account automation platform.",
+    "mtime": 1775974185982.4053,
+    "indexed_at": 1779025366029
+  },
+  "backend/bridge/influence/identity-resolver.js": {
+    "intent": "Implements Fellegi-Sunter probabilistic matching to disambiguate which social media accounts across platforms (discovered by sherlock/maigret) belong to the same real person, scoring candidates as CONFIRMED/PROBABLE/POSSIBLE/UNLIKELY based on username affinity, bio semantics, and metadata. Bridges Phase 1.5 username enumeration to Phase 2 profile data collection in the Influence social intelligence pipeline.",
+    "mtime": 1776010437873.6155,
+    "indexed_at": 1779025368304
+  },
+  "backend/bridge/influence/normalizer.js": {
+    "intent": "Parses raw ADB scrapes from Instagram/LinkedIn/social collectors into structured entity data — normalized counts, joined dates, cleaned text — for the Intelligence Pipeline's NORMALIZE stage. Extracts and stores profile photos for Qdrant face-matching integration in the knowledge graph (dir_1775980363354).",
+    "mtime": 1775984220995.3022,
+    "indexed_at": 1779025369054
+  },
+  "backend/bridge/influence/posting-engine.js": {
+    "intent": "Automates content posting to social media platforms (Instagram, Twitter, Facebook, TikTok, etc.) by launching headful browser instances with Puppeteer stealth + residential proxies, logging in via pre-configured Dolphin Anty accounts, and executing post operations. Part of the Influence venture (dir_1775926142812) — a social media management platform that Ozzu offers as a service.",
+    "mtime": 1777738371155.4202,
+    "indexed_at": 1779025369156
+  },
+  "backend/bridge/lib/devices.js": {
+    "intent": "This module provides a unified registry for Ozzu's infrastructure—devices, IPs, SSH specs, and secrets—so bridge endpoints and orchestration code can query device configuration via functions like `getDevice('dev-01')` and `getSshSpec()` instead of hardcoding addresses. It reads from `infra/devices.json` and loads secret env vars, enabling dynamic SSH connections and device management (dev-01, tablets, GCP VM, etc.) without scattered credential duplication.",
+    "mtime": 1777738371156.4204,
+    "indexed_at": 1779025369748
+  },
+  "backend/bridge/kairos-identity-resolve.js": {
+    "intent": "Runs as a cron job to automatically resolve pending identity candidates in the knowledge graph by executing the Fellegi-Sunter matching cascade (Stage 1: offline statistical matching; Stage 2: on-device ADB validation) against subjects via `/kg/subjects/{id}/identity-candidates`. Supports the Intelligence Pipeline's ability to auto-identify individuals in video/image evidence without manual lookup, processing candidates in configurable batches.",
+    "mtime": 1776010437873.6155,
+    "indexed_at": 1779025371213
+  },
+  "backend/bridge/infra-monitor.js": {
+    "intent": "Probes all infrastructure devices (Rock Pi, dev-01, ESP32 nodes) for service health and network state, serving cached results via `getState()` for MCP tools and operational dashboards. Enables the Ops/Services screens to show live status of hostapd, positioning hub, OTA servers, and BLE connectivity without direct network access from the Docker bridge container.",
+    "mtime": 1777738371156.4204,
+    "indexed_at": 1779025371607
+  },
+  "backend/bridge/logger.js": {
+    "intent": "Provides structured, configurable logging for all bridge backend services and REST endpoints—directives management, SOC engagements, OctoPrint print pipeline, and orchestration tasks. Supports text and JSON output formats with runtime log-level filtering, enabling consistent observability across the backend.",
+    "mtime": 1773151049568.3618,
+    "indexed_at": 1779025372650
+  },
+  "backend/bridge/kairos-osint-enrich.js": {
+    "intent": "Enriches KAIROS knowledge graph observations with Claude Haiku NLP analysis, processing un-enriched entries in batches, extracting entities/relationships, and storing results back to the database. Implements the ENRICH stage of the intelligence pipeline (dir_1775980363354), transforming raw OSINT data into semantically-annotated graph nodes for the Influence platform.",
+    "mtime": 1776010437874.6155,
+    "indexed_at": 1779025373151
+  },
+  "backend/bridge/metrics-tracker.js": {
+    "intent": "Lightweight metrics collector that tracks in-memory usage counters for Gemini (audio sessions, tool calls), Cipher (agent spawns/failures), Spotify API calls, Bridge WebSocket/HTTP traffic, and Pipeline violations — resetting daily at midnight. Flushes aggregated daily snapshots to PostgreSQL every 5 minutes to provide observability into system load and operational health across Ozzu's multi-component architecture.",
+    "mtime": 1773151049568.3618,
+    "indexed_at": 1779025377038
+  },
+  "backend/bridge/objective-engine.js": {
+    "intent": "Autonomous penetration testing loop: takes a security objective (e.g., \"gain root on 192.168.1.15\"), breaks it into attack steps, and iterates until success—Cipher decides → Joko executes → Cipher analyzes results → repeat. Powers SOC engagements on the bridge backend, tracking access levels, generating attack narratives, and reporting evidence chains back to the mobile app.",
+    "mtime": 1776379066650.0486,
+    "indexed_at": 1779025377426
+  },
+  "backend/bridge/mcp-proxy.js": {
+    "intent": "Proxies JSON-RPC requests from the bridge to external MCP servers (WhatsApp via SSE, Gmail accounts via HTTP), managing persistent connections and automatic reconnection logic. Enables Ozzu's intelligence pipeline and communication features to pull email/messages and send notifications through WhatsApp and Gmail without embedding those protocols directly in the bridge.",
+    "mtime": 1776201908121.7668,
+    "indexed_at": 1779025378385
+  },
+  "backend/bridge/octoprint-pipeline.js": {
+    "intent": "Orchestrates the complete 3D print pipeline: takes STL files, slices them locally on the bridge VM using PrusaSlicer (Ender V3 SE profile, 0.2mm layers, PETG 230°C), and uploads the resulting gcode to OctoPrint for printing. Lets directives queue prints with metadata and status tracking, removing dev-01 from the slice path to avoid network dependency.",
+    "mtime": 1778953268126.8743,
+    "indexed_at": 1779025380932
+  },
+  "backend/bridge/octoprint-recorder.js": {
+    "intent": "Records the tablet's camera feed (`http://10.9.0.7:5001/mjpeg`) to MP4 during 3D prints via ffmpeg running locally on the bridge, triggered by OctoPrint webhooks (PrintStarted/Done). Stores finished videos in the Files app under \"3D Prints\" folder and registers them in postgres.",
+    "mtime": 1778953268126.8743,
+    "indexed_at": 1779025380985
+  },
+  "backend/bridge/orchestrator.js": {
+    "intent": "Persistent session manager for the Claude orchestrator running on the bridge VM — maintains full conversation context and learned knowledge across multiple CLI invocations, enabling multi-turn directive automation without losing state. Provides internal APIs (sendMessage, handleResponse, getSessionInfo) that bridge endpoints call to orchestrate complex backend work requiring stateful reasoning.",
+    "mtime": 1773151050658.8748,
+    "indexed_at": 1779025381170
+  },
+  "backend/bridge/osint-analysis-engine.js": {
+    "intent": "Grades OSINT source reliability (A-F scale) and synthesizes findings via LLM into threat assessments with exposure scores, powering Ozzu's Intelligence Pipeline platform. Supports the SOC module's ability to convert raw data from dozens of Colombian government databases (DIAN, RUES, SECOP, etc.), HIBP, VirusTotal, and news sources into CIA-style intelligence briefs for threat analysis.",
+    "mtime": 1773151050658.8748,
+    "indexed_at": 1779025381615
+  },
+  "backend/bridge/octoprint-client.js": {
+    "intent": "REST client that abstracts OctoPrint API calls (login, upload gcode, start/cancel print, get status) to the server running on the tablet. The bridge uses it to implement the `/octoprint/print` endpoint, which orchestrates the 3D print pipeline (STL → slice → upload → print on the Ender V3 SE).",
+    "mtime": 1778953268126.8743,
+    "indexed_at": 1779025382575
+  },
+  "backend/bridge/osint-cli-runner.js": {
+    "intent": "Orchestrates OSINT tool execution (maigret, exiftool, etc.) inside a Docker container with concurrency control and health checking, enabling the intelligence pipeline to gather threat intelligence data. Routes tool requests from bridge endpoints through a semaphore to prevent resource exhaustion when running multiple concurrent scans.",
+    "mtime": 1773151050658.8748,
+    "indexed_at": 1779025384657
+  },
+  "backend/bridge/osint-correlator.js": {
+    "intent": "This correlator converts raw OSINT scan findings (username enums, HIBP breaches, DNS records, social profiles) into an entity relationship graph by extracting identities and mapping connections between them with confidence scores. It powers the Intelligence Pipeline's enrichment stage—taking disparate scan results and building a unified view of linked accounts, email addresses, and personas for SOC reporting.",
+    "mtime": 1773151050658.8748,
+    "indexed_at": 1779025385408
+  },
+  "backend/bridge/osint-browser-helper.js": {
+    "intent": "Wraps a Playwright browser container (port 3334) to automate web scraping, form filling, screenshots, and CAPTCHA detection for OSINT reconnaissance. Supports the Intelligence Pipeline's COLLECT phase by enabling methods like `navigate`, `fillAndSubmitForm`, and `detectCaptcha` for automated intelligence gathering without manual browser interaction.",
+    "mtime": 1773151050658.8748,
+    "indexed_at": 1779025389877
+  },
+  "backend/bridge/osint-dossier-generator.js": {
+    "intent": "Aggregates OSINT findings across social media, professional networks, gaming, and messaging platforms into structured intelligence dossiers organized by severity and temporal windows. Provides the `generateDossier()` function that outputs markdown-formatted threat assessments for the intelligence pipeline's ANALYZE stage, supporting the broader COLLECT → ENRICH → STORE → ANALYZE → ACT workflow.",
+    "mtime": 1773151050658.8748,
+    "indexed_at": 1779025391036
+  },
+  "backend/bridge/osint-ekf-engine.js": {
+    "intent": "Extended Kalman Filter that fuses observations from 20+ OSINT modules (face search, social media intel, data brokers, domain recon, phone lookup, etc.) into unified confidence scores for person identification, location, age, employer, and threat level. Feeds the Intelligence Pipeline (stage 4-5: STORE/ANALYZE) and SOC red-team consulting platform to synthesize fragmented public data into actionable person-of-interest profiles with quantified certainty.",
+    "mtime": 1773151050659.8748,
+    "indexed_at": 1779025391887
+  },
+  "backend/bridge/osint-modules/abuseipdb-lookup.js": {
+    "intent": "This module queries AbuseIPDB API to gather IP reputation and abuse history data, feeding the OSINT intelligence pipeline's COLLECT phase with malicious IP patterns. The findings populate the SOC platform's reconnaissance reports (SKYLINE-SOC engagements) and security assessments.",
+    "mtime": 1773151050659.8748,
+    "indexed_at": 1779025392526
+  },
+  "backend/bridge/osint-engine.js": {
+    "intent": "Orchestrates open-source intelligence scans across multiple OSINT modules (correlator, identity clustering, pivot analysis, EKF engine) with rate limiting and concurrent execution, calculating exposure scores and recording threat snapshots. Powers the ANALYZE stage of Ozzu's intelligence pipeline by aggregating reconnaissance data, clustering identities, and triggering remediation workflows for the SOC platform.",
+    "mtime": 1773151050659.8748,
+    "indexed_at": 1779025392585
+  },
+  "backend/bridge/osint-modules/avatar-compare.js": {
+    "intent": "Compares uploaded avatar images against a database of avatars collected from other profiles using perceptual hashing to identify matching identities across platforms; part of the OSINT intelligence pipeline for cross-account reconnaissance and profile linking. Returns similarity scores and top matches, enabling investigators to correlate the same person across multiple social media profiles.",
+    "mtime": 1773151050660.476,
+    "indexed_at": 1779025392671
+  },
+  "backend/bridge/osint-identity-cluster.js": {
+    "intent": "Groups OSINT entities (profiles, accounts, emails) into identity clusters by comparing face similarity scores, username patterns, email domains, shared data breaches, and platform overlap to identify likely same-person accounts. Clustering results are stored to the database and consumed by the intelligence pipeline's identity resolution and SOC analysis workflows.",
+    "mtime": 1773151050659.8748,
+    "indexed_at": 1779025394454
+  },
+  "backend/bridge/osint-modules/bluesky-intel.js": {
+    "intent": "Collects open-source intelligence from Bluesky profiles (display name, bio, followers, posts, engagement) via the public AT Protocol API, feeding the Intelligence Pipeline's COLLECT stage. Part of Ozzu's Palantir-model OSINT system (dir_1775980363354) that aggregates social platform data for the SOC platform's analysis phase.",
+    "mtime": 1773151050660.476,
+    "indexed_at": 1779025396326
+  },
+  "backend/bridge/osint-modules/amass-cli.js": {
+    "intent": "Enables passive domain reconnaissance in SOC engagements by wrapping the Amass CLI tool to enumerate subdomains via DNS, certificate transparency, and web archives for a given domain. Returns normalized findings that feed the intelligence pipeline's COLLECT phase, flowing through ENRICH → STORE → ANALYZE stages to support red team vulnerability assessment reports (e.g., OZZU-SEC-2026-001).",
+    "mtime": 1773151050660.476,
+    "indexed_at": 1779025398087
+  },
+  "backend/bridge/osint-modules/co-contraloria.js": {
+    "intent": "This OSINT module queries Colombia's Comptroller General database to retrieve fiscal responsibility records for a given cédula (national ID), exposing any documented cases of fiscal misconduct or administrative sanctions. It handles ASPX form extraction and session management to enrich threat profiles used by the intelligence pipeline's enrichment stage.",
+    "mtime": 1773151050660.476,
+    "indexed_at": 1779025399243
+  },
+  "backend/bridge/osint-modules/co-adres.js": {
+    "intent": "Queries Colombia's ADRES health system (miseguridadsocial.gov.co) to extract health plan affiliation and enrollment data for a cédula, returning structured findings about health provider and coverage status. Integrates into the bridge backend's OSINT module pipeline (`osint-modules/`) for enriching intelligence profiles with government database lookups, feeding the intelligence collection system.",
+    "mtime": 1773151050660.476,
+    "indexed_at": 1779025400912
+  },
+  "backend/bridge/osint-modules/co-policia.js": {
+    "intent": "OSINT module for the intelligence pipeline's COLLECT stage that queries Colombian National Police (srvcnpc.policia.gov.co) for criminal backgrounds and traffic violations by cédula. Handles ASPX form submission with ViewState authentication and returns structured findings (severity, raw records) that feed into profile enrichment for the broader ANALYZE and ACT stages.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025403972
+  },
+  "backend/bridge/osint-modules/co-fiscalia.js": {
+    "intent": "Validates Colombian cédulas and provides OSINT findings for the intelligence pipeline by returning manual-lookup guidance for the Fiscalía (criminal prosecution database), which has no public API. Feeds background-check and due-diligence workflows in Ozzu's SOC consulting platform.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025404049
+  },
+  "backend/bridge/osint-modules/co-dian.js": {
+    "intent": "This module performs DIAN RUT (Colombian tax registration) lookups for individuals and companies, querying open datasets on datos.gov.co when the main DIAN form is blocked by reCAPTCHA, returning tax status and company details as findings. It's part of Ozzu's intelligence pipeline (dir_1775980363354) and provides automated OSINT collection for background checks and business registration discovery in the SOC/analysis backend.",
+    "mtime": 1773151050660.476,
+    "indexed_at": 1779025404135
+  },
+  "backend/bridge/osint-modules/co-rama-judicial.js": {
+    "intent": "Queries Colombia's public judiciary court case database (`consultaprocesos.ramajudicial.gov.co`) by cédula to surface legal cases, judgments, and court status associated with a person. It's part of Ozzu's intelligence pipeline (COLLECT stage) that enriches profiles with OSINT findings for the Skyline SOC platform.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025404442
+  },
+  "backend/bridge/osint-modules/co-procuraduria.js": {
+    "intent": "Queries the Colombian Procuraduría General de la Nación's disciplinary database by cédula to collect public sanction and disciplinary records on individuals. Plugs into the OSINT collection stage of the intelligence pipeline (`co-procuraduria` scan module) to surface background findings on people during profile analysis.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025405843
+  },
+  "backend/bridge/osint-modules/co-redam.js": {
+    "intent": "Validates Colombian cédula numbers and scans the REDAM (delinquent child support) registry as part of the Intelligence Pipeline's OSINT collection stage (dir_1775980363354), returning exposure findings with remediation guidance for the SOC platform. Since REDAM now requires GOV.CO authentication, the module surfaces the finding and directs users to the official portal rather than attempting direct access.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025406561
+  },
+  "backend/bridge/osint-modules/co-registraduria.js": {
+    "intent": "Validates Colombian national ID cards (cédulas) through Registraduría Nacional's certificate API to determine current status (active/suspended/cancelled) and report findings with remediation guidance. Part of the OSINT collection pipeline (intelligence EPIC dir_1775980363354) for profile enrichment and person verification during red-team/SOC engagements.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025407739
+  },
+  "backend/bridge/osint-modules/co-rues.js": {
+    "intent": "**co-rues.js** queries Colombia's free RUES business registry (via datos.gov.co SODA API) to collect active/cancelled company registrations for a given NIT or cedula, returning exposure findings on business entities. It's part of the intelligence pipeline's COLLECT stage that feeds the SOC platform's OSINT scanning capabilities (called from `POST /soc/scan` endpoints for Colombian business/identity reconnaissance).",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025412969
+  },
+  "backend/bridge/osint-modules/co-sigep.js": {
+    "intent": "Queries Colombia's open public employee dataset (SIGEP II via datos.gov.co) by cédula to expose employment records, positions, and affiliated entities as part of the intelligence pipeline's COLLECT stage. It's one of several OSINT modules feeding the Influence/intelligence system with public data for corporate and personal reconnaissance.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025413441
+  },
+  "backend/bridge/osint-modules/co-utils.js": {
+    "intent": "Provides Colombian identity document validation (cédula de ciudadanía, NIT with DIAN checksum verification) and Colombian-specific HTTP utilities (headers, currency formatting, safe fetch helpers) to support OSINT intelligence pipeline work on Colombian subjects.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025414761
+  },
+  "backend/bridge/osint-modules/co-secop.js": {
+    "intent": "Collects intelligence on Colombian targets by querying government procurement contracts (SECOP II via datos.gov.co) to find contracts associated with a company NIT or personal cédula, extracting entity relationships, contract values, and dates. Plugs into the OSINT collection stage of Ozzu's intelligence pipeline for background research and entity mapping during threat assessments.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025415068
+  },
+  "backend/bridge/osint-modules/crtsh-monitor.js": {
+    "intent": "Monitors domain Certificate Transparency logs via crt.sh API to detect unexpected or rogue SSL certificates, deduplicating results and extracting subdomains as intelligence findings. Integrates with the SOC platform's OSINT pipeline (ANALYZE stage) to surface infrastructure risks across monitored profiles.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025415629
+  },
+  "backend/bridge/osint-modules/co-risk-score.js": {
+    "intent": "Aggregates Colombian OSINT findings from other co-* modules (Policía records, Procuraduría discipline, financial fraud, identity exposure) into a composite risk score for cedula/NIT profiles — part of the intelligence pipeline's ANALYZE stage. Weights findings by severity and type across legal, financial, identity, and exposure categories to produce a consolidated risk metric for due-diligence threat assessment.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025416754
+  },
+  "backend/bridge/osint-modules/co-simit.js": {
+    "intent": "Queries Colombia's traffic violation database (SIMIT/fcm.org.co) to check if a cédula has registered fines, returning findings in standard OSINT format. Part of the intelligence pipeline that enriches person profiles with public records during background research for SOC engagements and due diligence workflows.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025417131
+  },
+  "backend/bridge/osint-modules/darkweb-search.js": {
+    "intent": "Searches the dark web via Ahmia.fi clearnet gateway for mentions of email addresses, usernames, domains, or phone numbers on .onion sites, returning exposure findings for the OSINT profile being analyzed. It's part of Ozzu's intelligence collection pipeline (COLLECT stage) that feeds threat data into the SOC platform's analysis workflow.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025419495
+  },
+  "backend/bridge/osint-modules/co-libreta-militar.js": {
+    "intent": "Validates Colombian military service records (Libreta Militar) for profiles containing a cedula, returning an info finding with a manual lookup link since no public API exists. It's part of Ozzu's intelligence pipeline that enriches person profiles during OSINT collection for threat assessment and background research.",
+    "mtime": 1773151050660.8748,
+    "indexed_at": 1779025421349
+  },
+  "backend/bridge/osint-modules/data-broker.js": {
+    "intent": "OSINT module that checks if names/usernames appear on public data brokers (Spokeo, BeenVerified, WhitePages, etc.) and returns exposure findings with remediation guidance. Feeds the Intelligence Pipeline's COLLECT/ENRICH phases and surfaces in SOC engagement reports as doxing-risk indicators during red team consulting deliverables.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025422419
+  },
+  "backend/bridge/osint-modules/domain-recon.js": {
+    "intent": "Performs DNS enumeration, subdomain brute-forcing, and IP geolocation lookups on a given domain, returning structured findings (A/AAAA/MX/NS/TXT/SOA records, certificate transparency data, subdomain IPs) as part of domain reconnaissance profiles. It's a pluggable OSINT module in the intelligence pipeline that feeds domain findings into the /soc endpoints for red team engagement reports.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025423932
+  },
+  "backend/bridge/osint-modules/document-meta.js": {
+    "intent": "Scans for publicly exposed documents (PDFs/DOCX files) containing a target email or username via Google Custom Search API and reports discovered documents with metadata as exposure findings. Feeds the SOC platform's intelligence pipeline (`/soc/*` endpoints) to enable automated document-based reconnaissance during the COLLECT phase of threat analysis.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025425947
+  },
+  "backend/bridge/osint-modules/email-domain.js": {
+    "intent": "This module analyzes email domains via DNS/MX records to gather OSINT intelligence—detecting disposable addresses, privacy providers, major mail services, and DMARC/SPF/DKIM configurations—feeding findings into the intelligence pipeline's COLLECT stage for profiling. It's part of the backend SOC platform's email-domain intelligence gathering, supporting the red-team consulting services and threat assessment workflows.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025426196
+  },
+  "backend/bridge/osint-modules/exif-extract.js": {
+    "intent": "Extracts EXIF/IPTC/XMP metadata (GPS coordinates, camera model, author, timestamps) from uploaded images using the `exifr` package, returning structured findings for the profile scanning system. It's part of Ozzu's OSINT (Open Source Intelligence) collection pipeline, enabling metadata-based intelligence gathering on images provided during security assessments or recon operations.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025426594
+  },
+  "backend/bridge/osint-modules/exiftool-cli.js": {
+    "intent": "This ExifTool CLI module extracts comprehensive metadata (EXIF, XMP, etc.) from images across 400+ formats as part of the Intelligence Pipeline's OSINT collection layer. It integrates with the bridge's osint-modules system to scan image profiles and return findings that feed into the SOC analysis platform (dir_1775980363354).",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025427242
+  },
+  "backend/bridge/osint-modules/dnstwist-scan.js": {
+    "intent": "This module is part of Ozzu's OSINT intelligence pipeline (COLLECT phase) that scans domains for typosquatting and phishing variants using dnstwist, returning findings to the SOC platform's threat analysis workflow. It's invoked by the bridge's osint-cli-runner when analyzing domain profiles and surfaces discovered lookalike domains as security findings for brand protection and threat detection.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025428977
+  },
+  "backend/bridge/osint-modules/face-match.js": {
+    "intent": "Uses ArcFace embeddings to match faces across intelligence profiles via a local face recognition API (`http://127.0.0.1:5555`), returning cosine similarity scores against configurable thresholds (0.4 normal, 0.6 high confidence). Enables the intelligence pipeline's ENRICH/ANALYZE stages to automatically detect and link the same person across multiple data sources and profiles.",
+    "mtime": 1773151050661.8748,
+    "indexed_at": 1779025429756
+  },
+  "backend/bridge/osint-modules/facebook-intel.js": {
+    "intent": "This module extracts public Facebook page intelligence (name, about, followers, recent posts) by scraping mbasic.facebook.com and Google cache via a browser automation API, using safe timeout-wrapped fetches to handle network failures gracefully. It's part of Ozzu's OSINT pipeline for the SOC platform, feeding social media reconnaissance into the broader intelligence collection stage.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025430214
+  },
+  "backend/bridge/osint-modules/face-search.js": {
+    "intent": "Performs biometric face identification by embedding uploaded images via ArcFace and searching against Qdrant-indexed face collections, returning match scores and metadata as OSINT findings. Enables the SOC/intelligence pipeline to identify individuals during reconnaissance by integrating with the profile-scanning system that feeds the `POST /soc/` engagement workflow.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025430513
+  },
+  "backend/bridge/osint-modules/github-intel.js": {
+    "intent": "This GitHub OSINT module scans public GitHub profiles by username to extract profile metadata, repos, contributions, organizations, and contact info as structured intelligence findings. It feeds the collection stage of Ozzu's intelligence pipeline (dir_1775980363354), which powers the SOC platform's OSINT capability.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025435511
+  },
+  "backend/bridge/osint-modules/gravatar-lookup.js": {
+    "intent": "Scans whether an email address has a public Gravatar profile and extracts any exposed metadata (display name, bio, location, linked accounts) as findings — part of the OSINT intelligence pipeline for the SOC red-team platform. Returns a severity rating based on information exposure and suggests remediation (unlinking/deleting the profile).",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025436028
+  },
+  "backend/bridge/osint-modules/ghunt-email.js": {
+    "intent": "GHunt email module extracts Gaia IDs, profile photos, linked services, and Maps activity from Gmail addresses, returning structured OSINT findings. It's part of the SOC platform's intelligence pipeline for threat reconnaissance and security assessments.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025437026
+  },
+  "backend/bridge/osint-modules/h8mail-cli.js": {
+    "intent": "This module integrates h8mail CLI into Ozzu's OSINT pipeline to scan email addresses against known breach databases and return findings about compromised credentials. It exists to support the SOC platform's intelligence-gathering workflow for security assessments and client vulnerability research.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025438438
+  },
+  "backend/bridge/osint-modules/geoint-collector.js": {
+    "intent": "Extracts location signals from other OSINT modules' findings and enriches them with coordinates via Nominatim (text locations) and ip-api.com (IP geolocation). Feeds geocoded findings into the SOC intelligence pipeline's ENRICH stage to enable geospatial threat analysis and proximity-based correlation of indicators.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025438469
+  },
+  "backend/bridge/osint-modules/hibp-email.js": {
+    "intent": "Checks if an email address appears in known data breaches via the Have I Been Pwned API, returning severity-categorized breach findings for profile reconnaissance. Part of the `/soc/scan` intelligence pipeline's COLLECT/ENRICH stages, feeding breach data into the broader threat-analysis workflow for the SOC platform.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025439309
+  },
+  "backend/bridge/osint-modules/fullcontact-lookup.js": {
+    "intent": "FullContact API enrichment module that aggregates public identity data (employment, social links, family) from email/phone profiles as OSINT findings. Implements the ENRICH stage of the Intelligence Pipeline (dir_1775980363354) — a 6-stage system supporting SOC engagement analysis and red team consulting services.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025440357
+  },
+  "backend/bridge/osint-modules/hibp-password.js": {
+    "intent": "Checks if passwords appear in public data breaches via HIBP's k-anonymity API, assigning severity (critical/high/medium/low) based on breach prevalence. Plugs into the intelligence pipeline's OSINT scanning stage (`/osint-modules/`) as a reusable module for the SOC/red-team platform to assess credential compromise risk.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025442199
+  },
+  "backend/bridge/osint-modules/hunter-lookup.js": {
+    "intent": "Scans domains via Hunter.io API to enumerate email addresses and verify them, returning structured findings in the identity category for the OSINT pipeline. Feeds discovery data into the intelligence collection phase for reconnaissance on targets.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025445197
+  },
+  "backend/bridge/osint-modules/holehe-cli.js": {
+    "intent": "Holehe-cli scans an email address against 120+ online services to detect registered accounts and recovery information, returning standardized findings for integration into the bridge's OSINT analysis. It supports the SOC platform's email-based reconnaissance phase within the larger intelligence collection pipeline.",
+    "mtime": 1773151050662.875,
+    "indexed_at": 1779025445289
+  },
+  "backend/bridge/osint-modules/identity-resolver.js": {
+    "intent": "Extracts usernames from social media URLs (Instagram, Twitter, LinkedIn, GitHub, etc.) found in face-search and scene-analysis findings, then cross-references them to build identity candidate profiles with confidence scores. Part of the SOC platform's intelligence pipeline (ANALYZE stage) that feeds identity matches to the findings system for red team engagement planning.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025446033
+  },
+  "backend/bridge/osint-modules/leak-search.js": {
+    "intent": "Searches IntelligenceX's breach database for leaked credentials tied to email/username profiles, returning findings (breaches, severity levels) that feed into the Intelligence Pipeline's OSINT collection stage. Supports the SOC platform's reconnaissance phase by aggregating breach data for security assessment and red-team consulting engagements.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025449412
+  },
+  "backend/bridge/osint-modules/image-search.js": {
+    "intent": "Collects profile avatars from Gravatar, GitHub, and Reddit, then reverse-searches them via TinEye/Yandex/Google Vision to find where those images appear online while extracting EXIF metadata. It's the image-reconnaissance stage of the Intelligence Pipeline's OSINT collection module.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025449846
+  },
+  "backend/bridge/osint-modules/linkedin-intel.js": {
+    "intent": "Passive LinkedIn reconnaissance module that executes Google/Bing dorks and Google Custom Search Engine queries to gather profile, job history, and connection data without requiring login credentials. Feeds findings into the intelligence pipeline's OSINT collection stage (dir_1775980363354) to enrich person/company profiles for the SOC platform and red-team research workflows.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025451051
+  },
+  "backend/bridge/osint-modules/maigret-cli.js": {
+    "intent": "Maigret username reconnaissance module for the SOC/OSINT pipeline—searches a given username across 2500+ public websites and returns structured findings (e.g., account_found, contact_info) that feed into the bridge's `/soc/*` REST API and mobile app SOC tab. Part of the broader intelligence pipeline (dir_1775980363354) used in security assessments and red-team engagements.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025453851
+  },
+  "backend/bridge/osint-modules/instagram-intel.js": {
+    "intent": "Implements Instagram OSINT collection for the intelligence pipeline — extracts public profile metadata (bio, followers, posts, verified status) via Instagram's unauthenticated API endpoint with browser User-Agent spoofing and rate-limiting. Findings feed into the normalize/enrich stages of the COLLECT→STORE→ANALYZE pipeline for competitive and threat intelligence.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025454186
+  },
+  "backend/bridge/osint-modules/mastodon-intel.js": {
+    "intent": "Mastodon Intelligence module scans major ActivityPub instances (mastodon.social, fosstodon.org, infosec.exchange, etc.) for username profiles, returning WebFinger lookups and recent statuses as intelligence findings. Part of the intelligence pipeline's COLLECT stage — feeds profile reconnaissance into the SOC/red-team platform.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025455215
+  },
+  "backend/bridge/osint-modules/movement-intel.js": {
+    "intent": "Provides OSINT collection for the intelligence pipeline by querying Wi-Fi networks (WiGLE API), flight trajectories (OpenSky), and ship positions near known VIP coordinates to correlate movement patterns with infrastructure. Feeds location and infrastructure data into the COLLECT/ENRICH stages of the Palantir-model intelligence system King Kazuma is building.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025455961
+  },
+  "backend/bridge/osint-modules/otx-lookup.js": {
+    "intent": "AlienVault OTX threat intelligence module that scans domains, IPs, and emails against known malicious indicators and returns findings (pulse membership, passive DNS, geolocation risk). Feeds the SOC intelligence pipeline with indicator context during profile analysis and recon operations.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025456421
+  },
+  "backend/bridge/osint-modules/paste-monitor.js": {
+    "intent": "Monitors public paste sites and search engine caches for exposed information using Google dork patterns (LinkedIn, PDFs, spreadsheets, etc.), returning findings with severity levels and remediation steps. Part of the OSINT intelligence pipeline to detect data leaks and assess exposure risk for the SOC platform.",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025457123
+  },
+  "backend/bridge/osint-modules/news-intel.js": {
+    "intent": "Collects news articles and headlines mentioning specific profiles (names/usernames) via Google News RSS and web search, feeding the intelligence pipeline's COLLECT stage. Provides free OSINT intelligence for the SOC platform's profile enrichment without requiring API keys.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025458894
+  },
+  "backend/bridge/osint-modules/nuclei-cli.js": {
+    "intent": "Nuclei is a template-based vulnerability scanner for domains and IPs that returns findings ranked by severity (medium/high/critical) to feed Ozzu's OSINT collection stage. It integrates into the 6-stage intelligence pipeline (COLLECT → NORMALIZE → ENRICH → STORE → ANALYZE → ACT, dir_1775980363354) that powers the SOC red-team analysis platform.",
+    "mtime": 1773151050663.875,
+    "indexed_at": 1779025459018
+  },
+  "backend/bridge/osint-modules/phone-lookup.js": {
+    "intent": "Phone number validation and OSINT enrichment module—formats E.164 numbers, maps country codes, and queries carrier/messaging-platform data via NumVerify and similar APIs to build contact intelligence on targets and associates. Part of the intelligence pipeline's COLLECT stage for target association mapping and reconnaissance.",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025461823
+  },
+  "backend/bridge/osint-modules/phoneinfoga-cli.js": {
+    "intent": "Performs phone number OSINT reconnaissance via PhoneInfoga CLI, extracting carrier data, line type, geolocation, and disposable number detection to feed structured findings into the SOC intelligence pipeline. Part of the broader OSINT collection layer for red team engagements and security assessments within the Ozzu app's SOC platform.",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025463204
+  },
+  "backend/bridge/osint-modules/pimeyes-search.js": {
+    "intent": "PimEyes face search module scans profile images against a 900M+ face database to identify where a target appears online, returning identity matches as structured findings. It's part of the OSINT intelligence pipeline (`/backend/bridge/osint-modules/`) that feeds identity discovery during security assessments, with deferred production activation ($30/mo API key).",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025464653
+  },
+  "backend/bridge/osint-modules/reddit-intel.js": {
+    "intent": "Extracts OSINT intelligence from Reddit profiles by querying the `/user/{username}/about.json` API endpoint to collect account metadata (age, karma, active subreddits, recent activity patterns) and content themes, returning findings about identity exposure and behavioral patterns. Plugs into the bridge's SOC intelligence pipeline as a reusable module for target reconnaissance during engagements.",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025465106
+  },
+  "backend/bridge/osint-modules/reverse-image.js": {
+    "intent": "Generates automated reverse image search URLs (Google Lens, Yandex, TinEye) for OSINT profiles and optionally performs face detection/web image matching via Google Vision API to identify image sources and exposure. Part of the Intelligence Pipeline's COLLECT stage, it serves the `/osint/images/` endpoint to enable reconnaissance and exposure analysis during investigations.",
+    "mtime": 1773157639237.2156,
+    "indexed_at": 1779025465623
+  },
+  "backend/bridge/osint-modules/photo-forensics.js": {
+    "intent": "Analyzes photos to extract geolocation intelligence via solar position matching, shadow-length triangulation, and regional heuristics — supports the OSINT intelligence pipeline's ANALYZE phase. Returns confidence-ranked location candidates used by security investigations and threat correlation workflows.",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025466793
+  },
+  "backend/bridge/osint-modules/scene-analysis.js": {
+    "intent": "Extracts intelligence signals from photographs using Gemini Vision API to analyze visual context (objects, text, scenes, geolocation clues) in OSINT image profiles. Feeds findings into the intelligence pipeline's ENRICH stage, supporting the six-stage collection-to-action system that drives the SOC platform (project_intelligence_pipeline.md, EPIC dir_1775980363354).",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025468584
+  },
+  "backend/bridge/osint-modules/satellite-intel.js": {
+    "intent": "Queries OpenStreetMap via Overpass Turbo to map infrastructure (government buildings, military facilities, embassies, helipads, marinas, security cameras) around target coordinates, feeding the Intelligence Pipeline's geospatial OSINT phase. Provides `queryOverpass()` function and `OSM_QUERIES` object for SOC reconnaissance and threat-assessment workflows.",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025470203
+  },
+  "backend/bridge/osint-modules/secret-scanner.js": {
+    "intent": "This GitHub secret scanner searches public repos for exposed credentials (API keys, tokens, private keys, DB URLs) using regex patterns and the GitHub Search API, returning findings ranked by severity. It's the OSINT collection layer for Ozzu's SOC/intelligence platform, feeding reconnaissance data into the broader COLLECT → NORMALIZE → ENRICH pipeline that powers red team consulting and threat analysis.",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025470320
+  },
+  "backend/bridge/osint-modules/social-deep.js": {
+    "intent": "Extracts deep profile intelligence (linked accounts, activity patterns, metadata) from social media platforms using free APIs, upgrading Ozzu's OSINT capabilities beyond basic username enumeration. Feeds the intelligence pipeline's COLLECT stage with enriched social media targeting data for recon and analysis work.",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025470935
+  },
+  "backend/bridge/osint-modules/shodan-lookup.js": {
+    "intent": "Queries the Shodan API to identify exposed servers, open ports, CVEs, and SSL certificates for target hosts, with risk scoring for dangerous services like SSH, RDP, databases, and cache systems. Feeds the OSINT intelligence pipeline (`/soc/` endpoints) to surface publicly accessible vulnerabilities during security assessments and red-team engagements.",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025471061
+  },
+  "backend/bridge/osint-modules/sherlock-cli.js": {
+    "intent": "Searches usernames across 400+ sites via the sherlock-project CLI, returning standardized account findings (with category/severity/rawData fields) for the Intelligence Pipeline's COLLECT stage. Enables the SOC platform's OSINT reconnaissance capabilities with tool-availability validation and JSON output parsing.",
+    "mtime": 1773151050664.875,
+    "indexed_at": 1779025474733
+  },
+  "backend/bridge/osint-modules/social-network-mapper.js": {
+    "intent": "This OSINT module analyzes social media findings (Instagram, Twitter, etc.) to build connection maps—identifying mentions, tagged users, followers, and interaction patterns—feeding relationship intelligence into the Intelligence Pipeline's ANALYZE stage. It supports the SOC platform's target reconnaissance by surfacing high-confidence social connections and interaction networks across platforms.",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025474833
+  },
+  "backend/bridge/osint-modules/surveillance-intel.js": {
+    "intent": "Shodan-based surveillance discovery module for the Intelligence Pipeline (dir_1775980363354) that queries exposed cameras and IoT devices by geographic coordinates, classifies them by vendor/type (Hikvision, Dahua, Axis, NVR/DVR), and returns enriched metadata (IP, port, org, location, screenshot availability). Feeds the COLLECT stage of the OSINT pipeline to populate infrastructure intelligence for threat analysis.",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025477158
+  },
+  "backend/bridge/osint-modules/telegram-intel.js": {
+    "intent": "OSINT module that scrapes public Telegram channel metadata (name, description, member count, messages) for username profiles in the intelligence collection phase. Integrates with a containerized browser API (port 3334) and t.me preview scraping to feed profile enrichment for the downstream analysis pipeline (EPIC dir_1775980363354).",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025478506
+  },
+  "backend/bridge/osint-modules/theharvester-cli.js": {
+    "intent": "Performs public OSINT reconnaissance (email, subdomain, host, IP discovery) for domain and email profile targets using theHarvester, returning structured findings for the intelligence pipeline. Integrates into Ozzu's SOC platform's data-collection stage as part of the 6-stage Palantir-model pipeline (COLLECT → NORMALIZE → ENRICH → STORE → ANALYZE → ACT).",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025478779
+  },
+  "backend/bridge/osint-modules/urlhaus-check.js": {
+    "intent": "Queries the free URLhaus API to check if a domain hosts malware downloads or phishing URLs, returning severity-rated findings for the SOC threat intelligence pipeline. Integrates with the domain profiling system to flag malicious infrastructure during threat reconnaissance scans.",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025479539
+  },
+  "backend/bridge/osint-modules/virustotal-lookup.js": {
+    "intent": "Uses the VirusTotal API to scan domains and IPs against 70+ antivirus engines and threat databases, returning malware/phishing reputation findings. Part of the OSINT pipeline's COLLECT/ENRICH stages—feeds threat intelligence into SOC engagements when analyzing discovered entities for security assessments.",
+    "mtime": 1773151050666.8752,
+    "indexed_at": 1779025481912
+  },
+  "backend/bridge/osint-modules/tiktok-intel.js": {
+    "intent": "OSINT module that extracts public TikTok profile metadata (display name, bio, followers, recent videos) via HTML rehydration data parsing, feeding the intelligence pipeline's COLLECT/ENRICH phases. Integrates with Ozzu's SOC platform via the osint-modules scanner system to enable social media reconnaissance for security assessments.",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025483151
+  },
+  "backend/bridge/osint-modules/twitter-intel.js": {
+    "intent": "Twitter/X intelligence module that scrapes public profile data (display name, bio, follower counts, recent tweets) using twscrape, Nitter, and Google cache with rate-limiting and Docker container isolation. Feeds the intelligence pipeline's COLLECT phase to gather open-source intelligence on targets for threat analysis and red team consulting reports.",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025484319
+  },
+  "backend/bridge/osint-modules/username-enum.js": {
+    "intent": "Performs OSINT username enumeration across 350+ platforms (social media, forums, code repos, etc.) by checking HTTP status codes and redirects to detect if a given username exists anywhere online. Feeds findings into the SOC intelligence pipeline's COLLECT stage to support threat intelligence analysis and red team engagement reports.",
+    "mtime": 1773151050665.8752,
+    "indexed_at": 1779025484585
+  },
+  "backend/bridge/osint-modules/wikipedia-intel.js": {
+    "intent": "Queries Wikidata API to extract structured person data (birth date, nationality, occupations, organizations, family links) and returns intelligence findings with severity levels. Part of the OSINT intelligence pipeline's COLLECT stage, feeding open-source person intelligence into the main analysis flow for targets.",
+    "mtime": 1773151050666.8752,
+    "indexed_at": 1779025485040
+  },
+  "backend/bridge/osint-modules/youtube-intel.js": {
+    "intent": "YouTube Intelligence Module extracts metadata (channel name, subscriber count, video count, recent videos) from YouTube profiles using yt-dlp, running sandboxed in a Docker container. Part of Ozzu's OSINT collection stage for the intelligence pipeline that feeds the SOC/red team consulting platform (COLLECT → NORMALIZE → ENRICH → STORE → ANALYZE → ACT).",
+    "mtime": 1773151050666.8752,
+    "indexed_at": 1779025486166
+  },
+  "backend/bridge/osint-monitor.js": {
+    "intent": "Persistent OSINT monitoring scheduler that loads profiles from the database, runs scans on intervals, detects deltas in monitored data, and broadcasts alerts to connected clients. Part of the Intelligence Pipeline's COLLECT phase—continuously ingests threat intel from external sources on a schedule for the SOC platform.",
+    "mtime": 1773151050666.8752,
+    "indexed_at": 1779025487533
+  },
+  "backend/bridge/osint-modules/web-crawler.js": {
+    "intent": "Extracts emails, phone numbers, and social media links from web pages and target domains as part of the OSINT collection phase of the Intelligence Pipeline. Feeds reconnaissance findings into the SOC platform's security assessments via the `/soc/*` backend endpoints.",
+    "mtime": 1773151050666.8752,
+    "indexed_at": 1779025488061
+  },
+  "backend/bridge/osint-pivot-engine.js": {
+    "intent": "Automates the investigative expansion phase of Ozzu's intelligence pipeline: takes a seed profile (e.g., from face recognition) and cascades pivots across related identities with configurable depth and cardinality limits. Manages investigations in the database, ensuring bounded scope (max 20 pivots per investigation, max depth 2) while auto-triggering OSINT scans on discovered profiles.",
+    "mtime": 1773151050666.8752,
+    "indexed_at": 1779025489513
+  },
+  "backend/bridge/osint-remediation-engine.js": {
+    "intent": "The OSINT Remediation Engine converts scan findings (exposed PII on data brokers, leaked emails, etc.) into actionable remediation steps with links and instructions—e.g., auto-generating opt-out URLs for Spokeo, BeenVerified, and 10+ other brokers. It's the **ACT stage** of the intelligence pipeline, providing the backend remediation tasks that surface in the mobile app and bridge UI for users to execute.",
+    "mtime": 1773151050666.8752,
+    "indexed_at": 1779025489798
+  },
+  "backend/bridge/osint-report.js": {
+    "intent": "Generates structured OSINT reports (JSON + Markdown) from findings and entity relationship data stored in the database, supporting both per-profile and combined cross-profile reports with severity categorization and remediation checklists. Powers the intelligence pipeline's reporting layer for SOC and security assessment workflows.",
+    "mtime": 1773151050666.8752,
+    "indexed_at": 1779025491467
+  },
+  "backend/bridge/proactive-reporter.js": {
+    "intent": "Sends daily verbal summaries through June at 9 AM ET, aggregating service status and directive health. Also triggers event-based alerts when critical conditions occur (service outages, multiple failures) with a 30-minute cooldown to prevent spam.",
+    "mtime": 1773246219142.8835,
+    "indexed_at": 1779025492862
+  },
+  "backend/bridge/person.js": {
+    "intent": "Person.js defines and manages the core Identity object for Ozzu accounts — storing names, relationship types, avatar URLs, and communication channels (WhatsApp, email, push notifications, phone) in the database, enabling the app to reach users across multiple contact methods. It provides methods to create/find persons by phone/email and dispatch notifications through `sendPush` to registered channels.",
+    "mtime": 1775827754103.4944,
+    "indexed_at": 1779025493114
+  },
+  "backend/bridge/routes/agrovision.js": {
+    "intent": "Proxy handler that forwards `/plant/*` API requests from the Ozzu app to a local AgroVisión crop disease detection service (port 5556), enabling plant health analysis features. Manages CORS headers and 30-second request timeouts for the external service communication.",
+    "mtime": 1774105963191.32,
+    "indexed_at": 1779025494548
+  },
+  "backend/bridge/recovery-engine.js": {
+    "intent": "Tier 1 self-healing watchdog that automatically restarts failed Docker containers (postgres, redis, nginx, openvpn, qdrant, homeassistant, face-recognition, osint-tools, browser) using a config-driven playbook with exponential backoff before escalating to cipher-agent. Detects service DOWN events, respects dependency chains (e.g., face-recognition won't restart if qdrant is down), and emits 'recoveryFailed' after exhausting retry attempts to trigger manual agent intervention.",
+    "mtime": 1777738203554.5518,
+    "indexed_at": 1779025495114
+  },
+  "backend/bridge/push-notifications.js": {
+    "intent": "Provides `sendPush()` function to dispatch notifications via Expo's push API to Ozzu mobile app users, supporting customizable title, body, data, badge, and sound. Allows backend services to notify users of events like directive updates, task completions, or system alerts without requiring active app sessions.",
+    "mtime": 1775402226314.0068,
+    "indexed_at": 1779025495409
+  },
+  "backend/bridge/routes/business-contacts.js": {
+    "intent": "REST API handler for the Business tab's contacts management, providing CRUD endpoints to list, create, retrieve, update, and delete business contacts (buyers, suppliers, etc.) with optional type filtering. Bridges the frontend contacts UI to the Postgres database through standardized JSON responses.",
+    "mtime": 1773151050670.2856,
+    "indexed_at": 1779025496721
+  },
+  "backend/bridge/routes/backup.js": {
+    "intent": "Exposes `GET /api/backups` REST endpoint to list encrypted and unencrypted backups with metadata (size, timestamp, encryption status) from `/home/gcp/ozzu/backups/`. Provides disaster recovery infrastructure for the Ozzu app's database and critical files.",
+    "mtime": 1773151050669.8755,
+    "indexed_at": 1779025498206
+  },
+  "backend/bridge/routes/business-invoices.js": {
+    "intent": "Provides REST CRUD endpoints for the Business app's invoicing feature (GET/POST/PATCH/DELETE at /business/invoices). Handles filtering invoices by status and manages the full invoice lifecycle (create, fetch, update, delete) through the database layer.",
+    "mtime": 1773151050670.2856,
+    "indexed_at": 1779025498592
+  },
+  "backend/bridge/routes/business-investments.js": {
+    "intent": "Provides CRUD endpoints for business investments at `/business/investments[/:id]`, backing the Business screen's investment cards and detail views. Handles GET (list/fetch), POST (create), PATCH (update), and DELETE operations against the investments database.",
+    "mtime": 1773151050670.2856,
+    "indexed_at": 1779025498757
+  },
+  "backend/bridge/routes/business-email.js": {
+    "intent": "Manages Gmail SMTP transporters for two email accounts (personal and Ozzu/Skyline Capital) and exposes endpoints to list available accounts and send emails from the bridge. Enables the app to dispatch business notifications, directive updates, and reports via authenticated Gmail accounts rather than a shared system mailer.",
+    "mtime": 1775664961451.5352,
+    "indexed_at": 1779025499063
+  },
+  "backend/bridge/routes/cedula.js": {
+    "intent": "Implements `/cedula-db/import` (bulk-load Colombian ID documents with face photos and embeddings) and `/cedula-db/scan-match` (match unknown faces against the database using cosine similarity) endpoints for identity verification. Enables the identity-matching component of the OSINT intelligence pipeline.",
+    "mtime": 1773151050670.2856,
+    "indexed_at": 1779025504259
+  },
+  "backend/bridge/routes/cipher.js": {
+    "intent": "Exports route handlers for Cipher's conversation history and session management — `/conversations/recent` returns recent conversation metadata (persona, topics, duration), and `/cipher/history` retrieves full transcripts with filters for date/content-types. Integrates with the bridge's postgres conversation store and proactive reporter to persist and surface Cipher's context across sessions.",
+    "mtime": 1776091230735.2478,
+    "indexed_at": 1779025504691
+  },
+  "backend/bridge/routes/dashboard.js": {
+    "intent": "Provides a real-time HTML dashboard (`GET /dashboard`) that displays system state including directives, running agents, database/Redis health, uptime, and priority-colored status indicators. Used for operational monitoring of the bridge backend service and agent execution pipeline.",
+    "mtime": 1773151050670.8755,
+    "indexed_at": 1779025505105
+  },
+  "backend/bridge/routes/dev-dashboard.js": {
+    "intent": "This route provides a split-screen dev dashboard (`/dev-dashboard`) that displays a device mirror (redroid/iOS) on the left and live git diffs on the right, streaming code changes via SSE when files in `frontend/app`, `frontend/components`, `frontend/lib`, and `tv/` change. It exists to let King Kazuma visually validate UI changes against the running device in real-time without switching windows.",
+    "mtime": 1776275244166.77,
+    "indexed_at": 1779025506542
+  },
+  "backend/bridge/routes/business.js": {
+    "intent": "This file provides AI-powered document verification for the Business/Ventures feature, using Google's Gemini API to analyze uploaded documents against task-specific requirements and return structured verification results (document type, matched requirements, confidence scores, issues). It exposes endpoints like `POST /business/task/:id/verify-document` that handle file attachments and metrics computation, feeding verification data back to the Business screen when entrepreneurs submit supporting documents for venture validation.",
+    "mtime": 1773151050670.2856,
+    "indexed_at": 1779025507184
+  },
+  "backend/bridge/routes/designer.js": {
+    "intent": "Provides a `/designer` HTTP route that serves a browser-based drag-and-drop canvas where King Kazuma can grab real Ozzu UI components (ProjectCard, DirectiveListItem, TabBar, ServiceCard, etc.) and arrange them into custom layouts. Persists layouts to disk so Cipher can read the JSON and translate it into actual React Native code for deployment.",
+    "mtime": 1779020786585.8403,
+    "indexed_at": 1779025507393
+  },
+  "backend/bridge/routes/business-shipments.js": {
+    "intent": "Provides REST CRUD endpoints (`GET /business/shipments`, `POST`, `PATCH`, `DELETE /business/shipments/:id`) for managing shipment records, including optional status filtering. Backs the Business module's shipment tracking screens with persistent database operations via the bridge backend.",
+    "mtime": 1773151050670.2856,
+    "indexed_at": 1779025508145
+  },
+  "backend/bridge/routes/directives.js": {
+    "intent": "Provides REST endpoints for the directive lifecycle (create, status, deploy, merge) — the core abstraction for work items in Ozzu. Handles rate limiting, approval workflows, epic progression, and smartDeploy orchestration with timeline tracking for work history.",
+    "mtime": 1776269953674.9854,
+    "indexed_at": 1779025511261
+  },
+  "backend/bridge/routes/files.js": {
+    "intent": "**Personal file storage system** — receives uploads via `POST /files` (base64-encoded), persists them to disk organized by category and date (`/home/gcp/ozzu/data/files`), and stores metadata in postgres so the Files screen and other components can list, fetch, and organize user documents, photos, and 3D print recordings.",
+    "mtime": 1775856229719.6848,
+    "indexed_at": 1779025511338
+  },
+  "backend/bridge/routes/epics.js": {
+    "intent": "Provides REST API endpoints (`POST /epics`, `GET /epics/:id`, phase completion tracking) for Ozzu's Epic system, which organizes large initiatives as multi-phase projects with status and progress tracking. Each phase can be linked to a Directive, enabling King Kazuma to group related development work across multiple delivery phases.",
+    "mtime": 1773151050670.8755,
+    "indexed_at": 1779025511904
+  },
+  "backend/bridge/routes/finance.js": {
+    "intent": "Parses Bancolombia transaction emails from Gmail (via IMAP) to extract debit card purchase and transfer notifications across three formats (2022–2026), handling Colombian and US number formatting. Feeds transaction history to a finance/banking dashboard on the app, providing automated tracking of personal spending without external APIs.",
+    "mtime": 1775486318279.857,
+    "indexed_at": 1779025513339
+  },
+  "backend/bridge/routes/fleet.js": {
+    "intent": "Provides REST API endpoints to manage the redroid device fleet (register, start/stop, list devices) and configure ADB proxy routing for remote Android instances. Supports the mobile testing/preview infrastructure (dir_1776018900117) that Ozzu uses to deploy and test Android builds across multiple emulator instances without local ADB setup.",
+    "mtime": 1776091230735.2478,
+    "indexed_at": 1779025515010
+  },
+  "backend/bridge/routes/influence.js": {
+    "intent": "Manages real social media accounts from consenting users across X, Instagram, TikTok, YouTube, LinkedIn, Reddit, and Facebook via REST endpoints like `GET /api/influence/members` and `POST /api/influence/members`, handling account registration, credential storage (encrypted), and Dolphin Anty browser profile orchestration. It's the backend for the Influence venture (dir_1775926142812), enabling King Kazuma's social media content scheduling and account management platform.",
+    "mtime": 1775975539773.7012,
+    "indexed_at": 1779025515715
+  },
+  "backend/bridge/routes/identity.js": {
+    "intent": "Provides the `/api/face/identify` endpoint that uploads a photo, extracts a face embedding, and searches Qdrant's vector database to find matching identities with full profiles and relationship networks. Powers Ozzu's core identity resolution feature — upload a photo of a person and retrieve their profile + connections + timeline.",
+    "mtime": 1773151050670.8755,
+    "indexed_at": 1779025516005
+  },
+  "backend/bridge/routes/infra.js": {
+    "intent": "Exposes HTTP endpoints (`/infra/state`, `/infra/devices`, `/infra/network`) that serve cached infrastructure state including device reachability and network topology from the infraMonitor module. Allows the Ozzu app and bridge services to query real-time health status of connected devices (tablets, dev-01, ESP32 nodes, etc.) for dependency resolution and network diagnostics.",
+    "mtime": 1773606630711.3281,
+    "indexed_at": 1779025517568
+  },
+  "backend/bridge/routes/mcp.js": {
+    "intent": "MCP server that exposes directive management (create, list, verify, merge-and-deploy) as native Claude Code tools, allowing Cipher to orchestrate code changes as tracked work items. Integrates with git worktrees, build verification, approval gates, and smart deployment to auto-detect iOS/Android build tier.",
+    "mtime": 1777163224327.3613,
+    "indexed_at": 1779025518564
+  },
+  "backend/bridge/routes/ops.js": {
+    "intent": "This file provides REST endpoints for the **Ops screen** to monitor service health and incident history: `GET /ops/status` returns real-time service states (via the watchdog module), and `GET /ops/incidents` retrieves recent incidents with optional historical queries from the database. It's the observability backbone that powers the Operations dashboard King Kazuma uses to track system health.",
+    "mtime": 1775417105990.4397,
+    "indexed_at": 1779025519647
+  },
+  "backend/bridge/routes/knowledge-graph.js": {
+    "intent": "Provides REST API endpoints (`/kg/subjects`, `/kg/relationships`, `/kg/query`, etc.) for storing and querying knowledge graph entities, relationships, and findings from the intelligence pipeline. Backs the 6-stage OSINT platform (COLLECT→NORMALIZE→ENRICH→STORE→ANALYZE→ACT) that powers threat analysis and SOC research workflows in Ozzu.",
+    "mtime": 1776009015566.7988,
+    "indexed_at": 1779025520554
+  },
+  "backend/bridge/routes/ozzu-source.js": {
+    "intent": "Exposes `/ozzu.json` as an AltStore source manifest and `/download/ozzu.ipa` as the IPA download endpoint, letting King Kazuma's iPhone auto-update Ozzu via AltStore without PC sideloading each time. Reads version/bundleId from `frontend/app.json` and supports one-shot pairing-file delivery for SideStore initialization.",
+    "mtime": 1778964494292.0977,
+    "indexed_at": 1779025522451
+  },
+  "backend/bridge/routes/osint.js": {
+    "intent": "Provides REST endpoints (`POST /osint/profiles`, `GET /osint/profiles`) to create and list OSINT profiles (email, username, phone, domain, IP, image, cedula, NIT) that feed into the intelligence collection pipeline. Part of the Ozzu intelligence system (COLLECT stage of the 6-stage Palantir pipeline) that supports reconnaissance and profile scanning for the red-team consulting services.",
+    "mtime": 1773151050671.8755,
+    "indexed_at": 1779025522662
+  },
+  "backend/bridge/routes/positioning.js": {
+    "intent": "Manages indoor positioning endpoints that receive real-time location updates from a Rock Pi hub (via `POST /positioning/update`) and broadcast current location + room state to the Ozzu app via WebSocket. Provides GET endpoints to query location history and geo-fence by room, feeding data to map and device-tracking screens on the mobile app.",
+    "mtime": 1773459963513.3762,
+    "indexed_at": 1779025523929
+  },
+  "backend/bridge/routes/octoprint.js": {
+    "intent": "Defines REST endpoints that orchestrate Ozzu's 3D print pipeline: `/octoprint/print` triggers slicing (PrusaSlicer on bridge), uploads gcode to the tablet's OctoPrint, and starts printing with video recording. Bridges the mobile app to hardware via the OctoPrint API running at `10.9.0.7:5000`.",
+    "mtime": 1778953268127.8743,
+    "indexed_at": 1779025524558
+  },
+  "backend/bridge/routes/pipeline.js": {
+    "intent": "Orchestrates merge-and-deploy via `POST /api/post-merge-deploy` with auto-detection of build tier (HOT for JS-only with parallel OTA + CI, WARM for native) and debouncing to prevent duplicate runs. Also serves TV APK updates with caching and coordinates OTA delivery across Android and iOS devices.",
+    "mtime": 1776268453954.1155,
+    "indexed_at": 1779025526672
+  },
+  "backend/bridge/routes/schedules.js": {
+    "intent": "This module provides REST endpoints (`/schedules`) to create, list, and manage cron-based automation rules for connected devices—each rule triggers a service call (like a light toggle) on a schedule. It computes next execution times based on cron expressions (day of week, hour, minute) and timezone, storing schedules in the database for the bridge's automation engine.",
+    "mtime": 1773151050674.8757,
+    "indexed_at": 1779025527251
+  },
+  "backend/bridge/routes/soc.js": {
+    "intent": "The file provides REST endpoints (`/soc/engagements`, `/soc/findings`, `/soc/queue/:id/run`, etc.) that power the mobile app's SOC tab for managing penetration testing engagements and queueing/executing security assessment scripts on dev-01 via SSH. It tracks running processes, sanitizes binary output for Postgres, and persists execution results so the Cipher agent can analyze them downstream.",
+    "mtime": 1776483793296.0137,
+    "indexed_at": 1779025528946
+  },
+  "backend/bridge/routes/vault.js": {
+    "intent": "This file provides REST API endpoints (`GET /api/vault/profile` visible here) for storing and retrieving personal identity data — passport info, travel history, and document images — stored in a `documents` directory and postgres tables keyed by owner. It exists to back the Face ID-gated identity vault screen in the mobile app, giving the user a single place to store sensitive personal documents.",
+    "mtime": 1775419752333.8403,
+    "indexed_at": 1779025528991
+  },
+  "backend/bridge/routes/profile.js": {
+    "intent": "Manages the owner's single profile record via REST endpoints (GET/PUT/POST/PATCH), storing personal details, contact info, timezone, and separate billing/shipping addresses. Consumed by checkout, home automation config, and scheduler timezone features.",
+    "mtime": 1773151050674.8757,
+    "indexed_at": 1779025531764
+  },
+  "backend/bridge/routes/spotify.js": {
+    "intent": "Provides Spotify API integration endpoints (`/api/spotify/now-playing`, `/api/spotify/queue`, `/api/spotify/playlists`, `/api/spotify/play`) with local caching and album art dominant-color extraction via Home Assistant image fetch + sharp image processing. Enables the Ozzu mobile/web UI to display live playback state, search tracks, manage playlists, and render album art with vibrant accent colors.",
+    "mtime": 1773151050674.8757,
+    "indexed_at": 1779025532028
+  },
+  "backend/bridge/wa-service.js": {
+    "intent": "WhatsApp proxy that routes all API calls to an Android agent via SSH reverse tunnel (port 8766), supporting pause/resume of conversations and human notifications. Integrates WhatsApp messaging into the Ozzu platform's broader communication/intelligence pipeline, likely for the SOC engagement system or conversational features that need bidirectional messaging.",
+    "mtime": 1775763476734.9458,
+    "indexed_at": 1779025534066
+  },
+  "backend/bridge/routes/whatsapp.js": {
+    "intent": "Provides REST API endpoints (like `/whatsapp/history`) that integrate WhatsApp as a message transport for Ozzu's intelligence platform by converting incoming WhatsApp messages from Python MCP format to JSON and persisting them to postgres. Enables WhatsApp-based communication logging and audit trails for the operations pipeline.",
+    "mtime": 1776202661239.419,
+    "indexed_at": 1779025534231
+  },
+  "backend/bridge/tests/api.test.js": {
+    "intent": "Unit test suite for the bridge backend API (localhost:3333) that verifies HTTP endpoints for core Ozzu services like directives, SOC operations, and OctoPrint orchestration. Runs with `node tests/api.test.js` and validates request/response payloads across the backend's REST routes.",
+    "mtime": 1775402557142.8335,
+    "indexed_at": 1779025534470
+  },
+  "backend/bridge/server.js": {
+    "intent": "Central Node.js HTTP server that proxies Claude Code directives, device commands via WebSocket relay (tablets/TV), and Gemini API calls while spawning planning/implementation agents and orchestrating builds. Registers 16+ OSINT modules, handles metrics tracking, and drives OTA deployments and cipher pipeline processing for the SOC security analysis system.",
+    "mtime": 1779020786587.8403,
+    "indexed_at": 1779025534672
+  },
+  "backend/bridge/watchdog.js": {
+    "intent": "Monitors health of backend services (postgres, redis, nginx, qdrant, face-recognition, osint-tools, browser, vast-gpu) on 30s intervals and tracks state transitions. Powers the Ops screen dashboard and feeds alerts to the recovery-engine for automatic container restarts and cipher-agent for autonomous infrastructure recovery decisions.",
+    "mtime": 1777738371159.4204,
+    "indexed_at": 1779025543255
+  }
+}

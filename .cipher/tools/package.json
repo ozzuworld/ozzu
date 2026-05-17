@@ -1,0 +1,20 @@
+{
+  "name": "cipher-analysis-tools",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cipher's codebase analysis tooling. Run via scripts/cipher-analyze.sh.",
+  "scripts": {
+    "repomap": "repomix --output ../layer1/repomap.txt --include 'frontend/app/**,frontend/components/**,frontend/lib/**,frontend/modules/**,backend/bridge/*.js,backend/bridge/routes/**,scripts/**,.claude/rules/**' --ignore '**/node_modules/**,**/.expo/**,**/android/**,**/ios/**,**/build/**,**/dist/**' ../..",
+    "knip-frontend": "knip --reporter json --config ../knip-frontend.json --no-exit-code > ../layer1/knip-frontend.json",
+    "knip-backend": "knip --reporter json --config ../knip-backend.json --no-exit-code > ../layer1/knip-backend.json",
+    "depcruise-frontend": "depcruise --output-type json --output-to ../layer1/depcruise-frontend.json --no-config ../../frontend/app ../../frontend/components ../../frontend/lib",
+    "depcruise-backend": "depcruise --output-type json --output-to ../layer1/depcruise-backend.json --no-config ../../backend/bridge",
+    "jscpd": "jscpd --output ../layer1/jscpd --reporters json,console --silent ../../frontend/app ../../frontend/components ../../backend/bridge"
+  },
+  "devDependencies": {
+    "repomix": "^0.2.29",
+    "knip": "^5.43.6",
+    "dependency-cruiser": "^16.10.0",
+    "jscpd": "^4.0.5"
+  }
+}
