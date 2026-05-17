@@ -16,6 +16,7 @@ import { fetchPendingApprovals, resolveApproval } from "../../lib/bridge-api";
 import { CameraOverlay } from "../../components/CameraOverlay";
 import { ContentPanel } from "../../components/ContentPanel";
 import { GroupNav } from "../../components/GroupNav";
+import { TopBar } from "../../components/TopBar";
 
 import { useKeepAwake } from "expo-keep-awake";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
@@ -445,23 +446,7 @@ export default function LandingScreen() {
         <ScanLine />
       </View>
 
-      {/* Top Bar — hamburger left, status right */}
-      <View
-        style={{
-          paddingTop: insets.top,
-          height: 48 + insets.top,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingHorizontal: Math.max(20, insets.left, insets.right),
-          backgroundColor: "#000000",
-          zIndex: 10,
-          elevation: 10,
-        }}
-      >
-        <HamburgerMenu />
-        <StatusBadge />
-      </View>
+      <TopBar background="#000000" />
 
       <GroupNav group="cipher" />
 

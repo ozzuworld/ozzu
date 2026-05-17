@@ -7,7 +7,6 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useOpsStatus, useOpsIncidents } from "../../lib/ops-hooks";
 import { useInfraState } from "../../lib/infra-hooks";
 import SystemBanner from "../../components/ops/SystemBanner";
@@ -20,6 +19,7 @@ import GcpCard from "../../components/ops/GcpCard";
 import RouterCard from "../../components/ops/RouterCard";
 import PositioningCard from "../../components/ops/PositioningCard";
 import { GroupNav } from "../../components/GroupNav";
+import { TopBar } from "../../components/TopBar";
 
 import { colors } from "../../lib/design-tokens";
 const ACCENT = colors.accent;
@@ -27,7 +27,6 @@ const ACCENT = colors.accent;
 type Tab = "services" | "infra";
 
 export default function OpsScreen() {
-  const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("infra");
 
@@ -48,52 +47,34 @@ export default function OpsScreen() {
   const loading = activeTab === "services" ? svcLoading : infraLoading;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          paddingHorizontal: 16,
-          paddingVertical: 10,
-          borderBottomWidth: 1,
-          borderBottomColor: "rgba(255,255,255,0.06)",
-        }}
-      >
-        <Text style={{ fontSize: 16, marginRight: 8 }}>📡</Text>
-        <Text
-          style={{
-            fontFamily: "monospace",
-            fontWeight: "700",
-            fontSize: 16,
-            color: "#E2E8F0",
-            letterSpacing: 2,
-          }}
-        >
-          OPS
-        </Text>
-        <View style={{ flex: 1 }} />
-        {downCount > 0 && (
-          <View
-            style={{
-              backgroundColor: colors.error,
-              borderRadius: 10,
-              paddingHorizontal: 8,
-              paddingVertical: 2,
-              marginRight: 8,
-            }}
-          >
-            <Text style={{ fontFamily: "monospace", fontWeight: "700", fontSize: 10, color: "#FFF" }}>
-              {downCount} DOWN
+    <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
+      <TopBar
+        borderBottom
+        left={
+          <>
+            <Text style={{ fontSize: 16, marginRight: 8 }}>📡</Text>
+            <Text style={{ fontFamily: "monospace", fontWeight: "700", fontSize: 16, color: colors.text.primary, letterSpacing: 2 }}>
+              OPS
             </Text>
-          </View>
-        )}
-        <Pressable onPress={onRefresh}>
-          <Text style={{ fontFamily: "monospace", fontSize: 11, color: ACCENT, fontWeight: "700" }}>
-            REFRESH
-          </Text>
-        </Pressable>
-      </View>
+          </>
+        }
+        right={
+          <>
+            {downCount > 0 && (
+              <View style={{ backgroundColor: colors.error, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 }}>
+                <Text style={{ fontFamily: "monospace", fontWeight: "700", fontSize: 10, color: colors.text.primary }}>
+                  {downCount} DOWN
+                </Text>
+              </View>
+            )}
+            <Pressable onPress={onRefresh}>
+              <Text style={{ fontFamily: "monospace", fontSize: 11, color: ACCENT, fontWeight: "700" }}>
+                REFRESH
+              </Text>
+            </Pressable>
+          </>
+        }
+      />
 
       <GroupNav group="ops" />
 

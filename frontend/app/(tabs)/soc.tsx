@@ -12,6 +12,7 @@ import { useRouter } from "expo-router";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
+import { TopBar } from "../../components/TopBar";
 import { getBridgeUrl } from "../../lib/bridge-api";
 import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha, layout } from "../../lib/design-tokens";
 
@@ -77,33 +78,10 @@ export default function SOCScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg.primary, paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg.primary }}>
       <StatusBar style="light" />
 
-      {/* Top Bar */}
-      <View
-        style={{
-          height: layout.topBarHeight,
-          flexDirection: "row",
-          alignItems: "center",
-          paddingHorizontal: spacing.md,
-          backgroundColor: colors.bg.secondary,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border.subtle,
-        }}
-      >
-        <HamburgerMenu />
-        <Text
-          style={{
-            fontSize: fs.lg,
-            fontWeight: fw.semibold,
-            color: colors.text.primary,
-            marginLeft: spacing.md,
-          }}
-        >
-          🔐 SOC Engagements
-        </Text>
-      </View>
+      <TopBar title="🔐 SOC Engagements" background={colors.bg.secondary} borderBottom />
 
       <GroupNav group="work" />
 

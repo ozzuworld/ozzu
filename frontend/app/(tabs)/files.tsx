@@ -15,7 +15,6 @@ import {
   Dimensions,
   TextInput,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -28,8 +27,8 @@ import {
   type StoredFile,
 } from "../../lib/bridge-api";
 import { getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
-import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
+import { TopBar } from "../../components/TopBar";
 import { formatBytes, formatRelativeOrShortDate } from "../../lib/format";
 
 import { colors } from "../../lib/design-tokens";
@@ -267,7 +266,6 @@ function NewFolderModal({ visible, onClose, onCreate }: { visible: boolean; onCl
 
 // ── Main Screen ──
 export default function FilesScreen() {
-  const insets = useSafeAreaInsets();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [storageTotalBytes, setStorageTotalBytes] = useState(0);
@@ -398,8 +396,8 @@ export default function FilesScreen() {
   const isEmpty = folders.length === 0 && files.length === 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.gray[850], paddingTop: insets.top }}>
-      <HamburgerMenu />
+    <View style={{ flex: 1, backgroundColor: colors.gray[850] }}>
+      <TopBar />
       <GroupNav group="me" />
       {/* Header */}
       <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>

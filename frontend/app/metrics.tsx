@@ -8,12 +8,11 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
+import { TopBar } from "../components/TopBar";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { fetchUsageMetrics, fetchAnthropicUsage, type UsageMetrics, type AnthropicUsageData } from "../lib/bridge-api";
 import { GroupNav } from "../components/GroupNav";
-import { layout } from "../lib/design-tokens";
 import { formatLongDuration } from "../lib/format";
 import { colors } from "../lib/design-tokens";
 const CYAN = colors.accent;
@@ -347,46 +346,19 @@ export default function MetricsScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
       <StatusBar style="light" />
 
-      {/* Top bar */}
-      <View
-        style={{
-          height: layout.topBarHeight + insets.top,
-          paddingTop: insets.top,
-          flexDirection: "row",
-          alignItems: "center",
-          paddingHorizontal: 16,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.gray[800],
-        }}
-      >
-        <TVPressable
-          onPress={() => router.back()}
-          style={{ padding: 8, marginRight: 8 }}
-        >
-          <Text
-            style={{
-              color: colors.gray[400],
-              fontSize: 18,
-              fontFamily: "monospace",
-            }}
-          >
-            {"\u2190"}
-          </Text>
-        </TVPressable>
-        <Text
-          style={{
-            color: CYAN,
-            fontSize: 14,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-            letterSpacing: 3,
-          }}
-        >
-          METRICS
-        </Text>
-        <View style={{ flex: 1 }} />
-        <StatusBadge />
-      </View>
+      <TopBar
+        borderBottom
+        left={
+          <>
+            <TVPressable onPress={() => router.back()} style={{ padding: 8, marginRight: 8 }}>
+              <Text style={{ color: colors.gray[400], fontSize: 18, fontFamily: "monospace" }}>{"\u2190"}</Text>
+            </TVPressable>
+            <Text style={{ color: CYAN, fontSize: 14, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 3 }}>
+              METRICS
+            </Text>
+          </>
+        }
+      />
 
       <GroupNav group="cipher" />
 

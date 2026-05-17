@@ -33,6 +33,7 @@ import { PlanReviewModal } from "../../components/directives/PlanReviewModal";
 import { StatusChangeSheet } from "../../components/directives/StatusChangeSheet";
 import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
+import { TopBar } from "../../components/TopBar";
 import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha, statusPillStyle, layout } from "../../lib/design-tokens";
 
 if (
@@ -202,23 +203,10 @@ export default function DirectivesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
-      {/* Top Bar */}
-      <View style={{
-        paddingTop: insets.top,
-        height: layout.topBarHeight + insets.top,
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: hPad,
-      }}>
-        <Text style={{ color: colors.text.primary, fontSize: 18, fontWeight: fw.semibold }}>
-          Cipher
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <StatusBadge />
-          <HamburgerMenu />
-        </View>
-      </View>
+      <TopBar
+        left={<Text style={{ color: colors.text.primary, fontSize: 18, fontWeight: fw.semibold }}>Cipher</Text>}
+        right={<><StatusBadge /><HamburgerMenu /></>}
+      />
 
       <GroupNav group="cipher" />
 

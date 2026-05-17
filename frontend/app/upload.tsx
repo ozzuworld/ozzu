@@ -7,9 +7,9 @@ import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
+import { TopBar } from "../components/TopBar";
 import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
-import { layout } from "../lib/design-tokens";
 import { colors } from "../lib/design-tokens";
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB (3D scans can be large)
 
@@ -199,43 +199,22 @@ export default function UploadScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.gray[850] }}>
-      {/* Top Bar */}
-      <View
-        style={{
-          paddingTop: insets.top,
-          height: layout.topBarHeight + insets.top,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingHorizontal: Math.max(16, insets.left, insets.right),
-        }}
-      >
-        <Text style={{ color: colors.brand.amber, fontSize: 24, fontWeight: "bold" }}>
-          ozzu
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-          <TVPressable
-            onPress={() => router.back()}
-            style={{
-              paddingHorizontal: 12,
-              paddingVertical: 4,
-              borderRadius: 6,
-            }}
-          >
-            <Text
-              style={{
-                color: colors.gray[200],
-                fontSize: 12,
-                fontWeight: "bold",
-                letterSpacing: 1,
-              }}
+      <TopBar
+        left={<Text style={{ color: colors.brand.amber, fontSize: 24, fontWeight: "bold" }}>ozzu</Text>}
+        right={
+          <>
+            <TVPressable
+              onPress={() => router.back()}
+              style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6 }}
             >
-              {"◀ BACK"}
-            </Text>
-          </TVPressable>
-          <StatusBadge />
-        </View>
-      </View>
+              <Text style={{ color: colors.gray[200], fontSize: 12, fontWeight: "bold", letterSpacing: 1 }}>
+                {"◀ BACK"}
+              </Text>
+            </TVPressable>
+            <StatusBadge />
+          </>
+        }
+      />
 
       <ScrollView
         style={{ flex: 1 }}

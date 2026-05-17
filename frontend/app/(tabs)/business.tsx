@@ -13,6 +13,7 @@ import { DashboardView } from "../../components/business/DashboardView";
 import { PipelineView } from "../../components/business/PipelineView";
 import { ContactsView } from "../../components/business/ContactsView";
 import { GroupNav } from "../../components/GroupNav";
+import { TopBar } from "../../components/TopBar";
 import { layout } from "../../lib/design-tokens";
 
 import { colors } from "../../lib/design-tokens";
@@ -56,26 +57,10 @@ export default function BusinessScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.gray[850] }}>
-      {/* Top Bar */}
-      <View
-        style={{
-          paddingTop: insets.top,
-          height: layout.topBarHeight + insets.top,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingHorizontal: Math.max(16, insets.left, insets.right),
-          backgroundColor: colors.gray[850],
-          zIndex: 10,
-        }}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <HamburgerMenu />
-          <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 3 }}>
-            WORK
-          </Text>
-        </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <TopBar
+        background={colors.gray[850]}
+        title={<Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 3 }}>WORK</Text>}
+        right={<>
           {activeTab === "projects" && (
             <Pressable
               onPress={() => setAddVisible(true)}
@@ -92,8 +77,8 @@ export default function BusinessScreen() {
             </Pressable>
           )}
           <StatusBadge />
-        </View>
-      </View>
+        </>}
+      />
 
       <GroupNav group="work" />
 

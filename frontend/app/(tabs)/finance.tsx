@@ -6,12 +6,10 @@ import {
   RefreshControl,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { StatusBadge } from "../../components/StatusBadge";
-import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
+import { TopBar } from "../../components/TopBar";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { getBridgeUrl } from "../../lib/bridge-api";
-import { layout } from "../../lib/design-tokens";
 import { formatCOP, formatShortDate } from "../../lib/format";
 
 import { colors } from "../../lib/design-tokens";
@@ -153,23 +151,13 @@ export default function FinanceScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
-      {/* Top Bar */}
-      <View style={{
-        paddingTop: insets.top,
-        height: layout.topBarHeight + insets.top,
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: hPad,
-      }}>
-        <Text style={{ color: colors.brand.amber, fontSize: 22, fontWeight: "bold", letterSpacing: 2 }}>
-          OZZU
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <StatusBadge />
-          <HamburgerMenu />
-        </View>
-      </View>
+      <TopBar
+        left={
+          <Text style={{ color: colors.brand.amber, fontSize: 22, fontWeight: "bold", letterSpacing: 2 }}>
+            OZZU
+          </Text>
+        }
+      />
 
       <View style={{ height: 1, backgroundColor: colors.gray[800], marginHorizontal: hPad }} />
 

@@ -21,6 +21,7 @@ import {
   type BackupInfo,
 } from "../lib/bridge-api";
 import { GroupNav } from "../components/GroupNav";
+import { TopBar } from "../components/TopBar";
 
 import { colors } from "../lib/design-tokens";
 export default function BackupScreen() {
@@ -136,28 +137,33 @@ export default function BackupScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.gray[850], paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: colors.gray[850] }}>
       <StatusBar style="light" />
 
-      {/* Header */}
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, height: 48 }}>
-        <Pressable onPress={() => router.back()} style={{ marginRight: 12 }}>
-          <Text style={{ color: "#888", fontFamily: "monospace", fontSize: 14 }}>{"< BACK"}</Text>
-        </Pressable>
-        <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 16, fontWeight: "700", flex: 1 }}>
-          BACKUPS
-        </Text>
-        <View style={{
-          backgroundColor: cronEnabled ? "#064E3B" : "#7F1D1D",
-          paddingHorizontal: 8,
-          paddingVertical: 2,
-          borderRadius: 4,
-        }}>
-          <Text style={{ color: cronEnabled ? "#34D399" : "#F87171", fontFamily: "monospace", fontSize: 10 }}>
-            {cronEnabled ? "AUTO ON" : "AUTO OFF"}
-          </Text>
-        </View>
-      </View>
+      <TopBar
+        left={
+          <>
+            <Pressable onPress={() => router.back()} style={{ marginRight: 12 }}>
+              <Text style={{ color: colors.gray[500], fontFamily: "monospace", fontSize: 14 }}>{"< BACK"}</Text>
+            </Pressable>
+            <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 16, fontWeight: "700" }}>
+              BACKUPS
+            </Text>
+          </>
+        }
+        right={
+          <View style={{
+            backgroundColor: cronEnabled ? colors.success + "33" : colors.error + "33",
+            paddingHorizontal: 8,
+            paddingVertical: 2,
+            borderRadius: 4,
+          }}>
+            <Text style={{ color: cronEnabled ? colors.success : colors.error, fontFamily: "monospace", fontSize: 10 }}>
+              {cronEnabled ? "AUTO ON" : "AUTO OFF"}
+            </Text>
+          </View>
+        }
+      />
 
       <GroupNav group="me" />
 
