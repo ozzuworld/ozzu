@@ -100,6 +100,20 @@ run_layer3() {
   node "${REPO_ROOT}/.cipher/bin/check-drift.js"
   date -u +"%Y-%m-%dT%H:%M:%SZ" > "${LAYER3_DIR}/.last-run"
   log "Layer 3 done. See ${LAYER3_DIR}/SUMMARY.md"
+
+  # Layer 3.5 — LLM-judge rules. Skip in post-commit auto-runs (env hint),
+  # run on-demand via `scripts/cipher-analyze.sh layer3-llm`.
+  if [[ "${CIPHER_RUN_LLM_JUDGE:-0}" == "1" ]]; then
+    log "Layer 3.5: LLM-judge semantic drift checks (this takes ~3-5 min)"
+    node "${REPO_ROOT}/.cipher/bin/llm-judge.js"
+  fi
+}
+
+run_layer3_llm() {
+  mkdir -p "${LAYER3_DIR}"
+  log "Layer 3.5: LLM-judge semantic drift checks"
+  node "${REPO_ROOT}/.cipher/bin/llm-judge.js" "$@"
+  log "Layer 3.5 done. See ${LAYER3_DIR}/SUMMARY-LLM.md"
 }
 
 main() {
@@ -108,8 +122,9 @@ main() {
     layer1) run_layer1 ;;
     layer2) run_layer2 ;;
     layer3) run_layer3 ;;
+    layer3-llm) shift; run_layer3_llm "$@" ;;
     all)    run_layer1; run_layer2 || true; run_layer3 || true ;;
-    *) die "Unknown command: ${cmd}. Use: layer1 | layer2 | layer3 | all" ;;
+    *) die "Unknown command: ${cmd}. Use: layer1 | layer2 | layer3 | layer3-llm | all" ;;
   esac
 }
 
