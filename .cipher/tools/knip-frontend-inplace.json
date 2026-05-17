@@ -1,0 +1,31 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "app/_layout.tsx",
+    "app/(tabs)/_layout.tsx",
+    "app/(tabs)/*.tsx",
+    "app/*.tsx",
+    "index.ts",
+    "metro.config.js",
+    "babel.config.js"
+  ],
+  "project": [
+    "app/**/*.{ts,tsx}",
+    "components/**/*.{ts,tsx}",
+    "lib/**/*.{ts,tsx}",
+    "modules/**/*.{ts,tsx}"
+  ],
+  "ignore": [
+    "node_modules/**",
+    ".expo/**",
+    "android/**",
+    "ios/**",
+    "build/**",
+    "dist/**"
+  ],
+  "ignoreDependencies": [
+    "expo-router",
+    "@expo/.*",
+    "react-native-.*"
+  ]
+}

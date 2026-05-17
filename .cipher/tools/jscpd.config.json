@@ -1,0 +1,19 @@
+{
+  "minTokens": 50,
+  "minLines": 8,
+  "threshold": 5,
+  "reporters": ["json", "console"],
+  "output": "../layer1/jscpd",
+  "format": ["typescript", "tsx", "javascript", "jsx"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/.expo/**",
+    "**/android/**",
+    "**/ios/**",
+    "**/build/**",
+    "**/dist/**",
+    "**/.cipher/**"
+  ],
+  "absolute": false,
+  "gitignore": true
+}

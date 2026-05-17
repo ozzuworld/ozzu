@@ -1,0 +1,19 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "backend/bridge/server.js",
+        "backend/bridge/index.js"
+      ],
+      "project": [
+        "backend/bridge/*.js",
+        "backend/bridge/routes/**/*.js",
+        "backend/bridge/lib/**/*.js"
+      ],
+      "ignore": [
+        "backend/bridge/node_modules/**"
+      ]
+    }
+  }
+}

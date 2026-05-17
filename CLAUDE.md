@@ -1,5 +1,16 @@
 # Ozzu — Project Rules
 
+## RULE 0 — READ THE CIPHER INDEX BEFORE BULLSHITTING ABOUT THE CODEBASE
+
+When King Kazuma asks "read the codebase / what does X do / where's Y / what's duplicated / what's dead":
+1. **READ `.cipher/layer1/SUMMARY.md`** — repo map, dead exports, import graph, copy-paste hotspots.
+2. **READ `.cipher/layer3/SUMMARY.md`** — drift / consistency findings (hardcoded hex, duplicated layout constants, dup format helpers, broken routes).
+3. **QUERY `.cipher/bin/query-intent.sh "<terms>"`** — semantic lookup over the Layer 2 intent index (every source file has a 2-sentence purpose stored).
+
+The repo is too big for any single LLM context window. You CANNOT "read the whole codebase" by opening 5 files. Use the index. If a layer is stale, refresh: `scripts/cipher-analyze.sh {layer1|layer2|layer3|all}`.
+
+Existence of the index is the whole point of `.cipher/`. See `.cipher/README.md`.
+
 ## RULE 1 — READ BEFORE RESPONDING
 
 When King Kazuma asks "what we worked on", "where we left off", or anything about previous work:
