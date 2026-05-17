@@ -226,9 +226,11 @@ module.exports = function createOzzuSourceRoutes(ctx) {
     }
 
     // GET /icon.png — Serve the Ozzu app icon for SideStore manifest's iconURL.
-    // Read from frontend/assets/icon.png (the same image baked into the IPA).
+    // Read from /tmp/ozzu-bridge/ozzu-icon.png (the bridge container has
+    // /tmp/ozzu-bridge mounted, but NOT frontend/assets — so the icon is
+    // copied to this shared volume by deploy tooling / manual install).
     if (req.method === "GET" && pathname === "/icon.png") {
-      const ICON_PATH = "/home/gcp/ozzu/frontend/assets/icon.png";
+      const ICON_PATH = "/tmp/ozzu-bridge/ozzu-icon.png";
       if (!fs.existsSync(ICON_PATH)) {
         sendJSON(res, 404, { error: "Icon asset missing" });
         return true;

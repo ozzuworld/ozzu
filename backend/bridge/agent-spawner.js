@@ -1723,6 +1723,9 @@ function buildIosDeployCommand(directive) {
     `META_FILE=$(find /tmp/ozzu-ipa-cache -name "ozzu-build-meta.json" 2>/dev/null | head -1)`,
     `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
     `test -n "$META_FILE" && cp "$META_FILE" ${WORKDIR}/artifacts/ozzu-latest.meta.json && echo "Build meta cached" || echo "Build meta sidecar not present (older workflow)"`,
+    // Mirror the app icon to a path the bridge container can read (it has /tmp/ozzu-bridge mounted but NOT frontend/assets).
+    // Keeps the SideStore source's /icon.png in sync with whatever icon was baked into the IPA.
+    `test -f ${WORKDIR}/frontend/assets/icon.png && cp ${WORKDIR}/frontend/assets/icon.png /tmp/ozzu-bridge/ozzu-icon.png && echo "Source icon mirrored" || echo "Source icon copy skipped"`,
     `rm -rf /tmp/ozzu-ipa-cache`,
   ].join(" && ");
 }
