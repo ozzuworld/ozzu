@@ -65,6 +65,16 @@ function fileIcon(mime: string): string {
   return "📎";
 }
 
+function fileTypeColor(mime: string): string {
+  if (mime.startsWith("image/")) return colors.accent;
+  if (mime.startsWith("video/")) return colors.brand.purple;
+  if (mime.startsWith("audio/")) return colors.brand.purple;
+  if (mime.includes("pdf")) return colors.brand.blue;
+  if (mime.includes("zip") || mime.includes("tar") || mime.includes("gz")) return colors.gray[400];
+  if (mime.includes("text") || mime.includes("json") || mime.includes("xml")) return colors.success;
+  return colors.gray[500];
+}
+
 // ── API helpers ──
 async function fetchFolders(parentId: number | null): Promise<Folder[]> {
   const bridgeUrl = getBridgeUrl();
@@ -118,27 +128,75 @@ function FolderItem({ folder, onPress, onLongPress }: { folder: Folder; onPress:
       onPress={onPress}
       onLongPress={onLongPress}
       style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: colors.gray[800],
-        borderRadius: 10,
-        padding: 14,
-        marginBottom: 6,
-        borderWidth: 1,
-        borderColor: colors.gray[700],
-        opacity: pressed ? 0.7 : 1,
+        opacity: pressed ? 0.92 : 1,
+        transform: [{ scale: pressed ? 0.98 : 1 }],
       })}
     >
-      <Text style={{ fontSize: 22, marginRight: 12 }}>📁</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: colors.gray[50], fontSize: 13, fontFamily: "monospace", fontWeight: "600" }}>
-          {folder.name}
-        </Text>
-        <Text style={{ color: DIM, fontSize: 10, fontFamily: "monospace", marginTop: 2 }}>
-          {formatRelativeOrShortDate(folder.created_at)}
-        </Text>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          backgroundColor: colors.gray[800],
+          borderRadius: 10,
+          borderLeftWidth: 3,
+          borderLeftColor: colors.brand.amber,
+          padding: 14,
+          marginBottom: 8,
+          borderWidth: 1,
+          borderColor: "rgba(255,255,255,0.04)",
+        }}
+      >
+        <Text style={{ fontSize: 22, marginRight: 12 }}>📁</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.gray[50], fontSize: 14, fontWeight: "600" }} numberOfLines={1}>
+            {folder.name}
+          </Text>
+          <Text style={{ color: colors.gray[500], fontSize: 11, fontFamily: "monospace", marginTop: 3 }}>
+            {formatRelativeOrShortDate(folder.created_at)}
+          </Text>
+        </View>
+        <Text style={{ color: colors.gray[500], fontSize: 18 }}>›</Text>
       </View>
-      <Text style={{ color: DIM, fontSize: 16 }}>›</Text>
+    </Pressable>
+  );
+}
+
+function FileListItem({ file, onPress, onLongPress }: { file: StoredFile; onPress: () => void; onLongPress: () => void }) {
+  const accentColor = fileTypeColor(file.mime_type);
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      style={({ pressed }) => ({
+        opacity: pressed ? 0.92 : 1,
+        transform: [{ scale: pressed ? 0.98 : 1 }],
+      })}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          backgroundColor: colors.gray[800],
+          borderRadius: 10,
+          borderLeftWidth: 3,
+          borderLeftColor: accentColor,
+          padding: 12,
+          marginBottom: 8,
+          borderWidth: 1,
+          borderColor: "rgba(255,255,255,0.04)",
+        }}
+      >
+        <Text style={{ fontSize: 22, marginRight: 12 }}>{fileIcon(file.mime_type)}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.gray[50], fontSize: 13, fontWeight: "600" }} numberOfLines={1}>
+            {file.filename}
+          </Text>
+          <Text style={{ color: colors.gray[500], fontSize: 11, fontFamily: "monospace", marginTop: 3 }}>
+            {formatBytes(file.size_bytes)} · {formatRelativeOrShortDate(file.created_at)}
+          </Text>
+        </View>
+        <Text style={{ color: colors.gray[500], fontSize: 18 }}>›</Text>
+      </View>
     </Pressable>
   );
 }
@@ -534,31 +592,12 @@ export default function FilesScreen() {
                   <Text style={{ color: DIM, fontSize: 10, fontFamily: "monospace", letterSpacing: 1, marginBottom: 8 }}>FILES ({otherFiles.length})</Text>
                 )}
                 {otherFiles.map(f => (
-                  <Pressable
+                  <FileListItem
                     key={f.id}
+                    file={f}
                     onPress={() => setPreviewFile(f)}
                     onLongPress={() => handleDelete(f)}
-                    style={({ pressed }) => ({
-                      flexDirection: "row",
-                      alignItems: "center",
-                      backgroundColor: colors.gray[800],
-                      borderRadius: 8,
-                      padding: 12,
-                      marginBottom: 6,
-                      borderWidth: 1,
-                      borderColor: colors.gray[700],
-                      opacity: pressed ? 0.7 : 1,
-                    })}
-                  >
-                    <Text style={{ fontSize: 22, marginRight: 12 }}>{fileIcon(f.mime_type)}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text numberOfLines={1} style={{ color: "#ccc", fontSize: 12, fontFamily: "monospace" }}>{f.filename}</Text>
-                      <Text style={{ color: DIM, fontSize: 10, fontFamily: "monospace" }}>
-                        {formatBytes(f.size_bytes)} · {formatRelativeOrShortDate(f.created_at)}
-                      </Text>
-                    </View>
-                    <Text style={{ color: DIM, fontSize: 16 }}>›</Text>
-                  </Pressable>
+                  />
                 ))}
               </View>
             )}
