@@ -173,7 +173,7 @@ function FieldInput({ label, value, onChangeText, placeholder, keyboardType }: {
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor=colors.gray[500]
+        placeholderTextColor={colors.gray[500]}
         keyboardType={keyboardType}
         style={{ backgroundColor: colors.gray[800], borderRadius: 8, padding: 12, color: colors.gray[50], fontFamily: "monospace", fontSize: 13, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" }}
       />

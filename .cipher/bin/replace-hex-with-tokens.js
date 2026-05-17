@@ -94,12 +94,19 @@ function processFile(absPath) {
   let replaced = 0;
 
   for (const [hex, token] of Object.entries(MAP)) {
-    // Match the hex inside a single OR double-quoted string only.
-    // We KEEP the surrounding quotes-removed form (i.e. replace "X" → token)
-    // by matching with quotes.
     const escaped = hex.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`(['"])${escaped}\\1`, "g");
-    updated = updated.replace(re, () => {
+
+    // Case A: JSX attribute syntax `<prop>="<hex>"` → `<prop>={token}`
+    // Detect by checking that the quoted string is immediately preceded by `=` (JSX prop=value).
+    const reJsx = new RegExp(`=(['"])${escaped}\\1`, "g");
+    updated = updated.replace(reJsx, () => {
+      replaced++;
+      return `={${token}}`;
+    });
+
+    // Case B: any other quoted occurrence (style object value, plain string literal) → bare token
+    const reAny = new RegExp(`(['"])${escaped}\\1`, "g");
+    updated = updated.replace(reAny, () => {
       replaced++;
       return token;
     });

@@ -386,7 +386,7 @@ export function TaskDetailSheet({
                 onChangeText={setNotes}
                 onBlur={handleNotesSave}
                 placeholder="Add notes..."
-                placeholderTextColor=colors.gray[400]
+                placeholderTextColor={colors.gray[400]}
                 multiline
                 style={{
                   backgroundColor: colors.gray[800],
@@ -410,7 +410,7 @@ export function TaskDetailSheet({
                 <Pressable onPress={handleUploadMenu} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                   {uploading ? (
                     <>
-                      <ActivityIndicator size="small" color=colors.accent />
+                      <ActivityIndicator size="small" color={colors.accent} />
                       <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10 }}>VERIFYING...</Text>
                     </>
                   ) : (
@@ -423,7 +423,7 @@ export function TaskDetailSheet({
               </View>
 
               {loadingAttachments ? (
-                <ActivityIndicator size="small" color=colors.gray[400] style={{ marginVertical: 12 }} />
+                <ActivityIndicator size="small" color={colors.gray[400]} style={{ marginVertical: 12 }} />
               ) : attachments.length > 0 ? (
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
                   {attachments.map((att) => {

@@ -400,7 +400,7 @@ export default function UploadScreen() {
               value={textContent}
               onChangeText={setTextContent}
               placeholder="Paste or type content..."
-              placeholderTextColor=colors.gray[400]
+              placeholderTextColor={colors.gray[400]}
               multiline
               style={{
                 backgroundColor: colors.gray[800],

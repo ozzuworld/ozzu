@@ -613,7 +613,7 @@ export default function MetricsScreen() {
               <MetricRow
                 label="Today Completed"
                 value={String(live?.directives?.today?.completed || 0)}
-                valueColor=colors.success
+                valueColor={colors.success}
               />
               <MetricRow
                 label="Today Failed"
@@ -644,7 +644,7 @@ export default function MetricsScreen() {
               <MetricRow
                 label="Uptime"
                 value={formatUptime(live?.uptimeSeconds || 0)}
-                valueColor=colors.success
+                valueColor={colors.success}
               />
               <MetricRow
                 label="WS Connections"
@@ -869,7 +869,7 @@ export default function MetricsScreen() {
               <MetricRow
                 label="Cache Hits"
                 value={String(today?.spotify?.cacheHits || 0)}
-                valueColor=colors.success
+                valueColor={colors.success}
               />
             </View>
 
@@ -1073,7 +1073,7 @@ export default function MetricsScreen() {
                             <StatCard
                               value={formatNumber(totals.cacheRead)}
                               label="CACHE READ"
-                              color=colors.success
+                              color={colors.success}
                             />
                             <StatCard
                               value={formatNumber(totals.cacheCreation)}

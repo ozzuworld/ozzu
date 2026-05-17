@@ -78,7 +78,7 @@ export function AddTaskModal({ visible, projectId, existingPhases = [], onClose,
               value={title}
               onChangeText={setTitle}
               placeholder="Task title..."
-              placeholderTextColor=colors.gray[400]
+              placeholderTextColor={colors.gray[400]}
               style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 12, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: colors.gray[700] }}
               autoFocus
             />
@@ -88,7 +88,7 @@ export function AddTaskModal({ visible, projectId, existingPhases = [], onClose,
               value={description}
               onChangeText={setDescription}
               placeholder="Optional details..."
-              placeholderTextColor=colors.gray[400]
+              placeholderTextColor={colors.gray[400]}
               multiline
               style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 12, fontSize: 13, marginBottom: 12, minHeight: 50, borderWidth: 1, borderColor: colors.gray[700], textAlignVertical: "top" }}
             />
@@ -141,7 +141,7 @@ export function AddTaskModal({ visible, projectId, existingPhases = [], onClose,
                 value={customPhase}
                 onChangeText={setCustomPhase}
                 placeholder="Phase name..."
-                placeholderTextColor=colors.gray[400]
+                placeholderTextColor={colors.gray[400]}
                 style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 10, fontSize: 12, marginBottom: 12, borderWidth: 1, borderColor: colors.gray[700] }}
               />
             ) : null}

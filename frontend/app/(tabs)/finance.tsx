@@ -179,7 +179,7 @@ export default function FinanceScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: hPad, paddingBottom: Math.max(24, insets.bottom), gap: 16 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor=colors.accent colors={[colors.accent]} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} colors={[colors.accent]} />
         }
       >
         {/* Section header */}

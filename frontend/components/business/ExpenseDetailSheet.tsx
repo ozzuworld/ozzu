@@ -185,7 +185,7 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
               value={vendor}
               onChangeText={setVendor}
               placeholder="Vendor name..."
-              placeholderTextColor=colors.gray[400]
+              placeholderTextColor={colors.gray[400]}
               style={{ backgroundColor: colors.gray[800], color: colors.gray[50], borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, borderWidth: 1, borderColor: colors.gray[700] }}
             />
 
@@ -195,7 +195,7 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
               value={description}
               onChangeText={setDescription}
               placeholder="Details..."
-              placeholderTextColor=colors.gray[400]
+              placeholderTextColor={colors.gray[400]}
               multiline
               style={{ backgroundColor: colors.gray[800], color: colors.gray[50], borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, minHeight: 50, borderWidth: 1, borderColor: colors.gray[700], textAlignVertical: "top" }}
             />
@@ -243,7 +243,7 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
                   opacity: scanning ? 0.5 : 1,
                 }}
               >
-                {scanning ? <ActivityIndicator size={14} color=colors.accent /> : null}
+                {scanning ? <ActivityIndicator size={14} color={colors.accent} /> : null}
                 <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
                   {scanning ? "SCANNING RECEIPT..." : "SCAN RECEIPT"}
                 </Text>

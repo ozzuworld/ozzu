@@ -163,7 +163,7 @@ function FieldInput({ label, value, onChangeText, multiline, placeholder }: { la
     <View style={{ marginBottom: 16 }}>
       <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>{label.toUpperCase()}</Text>
       <TextInput
-        value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor=colors.gray[500] multiline={multiline}
+        value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={colors.gray[500]} multiline={multiline}
         style={{ backgroundColor: colors.gray[800], borderRadius: 8, padding: 12, color: colors.gray[50], fontFamily: "monospace", fontSize: 13, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", minHeight: multiline ? 60 : undefined }}
       />
     </View>

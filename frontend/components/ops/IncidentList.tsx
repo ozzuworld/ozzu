@@ -29,7 +29,7 @@ export default function IncidentList({ incidents, loading }: Props) {
   if (loading) {
     return (
       <View style={{ padding: 20, alignItems: "center" }}>
-        <ActivityIndicator color=colors.gray[400] size="small" />
+        <ActivityIndicator color={colors.gray[400]} size="small" />
       </View>
     );
   }

@@ -49,7 +49,7 @@ export function AddProjectModal({ visible, onClose, onCreated }: AddProjectModal
             value={name}
             onChangeText={setName}
             placeholder="Project name..."
-            placeholderTextColor=colors.gray[400]
+            placeholderTextColor={colors.gray[400]}
             style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 12, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: colors.gray[700] }}
             autoFocus
           />
@@ -59,7 +59,7 @@ export function AddProjectModal({ visible, onClose, onCreated }: AddProjectModal
             value={description}
             onChangeText={setDescription}
             placeholder="Optional description..."
-            placeholderTextColor=colors.gray[400]
+            placeholderTextColor={colors.gray[400]}
             multiline
             style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 12, fontSize: 13, marginBottom: 12, minHeight: 60, borderWidth: 1, borderColor: colors.gray[700], textAlignVertical: "top" }}
           />

@@ -166,7 +166,7 @@ export function ShipmentDetailSheet({ shipmentId, visible, onClose, onRefresh }:
                     onChangeText={setNotes}
                     onBlur={saveNotes}
                     placeholder="Add notes..."
-                    placeholderTextColor=colors.gray[500]
+                    placeholderTextColor={colors.gray[500]}
                     multiline
                     style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 12, minHeight: 60 }}
                   />

@@ -48,8 +48,8 @@ export function DashboardView() {
 
       {/* Key metrics 2x2 grid */}
       <View style={{ flexDirection: "row", gap: 10, marginBottom: 10 }}>
-        <MetricCard label="REVENUE" value={formatCurrency(m?.totalRevenue, "USD")} color=colors.success />
-        <MetricCard label="EXPENSES" value={formatCurrency(m?.totalExpenses, "COP")} color=colors.brand.amber />
+        <MetricCard label="REVENUE" value={formatCurrency(m?.totalRevenue, "USD")} color={colors.success} />
+        <MetricCard label="EXPENSES" value={formatCurrency(m?.totalExpenses, "COP")} color={colors.brand.amber} />
       </View>
       <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
         <MetricCard label="NET P&L" value={formatCurrency(m?.netPL, "USD")} color={plColor} />
@@ -73,8 +73,8 @@ export function DashboardView() {
       {m && (m.totalRevenue > 0 || m.totalExpenses > 0) && (
         <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.04)" }}>
           <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, letterSpacing: 2, marginBottom: 12 }}>REVENUE VS EXPENSES</Text>
-          <BarRow label="Revenue" value={m.totalRevenue} max={Math.max(m.totalRevenue, m.totalExpenses)} color=colors.success currency="USD" />
-          <BarRow label="Expenses" value={m.totalExpenses} max={Math.max(m.totalRevenue, m.totalExpenses)} color=colors.brand.amber currency="COP" />
+          <BarRow label="Revenue" value={m.totalRevenue} max={Math.max(m.totalRevenue, m.totalExpenses)} color={colors.success} currency="USD" />
+          <BarRow label="Expenses" value={m.totalExpenses} max={Math.max(m.totalRevenue, m.totalExpenses)} color={colors.brand.amber} currency="COP" />
         </View>
       )}
 

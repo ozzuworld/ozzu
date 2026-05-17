@@ -450,7 +450,7 @@ export default function PhotoCaptureOverlay({
             }}
           >
             {intelLoading ? (
-              <ActivityIndicator size="small" color=colors.brand.purple />
+              <ActivityIndicator size="small" color={colors.brand.purple} />
             ) : (
               <Text style={{ fontSize: 16 }}>{"\u{1F50D}"}</Text>
             )}
@@ -486,7 +486,7 @@ export default function PhotoCaptureOverlay({
             }}
           >
             {bridgeLoading ? (
-              <ActivityIndicator size="small" color=colors.accent />
+              <ActivityIndicator size="small" color={colors.accent} />
             ) : (
               <Text style={{ fontSize: 16 }}>{bridgeDone ? "\u2713" : "\u{1F517}"}</Text>
             )}

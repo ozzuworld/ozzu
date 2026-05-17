@@ -347,7 +347,7 @@ function SkiaSparkline({
   for (let i = 0; i <= 3; i++) {
     const gy = pad + (ch / 3) * i;
     gridLines.push(
-      <SkLine key={i} p1={vec(pad, gy)} p2={vec(w - pad, gy)} color=colors.gray[850] strokeWidth={0.5} />
+      <SkLine key={i} p1={vec(pad, gy)} p2={vec(w - pad, gy)} color={colors.gray[850]} strokeWidth={0.5} />
     );
   }
 

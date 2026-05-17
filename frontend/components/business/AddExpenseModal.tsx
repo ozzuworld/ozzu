@@ -161,7 +161,7 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
                 }}
               >
                 {scanning ? (
-                  <ActivityIndicator size={12} color=colors.accent />
+                  <ActivityIndicator size={12} color={colors.accent} />
                 ) : null}
                 <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
                   {scanning ? "SCANNING..." : "SCAN RECEIPT"}
@@ -245,7 +245,7 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
               value={vendor}
               onChangeText={setVendor}
               placeholder="Vendor name..."
-              placeholderTextColor=colors.gray[400]
+              placeholderTextColor={colors.gray[400]}
               style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, borderWidth: 1, borderColor: colors.gray[700] }}
             />
 
@@ -255,7 +255,7 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
               value={description}
               onChangeText={setDescription}
               placeholder="Optional details..."
-              placeholderTextColor=colors.gray[400]
+              placeholderTextColor={colors.gray[400]}
               multiline
               style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, minHeight: 40, borderWidth: 1, borderColor: colors.gray[700], textAlignVertical: "top" }}
             />
