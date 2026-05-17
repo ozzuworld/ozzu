@@ -32,26 +32,27 @@ import { ExpenseRow } from "./ExpenseRow";
 import { AddExpenseModal } from "./AddExpenseModal";
 import { ExpenseDetailSheet } from "./ExpenseDetailSheet";
 
+import { colors } from "../../lib/design-tokens";
 const STATUS_CYCLE: Record<string, string> = {
   pending: "in_progress",
   in_progress: "done",
   done: "pending",
 };
 const STATUS_ICON: Record<string, string> = { pending: "○", in_progress: "◐", done: "●" };
-const STATUS_COLOR: Record<string, string> = { pending: "#525252", in_progress: "#EAB308", done: "#22C55E" };
+const STATUS_COLOR: Record<string, string> = { pending: colors.gray[400], in_progress: colors.brand.amberDeep, done: colors.success };
 const STATUS_LABEL: Record<string, string> = { pending: "PENDING", in_progress: "IN PROGRESS", done: "DONE" };
 
 const VERIFICATION_DOT_COLOR: Record<string, string> = {
-  verified: "#22C55E",
-  partial: "#EAB308",
-  rejected: "#EF4444",
-  unverified: "#525252",
+  verified: colors.success,
+  partial: colors.brand.amberDeep,
+  rejected: colors.error,
+  unverified: colors.gray[400],
 };
 
 const PRIORITIES = [
-  { value: "low", label: "LOW", color: "#3B82F6" },
-  { value: "medium", label: "MED", color: "#F97316" },
-  { value: "high", label: "HIGH", color: "#EF4444" },
+  { value: "low", label: "LOW", color: colors.brand.blue },
+  { value: "medium", label: "MED", color: colors.brand.orange },
+  { value: "high", label: "HIGH", color: colors.error },
 ] as const;
 
 interface TaskDetailSheetProps {
@@ -252,7 +253,7 @@ export function TaskDetailSheet({
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
           <Pressable style={{ height: 100 }} onPress={onClose} />
-          <View style={{ flex: 1, backgroundColor: "#111111", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+          <View style={{ flex: 1, backgroundColor: colors.gray[850], borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
             <Pressable onPress={onClose} style={{ alignItems: "center", paddingTop: 12, paddingBottom: 8 }}>
               <View style={{ width: 40, height: 4, backgroundColor: "#555", borderRadius: 2 }} />
             </Pressable>
@@ -260,7 +261,7 @@ export function TaskDetailSheet({
             {/* Close button */}
             <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16, marginBottom: 4 }}>
               <Pressable onPress={onClose} hitSlop={16} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-                <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 11 }}>CLOSE</Text>
+                <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 11 }}>CLOSE</Text>
               </Pressable>
             </View>
 
@@ -273,7 +274,7 @@ export function TaskDetailSheet({
                   </Text>
                 </Pressable>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: "#E5E5E5", fontSize: 16, fontWeight: "bold" }}>
+                  <Text style={{ color: colors.gray[50], fontSize: 16, fontWeight: "bold" }}>
                     {task.title}
                   </Text>
                   <Text style={{ color: STATUS_COLOR[task.status], fontFamily: "monospace", fontSize: 10, marginTop: 2 }}>
@@ -283,7 +284,7 @@ export function TaskDetailSheet({
               </View>
 
               {/* Priority pills */}
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>PRIORITY</Text>
+              <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>PRIORITY</Text>
               <View style={{ flexDirection: "row", gap: 6, marginBottom: 16 }}>
                 {PRIORITIES.map((p) => (
                   <Pressable
@@ -294,13 +295,13 @@ export function TaskDetailSheet({
                       paddingVertical: 6,
                       borderRadius: 6,
                       alignItems: "center",
-                      backgroundColor: task.priority === p.value ? p.color + "22" : "#1A1A1A",
+                      backgroundColor: task.priority === p.value ? p.color + "22" : colors.gray[800],
                       borderWidth: 1,
-                      borderColor: task.priority === p.value ? p.color : "#2A2A2A",
+                      borderColor: task.priority === p.value ? p.color : colors.gray[700],
                     }}
                   >
                     <Text style={{
-                      color: task.priority === p.value ? p.color : "#525252",
+                      color: task.priority === p.value ? p.color : colors.gray[400],
                       fontFamily: "monospace",
                       fontSize: 10,
                       fontWeight: "bold",
@@ -314,9 +315,9 @@ export function TaskDetailSheet({
               {/* Phase badge */}
               {task.phase ? (
                 <View style={{ marginBottom: 16 }}>
-                  <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>PHASE</Text>
+                  <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>PHASE</Text>
                   <View style={{ backgroundColor: "#06B6D422", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, alignSelf: "flex-start" }}>
-                    <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 11 }}>{task.phase}</Text>
+                    <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 11 }}>{task.phase}</Text>
                   </View>
                 </View>
               ) : null}
@@ -324,8 +325,8 @@ export function TaskDetailSheet({
               {/* Description */}
               {task.description ? (
                 <View style={{ marginBottom: 16 }}>
-                  <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>DESCRIPTION</Text>
-                  <Text style={{ color: "#A3A3A3", fontSize: 13, lineHeight: 20 }}>{task.description}</Text>
+                  <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>DESCRIPTION</Text>
+                  <Text style={{ color: colors.gray[200], fontSize: 13, lineHeight: 20 }}>{task.description}</Text>
                 </View>
               ) : null}
 
@@ -333,7 +334,7 @@ export function TaskDetailSheet({
               {hasRequirements ? (
                 <View style={{ marginBottom: 16 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-                    <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, flex: 1 }}>
+                    <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, flex: 1 }}>
                       REQUIREMENTS ({reqFulfilled}/{requirements.length})
                     </Text>
                     <View style={{
@@ -359,18 +360,18 @@ export function TaskDetailSheet({
                       paddingVertical: 6,
                       paddingLeft: 8,
                       borderLeftWidth: 2,
-                      borderLeftColor: req.fulfilled ? "#22C55E" : "#333",
+                      borderLeftColor: req.fulfilled ? colors.success : colors.gray[600],
                       marginBottom: 4,
                     }}>
-                      <Text style={{ color: req.fulfilled ? "#22C55E" : "#525252", fontSize: 12, marginRight: 8, marginTop: 1 }}>
+                      <Text style={{ color: req.fulfilled ? colors.success : colors.gray[400], fontSize: 12, marginRight: 8, marginTop: 1 }}>
                         {req.fulfilled ? "●" : "○"}
                       </Text>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ color: req.fulfilled ? "#A3A3A3" : "#E5E5E5", fontSize: 12, fontWeight: "600" }}>
+                        <Text style={{ color: req.fulfilled ? colors.gray[200] : colors.gray[50], fontSize: 12, fontWeight: "600" }}>
                           {req.label}
                         </Text>
                         {req.description ? (
-                          <Text style={{ color: "#525252", fontSize: 10, marginTop: 2 }}>{req.description}</Text>
+                          <Text style={{ color: colors.gray[400], fontSize: 10, marginTop: 2 }}>{req.description}</Text>
                         ) : null}
                       </View>
                     </View>
@@ -379,23 +380,23 @@ export function TaskDetailSheet({
               ) : null}
 
               {/* Notes */}
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>NOTES</Text>
+              <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>NOTES</Text>
               <TextInput
                 value={notes}
                 onChangeText={setNotes}
                 onBlur={handleNotesSave}
                 placeholder="Add notes..."
-                placeholderTextColor="#525252"
+                placeholderTextColor=colors.gray[400]
                 multiline
                 style={{
-                  backgroundColor: "#1A1A1A",
-                  color: "#E5E5E5",
+                  backgroundColor: colors.gray[800],
+                  color: colors.gray[50],
                   borderRadius: 8,
                   padding: 12,
                   fontSize: 13,
                   minHeight: 80,
                   borderWidth: 1,
-                  borderColor: "#2A2A2A",
+                  borderColor: colors.gray[700],
                   textAlignVertical: "top",
                   marginBottom: 16,
                 }}
@@ -403,26 +404,26 @@ export function TaskDetailSheet({
 
               {/* Attachments */}
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10 }}>
+                <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10 }}>
                   ATTACHMENTS ({attachments.length})
                 </Text>
                 <Pressable onPress={handleUploadMenu} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                   {uploading ? (
                     <>
-                      <ActivityIndicator size="small" color="#06B6D4" />
-                      <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>VERIFYING...</Text>
+                      <ActivityIndicator size="small" color=colors.accent />
+                      <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10 }}>VERIFYING...</Text>
                     </>
                   ) : (
                     <>
-                      <Text style={{ color: "#06B6D4", fontSize: 16 }}>+</Text>
-                      <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>ADD</Text>
+                      <Text style={{ color: colors.accent, fontSize: 16 }}>+</Text>
+                      <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10 }}>ADD</Text>
                     </>
                   )}
                 </Pressable>
               </View>
 
               {loadingAttachments ? (
-                <ActivityIndicator size="small" color="#525252" style={{ marginVertical: 12 }} />
+                <ActivityIndicator size="small" color=colors.gray[400] style={{ marginVertical: 12 }} />
               ) : attachments.length > 0 ? (
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
                   {attachments.map((att) => {
@@ -451,19 +452,19 @@ export function TaskDetailSheet({
                           {att.file_type === "image" ? (
                             <Image
                               source={{ uri: getAttachmentUrl(att.id, true) }}
-                              style={{ width: 80, height: 80, borderRadius: 8, backgroundColor: "#1A1A1A" }}
+                              style={{ width: 80, height: 80, borderRadius: 8, backgroundColor: colors.gray[800] }}
                             />
                           ) : (
                             <View style={{
                               width: 80,
                               height: 80,
                               borderRadius: 8,
-                              backgroundColor: "#1A1A1A",
+                              backgroundColor: colors.gray[800],
                               alignItems: "center",
                               justifyContent: "center",
                             }}>
                               <Text style={{ fontSize: 24 }}>📄</Text>
-                              <Text style={{ color: "#525252", fontSize: 8, fontFamily: "monospace", marginTop: 2 }} numberOfLines={1}>
+                              <Text style={{ color: colors.gray[400], fontSize: 8, fontFamily: "monospace", marginTop: 2 }} numberOfLines={1}>
                                 {att.file_name}
                               </Text>
                             </View>
@@ -479,7 +480,7 @@ export function TaskDetailSheet({
                               borderRadius: 5,
                               backgroundColor: dotColor,
                               borderWidth: 1.5,
-                              borderColor: "#111111",
+                              borderColor: colors.gray[850],
                             }} />
                           ) : null}
                         </View>
@@ -488,7 +489,7 @@ export function TaskDetailSheet({
                   })}
                 </View>
               ) : (
-                <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11, marginBottom: 16 }}>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11, marginBottom: 16 }}>
                   No attachments yet
                 </Text>
               )}
@@ -496,17 +497,17 @@ export function TaskDetailSheet({
               {/* Cost summary */}
               {(task.estimated_cost || task.actual_cost || expenses.length > 0) ? (
                 <View style={{ marginBottom: 16 }}>
-                  <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>COSTS</Text>
+                  <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>COSTS</Text>
                   <View style={{ flexDirection: "row", gap: 16 }}>
                     {task.estimated_cost ? (
                       <View>
-                        <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>ESTIMATED</Text>
-                        <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 12 }}>{formatCOPCompact(task.estimated_cost)}</Text>
+                        <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>ESTIMATED</Text>
+                        <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 12 }}>{formatCOPCompact(task.estimated_cost)}</Text>
                       </View>
                     ) : null}
                     <View>
-                      <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>ACTUAL</Text>
-                      <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
+                      <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>ACTUAL</Text>
+                      <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
                         {formatCOPCompact(task.actual_cost || 0)}
                       </Text>
                     </View>
@@ -518,12 +519,12 @@ export function TaskDetailSheet({
               {onAddExpense ? (
                 <View style={{ marginBottom: 16 }}>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10 }}>
+                    <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10 }}>
                       EXPENSES ({expenses.length})
                     </Text>
                     <Pressable onPress={() => setAddExpenseVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                      <Text style={{ color: "#06B6D4", fontSize: 16 }}>+</Text>
-                      <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>ADD</Text>
+                      <Text style={{ color: colors.accent, fontSize: 16 }}>+</Text>
+                      <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10 }}>ADD</Text>
                     </Pressable>
                   </View>
                   {expenses.length > 0 ? (
@@ -544,18 +545,18 @@ export function TaskDetailSheet({
                       />
                     ))
                   ) : (
-                    <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11 }}>No expenses yet</Text>
+                    <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11 }}>No expenses yet</Text>
                   )}
                 </View>
               ) : null}
 
               {/* Timestamps */}
               <View style={{ marginBottom: 16 }}>
-                <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>
                   Created {formatDate(task.created_at)}
                 </Text>
                 {task.completed_at ? (
-                  <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>
+                  <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>
                     Completed {formatDate(task.completed_at)}
                   </Text>
                 ) : null}
@@ -563,7 +564,7 @@ export function TaskDetailSheet({
 
               {/* Delete task */}
               <Pressable onPress={() => onDelete(task)} style={{ alignItems: "center", paddingVertical: 10 }}>
-                <Text style={{ color: "#EF4444", fontFamily: "monospace", fontSize: 11 }}>DELETE TASK</Text>
+                <Text style={{ color: colors.error, fontFamily: "monospace", fontSize: 11 }}>DELETE TASK</Text>
               </Pressable>
             </ScrollView>
           </View>
@@ -591,13 +592,13 @@ export function TaskDetailSheet({
                 }}
                 style={{
                   marginTop: 16,
-                  backgroundColor: "#06B6D4",
+                  backgroundColor: colors.accent,
                   paddingHorizontal: 20,
                   paddingVertical: 10,
                   borderRadius: 8,
                 }}
               >
-                <Text style={{ color: "#111", fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>DOWNLOAD / SHARE</Text>
+                <Text style={{ color: colors.gray[850], fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>DOWNLOAD / SHARE</Text>
               </Pressable>
             </>
           )}
@@ -608,9 +609,9 @@ export function TaskDetailSheet({
       <Modal visible={verificationDetail !== null} transparent animationType="slide" onRequestClose={() => setVerificationDetail(null)}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
           <Pressable style={{ flex: 0.3 }} onPress={() => setVerificationDetail(null)} />
-          <View style={{ flex: 0.7, backgroundColor: "#111111", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 }}>
+          <View style={{ flex: 0.7, backgroundColor: colors.gray[850], borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 }}>
             <View style={{ alignItems: "center", paddingBottom: 12 }}>
-              <View style={{ width: 40, height: 4, backgroundColor: "#333", borderRadius: 2 }} />
+              <View style={{ width: 40, height: 4, backgroundColor: colors.gray[600], borderRadius: 2 }} />
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
               {verificationDetail && (
@@ -627,35 +628,35 @@ export function TaskDetailSheet({
                     }}>
                       {verificationDetail.status.toUpperCase()}
                     </Text>
-                    <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginLeft: 8 }}>
+                    <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginLeft: 8 }}>
                       {verificationDetail.documentType}
                     </Text>
                   </View>
 
                   {/* Summary */}
-                  <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>AI ANALYSIS</Text>
-                  <Text style={{ color: "#A3A3A3", fontSize: 13, lineHeight: 20, marginBottom: 16 }}>
+                  <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>AI ANALYSIS</Text>
+                  <Text style={{ color: colors.gray[200], fontSize: 13, lineHeight: 20, marginBottom: 16 }}>
                     {verificationDetail.summary}
                   </Text>
 
                   {/* Matched requirements */}
                   {verificationDetail.details.length > 0 ? (
                     <View style={{ marginBottom: 16 }}>
-                      <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 8 }}>REQUIREMENTS CHECK</Text>
+                      <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 8 }}>REQUIREMENTS CHECK</Text>
                       {verificationDetail.details.map((d, i) => (
                         <View key={i} style={{
                           flexDirection: "row", alignItems: "flex-start",
                           paddingVertical: 6, paddingLeft: 8,
-                          borderLeftWidth: 2, borderLeftColor: d.met ? "#22C55E" : "#EF4444",
+                          borderLeftWidth: 2, borderLeftColor: d.met ? colors.success : colors.error,
                           marginBottom: 4,
                         }}>
-                          <Text style={{ color: d.met ? "#22C55E" : "#EF4444", fontSize: 12, marginRight: 8 }}>
+                          <Text style={{ color: d.met ? colors.success : colors.error, fontSize: 12, marginRight: 8 }}>
                             {d.met ? "✓" : "✗"}
                           </Text>
                           <View style={{ flex: 1 }}>
-                            <Text style={{ color: "#E5E5E5", fontSize: 11 }}>{d.requirementId}</Text>
-                            <Text style={{ color: "#737373", fontSize: 10, marginTop: 2 }}>{d.explanation}</Text>
-                            <Text style={{ color: "#525252", fontSize: 9, marginTop: 2 }}>
+                            <Text style={{ color: colors.gray[50], fontSize: 11 }}>{d.requirementId}</Text>
+                            <Text style={{ color: colors.gray[300], fontSize: 10, marginTop: 2 }}>{d.explanation}</Text>
+                            <Text style={{ color: colors.gray[400], fontSize: 9, marginTop: 2 }}>
                               Confidence: {Math.round(d.confidence * 100)}%
                             </Text>
                           </View>
@@ -667,9 +668,9 @@ export function TaskDetailSheet({
                   {/* Issues */}
                   {verificationDetail.issues.length > 0 ? (
                     <View style={{ marginBottom: 16 }}>
-                      <Text style={{ color: "#EF4444", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>ISSUES</Text>
+                      <Text style={{ color: colors.error, fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>ISSUES</Text>
                       {verificationDetail.issues.map((issue, i) => (
-                        <Text key={i} style={{ color: "#A3A3A3", fontSize: 12, marginBottom: 2 }}>• {issue}</Text>
+                        <Text key={i} style={{ color: colors.gray[200], fontSize: 12, marginBottom: 2 }}>• {issue}</Text>
                       ))}
                     </View>
                   ) : null}
@@ -677,15 +678,15 @@ export function TaskDetailSheet({
                   {/* Suggestions */}
                   {verificationDetail.suggestions.length > 0 ? (
                     <View style={{ marginBottom: 16 }}>
-                      <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>SUGGESTIONS</Text>
+                      <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>SUGGESTIONS</Text>
                       {verificationDetail.suggestions.map((s, i) => (
-                        <Text key={i} style={{ color: "#A3A3A3", fontSize: 12, marginBottom: 2 }}>• {s}</Text>
+                        <Text key={i} style={{ color: colors.gray[200], fontSize: 12, marginBottom: 2 }}>• {s}</Text>
                       ))}
                     </View>
                   ) : null}
 
                   <Pressable onPress={() => setVerificationDetail(null)} style={{ alignItems: "center", paddingVertical: 12 }}>
-                    <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11 }}>CLOSE</Text>
+                    <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11 }}>CLOSE</Text>
                   </Pressable>
                 </>
               )}

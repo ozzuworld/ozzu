@@ -30,7 +30,7 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
 
   const platformEmoji = run.platform === "ios" ? "\u{1F34E}" : "\u{1F4F1}";
   const statusEmoji = isActive ? "\u{1F504}" : succeeded ? "\u2705" : failed ? "\u274C" : "\u23F3";
-  const badgeColor = isActive ? "#3B82F6" : succeeded ? "#10B981" : failed ? "#EF4444" : "#6B7280";
+  const badgeColor = isActive ? colors.brand.blue : succeeded ? "#10B981" : failed ? colors.error : "#6B7280";
   const statusText = isActive
     ? run.status === "in_progress" ? "building" : "queued"
     : run.conclusion || run.status;

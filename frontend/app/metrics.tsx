@@ -15,8 +15,9 @@ import { fetchUsageMetrics, fetchAnthropicUsage, type UsageMetrics, type Anthrop
 import { GroupNav } from "../components/GroupNav";
 import { layout } from "../lib/design-tokens";
 import { formatLongDuration } from "../lib/format";
-const CYAN = "#06B6D4";
-const CARD_BG = "#111111";
+import { colors } from "../lib/design-tokens";
+const CYAN = colors.accent;
+const CARD_BG = colors.gray[850];
 const BORDER = "#222";
 
 function formatUptime(seconds: number): string {
@@ -71,7 +72,7 @@ function StatCard({
       </Text>
       <Text
         style={{
-          color: "#737373",
+          color: colors.gray[300],
           fontSize: 10,
           fontFamily: "monospace",
           fontWeight: "bold",
@@ -109,7 +110,7 @@ function SectionHeader({ title }: { title: string }) {
 function MetricRow({
   label,
   value,
-  valueColor = "#E5E5E5",
+  valueColor = colors.gray[50],
 }: {
   label: string;
   value: string;
@@ -122,12 +123,12 @@ function MetricRow({
         justifyContent: "space-between",
         paddingVertical: 6,
         borderBottomWidth: 1,
-        borderBottomColor: "#1A1A1A",
+        borderBottomColor: colors.gray[800],
       }}
     >
       <Text
         style={{
-          color: "#737373",
+          color: colors.gray[300],
           fontSize: 12,
           fontFamily: "monospace",
         }}
@@ -165,7 +166,7 @@ function Bar({
     <View
       style={{
         height,
-        backgroundColor: "#1A1A1A",
+        backgroundColor: colors.gray[800],
         borderRadius: height / 2,
         overflow: "hidden",
         flex: 1,
@@ -203,12 +204,12 @@ function DeviceRow({
         gap: 8,
       }}
     >
-      <Text style={{ fontSize: 8, color: isOnline ? "#22C55E" : "#EF4444" }}>
+      <Text style={{ fontSize: 8, color: isOnline ? colors.success : colors.error }}>
         {isOnline ? "\u25CF" : "\u25CF"}
       </Text>
       <Text
         style={{
-          color: "#A3A3A3",
+          color: colors.gray[200],
           fontSize: 12,
           fontFamily: "monospace",
           flex: 1,
@@ -218,7 +219,7 @@ function DeviceRow({
       </Text>
       <Text
         style={{
-          color: "#525252",
+          color: colors.gray[400],
           fontSize: 10,
           fontFamily: "monospace",
         }}
@@ -249,7 +250,7 @@ function HistoryChart({
     <View style={{ marginTop: 8 }}>
       <Text
         style={{
-          color: "#525252",
+          color: colors.gray[400],
           fontSize: 10,
           fontFamily: "monospace",
           marginBottom: 6,
@@ -275,7 +276,7 @@ function HistoryChart({
           >
             <Text
               style={{
-                color: "#525252",
+                color: colors.gray[400],
                 fontSize: 10,
                 fontFamily: "monospace",
                 width: 30,
@@ -286,7 +287,7 @@ function HistoryChart({
             <Bar value={val} max={max} />
             <Text
               style={{
-                color: "#737373",
+                color: colors.gray[300],
                 fontSize: 10,
                 fontFamily: "monospace",
                 width: 40,
@@ -343,7 +344,7 @@ export default function MetricsScreen() {
   const history = data?.history || [];
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#0A0A0A" }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
       <StatusBar style="light" />
 
       {/* Top bar */}
@@ -355,7 +356,7 @@ export default function MetricsScreen() {
           alignItems: "center",
           paddingHorizontal: 16,
           borderBottomWidth: 1,
-          borderBottomColor: "#1A1A1A",
+          borderBottomColor: colors.gray[800],
         }}
       >
         <TVPressable
@@ -364,7 +365,7 @@ export default function MetricsScreen() {
         >
           <Text
             style={{
-              color: "#525252",
+              color: colors.gray[400],
               fontSize: 18,
               fontFamily: "monospace",
             }}
@@ -405,7 +406,7 @@ export default function MetricsScreen() {
         {error && !data && (
           <Text
             style={{
-              color: "#EF4444",
+              color: colors.error,
               fontSize: 12,
               fontFamily: "monospace",
               textAlign: "center",
@@ -419,7 +420,7 @@ export default function MetricsScreen() {
         {!data && !error && (
           <Text
             style={{
-              color: "#525252",
+              color: colors.gray[400],
               fontSize: 12,
               fontFamily: "monospace",
               textAlign: "center",
@@ -489,7 +490,7 @@ export default function MetricsScreen() {
                     <View style={{ alignItems: "center" }}>
                       <Text
                         style={{
-                          color: "#E5E5E5",
+                          color: colors.gray[50],
                           fontSize: 18,
                           fontFamily: "monospace",
                           fontWeight: "bold",
@@ -499,7 +500,7 @@ export default function MetricsScreen() {
                       </Text>
                       <Text
                         style={{
-                          color: "#525252",
+                          color: colors.gray[400],
                           fontSize: 10,
                           fontFamily: "monospace",
                         }}
@@ -512,7 +513,7 @@ export default function MetricsScreen() {
                         style={{
                           color:
                             live.voiceLatency.p95Total > 2000
-                              ? "#EF4444"
+                              ? colors.error
                               : "#FBBF24",
                           fontSize: 18,
                           fontFamily: "monospace",
@@ -523,7 +524,7 @@ export default function MetricsScreen() {
                       </Text>
                       <Text
                         style={{
-                          color: "#525252",
+                          color: colors.gray[400],
                           fontSize: 10,
                           fontFamily: "monospace",
                         }}
@@ -535,7 +536,7 @@ export default function MetricsScreen() {
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                     <Text
                       style={{
-                        color: "#525252",
+                        color: colors.gray[400],
                         fontSize: 10,
                         fontFamily: "monospace",
                         width: 24,
@@ -559,7 +560,7 @@ export default function MetricsScreen() {
                   >
                     <Text
                       style={{
-                        color: "#525252",
+                        color: colors.gray[400],
                         fontSize: 10,
                         fontFamily: "monospace",
                         width: 24,
@@ -597,8 +598,8 @@ export default function MetricsScreen() {
                 }
                 valueColor={
                   (live?.directives?.successRate ?? 100) >= 80
-                    ? "#22C55E"
-                    : "#EF4444"
+                    ? colors.success
+                    : colors.error
                 }
               />
               <MetricRow
@@ -612,15 +613,15 @@ export default function MetricsScreen() {
               <MetricRow
                 label="Today Completed"
                 value={String(live?.directives?.today?.completed || 0)}
-                valueColor="#22C55E"
+                valueColor=colors.success
               />
               <MetricRow
                 label="Today Failed"
                 value={String(live?.directives?.today?.failed || 0)}
                 valueColor={
                   (live?.directives?.today?.failed || 0) > 0
-                    ? "#EF4444"
-                    : "#737373"
+                    ? colors.error
+                    : colors.gray[300]
                 }
               />
               <MetricRow
@@ -643,7 +644,7 @@ export default function MetricsScreen() {
               <MetricRow
                 label="Uptime"
                 value={formatUptime(live?.uptimeSeconds || 0)}
-                valueColor="#22C55E"
+                valueColor=colors.success
               />
               <MetricRow
                 label="WS Connections"
@@ -657,7 +658,7 @@ export default function MetricsScreen() {
                 label="Memory (Heap)"
                 value={`${live?.memoryMB?.heap || 0} MB`}
                 valueColor={
-                  (live?.memoryMB?.heap || 0) > 300 ? "#EF4444" : "#E5E5E5"
+                  (live?.memoryMB?.heap || 0) > 300 ? colors.error : colors.gray[50]
                 }
               />
               <MetricRow
@@ -693,7 +694,7 @@ export default function MetricsScreen() {
               ) : (
                 <Text
                   style={{
-                    color: "#525252",
+                    color: colors.gray[400],
                     fontSize: 12,
                     fontFamily: "monospace",
                     textAlign: "center",
@@ -732,14 +733,14 @@ export default function MetricsScreen() {
                         style={{
                           fontSize: 8,
                           color:
-                            evt.event === "connect" ? "#22C55E" : "#EF4444",
+                            evt.event === "connect" ? colors.success : colors.error,
                         }}
                       >
                         {evt.event === "connect" ? "\u25B2" : "\u25BC"}
                       </Text>
                       <Text
                         style={{
-                          color: "#737373",
+                          color: colors.gray[300],
                           fontSize: 10,
                           fontFamily: "monospace",
                           flex: 1,
@@ -749,7 +750,7 @@ export default function MetricsScreen() {
                       </Text>
                       <Text
                         style={{
-                          color: "#525252",
+                          color: colors.gray[400],
                           fontSize: 10,
                           fontFamily: "monospace",
                         }}
@@ -841,7 +842,7 @@ export default function MetricsScreen() {
                 label="Reconnects"
                 value={String(today?.gemini?.reconnects || 0)}
                 valueColor={
-                  (today?.gemini?.reconnects || 0) > 10 ? "#FBBF24" : "#E5E5E5"
+                  (today?.gemini?.reconnects || 0) > 10 ? "#FBBF24" : colors.gray[50]
                 }
               />
             </View>
@@ -868,7 +869,7 @@ export default function MetricsScreen() {
               <MetricRow
                 label="Cache Hits"
                 value={String(today?.spotify?.cacheHits || 0)}
-                valueColor="#22C55E"
+                valueColor=colors.success
               />
             </View>
 
@@ -886,7 +887,7 @@ export default function MetricsScreen() {
               >
                 <Text
                   style={{
-                    color: "#737373",
+                    color: colors.gray[300],
                     fontSize: 12,
                     fontFamily: "monospace",
                     textAlign: "center",
@@ -896,7 +897,7 @@ export default function MetricsScreen() {
                 </Text>
                 <Text
                   style={{
-                    color: "#525252",
+                    color: colors.gray[400],
                     fontSize: 10,
                     fontFamily: "monospace",
                     textAlign: "center",
@@ -923,7 +924,7 @@ export default function MetricsScreen() {
                       >
                         <Text
                           style={{
-                            color: "#525252",
+                            color: colors.gray[400],
                             fontSize: 10,
                             fontFamily: "monospace",
                             marginBottom: 6,
@@ -943,7 +944,7 @@ export default function MetricsScreen() {
                         </Text>
                         <Text
                           style={{
-                            color: "#525252",
+                            color: colors.gray[400],
                             fontSize: 10,
                             fontFamily: "monospace",
                             marginTop: 2,
@@ -957,7 +958,7 @@ export default function MetricsScreen() {
                             max={anthropicData.rateLimits.requestsLimit}
                             color={
                               (anthropicData.rateLimits.requestsRemaining / anthropicData.rateLimits.requestsLimit) < 0.2
-                                ? "#EF4444"
+                                ? colors.error
                                 : CYAN
                             }
                           />
@@ -976,7 +977,7 @@ export default function MetricsScreen() {
                       >
                         <Text
                           style={{
-                            color: "#525252",
+                            color: colors.gray[400],
                             fontSize: 10,
                             fontFamily: "monospace",
                             marginBottom: 6,
@@ -996,7 +997,7 @@ export default function MetricsScreen() {
                         </Text>
                         <Text
                           style={{
-                            color: "#525252",
+                            color: colors.gray[400],
                             fontSize: 10,
                             fontFamily: "monospace",
                             marginTop: 2,
@@ -1010,7 +1011,7 @@ export default function MetricsScreen() {
                             max={anthropicData.rateLimits.tokensLimit}
                             color={
                               (anthropicData.rateLimits.tokensRemaining / anthropicData.rateLimits.tokensLimit) < 0.2
-                                ? "#EF4444"
+                                ? colors.error
                                 : CYAN
                             }
                           />
@@ -1034,7 +1035,7 @@ export default function MetricsScreen() {
                   >
                     <Text
                       style={{
-                        color: "#525252",
+                        color: colors.gray[400],
                         fontSize: 10,
                         fontFamily: "monospace",
                         marginBottom: 8,
@@ -1072,7 +1073,7 @@ export default function MetricsScreen() {
                             <StatCard
                               value={formatNumber(totals.cacheRead)}
                               label="CACHE READ"
-                              color="#22C55E"
+                              color=colors.success
                             />
                             <StatCard
                               value={formatNumber(totals.cacheCreation)}
@@ -1100,7 +1101,7 @@ export default function MetricsScreen() {
                   >
                     <Text
                       style={{
-                        color: "#525252",
+                        color: colors.gray[400],
                         fontSize: 10,
                         fontFamily: "monospace",
                         marginBottom: 8,
@@ -1145,7 +1146,7 @@ export default function MetricsScreen() {
                   >
                     <Text
                       style={{
-                        color: "#525252",
+                        color: colors.gray[400],
                         fontSize: 10,
                         fontFamily: "monospace",
                         marginBottom: 8,
@@ -1168,12 +1169,12 @@ export default function MetricsScreen() {
                           style={{
                             paddingVertical: 6,
                             borderBottomWidth: 1,
-                            borderBottomColor: "#1A1A1A",
+                            borderBottomColor: colors.gray[800],
                           }}
                         >
                           <Text
                             style={{
-                              color: "#A3A3A3",
+                              color: colors.gray[200],
                               fontSize: 11,
                               fontFamily: "monospace",
                               marginBottom: 4,
@@ -1184,7 +1185,7 @@ export default function MetricsScreen() {
                           <View style={{ flexDirection: "row", gap: 12 }}>
                             <Text
                               style={{
-                                color: "#525252",
+                                color: colors.gray[400],
                                 fontSize: 10,
                                 fontFamily: "monospace",
                               }}
@@ -1193,7 +1194,7 @@ export default function MetricsScreen() {
                             </Text>
                             <Text
                               style={{
-                                color: "#525252",
+                                color: colors.gray[400],
                                 fontSize: 10,
                                 fontFamily: "monospace",
                               }}

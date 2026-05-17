@@ -4,6 +4,7 @@ import * as ImagePicker from "expo-image-picker";
 import { CostField } from "./CostField";
 import { uploadTaskAttachment, extractReceipt } from "../../lib/bridge-api";
 
+import { colors } from "../../lib/design-tokens";
 const CATEGORIES = [
   { value: "materials", label: "Materials", icon: "M" },
   { value: "labor", label: "Labor", icon: "L" },
@@ -16,10 +17,10 @@ const CATEGORIES = [
 ] as const;
 
 const PAYMENT_STATUSES = [
-  { value: "pending", label: "PENDING", color: "#EAB308" },
-  { value: "paid", label: "PAID", color: "#22C55E" },
-  { value: "partial", label: "PARTIAL", color: "#F97316" },
-  { value: "overdue", label: "OVERDUE", color: "#EF4444" },
+  { value: "pending", label: "PENDING", color: colors.brand.amberDeep },
+  { value: "paid", label: "PAID", color: colors.success },
+  { value: "partial", label: "PARTIAL", color: colors.brand.orange },
+  { value: "overdue", label: "OVERDUE", color: colors.error },
 ] as const;
 
 const PAYMENT_METHODS = [
@@ -137,10 +138,10 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", padding: 20 }} onPress={onClose}>
-        <Pressable onPress={() => {}} style={{ backgroundColor: "#1A1A1A", borderRadius: 12, maxHeight: "85%" }}>
+        <Pressable onPress={() => {}} style={{ backgroundColor: colors.gray[800], borderRadius: 12, maxHeight: "85%" }}>
           <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2 }}>
+              <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2 }}>
                 NEW EXPENSE
               </Text>
               <Pressable
@@ -155,14 +156,14 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
                   paddingVertical: 6,
                   borderRadius: 6,
                   borderWidth: 1,
-                  borderColor: "#06B6D4",
+                  borderColor: colors.accent,
                   opacity: scanning ? 0.5 : 1,
                 }}
               >
                 {scanning ? (
-                  <ActivityIndicator size={12} color="#06B6D4" />
+                  <ActivityIndicator size={12} color=colors.accent />
                 ) : null}
-                <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
+                <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
                   {scanning ? "SCANNING..." : "SCAN RECEIPT"}
                 </Text>
               </Pressable>
@@ -181,7 +182,7 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
                 alignItems: "center",
                 gap: 8,
               }}>
-                <Text style={{ color: "#22C55E", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>VERIFIED</Text>
+                <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>VERIFIED</Text>
                 <Text style={{ color: "#22C55E99", fontFamily: "monospace", fontSize: 9, flex: 1 }}>
                   Receipt scanned — expense will be marked as verified
                 </Text>
@@ -194,25 +195,25 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
             {/* IVA */}
             <View style={{ marginTop: 12 }}>
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10 }}>IVA 19% AUTO</Text>
+                <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10 }}>IVA 19% AUTO</Text>
                 <Switch
                   value={ivaAuto}
                   onValueChange={setIvaAuto}
-                  trackColor={{ false: "#2A2A2A", true: "#06B6D444" }}
-                  thumbColor={ivaAuto ? "#06B6D4" : "#525252"}
+                  trackColor={{ false: colors.gray[700], true: "#06B6D444" }}
+                  thumbColor={ivaAuto ? colors.accent : colors.gray[400]}
                 />
               </View>
               {!ivaAuto ? (
                 <CostField value={ivaManual} onChange={setIvaManual} label="IVA MANUAL" />
               ) : amount ? (
-                <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 10 }}>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>
                   IVA: ${Math.round(ivaAmount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")}
                 </Text>
               ) : null}
             </View>
 
             {/* Category */}
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginTop: 12, marginBottom: 6 }}>CATEGORY</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginTop: 12, marginBottom: 6 }}>CATEGORY</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
               {CATEGORIES.map((c) => (
                 <Pressable
@@ -222,13 +223,13 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
                     paddingHorizontal: 10,
                     paddingVertical: 6,
                     borderRadius: 6,
-                    backgroundColor: category === c.value ? "#06B6D422" : "#111",
+                    backgroundColor: category === c.value ? "#06B6D422" : colors.gray[850],
                     borderWidth: 1,
-                    borderColor: category === c.value ? "#06B6D4" : "#2A2A2A",
+                    borderColor: category === c.value ? colors.accent : colors.gray[700],
                   }}
                 >
                   <Text style={{
-                    color: category === c.value ? "#06B6D4" : "#525252",
+                    color: category === c.value ? colors.accent : colors.gray[400],
                     fontFamily: "monospace",
                     fontSize: 10,
                   }}>
@@ -239,28 +240,28 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
             </View>
 
             {/* Vendor */}
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>VENDOR</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>VENDOR</Text>
             <TextInput
               value={vendor}
               onChangeText={setVendor}
               placeholder="Vendor name..."
-              placeholderTextColor="#525252"
-              style={{ backgroundColor: "#111", color: "#E5E5E5", borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, borderWidth: 1, borderColor: "#2A2A2A" }}
+              placeholderTextColor=colors.gray[400]
+              style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, borderWidth: 1, borderColor: colors.gray[700] }}
             />
 
             {/* Description */}
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>DESCRIPTION</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>DESCRIPTION</Text>
             <TextInput
               value={description}
               onChangeText={setDescription}
               placeholder="Optional details..."
-              placeholderTextColor="#525252"
+              placeholderTextColor=colors.gray[400]
               multiline
-              style={{ backgroundColor: "#111", color: "#E5E5E5", borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, minHeight: 40, borderWidth: 1, borderColor: "#2A2A2A", textAlignVertical: "top" }}
+              style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, minHeight: 40, borderWidth: 1, borderColor: colors.gray[700], textAlignVertical: "top" }}
             />
 
             {/* Payment Status */}
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>PAYMENT STATUS</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>PAYMENT STATUS</Text>
             <View style={{ flexDirection: "row", gap: 6, marginBottom: 12 }}>
               {PAYMENT_STATUSES.map((s) => (
                 <Pressable
@@ -271,12 +272,12 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
                     paddingVertical: 6,
                     borderRadius: 6,
                     alignItems: "center",
-                    backgroundColor: paymentStatus === s.value ? s.color + "22" : "#111",
+                    backgroundColor: paymentStatus === s.value ? s.color + "22" : colors.gray[850],
                     borderWidth: 1,
-                    borderColor: paymentStatus === s.value ? s.color : "#2A2A2A",
+                    borderColor: paymentStatus === s.value ? s.color : colors.gray[700],
                   }}
                 >
-                  <Text style={{ color: paymentStatus === s.value ? s.color : "#525252", fontFamily: "monospace", fontSize: 8, fontWeight: "bold" }}>
+                  <Text style={{ color: paymentStatus === s.value ? s.color : colors.gray[400], fontFamily: "monospace", fontSize: 8, fontWeight: "bold" }}>
                     {s.label}
                   </Text>
                 </Pressable>
@@ -284,7 +285,7 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
             </View>
 
             {/* Payment Method */}
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>PAYMENT METHOD</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>PAYMENT METHOD</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 {PAYMENT_METHODS.map((m) => (
@@ -295,12 +296,12 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
                       paddingHorizontal: 10,
                       paddingVertical: 5,
                       borderRadius: 6,
-                      backgroundColor: paymentMethod === m.value ? "#06B6D422" : "#111",
+                      backgroundColor: paymentMethod === m.value ? "#06B6D422" : colors.gray[850],
                       borderWidth: 1,
-                      borderColor: paymentMethod === m.value ? "#06B6D4" : "#2A2A2A",
+                      borderColor: paymentMethod === m.value ? colors.accent : colors.gray[700],
                     }}
                   >
-                    <Text style={{ color: paymentMethod === m.value ? "#06B6D4" : "#525252", fontFamily: "monospace", fontSize: 10 }}>
+                    <Text style={{ color: paymentMethod === m.value ? colors.accent : colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>
                       {m.label}
                     </Text>
                   </Pressable>
@@ -311,14 +312,14 @@ export function AddExpenseModal({ visible, taskId, onClose, onCreated, onAddExpe
             {/* Actions */}
             <View style={{ flexDirection: "row", gap: 10, justifyContent: "flex-end" }}>
               <Pressable onPress={onClose} style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
-                <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 12 }}>CANCEL</Text>
+                <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 12 }}>CANCEL</Text>
               </Pressable>
               <Pressable
                 onPress={handleCreate}
                 disabled={!amount || saving}
-                style={{ backgroundColor: amount ? "#06B6D4" : "#2A2A2A", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
+                style={{ backgroundColor: amount ? colors.accent : colors.gray[700], paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
               >
-                <Text style={{ color: amount ? "#111" : "#525252", fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
+                <Text style={{ color: amount ? colors.gray[850] : colors.gray[400], fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
                   {saving ? "ADDING..." : "ADD"}
                 </Text>
               </Pressable>

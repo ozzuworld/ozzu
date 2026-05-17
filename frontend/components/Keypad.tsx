@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { View, Text, Modal, Pressable } from "react-native";
 
+import { colors } from "../lib/design-tokens";
 interface KeypadProps {
   visible: boolean;
   title?: string;
@@ -56,13 +57,13 @@ export function Keypad({ visible, title, onSubmit, onCancel }: KeypadProps) {
       >
         <View
           style={{
-            backgroundColor: "#1A1A1A",
+            backgroundColor: colors.gray[800],
             borderWidth: 2,
-            borderColor: "#06B6D4",
+            borderColor: colors.accent,
             borderRadius: 16,
             padding: 24,
             width: 280,
-            shadowColor: "#06B6D4",
+            shadowColor: colors.accent,
             shadowOffset: { width: 0, height: 0 },
             shadowOpacity: 0.3,
             shadowRadius: 20,
@@ -72,7 +73,7 @@ export function Keypad({ visible, title, onSubmit, onCancel }: KeypadProps) {
           {/* Title */}
           <Text
             style={{
-              color: "#06B6D4",
+              color: colors.accent,
               fontSize: 14,
               fontWeight: "bold",
               letterSpacing: 2,
@@ -95,7 +96,7 @@ export function Keypad({ visible, title, onSubmit, onCancel }: KeypadProps) {
             }}
           >
             {pin.length === 0 ? (
-              <Text style={{ color: "#525252", fontSize: 16, fontFamily: "monospace" }}>
+              <Text style={{ color: colors.gray[400], fontSize: 16, fontFamily: "monospace" }}>
                 ····
               </Text>
             ) : (
@@ -106,7 +107,7 @@ export function Keypad({ visible, title, onSubmit, onCancel }: KeypadProps) {
                     width: 12,
                     height: 12,
                     borderRadius: 6,
-                    backgroundColor: "#06B6D4",
+                    backgroundColor: colors.accent,
                   }}
                 />
               ))
@@ -137,10 +138,10 @@ export function Keypad({ visible, title, onSubmit, onCancel }: KeypadProps) {
                       borderRadius: 10,
                       borderWidth: 1,
                       borderColor: isConfirm
-                        ? "#22C55E"
+                        ? colors.success
                         : isAction
-                        ? "#F59E0B"
-                        : "#333",
+                        ? colors.brand.amber
+                        : colors.gray[600],
                       backgroundColor: pressed
                         ? isConfirm
                           ? "rgba(34,197,94,0.2)"
@@ -152,7 +153,7 @@ export function Keypad({ visible, title, onSubmit, onCancel }: KeypadProps) {
                   >
                     <Text
                       style={{
-                        color: isConfirm ? "#22C55E" : isAction ? "#F59E0B" : "#E0E0E0",
+                        color: isConfirm ? colors.success : isAction ? colors.brand.amber : "#E0E0E0",
                         fontSize: isAction ? 20 : 22,
                         fontWeight: "bold",
                         fontFamily: isAction ? undefined : "monospace",
@@ -178,7 +179,7 @@ export function Keypad({ visible, title, onSubmit, onCancel }: KeypadProps) {
           >
             <Text
               style={{
-                color: "#EF4444",
+                color: colors.error,
                 fontSize: 13,
                 fontWeight: "bold",
                 letterSpacing: 1,

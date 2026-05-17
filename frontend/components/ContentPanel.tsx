@@ -12,6 +12,7 @@ import { TVPressable } from "./TVPressable";
 import { RARITY_COLORS } from "../lib/rooms";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { colors } from "../lib/design-tokens";
 interface ContentPanelProps {
   visible: boolean;
   title: string;
@@ -36,7 +37,7 @@ const C = {
   bg: "rgba(10, 10, 20, 0.95)",
   headerBg: "rgba(59, 130, 246, 0.08)",
   headerBorder: "rgba(59, 130, 246, 0.15)",
-  text: "#CBD5E1",
+  text: colors.gray[100],
   textBright: "#E2E8F0",
   textDim: "#64748B",
   accent: "#60A5FA",
@@ -49,7 +50,7 @@ const C = {
   statusPending: "#FBBF24",
   statusActive: "#34D399",
   statusDone: "#60A5FA",
-  bullet: "#3B82F6",
+  bullet: colors.brand.blue,
 };
 
 // ── Inline markdown parser ──

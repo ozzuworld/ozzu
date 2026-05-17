@@ -8,8 +8,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useGlasses } from "../lib/glasses-context";
 import { GroupNav } from "../components/GroupNav";
 
-const CYAN = "#06B6D4";
-const DIM = "#525252";
+import { colors } from "../lib/design-tokens";
+const CYAN = colors.accent;
+const DIM = colors.gray[400];
 
 export default function GlassesScreen() {
   const router = useRouter();
@@ -25,13 +26,13 @@ export default function GlassesScreen() {
     capturePhoto,
   } = useGlasses();
 
-  const stateColor = isConnected ? "#10B981" : connectionState === "connecting" ? "#F59E0B" : DIM;
+  const stateColor = isConnected ? "#10B981" : connectionState === "connecting" ? colors.brand.amber : DIM;
   const stateLabel = isConnected
     ? isStreaming ? `CONNECTED ${fps} FPS` : "CONNECTED"
     : connectionState === "connecting" ? "CONNECTING..." : "DISCONNECTED";
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#111", paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: colors.gray[850], paddingTop: insets.top }}>
       {/* Header */}
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 16, marginBottom: 16 }}>
         <Pressable onPress={() => router.back()} hitSlop={20} style={{ padding: 8 }}>
@@ -71,7 +72,7 @@ export default function GlassesScreen() {
         style={{
           backgroundColor: isConnected ? "rgba(239,68,68,0.15)" : "rgba(6,182,212,0.15)",
           borderWidth: 1,
-          borderColor: isConnected ? "#EF4444" : CYAN,
+          borderColor: isConnected ? colors.error : CYAN,
           borderRadius: 12,
           paddingVertical: 16,
           alignItems: "center",
@@ -79,7 +80,7 @@ export default function GlassesScreen() {
         }}
       >
         <Text style={{
-          color: isConnected ? "#EF4444" : CYAN,
+          color: isConnected ? colors.error : CYAN,
           fontSize: 14, fontFamily: "monospace", fontWeight: "700", letterSpacing: 2,
         }}>
           {isConnected ? "DISCONNECT" : "CONNECT GLASSES"}
@@ -93,7 +94,7 @@ export default function GlassesScreen() {
           style={{
             backgroundColor: "rgba(168,85,247,0.15)",
             borderWidth: 1,
-            borderColor: "#A855F7",
+            borderColor: colors.brand.purple,
             borderRadius: 12,
             paddingVertical: 16,
             alignItems: "center",
@@ -101,7 +102,7 @@ export default function GlassesScreen() {
           }}
         >
           <Text style={{
-            color: "#A855F7",
+            color: colors.brand.purple,
             fontSize: 14, fontFamily: "monospace", fontWeight: "700", letterSpacing: 2,
           }}>
             CAPTURE PHOTO
@@ -134,7 +135,7 @@ export default function GlassesScreen() {
           borderRadius: 8,
           padding: 12,
         }}>
-          <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace" }}>{error}</Text>
+          <Text style={{ color: colors.error, fontSize: 11, fontFamily: "monospace" }}>{error}</Text>
         </View>
       )}
       </View>

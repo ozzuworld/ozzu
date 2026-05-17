@@ -155,7 +155,7 @@ export default function DirectiveDetailScreen() {
 
   const pill = statusPillStyle(directive.status);
   const typeLabel = directive.type === "feature" ? "Feature" : directive.type === "epic" ? "Epic" : directive.type === "explore" ? "Explore" : "Quick";
-  const typeColor = directive.type === "feature" ? "#3B82F6" : directive.type === "epic" ? "#A855F7" : directive.type === "explore" ? "#06B6D4" : "#22C55E";
+  const typeColor = directive.type === "feature" ? colors.brand.blue : directive.type === "epic" ? colors.brand.purple : directive.type === "explore" ? colors.accent : colors.success;
 
   // Context action buttons
   const actions: Array<{ label: string; action: string; color: string; filled?: boolean }> = [];
@@ -167,7 +167,7 @@ export default function DirectiveDetailScreen() {
     actions.push({ label: "Retry", action: "retry", color: colors.info });
   }
   if (directive.status === "blocked") {
-    actions.push({ label: "Unblock", action: "unblock", color: "#A855F7" });
+    actions.push({ label: "Unblock", action: "unblock", color: colors.brand.purple });
   }
   if (["failed", "stale", "cancelled"].includes(directive.status)) {
     actions.push({ label: "Retry", action: "retry", color: colors.info });
@@ -354,7 +354,7 @@ export default function DirectiveDetailScreen() {
                 padding: spacing.md,
                 marginBottom: spacing.lg,
                 borderLeftWidth: 2,
-                borderLeftColor: "#A855F7",
+                borderLeftColor: colors.brand.purple,
               }}>
                 <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: fontWeight.bold, letterSpacing: 0.5, marginBottom: 4 }}>
                   HANDOFF

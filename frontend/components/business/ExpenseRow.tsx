@@ -2,6 +2,7 @@ import { View, Text, Pressable } from "react-native";
 import type { BusinessExpense } from "../../lib/bridge-api";
 import { formatCOPDisplay } from "./CostField";
 
+import { colors } from "../../lib/design-tokens";
 const CATEGORY_ICONS: Record<string, string> = {
   materials: "M",
   labor: "L",
@@ -14,10 +15,10 @@ const CATEGORY_ICONS: Record<string, string> = {
 };
 
 const PAYMENT_STATUS_COLOR: Record<string, string> = {
-  pending: "#EAB308",
-  paid: "#22C55E",
-  partial: "#F97316",
-  overdue: "#EF4444",
+  pending: colors.brand.amberDeep,
+  paid: colors.success,
+  partial: colors.brand.orange,
+  overdue: colors.error,
 };
 
 interface ExpenseRowProps {
@@ -27,13 +28,13 @@ interface ExpenseRowProps {
 }
 
 export function ExpenseRow({ expense, onPress, onDelete }: ExpenseRowProps) {
-  const statusColor = PAYMENT_STATUS_COLOR[expense.payment_status] || "#525252";
+  const statusColor = PAYMENT_STATUS_COLOR[expense.payment_status] || colors.gray[400];
   const catIcon = CATEGORY_ICONS[expense.category] || "?";
 
   return (
     <Pressable onPress={onPress} onLongPress={onDelete}>
       <View style={{
-        backgroundColor: "#1A1A1A",
+        backgroundColor: colors.gray[800],
         borderRadius: 8,
         padding: 12,
         marginBottom: 6,
@@ -45,12 +46,12 @@ export function ExpenseRow({ expense, onPress, onDelete }: ExpenseRowProps) {
           width: 32,
           height: 32,
           borderRadius: 6,
-          backgroundColor: "#2A2A2A",
+          backgroundColor: colors.gray[700],
           alignItems: "center",
           justifyContent: "center",
           marginRight: 10,
         }}>
-          <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
+          <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
             {catIcon}
           </Text>
         </View>
@@ -58,20 +59,20 @@ export function ExpenseRow({ expense, onPress, onDelete }: ExpenseRowProps) {
         {/* Info */}
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Text style={{ color: "#E5E5E5", fontSize: 13, fontWeight: "bold" }} numberOfLines={1}>
+            <Text style={{ color: colors.gray[50], fontSize: 13, fontWeight: "bold" }} numberOfLines={1}>
               {formatCOPDisplay(expense.amount)}
             </Text>
             {expense.iva_amount > 0 ? (
-              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>
+              <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>
                 IVA {formatCOPDisplay(expense.iva_amount)}
               </Text>
             ) : null}
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
             {expense.vendor ? (
-              <Text style={{ color: "#737373", fontSize: 11 }} numberOfLines={1}>{expense.vendor}</Text>
+              <Text style={{ color: colors.gray[300], fontSize: 11 }} numberOfLines={1}>{expense.vendor}</Text>
             ) : null}
-            <Text style={{ color: "#525252", fontSize: 10 }}>
+            <Text style={{ color: colors.gray[400], fontSize: 10 }}>
               {new Date(expense.expense_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
             </Text>
           </View>
@@ -86,7 +87,7 @@ export function ExpenseRow({ expense, onPress, onDelete }: ExpenseRowProps) {
             borderRadius: 4,
           }}>
             <Text style={{
-              color: expense.verified ? "#22C55E" : "#EAB308",
+              color: expense.verified ? colors.success : colors.brand.amberDeep,
               fontFamily: "monospace",
               fontSize: 7,
               fontWeight: "bold",

@@ -3,6 +3,7 @@ import { View, Text, Pressable, Animated, Modal } from "react-native";
 import { useRouter } from "expo-router";
 import { TVPressable } from "./TVPressable";
 
+import { colors } from "../lib/design-tokens";
 const PANEL_WIDTH = 200;
 
 type MenuItem =
@@ -76,7 +77,7 @@ export function HamburgerMenu() {
       >
         <Text
           style={{
-            color: "#525252",
+            color: colors.gray[400],
             fontSize: 22,
             fontFamily: "monospace",
           }}
@@ -122,14 +123,14 @@ export function HamburgerMenu() {
           <Animated.View
             style={{
               width: PANEL_WIDTH,
-              backgroundColor: "#111111",
+              backgroundColor: colors.gray[850],
               borderWidth: 1,
-              borderColor: "#333",
+              borderColor: colors.gray[600],
               borderRadius: 12,
               paddingTop: 16,
               paddingBottom: 8,
               paddingHorizontal: 16,
-              shadowColor: "#06B6D4",
+              shadowColor: colors.accent,
               shadowOpacity: 0.15,
               shadowRadius: 16,
               shadowOffset: { width: 0, height: 0 },
@@ -141,7 +142,7 @@ export function HamburgerMenu() {
             {/* Panel title */}
             <Text
               style={{
-                color: "#06B6D4",
+                color: colors.accent,
                 fontSize: 12,
                 fontFamily: "monospace",
                 fontWeight: "bold",
@@ -177,7 +178,7 @@ export function HamburgerMenu() {
                 <Text style={{ fontSize: 18 }}>{item.icon}</Text>
                 <Text
                   style={{
-                    color: "#A3A3A3",
+                    color: colors.gray[200],
                     fontSize: 13,
                     fontFamily: "monospace",
                     fontWeight: "bold",

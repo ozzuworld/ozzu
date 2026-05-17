@@ -2,11 +2,12 @@ import { useState, useEffect } from "react";
 import { View, Text } from "react-native";
 import { useHA } from "../lib/ha-context";
 
+import { colors } from "../lib/design-tokens";
 const statusConfig: Record<string, { dot: string }> = {
-  connected: { dot: "#22C55E" },
-  connecting: { dot: "#EAB308" },
-  disconnected: { dot: "#737373" },
-  error: { dot: "#EF4444" },
+  connected: { dot: colors.success },
+  connecting: { dot: colors.brand.amberDeep },
+  disconnected: { dot: colors.gray[300] },
+  error: { dot: colors.error },
 };
 
 function getTimeString() {
@@ -51,7 +52,7 @@ export function StatusBadge() {
       />
       <Text
         style={{
-          color: "#525252",
+          color: colors.gray[400],
           fontSize: 11,
           fontWeight: "bold",
           fontFamily: "monospace",

@@ -17,6 +17,7 @@ import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
 import { formatLongDate } from "../../lib/format";
 
+import { colors } from "../../lib/design-tokens";
 // ── Types ──────────────────────────────────────────────────────────────────
 interface Visa {
   type: string;
@@ -83,10 +84,10 @@ const DIRECTION_LABEL: Record<string, string> = {
 };
 
 const DIRECTION_COLOR: Record<string, string> = {
-  entry: "#22c55e",
-  exit: "#f97316",
+  entry: colors.success,
+  exit: colors.brand.orange,
   transit: "#a78bfa",
-  stamp: "#94a3b8",
+  stamp: colors.gray[250],
 };
 
 function daysUntil(dateStr?: string | null): number {
@@ -125,7 +126,7 @@ function ExpiryBadge({ dateStr, label }: { dateStr: string; label: string }) {
     <View style={[styles.expiryBadge, urgent && styles.expiryUrgent]}>
       <Text style={styles.expiryLabel}>{label}</Text>
       <Text style={styles.expiryDate}>{formatLongDate(dateStr)}</Text>
-      <Text style={[styles.expiryDays, expired && { color: "#ef4444" }, urgent && !expired && { color: "#f97316" }]}>
+      <Text style={[styles.expiryDays, expired && { color: colors.error }, urgent && !expired && { color: colors.brand.orange }]}>
         {expired ? "EXPIRED" : `${days}d remaining`}
       </Text>
     </View>
@@ -293,14 +294,14 @@ export default function IdentityScreen() {
               <Text style={styles.sectionNote}>{travelHistory.length} stamp events · {countriesVisited.length} countries</Text>
               {travelHistory.map((t) => (
                 <View key={t.id} style={styles.travelEntry}>
-                  <View style={[styles.travelDot, { backgroundColor: DIRECTION_COLOR[t.direction] ?? "#94a3b8" }]} />
+                  <View style={[styles.travelDot, { backgroundColor: DIRECTION_COLOR[t.direction] ?? colors.gray[250] }]} />
                   <View style={styles.travelBody}>
                     <View style={styles.travelTop}>
                       <Text style={styles.travelFlag}>{countryFlag(t.country)}</Text>
                       <Text style={styles.travelCountry}>{t.country}</Text>
                       {t.city ? <Text style={styles.travelCity}>{t.city}</Text> : null}
                       <View style={styles.spacer} />
-                      <Text style={[styles.travelDir, { color: DIRECTION_COLOR[t.direction] ?? "#94a3b8" }]}>
+                      <Text style={[styles.travelDir, { color: DIRECTION_COLOR[t.direction] ?? colors.gray[250] }]}>
                         {DIRECTION_LABEL[t.direction]}
                       </Text>
                     </View>
@@ -349,7 +350,7 @@ function InfoRow({ label, value, mono, urgent }: { label: string; value: string;
   return (
     <View style={styles.infoRow}>
       <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={[styles.infoValue, mono && styles.infoMono, urgent && { color: "#f97316" }]}>{value}</Text>
+      <Text style={[styles.infoValue, mono && styles.infoMono, urgent && { color: colors.brand.orange }]}>{value}</Text>
     </View>
   );
 }
@@ -365,15 +366,15 @@ const styles = StyleSheet.create({
   unlockTxt: { color: "#fff", fontWeight: "700", fontSize: 16 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 60, paddingBottom: 12 },
   headerName: { fontSize: 20, fontWeight: "700", color: "#f1f5f9" },
-  headerSub: { fontSize: 13, color: "#94a3b8", marginTop: 2 },
+  headerSub: { fontSize: 13, color: colors.gray[250], marginTop: 2 },
   lockBtn: { padding: 8 },
   lockBtnTxt: { fontSize: 20 },
   expiryRow: { paddingHorizontal: 16, marginBottom: 4 },
   expiryBadge: { backgroundColor: "#1e293b", borderRadius: 10, padding: 12, marginRight: 10, minWidth: 140 },
-  expiryUrgent: { borderWidth: 1, borderColor: "#f97316" },
+  expiryUrgent: { borderWidth: 1, borderColor: colors.brand.orange },
   expiryLabel: { fontSize: 11, color: "#64748b", fontWeight: "600", textTransform: "uppercase", marginBottom: 2 },
   expiryDate: { fontSize: 14, color: "#f1f5f9", fontWeight: "600" },
-  expiryDays: { fontSize: 12, color: "#22c55e", marginTop: 2 },
+  expiryDays: { fontSize: 12, color: colors.success, marginTop: 2 },
   tabs: { flexDirection: "row", paddingHorizontal: 16, marginVertical: 8 },
   tab: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 8, marginHorizontal: 3, backgroundColor: "#1e293b" },
   tabActive: { backgroundColor: "#4c1d95" },
@@ -390,19 +391,19 @@ const styles = StyleSheet.create({
   flagGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   flagItem: { alignItems: "center", width: 72, marginBottom: 8 },
   flagEmoji: { fontSize: 28 },
-  flagLabel: { fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 2 },
+  flagLabel: { fontSize: 11, color: colors.gray[250], textAlign: "center", marginTop: 2 },
   travelEntry: { flexDirection: "row", marginBottom: 12 },
   travelDot: { width: 10, height: 10, borderRadius: 5, marginTop: 5, marginRight: 12 },
   travelBody: { flex: 1, backgroundColor: "#1e293b", borderRadius: 10, padding: 12 },
   travelTop: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
   travelFlag: { fontSize: 16, marginRight: 6 },
   travelCountry: { fontSize: 15, fontWeight: "700", color: "#f1f5f9" },
-  travelCity: { fontSize: 12, color: "#94a3b8", marginLeft: 6 },
+  travelCity: { fontSize: 12, color: colors.gray[250], marginLeft: 6 },
   spacer: { flex: 1 },
   travelDir: { fontSize: 12, fontWeight: "600" },
   travelDate: { fontSize: 12, color: "#64748b" },
   travelPort: { fontSize: 11, color: "#475569", marginTop: 2 },
-  travelNotes: { fontSize: 12, color: "#94a3b8", marginTop: 4 },
+  travelNotes: { fontSize: 12, color: colors.gray[250], marginTop: 4 },
   docCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#1e293b", borderRadius: 12, padding: 16, marginBottom: 10 },
   docIcon: { fontSize: 28, marginRight: 14 },
   docInfo: { flex: 1 },
@@ -413,6 +414,6 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, paddingTop: 56, backgroundColor: "#0a0a0f" },
   modalTitle: { fontSize: 16, fontWeight: "700", color: "#f1f5f9", flex: 1 },
   closeBtn: { padding: 8 },
-  closeTxt: { color: "#94a3b8", fontSize: 18 },
+  closeTxt: { color: colors.gray[250], fontSize: 18 },
   docImage: { flex: 1, width: "100%" },
 });

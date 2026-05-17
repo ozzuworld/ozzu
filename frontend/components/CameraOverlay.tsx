@@ -5,6 +5,7 @@ import { TVPressable } from "./TVPressable";
 import { RARITY_COLORS } from "../lib/rooms";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { colors } from "../lib/design-tokens";
 interface CameraOverlayProps {
   visible: boolean;
   streamUrl: string;
@@ -169,7 +170,7 @@ export function CameraOverlay({
                 width: 8,
                 height: 8,
                 borderRadius: 4,
-                backgroundColor: "#EF4444",
+                backgroundColor: colors.error,
                 marginRight: 8,
               }}
             />

@@ -15,7 +15,8 @@ import { ContactsView } from "../../components/business/ContactsView";
 import { GroupNav } from "../../components/GroupNav";
 import { layout } from "../../lib/design-tokens";
 
-const ACCENT = "#06B6D4";
+import { colors } from "../../lib/design-tokens";
+const ACCENT = colors.accent;
 
 const SUB_TABS = [
   { key: "dashboard", label: "DASHBOARD" },
@@ -54,7 +55,7 @@ export default function BusinessScreen() {
   const overallPct = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#111111" }}>
+    <View style={{ flex: 1, backgroundColor: colors.gray[850] }}>
       {/* Top Bar */}
       <View
         style={{
@@ -64,7 +65,7 @@ export default function BusinessScreen() {
           alignItems: "center",
           justifyContent: "space-between",
           paddingHorizontal: Math.max(16, insets.left, insets.right),
-          backgroundColor: "#111111",
+          backgroundColor: colors.gray[850],
           zIndex: 10,
         }}
       >
@@ -97,7 +98,7 @@ export default function BusinessScreen() {
       <GroupNav group="work" />
 
       {/* Sub-tab navigation */}
-      <View style={{ paddingHorizontal: 16, paddingBottom: 8, backgroundColor: "#111111" }}>
+      <View style={{ paddingHorizontal: 16, paddingBottom: 8, backgroundColor: colors.gray[850] }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: "row", gap: 6 }}>
             {SUB_TABS.map((tab) => (
@@ -115,7 +116,7 @@ export default function BusinessScreen() {
               >
                 <Text
                   style={{
-                    color: activeTab === tab.key ? ACCENT : "#525252",
+                    color: activeTab === tab.key ? ACCENT : colors.gray[400],
                     fontFamily: "monospace",
                     fontSize: 10,
                     fontWeight: "bold",
@@ -139,12 +140,12 @@ export default function BusinessScreen() {
           style={{ flex: 1 }}
           contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#525252" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor=colors.gray[400] />}
         >
           {/* Overview card */}
           <View
             style={{
-              backgroundColor: "#1A1A1A",
+              backgroundColor: colors.gray[800],
               borderRadius: 14,
               padding: 18,
               marginBottom: 20,
@@ -153,47 +154,47 @@ export default function BusinessScreen() {
             }}
           >
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12 }}>
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, letterSpacing: 2 }}>OVERVIEW</Text>
+              <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, letterSpacing: 2 }}>OVERVIEW</Text>
               <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 28, fontWeight: "bold", lineHeight: 32 }}>{overallPct}%</Text>
             </View>
             <ProgressBar done={totalDone} total={totalTasks} color={ACCENT} height={8} glow />
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 14, paddingHorizontal: 4 }}>
               <View style={{ alignItems: "center" }}>
-                <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalProjects}</Text>
-                <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>PROJECTS</Text>
+                <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalProjects}</Text>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>PROJECTS</Text>
               </View>
               <View style={{ alignItems: "center" }}>
-                <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalTasks}</Text>
-                <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>TASKS</Text>
+                <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalTasks}</Text>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>TASKS</Text>
               </View>
               <View style={{ alignItems: "center" }}>
-                <Text style={{ color: "#22C55E", fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalDone}</Text>
-                <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>DONE</Text>
+                <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalDone}</Text>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>DONE</Text>
               </View>
               <View style={{ alignItems: "center" }}>
-                <Text style={{ color: "#EAB308", fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalInProgress}</Text>
-                <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>ACTIVE</Text>
+                <Text style={{ color: colors.brand.amberDeep, fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{totalInProgress}</Text>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>ACTIVE</Text>
               </View>
             </View>
           </View>
 
           {/* Error state */}
           {error ? (
-            <View style={{ backgroundColor: "#1A1A1A", borderRadius: 10, padding: 16, marginBottom: 16, borderLeftWidth: 3, borderLeftColor: "#EF4444" }}>
-              <Text style={{ color: "#EF4444", fontFamily: "monospace", fontSize: 11 }}>{error}</Text>
+            <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 16, marginBottom: 16, borderLeftWidth: 3, borderLeftColor: colors.error }}>
+              <Text style={{ color: colors.error, fontFamily: "monospace", fontSize: 11 }}>{error}</Text>
             </View>
           ) : null}
 
           {/* Projects list */}
           {loading && projects.length === 0 ? (
             <View style={{ alignItems: "center", paddingVertical: 40 }}>
-              <Text style={{ color: "#525252", fontFamily: "monospace" }}>Loading ventures...</Text>
+              <Text style={{ color: colors.gray[400], fontFamily: "monospace" }}>Loading ventures...</Text>
             </View>
           ) : projects.length === 0 ? (
             <View style={{ alignItems: "center", paddingVertical: 60 }}>
               <Text style={{ fontSize: 48, marginBottom: 16 }}>🚀</Text>
-              <Text style={{ color: "#737373", fontSize: 15, marginBottom: 4 }}>No ventures yet</Text>
-              <Text style={{ color: "#525252", fontSize: 12, marginBottom: 16, textAlign: "center", paddingHorizontal: 40 }}>
+              <Text style={{ color: colors.gray[300], fontSize: 15, marginBottom: 4 }}>No ventures yet</Text>
+              <Text style={{ color: colors.gray[400], fontSize: 12, marginBottom: 16, textAlign: "center", paddingHorizontal: 40 }}>
                 Create your first project to start tracking
               </Text>
               <Pressable

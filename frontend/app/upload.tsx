@@ -10,6 +10,7 @@ import { TVPressable } from "../components/TVPressable";
 import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { layout } from "../lib/design-tokens";
+import { colors } from "../lib/design-tokens";
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB (3D scans can be large)
 
 const ALLOWED_MIME_PREFIXES = ["image/", "text/", "audio/", "video/", "application/pdf", "application/json", "model/", "application/octet-stream"];
@@ -197,7 +198,7 @@ export default function UploadScreen() {
   }, []);
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#111111" }}>
+    <View style={{ flex: 1, backgroundColor: colors.gray[850] }}>
       {/* Top Bar */}
       <View
         style={{
@@ -209,7 +210,7 @@ export default function UploadScreen() {
           paddingHorizontal: Math.max(16, insets.left, insets.right),
         }}
       >
-        <Text style={{ color: "#F59E0B", fontSize: 24, fontWeight: "bold" }}>
+        <Text style={{ color: colors.brand.amber, fontSize: 24, fontWeight: "bold" }}>
           ozzu
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
@@ -223,7 +224,7 @@ export default function UploadScreen() {
           >
             <Text
               style={{
-                color: "#A3A3A3",
+                color: colors.gray[200],
                 fontSize: 12,
                 fontWeight: "bold",
                 letterSpacing: 1,
@@ -243,7 +244,7 @@ export default function UploadScreen() {
         {/* Title */}
         <Text
           style={{
-            color: "#06B6D4",
+            color: colors.accent,
             fontSize: 16,
             fontFamily: "monospace",
             fontWeight: "bold",
@@ -263,14 +264,14 @@ export default function UploadScreen() {
                 paddingHorizontal: 20,
                 paddingVertical: 8,
                 borderRadius: 6,
-                backgroundColor: mode === m ? "#06B6D4" : "#1A1A1A",
+                backgroundColor: mode === m ? colors.accent : colors.gray[800],
                 borderWidth: 1,
-                borderColor: mode === m ? "#06B6D4" : "#333",
+                borderColor: mode === m ? colors.accent : colors.gray[600],
               }}
             >
               <Text
                 style={{
-                  color: mode === m ? "#000" : "#737373",
+                  color: mode === m ? "#000" : colors.gray[300],
                   fontSize: 12,
                   fontFamily: "monospace",
                   fontWeight: "bold",
@@ -293,15 +294,15 @@ export default function UploadScreen() {
                   flex: 1,
                   paddingVertical: 14,
                   borderRadius: 8,
-                  backgroundColor: "#1A1A1A",
+                  backgroundColor: colors.gray[800],
                   borderWidth: 1,
-                  borderColor: "#333",
+                  borderColor: colors.gray[600],
                   alignItems: "center",
                 }}
               >
                 <Text
                   style={{
-                    color: "#A3A3A3",
+                    color: colors.gray[200],
                     fontSize: 12,
                     fontFamily: "monospace",
                     fontWeight: "bold",
@@ -317,15 +318,15 @@ export default function UploadScreen() {
                   flex: 1,
                   paddingVertical: 14,
                   borderRadius: 8,
-                  backgroundColor: "#1A1A1A",
+                  backgroundColor: colors.gray[800],
                   borderWidth: 1,
-                  borderColor: "#333",
+                  borderColor: colors.gray[600],
                   alignItems: "center",
                 }}
               >
                 <Text
                   style={{
-                    color: "#A3A3A3",
+                    color: colors.gray[200],
                     fontSize: 12,
                     fontFamily: "monospace",
                     fontWeight: "bold",
@@ -341,11 +342,11 @@ export default function UploadScreen() {
             {files.length > 0 && (
               <View style={{ gap: 6 }}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                  <Text style={{ color: "#737373", fontSize: 11, fontFamily: "monospace" }}>
+                  <Text style={{ color: colors.gray[300], fontSize: 11, fontFamily: "monospace" }}>
                     {files.length} file{files.length > 1 ? "s" : ""} · {formatSize(totalSize)}
                   </Text>
                   <TVPressable onPress={() => setFiles([])} style={{ padding: 4 }}>
-                    <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>
+                    <Text style={{ color: colors.error, fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>
                       CLEAR ALL
                     </Text>
                   </TVPressable>
@@ -354,9 +355,9 @@ export default function UploadScreen() {
                   <View
                     key={`${f.name}-${i}`}
                     style={{
-                      backgroundColor: "#1A1A1A",
+                      backgroundColor: colors.gray[800],
                       borderWidth: 1,
-                      borderColor: "#333",
+                      borderColor: colors.gray[600],
                       borderRadius: 8,
                       padding: 10,
                       gap: 6,
@@ -374,15 +375,15 @@ export default function UploadScreen() {
                         {f.contentType === "image" ? "🖼️" : "📄"}
                       </Text>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ color: "#E5E5E5", fontSize: 12, fontFamily: "monospace" }} numberOfLines={1}>
+                        <Text style={{ color: colors.gray[50], fontSize: 12, fontFamily: "monospace" }} numberOfLines={1}>
                           {f.name}
                         </Text>
-                        <Text style={{ color: "#525252", fontSize: 10, fontFamily: "monospace" }}>
+                        <Text style={{ color: colors.gray[400], fontSize: 10, fontFamily: "monospace" }}>
                           {formatSize(f.size)} · {f.contentType.toUpperCase()}
                         </Text>
                       </View>
                       <TVPressable onPress={() => removeFile(i)} style={{ padding: 6 }}>
-                        <Text style={{ color: "#EF4444", fontSize: 14 }}>✕</Text>
+                        <Text style={{ color: colors.error, fontSize: 14 }}>✕</Text>
                       </TVPressable>
                     </View>
                   </View>
@@ -399,15 +400,15 @@ export default function UploadScreen() {
               value={textContent}
               onChangeText={setTextContent}
               placeholder="Paste or type content..."
-              placeholderTextColor="#525252"
+              placeholderTextColor=colors.gray[400]
               multiline
               style={{
-                backgroundColor: "#1A1A1A",
+                backgroundColor: colors.gray[800],
                 borderWidth: 1,
-                borderColor: "#333",
+                borderColor: colors.gray[600],
                 borderRadius: 8,
                 padding: 12,
-                color: "#E5E5E5",
+                color: colors.gray[50],
                 fontSize: 13,
                 fontFamily: "monospace",
                 minHeight: 160,
@@ -416,7 +417,7 @@ export default function UploadScreen() {
             />
             <Text
               style={{
-                color: "#525252",
+                color: colors.gray[400],
                 fontSize: 11,
                 fontFamily: "monospace",
                 alignSelf: "flex-end",
@@ -431,7 +432,7 @@ export default function UploadScreen() {
         {error && (
           <Text
             style={{
-              color: "#EF4444",
+              color: colors.error,
               fontSize: 12,
               fontFamily: "monospace",
             }}
@@ -473,16 +474,16 @@ export default function UploadScreen() {
               flex: 1,
               paddingVertical: 14,
               borderRadius: 8,
-              backgroundColor: hasContent && !sending ? "#06B6D4" : "#1A1A1A",
+              backgroundColor: hasContent && !sending ? colors.accent : colors.gray[800],
               borderWidth: 1,
-              borderColor: hasContent && !sending ? "#06B6D4" : "#333",
+              borderColor: hasContent && !sending ? colors.accent : colors.gray[600],
               alignItems: "center",
               opacity: hasContent && !sending ? 1 : 0.4,
             }}
           >
             <Text
               style={{
-                color: hasContent && !sending ? "#000" : "#525252",
+                color: hasContent && !sending ? "#000" : colors.gray[400],
                 fontSize: 12,
                 fontFamily: "monospace",
                 fontWeight: "bold",
@@ -499,16 +500,16 @@ export default function UploadScreen() {
               flex: 1,
               paddingVertical: 14,
               borderRadius: 8,
-              backgroundColor: hasContent && !sending ? "#F59E0B" : "#1A1A1A",
+              backgroundColor: hasContent && !sending ? colors.brand.amber : colors.gray[800],
               borderWidth: 1,
-              borderColor: hasContent && !sending ? "#F59E0B" : "#333",
+              borderColor: hasContent && !sending ? colors.brand.amber : colors.gray[600],
               alignItems: "center",
               opacity: hasContent && !sending ? 1 : 0.4,
             }}
           >
             <Text
               style={{
-                color: hasContent && !sending ? "#000" : "#525252",
+                color: hasContent && !sending ? "#000" : colors.gray[400],
                 fontSize: 12,
                 fontFamily: "monospace",
                 fontWeight: "bold",

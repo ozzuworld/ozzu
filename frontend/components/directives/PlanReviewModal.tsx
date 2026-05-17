@@ -55,7 +55,7 @@ export function PlanReviewModal({
             <View style={{ flexDirection: "row", gap: spacing.sm, alignItems: "center" }}>
               <View style={{
                 paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.full,
-                backgroundColor: directive.type === "feature" ? withAlpha("#3B82F6", 0.12) : withAlpha("#22C55E", 0.12),
+                backgroundColor: directive.type === "feature" ? withAlpha(colors.brand.blue, 0.12) : withAlpha(colors.success, 0.12),
               }}>
                 <Text style={{
                   color: directive.type === "feature" ? "#60A5FA" : "#4ADE80",

@@ -32,8 +32,9 @@ import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
 import { formatBytes, formatRelativeOrShortDate } from "../../lib/format";
 
-const ACCENT = "#06B6D4";
-const DIM = "#525252";
+import { colors } from "../../lib/design-tokens";
+const ACCENT = colors.accent;
+const DIM = colors.gray[400];
 const { width: SCREEN_W } = Dimensions.get("window");
 
 // ── Types ──
@@ -120,18 +121,18 @@ function FolderItem({ folder, onPress, onLongPress }: { folder: Folder; onPress:
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "center",
-        backgroundColor: "#1A1A1A",
+        backgroundColor: colors.gray[800],
         borderRadius: 10,
         padding: 14,
         marginBottom: 6,
         borderWidth: 1,
-        borderColor: "#2A2A2A",
+        borderColor: colors.gray[700],
         opacity: pressed ? 0.7 : 1,
       })}
     >
       <Text style={{ fontSize: 22, marginRight: 12 }}>📁</Text>
       <View style={{ flex: 1 }}>
-        <Text style={{ color: "#E5E5E5", fontSize: 13, fontFamily: "monospace", fontWeight: "600" }}>
+        <Text style={{ color: colors.gray[50], fontSize: 13, fontFamily: "monospace", fontWeight: "600" }}>
           {folder.name}
         </Text>
         <Text style={{ color: DIM, fontSize: 10, fontFamily: "monospace", marginTop: 2 }}>
@@ -161,9 +162,9 @@ function FileItem({ file, onPress, onLongPress }: { file: StoredFile; onPress: (
           width: thumbSize,
           height: thumbSize,
           borderRadius: 8,
-          backgroundColor: "#1A1A1A",
+          backgroundColor: colors.gray[800],
           borderWidth: 1,
-          borderColor: "#2A2A2A",
+          borderColor: colors.gray[700],
           overflow: "hidden",
           justifyContent: "center",
           alignItems: "center",
@@ -222,8 +223,8 @@ function PreviewModal({ file, visible, onClose, onDelete, onDownload }: {
           <Pressable onPress={onDownload} style={{ paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: "rgba(6,182,212,0.15)", borderWidth: 1, borderColor: ACCENT }}>
             <Text style={{ color: ACCENT, fontSize: 12, fontFamily: "monospace", fontWeight: "700" }}>DOWNLOAD</Text>
           </Pressable>
-          <Pressable onPress={onDelete} style={{ paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: "rgba(239,68,68,0.15)", borderWidth: 1, borderColor: "#EF4444" }}>
-            <Text style={{ color: "#EF4444", fontSize: 12, fontFamily: "monospace", fontWeight: "700" }}>DELETE</Text>
+          <Pressable onPress={onDelete} style={{ paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: "rgba(239,68,68,0.15)", borderWidth: 1, borderColor: colors.error }}>
+            <Text style={{ color: colors.error, fontSize: 12, fontFamily: "monospace", fontWeight: "700" }}>DELETE</Text>
           </Pressable>
         </View>
       </View>
@@ -237,7 +238,7 @@ function NewFolderModal({ visible, onClose, onCreate }: { visible: boolean; onCl
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center", paddingHorizontal: 32 }}>
-        <View style={{ backgroundColor: "#1A1A1A", borderRadius: 12, padding: 24, width: "100%", borderWidth: 1, borderColor: "#333" }}>
+        <View style={{ backgroundColor: colors.gray[800], borderRadius: 12, padding: 24, width: "100%", borderWidth: 1, borderColor: colors.gray[600] }}>
           <Text style={{ color: "#fff", fontFamily: "monospace", fontSize: 14, fontWeight: "700", marginBottom: 16, letterSpacing: 2 }}>NEW FOLDER</Text>
           <TextInput
             value={name}
@@ -245,10 +246,10 @@ function NewFolderModal({ visible, onClose, onCreate }: { visible: boolean; onCl
             placeholder="Folder name"
             placeholderTextColor={DIM}
             autoFocus
-            style={{ backgroundColor: "#111", color: "#fff", fontFamily: "monospace", fontSize: 14, borderRadius: 8, padding: 12, borderWidth: 1, borderColor: "#333", marginBottom: 16 }}
+            style={{ backgroundColor: colors.gray[850], color: "#fff", fontFamily: "monospace", fontSize: 14, borderRadius: 8, padding: 12, borderWidth: 1, borderColor: colors.gray[600], marginBottom: 16 }}
           />
           <View style={{ flexDirection: "row", gap: 10 }}>
-            <Pressable onPress={onClose} style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: "#2A2A2A", alignItems: "center" }}>
+            <Pressable onPress={onClose} style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: colors.gray[700], alignItems: "center" }}>
               <Text style={{ color: "#aaa", fontFamily: "monospace", fontSize: 12 }}>CANCEL</Text>
             </Pressable>
             <Pressable
@@ -397,7 +398,7 @@ export default function FilesScreen() {
   const isEmpty = folders.length === 0 && files.length === 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#111", paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: colors.gray[850], paddingTop: insets.top }}>
       <HamburgerMenu />
       <GroupNav group="me" />
       {/* Header */}
@@ -432,7 +433,7 @@ export default function FilesScreen() {
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Pressable
               onPress={() => setNewFolderVisible(true)}
-              style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "#333" }}
+              style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: colors.gray[600] }}
             >
               <Text style={{ color: "#aaa", fontSize: 11, fontFamily: "monospace", fontWeight: "700" }}>📁 NEW</Text>
             </Pressable>
@@ -465,7 +466,7 @@ export default function FilesScreen() {
             <Text style={{ color: DIM, fontSize: 14, fontFamily: "monospace", textAlign: "center" }}>
               {breadcrumbs.length > 1 ? "Empty folder" : "Your private cloud is empty"}
             </Text>
-            <Text style={{ color: "#333", fontSize: 11, fontFamily: "monospace", marginTop: 8, textAlign: "center" }}>
+            <Text style={{ color: colors.gray[600], fontSize: 11, fontFamily: "monospace", marginTop: 8, textAlign: "center" }}>
               Create folders or upload files above
             </Text>
           </View>
@@ -521,12 +522,12 @@ export default function FilesScreen() {
                     style={({ pressed }) => ({
                       flexDirection: "row",
                       alignItems: "center",
-                      backgroundColor: "#1A1A1A",
+                      backgroundColor: colors.gray[800],
                       borderRadius: 8,
                       padding: 12,
                       marginBottom: 6,
                       borderWidth: 1,
-                      borderColor: "#2A2A2A",
+                      borderColor: colors.gray[700],
                       opacity: pressed ? 0.7 : 1,
                     })}
                   >

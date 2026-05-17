@@ -4,11 +4,12 @@ import { useState } from "react";
 import type { InfraDevice, DeviceResources } from "../../lib/infra-hooks";
 import { formatBytes } from "../../lib/format";
 
-const ACCENT = "#06B6D4";
-const GREEN = "#22C55E";
-const RED = "#EF4444";
-const YELLOW = "#EAB308";
-const GRAY = "#525252";
+import { colors } from "../../lib/design-tokens";
+const ACCENT = colors.accent;
+const GREEN = colors.success;
+const RED = colors.error;
+const YELLOW = colors.brand.amberDeep;
+const GRAY = colors.gray[400];
 const DIM = "#64748B";
 
 interface Props {
@@ -27,7 +28,7 @@ function ResourceBar({ label, used, total, unit, warnPct = 80 }: {
     <View style={{ marginBottom: 8 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 3 }}>
         <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM, letterSpacing: 1 }}>{label}</Text>
-        <Text style={{ fontFamily: "monospace", fontSize: 9, color: "#CBD5E1" }}>
+        <Text style={{ fontFamily: "monospace", fontSize: 9, color: colors.gray[100] }}>
           {used.toFixed(used < 10 ? 1 : 0)}{unit} / {total.toFixed(total < 10 ? 1 : 0)}{unit}
         </Text>
       </View>
@@ -45,7 +46,7 @@ function ServiceRow({ name, status }: { name: string; status: string }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 3 }}>
       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />
-      <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#CBD5E1", flex: 1 }}>{name}</Text>
+      <Text style={{ fontFamily: "monospace", fontSize: 10, color: colors.gray[100], flex: 1 }}>{name}</Text>
       <Text style={{ fontFamily: "monospace", fontSize: 9, color: isActive ? GREEN : GRAY }}>{status.toUpperCase()}</Text>
     </View>
   );
@@ -74,7 +75,7 @@ function MetricPill({ label, value, color }: { label: string; value: string; col
   return (
     <View>
       <Text style={{ fontFamily: "monospace", fontSize: 8, color: DIM, letterSpacing: 1 }}>{label}</Text>
-      <Text style={{ fontFamily: "monospace", fontWeight: "700", fontSize: 11, color: color || "#CBD5E1" }}>{value}</Text>
+      <Text style={{ fontFamily: "monospace", fontWeight: "700", fontSize: 11, color: color || colors.gray[100] }}>{value}</Text>
     </View>
   );
 }
@@ -88,7 +89,7 @@ const DEVICE_EMOJI: Record<string, string> = {
 
 const DEVICE_BADGES: Record<string, { label: string; color: string }[]> = {
   rockpi: [
-    { label: "ESP32 HUB", color: "#06B6D4" },
+    { label: "ESP32 HUB", color: colors.accent },
     { label: "WiFi AP", color: "#8B5CF6" },
   ],
 };
@@ -199,7 +200,7 @@ export default function InfraDeviceCard({ id, device, children }: Props) {
                 </Text>
                 {Object.entries(device.extended.networkIo).map(([iface, io]) => (
                   <View key={iface} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 }}>
-                    <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#CBD5E1" }}>{iface}</Text>
+                    <Text style={{ fontFamily: "monospace", fontSize: 10, color: colors.gray[100] }}>{iface}</Text>
                     <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>
                       RX {formatBytes(io.rxBytes)} / TX {formatBytes(io.txBytes)}
                     </Text>
@@ -217,7 +218,7 @@ export default function InfraDeviceCard({ id, device, children }: Props) {
                 {device.extended.hostapdClients.map((c: any, i: number) => (
                   <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 3 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: GREEN }} />
-                    <Text style={{ fontFamily: "monospace", fontSize: 9, color: "#CBD5E1", flex: 1 }}>{c.mac}</Text>
+                    <Text style={{ fontFamily: "monospace", fontSize: 9, color: colors.gray[100], flex: 1 }}>{c.mac}</Text>
                     {c.signalDbm != null && (
                       <Text style={{ fontFamily: "monospace", fontSize: 8, color: c.signalDbm > -60 ? GREEN : c.signalDbm > -75 ? YELLOW : RED }}>
                         {c.signalDbm} dBm

@@ -1,4 +1,5 @@
-// Linear-inspired design tokens — single source of truth for all UI styling
+// Design tokens — single source of truth for all UI styling.
+// Accent palette switched from Linear indigo to codebase-actual cyan (dir_1779034939863, 2026-05-17).
 
 // ── Colors ──
 
@@ -19,9 +20,37 @@ export const colors = {
     disabled: "#454545",
   },
 
-  // Accent
-  accent: "#5e6ad2", // Linear indigo
-  accentLight: "#7c85e0",
+  // Accent — cyan (was Linear indigo until 2026-05-17)
+  accent: "#06B6D4",
+  accentLight: "#22d3ee",
+
+  // Brand colors used across the app
+  brand: {
+    cyan: "#06B6D4",         // accent (alias)
+    cyanLight: "#22d3ee",
+    spotify: "#1DB954",      // music tab
+    purple: "#A855F7",
+    blue: "#3B82F6",
+    amber: "#F59E0B",
+    amberDeep: "#EAB308",
+    orange: "#F97316",
+  },
+
+  // Gray scale (mapped to the actual hexes the codebase has been using)
+  gray: {
+    50:  "#e5e5e5",   // ultra-light text on dark
+    100: "#cbd5e1",   // slate
+    200: "#a3a3a3",   // light text
+    250: "#94a3b8",   // mid slate
+    300: "#737373",   // mid text
+    400: "#525252",   // dim text
+    500: "#404040",   // dim border
+    600: "#333333",   // border
+    700: "#2a2a2a",   // surface (low)
+    800: "#1a1a1a",   // surface (mid)
+    850: "#111111",   // surface (deep)
+    900: "#0a0a0a",   // base bg (alias of colors.bg.base)
+  },
 
   // Borders
   border: {

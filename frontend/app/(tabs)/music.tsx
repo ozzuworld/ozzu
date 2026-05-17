@@ -23,10 +23,11 @@ import { HA_URL, HA_TOKEN } from "../../lib/config";
 import { layout } from "../../lib/design-tokens";
 import { formatTrackTime, formatTrackDuration } from "../../lib/format";
 
+import { colors } from "../../lib/design-tokens";
 const BRIDGE_URL =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
 
-const ACCENT = "#1DB954";
+const ACCENT = colors.brand.spotify;
 const BAR_COLOR = "#FFFFFF";
 const BAR_BG = "rgba(255,255,255,0.1)";
 const MINI_PLAYER_HEIGHT = 56;

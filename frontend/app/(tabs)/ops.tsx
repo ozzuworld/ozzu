@@ -21,7 +21,8 @@ import RouterCard from "../../components/ops/RouterCard";
 import PositioningCard from "../../components/ops/PositioningCard";
 import { GroupNav } from "../../components/GroupNav";
 
-const ACCENT = "#06B6D4";
+import { colors } from "../../lib/design-tokens";
+const ACCENT = colors.accent;
 
 type Tab = "services" | "infra";
 
@@ -47,7 +48,7 @@ export default function OpsScreen() {
   const loading = activeTab === "services" ? svcLoading : infraLoading;
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#0A0A0A", paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
       {/* Header */}
       <View
         style={{
@@ -75,7 +76,7 @@ export default function OpsScreen() {
         {downCount > 0 && (
           <View
             style={{
-              backgroundColor: "#EF4444",
+              backgroundColor: colors.error,
               borderRadius: 10,
               paddingHorizontal: 8,
               paddingVertical: 2,
@@ -122,7 +123,7 @@ export default function OpsScreen() {
                 fontWeight: "700",
                 fontSize: 11,
                 letterSpacing: 1,
-                color: activeTab === tab ? ACCENT : "#525252",
+                color: activeTab === tab ? ACCENT : colors.gray[400],
               }}
             >
               {tab === "infra" ? "INFRASTRUCTURE" : "SERVICES"}
@@ -134,7 +135,7 @@ export default function OpsScreen() {
       {loading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={ACCENT} size="large" />
-          <Text style={{ fontFamily: "monospace", fontSize: 11, color: "#525252", marginTop: 12 }}>
+          <Text style={{ fontFamily: "monospace", fontSize: 11, color: colors.gray[400], marginTop: 12 }}>
             {activeTab === "infra" ? "Probing infrastructure..." : "Checking services..."}
           </Text>
         </View>
@@ -182,7 +183,7 @@ export default function OpsScreen() {
                   style={{
                     fontFamily: "monospace",
                     fontSize: 9,
-                    color: "#525252",
+                    color: colors.gray[400],
                     textAlign: "center",
                     marginTop: 8,
                   }}
@@ -209,7 +210,7 @@ export default function OpsScreen() {
                   style={{
                     fontFamily: "monospace",
                     fontSize: 9,
-                    color: "#525252",
+                    color: colors.gray[400],
                     textAlign: "center",
                     marginTop: 12,
                   }}

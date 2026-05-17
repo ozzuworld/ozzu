@@ -4,12 +4,13 @@ import { useState } from "react";
 import type { ESP32Node, PositioningHub } from "../../lib/infra-hooks";
 import { MetricPill } from "./InfraDeviceCard";
 
-const GREEN = "#22C55E";
-const RED = "#EF4444";
-const YELLOW = "#EAB308";
-const GRAY = "#525252";
+import { colors } from "../../lib/design-tokens";
+const GREEN = colors.success;
+const RED = colors.error;
+const YELLOW = colors.brand.amberDeep;
+const GRAY = colors.gray[400];
 const DIM = "#64748B";
-const ACCENT = "#06B6D4";
+const ACCENT = colors.accent;
 
 interface Props {
   nodes: ESP32Node[];
@@ -33,7 +34,7 @@ function NodeRow({ node }: { node: ESP32Node }) {
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}>
       <Text style={{ fontSize: 14 }}>{emoji}</Text>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontFamily: "monospace", fontSize: 10, fontWeight: "700", color: "#CBD5E1" }}>
+        <Text style={{ fontFamily: "monospace", fontSize: 10, fontWeight: "700", color: colors.gray[100] }}>
           Node {node.id} — {node.room.toUpperCase()}
         </Text>
         <Text style={{ fontFamily: "monospace", fontSize: 8, color: DIM }}>{node.ip}{node.mac ? ` (${node.mac})` : ""}</Text>

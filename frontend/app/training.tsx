@@ -43,14 +43,15 @@ import { getBridgeUrl } from "../lib/bridge-api";
 import { GroupNav } from "../components/GroupNav";
 import { layout } from "../lib/design-tokens";
 
+import { colors } from "../lib/design-tokens";
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-const CYAN = "#06B6D4";
-const GREEN = "#22C55E";
-const AMBER = "#F59E0B";
-const RED = "#EF4444";
-const PURPLE = "#A855F7";
+const CYAN = colors.accent;
+const GREEN = colors.success;
+const AMBER = colors.brand.amber;
+const RED = colors.error;
+const PURPLE = colors.brand.purple;
 const MAGENTA = "#EC4899";
-const CARD_BG = "#0A0A0A";
+const CARD_BG = colors.bg.base;
 const BORDER = "#151515";
 const AUTO_REFRESH_MS = 10000;
 const EPIC_TARGET = 100_000_000;
@@ -58,13 +59,13 @@ const EPIC_TARGET = 100_000_000;
 // Dataset metadata for labels and targets
 const DATASET_INFO: Record<string, { label: string; total: number; color: string }> = {
   glint360k: { label: "Glint360K", total: 17_100_000, color: CYAN },
-  webface4m: { label: "WebFace4M", total: 4_200_000, color: "#F97316" },
+  webface4m: { label: "WebFace4M", total: 4_200_000, color: colors.brand.orange },
   satellite: { label: "Satellite Crawl", total: 50_000_000, color: AMBER },
   laion: { label: "LAION-Face", total: 50_000_000, color: PURPLE },
   ms1mv3: { label: "MS1MV3", total: 5_200_000, color: GREEN },
   ms1mv2: { label: "MS1MV2", total: 5_800_000, color: MAGENTA },
-  vggface2: { label: "VGGFace2", total: 3_310_000, color: "#3B82F6" },
-  vggface2_wds: { label: "VGGFace2-WDS", total: 3_310_000, color: "#3B82F6" },
+  vggface2: { label: "VGGFace2", total: 3_310_000, color: colors.brand.blue },
+  vggface2_wds: { label: "VGGFace2-WDS", total: 3_310_000, color: colors.brand.blue },
   casia: { label: "CASIA-WebFace", total: 500_000, color: "#6366F1" },
   imdb_wiki: { label: "IMDB-Wiki", total: 512_000, color: "#8B5CF6" },
   celeba: { label: "CelebA", total: 200_000, color: "#EC4899" },
@@ -332,7 +333,7 @@ function SkiaSparkline({
   if (!pathStr || !fillPathStr) {
     return (
       <View style={{ width: w, height: h, justifyContent: "center", alignItems: "center" }}>
-        <Text style={{ color: "#1A1A1A", fontSize: 10, fontFamily: "monospace" }}>
+        <Text style={{ color: colors.gray[800], fontSize: 10, fontFamily: "monospace" }}>
           Collecting telemetry...
         </Text>
       </View>
@@ -346,7 +347,7 @@ function SkiaSparkline({
   for (let i = 0; i <= 3; i++) {
     const gy = pad + (ch / 3) * i;
     gridLines.push(
-      <SkLine key={i} p1={vec(pad, gy)} p2={vec(w - pad, gy)} color="#111" strokeWidth={0.5} />
+      <SkLine key={i} p1={vec(pad, gy)} p2={vec(w - pad, gy)} color=colors.gray[850] strokeWidth={0.5} />
     );
   }
 
@@ -477,7 +478,7 @@ function PulsingGlow({ active, color }: { active: boolean; color: string }) {
           width: 8,
           height: 8,
           borderRadius: 4,
-          backgroundColor: active ? color : "#333",
+          backgroundColor: active ? color : colors.gray[600],
         }}
       />
     </View>
@@ -513,7 +514,7 @@ function NeonProgressBar({
     <View style={{ marginVertical: 6 }}>
       {label && (
         <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-          <Text style={{ color: "#333", fontSize: 9, fontFamily: "monospace" }}>{label}</Text>
+          <Text style={{ color: colors.gray[600], fontSize: 9, fontFamily: "monospace" }}>{label}</Text>
           <Text style={{ color: color + "80", fontSize: 9, fontFamily: "monospace", fontWeight: "bold" }}>
             {pct.toFixed(2)}%
           </Text>
@@ -580,7 +581,7 @@ function ActivityTicker({ events }: { events: string[] }) {
     >
       <Animated.Text
         style={[
-          { color: "#333", fontSize: 9, fontFamily: "monospace" },
+          { color: colors.gray[600], fontSize: 9, fontFamily: "monospace" },
           animStyle,
         ]}
       >
@@ -630,7 +631,7 @@ function GlowCard({
       </Text>
       <Text
         style={{
-          color: "#404040",
+          color: colors.gray[500],
           fontSize: 8,
           fontFamily: "monospace",
           fontWeight: "bold",
@@ -671,11 +672,11 @@ function SourceBar({
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           {active && <PulsingGlow active={true} color={color} />}
-          <Text style={{ color: active ? color : "#404040", fontSize: 9, fontFamily: "monospace", fontWeight: active ? "bold" : "normal" }}>
+          <Text style={{ color: active ? color : colors.gray[500], fontSize: 9, fontFamily: "monospace", fontWeight: active ? "bold" : "normal" }}>
             {label}
           </Text>
         </View>
-        <Text style={{ color: active ? color : "#333", fontSize: 9, fontFamily: "monospace" }}>
+        <Text style={{ color: active ? color : colors.gray[600], fontSize: 9, fontFamily: "monospace" }}>
           {formatCompact(count)}
         </Text>
       </View>
@@ -697,7 +698,7 @@ function SourceBar({
 // ═══════════════════════════════════════════════════════════════════════════════
 // INFO ROW + SECTION
 // ═══════════════════════════════════════════════════════════════════════════════
-function InfoRow({ label, value, color = "#737373" }: { label: string; value: string; color?: string }) {
+function InfoRow({ label, value, color = colors.gray[300] }: { label: string; value: string; color?: string }) {
   return (
     <View style={s.infoRow}>
       <Text style={s.infoLabel}>{label}</Text>
@@ -923,11 +924,11 @@ export default function TrainingScreen() {
       {/* ── Top command bar ────────────────────────────────────────── */}
       <View style={[s.topBar, { paddingTop: insets.top, paddingHorizontal: pad }]}>
         <Pressable onPress={() => router.back()} hitSlop={20} style={{ padding: 8 }}>
-          <Text style={{ color: "#525252", fontSize: 22, fontFamily: "monospace" }}>{"◁"}</Text>
+          <Text style={{ color: colors.gray[400], fontSize: 22, fontFamily: "monospace" }}>{"◁"}</Text>
         </Pressable>
 
         <View style={{ flex: 1, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
-          <PulsingGlow active={vastRunning} color={vastRunning ? GREEN : "#333"} />
+          <PulsingGlow active={vastRunning} color={vastRunning ? GREEN : colors.gray[600]} />
           <Animated.Text
             style={[
               {
@@ -947,7 +948,7 @@ export default function TrainingScreen() {
           <PulsingGlow active={qdrantOnline} color={qdrantColor} />
         </View>
 
-        <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>{timeStr}</Text>
+        <Text style={{ color: colors.gray[800], fontSize: 9, fontFamily: "monospace" }}>{timeStr}</Text>
       </View>
 
       <GroupNav group="cipher" />
@@ -1051,7 +1052,7 @@ export default function TrainingScreen() {
 
             return entries.map(({ key, info, prog, count, status }) => {
               const statusIcon = status === "completed" ? "✓" : status === "running" ? "▶" : status === "failed" ? "✗" : "·";
-              const statusColor = status === "completed" ? GREEN : status === "running" ? CYAN : status === "failed" ? RED : "#333";
+              const statusColor = status === "completed" ? GREEN : status === "running" ? CYAN : status === "failed" ? RED : colors.gray[600];
               const pct = info.total > 0 ? Math.min(100, (count / info.total) * 100) : 0;
               const rateStr = prog?.rate ? `${prog.rate.toLocaleString()}/min` : "";
               const timeStr = prog?.elapsedSec ? (prog.elapsedSec > 3600 ? `${(prog.elapsedSec / 3600).toFixed(1)}h` : `${Math.round(prog.elapsedSec / 60)}m`) : "";
@@ -1067,15 +1068,15 @@ export default function TrainingScreen() {
                       )}
                     </View>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      {rateStr ? <Text style={{ color: "#333", fontSize: 8, fontFamily: "monospace" }}>{rateStr}</Text> : null}
-                      {timeStr ? <Text style={{ color: "#333", fontSize: 8, fontFamily: "monospace" }}>{timeStr}</Text> : null}
+                      {rateStr ? <Text style={{ color: colors.gray[600], fontSize: 8, fontFamily: "monospace" }}>{rateStr}</Text> : null}
+                      {timeStr ? <Text style={{ color: colors.gray[600], fontSize: 8, fontFamily: "monospace" }}>{timeStr}</Text> : null}
                       <Text style={{ color: statusColor, fontSize: 10, fontFamily: "monospace", fontWeight: "bold" }}>
                         {count > 0 ? formatCompact(count) : "—"}
                       </Text>
                     </View>
                   </View>
                   {/* Progress bar */}
-                  <View style={{ height: 3, backgroundColor: "#111", borderRadius: 2 }}>
+                  <View style={{ height: 3, backgroundColor: colors.gray[850], borderRadius: 2 }}>
                     <View
                       style={{
                         height: 3,
@@ -1094,7 +1095,7 @@ export default function TrainingScreen() {
           })()}
           {/* Satellite / untracked remainder */}
           {(sources["satellite"] || 0) > 0 && (
-            <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: "#111" }}>
+            <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.gray[850] }}>
               <SourceBar
                 label="Satellite + Legacy"
                 count={sources["satellite"]}
@@ -1128,7 +1129,7 @@ export default function TrainingScreen() {
                     {stats.vast.status}
                   </Text>
                 </View>
-                <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>
+                <Text style={{ color: colors.gray[800], fontSize: 9, fontFamily: "monospace" }}>
                   #{stats.vast.id}
                 </Text>
               </View>
@@ -1170,7 +1171,7 @@ export default function TrainingScreen() {
             </>
           ) : (
             <View style={{ padding: 24, alignItems: "center" }}>
-              <Text style={{ color: "#1A1A1A", fontSize: 10, fontFamily: "monospace" }}>
+              <Text style={{ color: colors.gray[800], fontSize: 10, fontFamily: "monospace" }}>
                 NO ACTIVE GPU INSTANCE
               </Text>
             </View>
@@ -1309,15 +1310,15 @@ export default function TrainingScreen() {
                 {stats?.qdrant?.status || "OFFLINE"}
               </Text>
               {stats?.qdrant?.status === "yellow" && (
-                <Text style={{ color: "#333", fontSize: 8, fontFamily: "monospace" }}>
+                <Text style={{ color: colors.gray[600], fontSize: 8, fontFamily: "monospace" }}>
                   (HNSW disabled)
                 </Text>
               )}
             </View>
-            <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>QDRANT</Text>
+            <Text style={{ color: colors.gray[800], fontSize: 9, fontFamily: "monospace" }}>QDRANT</Text>
           </View>
           <InfoRow label="Total Vectors" value={formatFull(points)} color={CYAN} />
-          <InfoRow label="Indexed (HNSW)" value={indexed > 0 ? formatFull(indexed) : "disabled"} color={indexed > 0 ? GREEN : "#333"} />
+          <InfoRow label="Indexed (HNSW)" value={indexed > 0 ? formatFull(indexed) : "disabled"} color={indexed > 0 ? GREEN : colors.gray[600]} />
           <InfoRow label="Segments" value={String(stats?.qdrant?.segments_count || 0)} />
           <InfoRow label="Dimensions" value={String(pipeline?.dimensions || 512)} />
           <InfoRow label="Distance" value="Cosine" />
@@ -1331,7 +1332,7 @@ export default function TrainingScreen() {
               <PulsingGlow active={heartbeatAlive} color={heartbeatAlive ? GREEN : RED} />
               <Text
                 style={{
-                  color: heartbeatAlive ? GREEN : heartbeatAge !== null ? RED : "#333",
+                  color: heartbeatAlive ? GREEN : heartbeatAge !== null ? RED : colors.gray[600],
                   fontSize: 10,
                   fontFamily: "monospace",
                   fontWeight: "bold",
@@ -1341,7 +1342,7 @@ export default function TrainingScreen() {
               </Text>
             </View>
             {pipeline?.elapsedSec ? (
-              <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>
+              <Text style={{ color: colors.gray[800], fontSize: 9, fontFamily: "monospace" }}>
                 {pipeline.elapsedSec > 3600 ? `${(pipeline.elapsedSec / 3600).toFixed(1)}h` : `${Math.round(pipeline.elapsedSec / 60)}m`} elapsed
               </Text>
             ) : null}
@@ -1456,14 +1457,14 @@ const s = StyleSheet.create({
     elevation: 5,
   },
   heroLabel: {
-    color: "#1A1A1A",
+    color: colors.gray[800],
     fontSize: 9,
     fontFamily: "monospace",
     letterSpacing: 4,
     marginBottom: 8,
   },
   heroSub: {
-    color: "#111",
+    color: colors.gray[850],
     fontSize: 9,
     fontFamily: "monospace",
     marginTop: 6,
@@ -1478,7 +1479,7 @@ const s = StyleSheet.create({
     marginBottom: 10,
   },
   chartLabel: {
-    color: "#1A1A1A",
+    color: colors.gray[800],
     fontSize: 9,
     fontFamily: "monospace",
     letterSpacing: 2,
@@ -1506,10 +1507,10 @@ const s = StyleSheet.create({
     paddingVertical: 7,
     paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#0A0A0A",
+    borderBottomColor: colors.bg.base,
   },
   infoLabel: {
-    color: "#333",
+    color: colors.gray[600],
     fontSize: 10,
     fontFamily: "monospace",
   },
@@ -1540,7 +1541,7 @@ const s = StyleSheet.create({
     marginLeft: 8,
   },
   topoText: {
-    color: "#1A1A1A",
+    color: colors.gray[800],
     fontSize: 9,
     fontFamily: "monospace",
     lineHeight: 15,

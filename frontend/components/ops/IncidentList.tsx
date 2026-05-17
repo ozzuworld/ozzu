@@ -1,12 +1,13 @@
 import { View, Text, ScrollView, ActivityIndicator } from "react-native";
 import type { OpsIncident } from "../../lib/ops-hooks";
 
+import { colors } from "../../lib/design-tokens";
 const STATUS_COLORS: Record<string, string> = {
-  healthy: "#22C55E",
-  degraded: "#EAB308",
-  down: "#EF4444",
-  unknown: "#525252",
-  idle: "#EAB308",
+  healthy: colors.success,
+  degraded: colors.brand.amberDeep,
+  down: colors.error,
+  unknown: colors.gray[400],
+  idle: colors.brand.amberDeep,
 };
 
 interface Props {
@@ -28,7 +29,7 @@ export default function IncidentList({ incidents, loading }: Props) {
   if (loading) {
     return (
       <View style={{ padding: 20, alignItems: "center" }}>
-        <ActivityIndicator color="#525252" size="small" />
+        <ActivityIndicator color=colors.gray[400] size="small" />
       </View>
     );
   }
@@ -36,7 +37,7 @@ export default function IncidentList({ incidents, loading }: Props) {
   if (incidents.length === 0) {
     return (
       <View style={{ padding: 16, alignItems: "center" }}>
-        <Text style={{ fontFamily: "monospace", fontSize: 11, color: "#525252" }}>
+        <Text style={{ fontFamily: "monospace", fontSize: 11, color: colors.gray[400] }}>
           No recent incidents
         </Text>
       </View>
@@ -50,7 +51,7 @@ export default function IncidentList({ incidents, loading }: Props) {
           fontFamily: "monospace",
           fontWeight: "700",
           fontSize: 10,
-          color: "#525252",
+          color: colors.gray[400],
           letterSpacing: 1,
           marginBottom: 8,
         }}
@@ -63,7 +64,7 @@ export default function IncidentList({ incidents, loading }: Props) {
         nestedScrollEnabled
       >
         {incidents.map((inc, i) => {
-          const toColor = STATUS_COLORS[inc.toStatus] || "#525252";
+          const toColor = STATUS_COLORS[inc.toStatus] || colors.gray[400];
           const isRecovery = inc.toStatus === "healthy";
           return (
             <View
@@ -83,7 +84,7 @@ export default function IncidentList({ incidents, loading }: Props) {
                   fontFamily: "monospace",
                   fontWeight: "600",
                   fontSize: 10,
-                  color: isRecovery ? "#22C55E" : "#E2E8F0",
+                  color: isRecovery ? colors.success : "#E2E8F0",
                   width: 100,
                 }}
                 numberOfLines={1}
@@ -93,7 +94,7 @@ export default function IncidentList({ incidents, loading }: Props) {
               <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#64748B", flex: 1 }}>
                 {inc.fromStatus} → {inc.toStatus}
               </Text>
-              <Text style={{ fontFamily: "monospace", fontSize: 9, color: "#525252" }}>
+              <Text style={{ fontFamily: "monospace", fontSize: 9, color: colors.gray[400] }}>
                 {formatTs(inc.ts)}
               </Text>
             </View>

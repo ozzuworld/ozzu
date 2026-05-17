@@ -2,9 +2,10 @@
 import { View, Text } from "react-native";
 import type { InfraState } from "../../lib/infra-hooks";
 
-const GREEN = "#22C55E";
-const RED = "#EF4444";
-const GRAY = "#525252";
+import { colors } from "../../lib/design-tokens";
+const GREEN = colors.success;
+const RED = colors.error;
+const GRAY = colors.gray[400];
 const DIM = "#64748B";
 
 interface Props {

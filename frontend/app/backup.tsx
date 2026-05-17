@@ -22,6 +22,7 @@ import {
 } from "../lib/bridge-api";
 import { GroupNav } from "../components/GroupNav";
 
+import { colors } from "../lib/design-tokens";
 export default function BackupScreen() {
   const router = useRouter();
   const { insets, isPhone } = usePhoneLayout();
@@ -135,7 +136,7 @@ export default function BackupScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#111111", paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: colors.gray[850], paddingTop: insets.top }}>
       <StatusBar style="light" />
 
       {/* Header */}
@@ -143,7 +144,7 @@ export default function BackupScreen() {
         <Pressable onPress={() => router.back()} style={{ marginRight: 12 }}>
           <Text style={{ color: "#888", fontFamily: "monospace", fontSize: 14 }}>{"< BACK"}</Text>
         </Pressable>
-        <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 16, fontWeight: "700", flex: 1 }}>
+        <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 16, fontWeight: "700", flex: 1 }}>
           BACKUPS
         </Text>
         <View style={{
@@ -169,7 +170,7 @@ export default function BackupScreen() {
           onPress={handleCreateBackup}
           disabled={creating}
           style={{
-            backgroundColor: creating ? "#1A1A1A" : "#1E3A5F",
+            backgroundColor: creating ? colors.gray[800] : "#1E3A5F",
             borderRadius: 8,
             padding: 16,
             marginBottom: 16,
@@ -189,13 +190,13 @@ export default function BackupScreen() {
         </Pressable>
 
         {/* Info */}
-        <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11, marginBottom: 16 }}>
+        <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11, marginBottom: 16 }}>
           Backups include: PostgreSQL, OSINT images, business attachments, HA config, env secrets, Redis.
           {"\n"}Encrypted with AES-256-CBC. Download saves to Files for iCloud sync.
         </Text>
 
         {error && (
-          <Text style={{ color: "#EF4444", fontFamily: "monospace", fontSize: 12, marginBottom: 12 }}>
+          <Text style={{ color: colors.error, fontFamily: "monospace", fontSize: 12, marginBottom: 12 }}>
             {error}
           </Text>
         )}
@@ -211,7 +212,7 @@ export default function BackupScreen() {
             <View
               key={b.filename}
               style={{
-                backgroundColor: "#1A1A1A",
+                backgroundColor: colors.gray[800],
                 borderRadius: 8,
                 padding: 12,
                 marginBottom: 8,
@@ -233,7 +234,7 @@ export default function BackupScreen() {
                     onPress={() => handleDownload(b)}
                     disabled={downloading === b.filename}
                     style={{
-                      backgroundColor: downloading === b.filename ? "#1A1A1A" : "#064E3B",
+                      backgroundColor: downloading === b.filename ? colors.gray[800] : "#064E3B",
                       paddingHorizontal: 10,
                       paddingVertical: 6,
                       borderRadius: 4,

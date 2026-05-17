@@ -131,10 +131,10 @@ export default function DirectivesScreen() {
   // Board columns (Jira-style kanban)
   const boardColumns = useMemo(() => {
     const columns: Array<{ key: string; label: string; color: string; items: Directive[] }> = [
-      { key: "needs_action", label: "Needs Action", color: "#EF4444", items: [] },
-      { key: "todo", label: "To Do", color: "#737373", items: [] },
-      { key: "in_progress", label: "In Progress", color: "#3B82F6", items: [] },
-      { key: "done", label: "Done", color: "#22C55E", items: [] },
+      { key: "needs_action", label: "Needs Action", color: colors.error, items: [] },
+      { key: "todo", label: "To Do", color: colors.gray[300], items: [] },
+      { key: "in_progress", label: "In Progress", color: colors.brand.blue, items: [] },
+      { key: "done", label: "Done", color: colors.success, items: [] },
     ];
     for (const d of filtered) {
       if (["blocked", "deploy_failed", "failed", "stale"].includes(d.status)) {

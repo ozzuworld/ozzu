@@ -2,8 +2,9 @@ import { useState } from "react";
 import { View, Text, Modal, TextInput, Pressable, ScrollView } from "react-native";
 import { createBusinessProject } from "../../lib/bridge-api";
 
+import { colors } from "../../lib/design-tokens";
 const EMOJI_OPTIONS = ["📁", "🚀", "💼", "🎯", "📊", "🛠", "🔬", "🎨", "📱", "🌐", "🤖", "💰"];
-const COLOR_OPTIONS = ["#06B6D4", "#22C55E", "#EAB308", "#F97316", "#EF4444", "#A855F7", "#3B82F6", "#EC4899"];
+const COLOR_OPTIONS = [colors.accent, colors.success, colors.brand.amberDeep, colors.brand.orange, colors.error, colors.brand.purple, colors.brand.blue, "#EC4899"];
 
 interface AddProjectModalProps {
   visible: boolean;
@@ -15,10 +16,10 @@ export function AddProjectModal({ visible, onClose, onCreated }: AddProjectModal
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [emoji, setEmoji] = useState("📁");
-  const [color, setColor] = useState("#06B6D4");
+  const [color, setColor] = useState(colors.accent);
   const [saving, setSaving] = useState(false);
 
-  const reset = () => { setName(""); setDescription(""); setEmoji("📁"); setColor("#06B6D4"); };
+  const reset = () => { setName(""); setDescription(""); setEmoji("📁"); setColor(colors.accent); };
 
   const handleCreate = async () => {
     if (!name.trim()) return;
@@ -38,44 +39,44 @@ export function AddProjectModal({ visible, onClose, onCreated }: AddProjectModal
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", padding: 24 }} onPress={onClose}>
-        <Pressable onPress={() => {}} style={{ backgroundColor: "#1A1A1A", borderRadius: 12, padding: 20 }}>
-          <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2, marginBottom: 16 }}>
+        <Pressable onPress={() => {}} style={{ backgroundColor: colors.gray[800], borderRadius: 12, padding: 20 }}>
+          <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2, marginBottom: 16 }}>
             NEW PROJECT
           </Text>
 
-          <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>NAME</Text>
+          <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>NAME</Text>
           <TextInput
             value={name}
             onChangeText={setName}
             placeholder="Project name..."
-            placeholderTextColor="#525252"
-            style={{ backgroundColor: "#111", color: "#E5E5E5", borderRadius: 8, padding: 12, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: "#2A2A2A" }}
+            placeholderTextColor=colors.gray[400]
+            style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 12, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: colors.gray[700] }}
             autoFocus
           />
 
-          <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>DESCRIPTION</Text>
+          <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>DESCRIPTION</Text>
           <TextInput
             value={description}
             onChangeText={setDescription}
             placeholder="Optional description..."
-            placeholderTextColor="#525252"
+            placeholderTextColor=colors.gray[400]
             multiline
-            style={{ backgroundColor: "#111", color: "#E5E5E5", borderRadius: 8, padding: 12, fontSize: 13, marginBottom: 12, minHeight: 60, borderWidth: 1, borderColor: "#2A2A2A", textAlignVertical: "top" }}
+            style={{ backgroundColor: colors.gray[850], color: colors.gray[50], borderRadius: 8, padding: 12, fontSize: 13, marginBottom: 12, minHeight: 60, borderWidth: 1, borderColor: colors.gray[700], textAlignVertical: "top" }}
           />
 
-          <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>ICON</Text>
+          <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>ICON</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
             <View style={{ flexDirection: "row", gap: 6 }}>
               {EMOJI_OPTIONS.map((e) => (
                 <Pressable key={e} onPress={() => setEmoji(e)}
-                  style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: emoji === e ? "#2A2A2A" : "transparent", alignItems: "center", justifyContent: "center", borderWidth: emoji === e ? 1 : 0, borderColor: "#06B6D4" }}>
+                  style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: emoji === e ? colors.gray[700] : "transparent", alignItems: "center", justifyContent: "center", borderWidth: emoji === e ? 1 : 0, borderColor: colors.accent }}>
                   <Text style={{ fontSize: 18 }}>{e}</Text>
                 </Pressable>
               ))}
             </View>
           </ScrollView>
 
-          <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>COLOR</Text>
+          <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>COLOR</Text>
           <View style={{ flexDirection: "row", gap: 8, marginBottom: 20 }}>
             {COLOR_OPTIONS.map((c) => (
               <Pressable key={c} onPress={() => setColor(c)}
@@ -85,14 +86,14 @@ export function AddProjectModal({ visible, onClose, onCreated }: AddProjectModal
 
           <View style={{ flexDirection: "row", gap: 10, justifyContent: "flex-end" }}>
             <Pressable onPress={onClose} style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 12 }}>CANCEL</Text>
+              <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 12 }}>CANCEL</Text>
             </Pressable>
             <Pressable
               onPress={handleCreate}
               disabled={!name.trim() || saving}
-              style={{ backgroundColor: name.trim() ? "#06B6D4" : "#2A2A2A", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
+              style={{ backgroundColor: name.trim() ? colors.accent : colors.gray[700], paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
             >
-              <Text style={{ color: name.trim() ? "#111" : "#525252", fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
+              <Text style={{ color: name.trim() ? colors.gray[850] : colors.gray[400], fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
                 {saving ? "CREATING..." : "CREATE"}
               </Text>
             </Pressable>

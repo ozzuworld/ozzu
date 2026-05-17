@@ -3,16 +3,17 @@ import { View, Text, Pressable, LayoutAnimation } from "react-native";
 import { type BusinessTask, type TaskRequirement } from "../../lib/bridge-api";
 import { formatCOPCompact } from "./CostField";
 
+import { colors } from "../../lib/design-tokens";
 const STATUS_COLOR: Record<string, string> = {
-  pending: "#525252",
-  in_progress: "#EAB308",
-  done: "#22C55E",
+  pending: colors.gray[400],
+  in_progress: colors.brand.amberDeep,
+  done: colors.success,
 };
 
 const PRIORITY_BADGE: Record<string, { label: string; color: string }> = {
-  high: { label: "HIGH", color: "#EF4444" },
-  medium: { label: "MED", color: "#F97316" },
-  low: { label: "LOW", color: "#3B82F6" },
+  high: { label: "HIGH", color: colors.error },
+  medium: { label: "MED", color: colors.brand.orange },
+  low: { label: "LOW", color: colors.brand.blue },
 };
 
 interface TaskCardProps {
@@ -34,9 +35,9 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
     const now = new Date();
     const diff = Math.ceil((date.getTime() - now.getTime()) / 86400000);
     const label = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    if (diff < 0) return { label, color: "#EF4444" };
-    if (diff <= 2) return { label, color: "#EAB308" };
-    return { label, color: "#525252" };
+    if (diff < 0) return { label, color: colors.error };
+    if (diff <= 2) return { label, color: colors.brand.amberDeep };
+    return { label, color: colors.gray[400] };
   };
 
   const due = formatDue(task.due_date);
@@ -54,7 +55,7 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
     >
       <View
         style={{
-          backgroundColor: "#1A1A1A",
+          backgroundColor: colors.gray[800],
           borderRadius: 10,
           padding: 14,
           marginBottom: 8,
@@ -87,7 +88,7 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
           <View style={{ flex: 1 }}>
             <Text
               style={{
-                color: isDone ? "#525252" : "#E5E5E5",
+                color: isDone ? colors.gray[400] : colors.gray[50],
                 fontSize: 14,
                 textDecorationLine: isDone ? "line-through" : "none",
               }}
@@ -103,17 +104,17 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
               const reqs: TaskRequirement[] = task.requirements || [];
               if (reqs.length === 0) return null;
               const fulfilled = reqs.filter((r) => r.fulfilled).length;
-              const color = fulfilled === 0 ? "#525252" : fulfilled >= reqs.length ? "#22C55E" : "#EAB308";
+              const color = fulfilled === 0 ? colors.gray[400] : fulfilled >= reqs.length ? colors.success : colors.brand.amberDeep;
               return <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />;
             })()}
             {task.estimated_cost ? (
-              <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>{formatCOPCompact(task.estimated_cost)}</Text>
+              <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10 }}>{formatCOPCompact(task.estimated_cost)}</Text>
             ) : null}
             {(task.expense_count || 0) > 0 ? (
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10 }}>$ {task.expense_count}</Text>
+              <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10 }}>$ {task.expense_count}</Text>
             ) : null}
             {attachCount > 0 ? (
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10 }}>📎 {attachCount}</Text>
+              <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10 }}>📎 {attachCount}</Text>
             ) : null}
             {due ? (
               <Text style={{ color: due.color, fontFamily: "monospace", fontSize: 10 }}>{due.label}</Text>
@@ -130,12 +131,12 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
         {expanded ? (
           <View style={{ marginTop: 12, marginLeft: 30 }}>
             {task.description ? (
-              <Text style={{ color: "#737373", fontSize: 13, lineHeight: 19, marginBottom: 8 }}>
+              <Text style={{ color: colors.gray[300], fontSize: 13, lineHeight: 19, marginBottom: 8 }}>
                 {task.description}
               </Text>
             ) : null}
             {task.notes ? (
-              <Text style={{ color: "#525252", fontSize: 12, fontStyle: "italic", marginBottom: 8 }} numberOfLines={2}>
+              <Text style={{ color: colors.gray[400], fontSize: 12, fontStyle: "italic", marginBottom: 8 }} numberOfLines={2}>
                 {task.notes}
               </Text>
             ) : null}
@@ -151,7 +152,7 @@ export function TaskCard({ task, onToggle, onPress, onLongPress }: TaskCardProps
                 marginTop: 2,
               })}
             >
-              <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>DETAILS</Text>
+              <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>DETAILS</Text>
             </Pressable>
           </View>
         ) : null}

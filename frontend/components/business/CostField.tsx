@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text, TextInput } from "react-native";
 
+import { colors } from "../../lib/design-tokens";
 function formatCOPDisplay(amount: number): string {
   if (!amount && amount !== 0) return "";
   return "$" + Math.round(amount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
@@ -33,21 +34,21 @@ export function CostField({ value, onChange, label, placeholder = "$0", editable
   return (
     <View>
       {label ? (
-        <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>{label}</Text>
+        <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>{label}</Text>
       ) : null}
-      <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#111", borderRadius: 8, borderWidth: 1, borderColor: "#2A2A2A" }}>
-        <Text style={{ color: "#525252", fontSize: 14, paddingLeft: 12 }}>$</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: colors.gray[850], borderRadius: 8, borderWidth: 1, borderColor: colors.gray[700] }}>
+        <Text style={{ color: colors.gray[400], fontSize: 14, paddingLeft: 12 }}>$</Text>
         <TextInput
           value={text}
           onChangeText={handleChange}
           placeholder={placeholder}
-          placeholderTextColor="#525252"
+          placeholderTextColor=colors.gray[400]
           keyboardType="numeric"
           editable={editable}
-          style={{ flex: 1, color: "#E5E5E5", padding: 10, fontSize: 14 }}
+          style={{ flex: 1, color: colors.gray[50], padding: 10, fontSize: 14 }}
         />
         {text ? (
-          <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 10, paddingRight: 12 }}>
+          <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10, paddingRight: 12 }}>
             {formatCOPDisplay(parseInt(text, 10) || 0)}
           </Text>
         ) : null}

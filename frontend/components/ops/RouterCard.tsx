@@ -4,12 +4,13 @@ import { useState } from "react";
 import type { RouterState } from "../../lib/infra-hooks";
 import { MetricPill } from "./InfraDeviceCard";
 
-const GREEN = "#22C55E";
-const RED = "#EF4444";
-const YELLOW = "#EAB308";
-const GRAY = "#525252";
+import { colors } from "../../lib/design-tokens";
+const GREEN = colors.success;
+const RED = colors.error;
+const YELLOW = colors.brand.amberDeep;
+const GRAY = colors.gray[400];
 const DIM = "#64748B";
-const ACCENT = "#06B6D4";
+const ACCENT = colors.accent;
 
 interface Props {
   router: RouterState;
@@ -19,7 +20,7 @@ function DhcpRow({ client }: { client: any }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 3 }}>
       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: GREEN }} />
-      <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#CBD5E1", width: 110 }} numberOfLines={1}>
+      <Text style={{ fontFamily: "monospace", fontSize: 10, color: colors.gray[100], width: 110 }} numberOfLines={1}>
         {client.name || client.hostname || "Unknown"}
       </Text>
       <Text style={{ fontFamily: "monospace", fontSize: 9, color: DIM, flex: 1 }}>{client.ip || client.ipaddr}</Text>
@@ -33,7 +34,7 @@ function WanInterface({ name, data }: { name: string; data: any }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 3 }}>
       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isUp ? GREEN : GRAY }} />
-      <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#CBD5E1", flex: 1 }}>{name}</Text>
+      <Text style={{ fontFamily: "monospace", fontSize: 10, color: colors.gray[100], flex: 1 }}>{name}</Text>
       <Text style={{ fontFamily: "monospace", fontSize: 9, color: isUp ? GREEN : GRAY }}>
         {data?.ipaddr || data?.ip || (isUp ? "UP" : "DOWN")}
       </Text>
@@ -140,7 +141,7 @@ export default function RouterCard({ router }: Props) {
                 </Text>
                 {router.vpn.openvpnClient && (
                   <View style={{ paddingVertical: 2 }}>
-                    <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#CBD5E1" }}>OpenVPN Client</Text>
+                    <Text style={{ fontFamily: "monospace", fontSize: 10, color: colors.gray[100] }}>OpenVPN Client</Text>
                     {Array.isArray(router.vpn.openvpnClient) ? (
                       router.vpn.openvpnClient.map((c: any, i: number) => (
                         <Text key={i} style={{ fontFamily: "monospace", fontSize: 9, color: DIM }}>

@@ -5,7 +5,8 @@ import { type BusinessContact } from "../../lib/bridge-api";
 import { ContactDetailSheet } from "./ContactDetailSheet";
 import { AddContactModal } from "./AddContactModal";
 
-const ACCENT = "#06B6D4";
+import { colors } from "../../lib/design-tokens";
+const ACCENT = colors.accent;
 const TYPES = [
   { key: undefined, label: "ALL" },
   { key: "buyer", label: "BUYERS" },
@@ -15,11 +16,11 @@ const TYPES = [
 ] as const;
 
 const TYPE_COLORS: Record<string, string> = {
-  buyer: "#22C55E",
-  supplier: "#F59E0B",
-  logistics: "#3B82F6",
+  buyer: colors.success,
+  supplier: colors.brand.amber,
+  logistics: colors.brand.blue,
   broker: "#8B5CF6",
-  other: "#737373",
+  other: colors.gray[300],
 };
 
 const COUNTRY_FLAGS: Record<string, string> = {
@@ -51,7 +52,7 @@ export function ContactsView() {
     <View style={{ flex: 1 }}>
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#525252" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor=colors.gray[400] />}
       >
         {/* Filter pills */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
@@ -64,12 +65,12 @@ export function ContactsView() {
                   paddingHorizontal: 14,
                   paddingVertical: 6,
                   borderRadius: 6,
-                  backgroundColor: filterType === t.key ? ACCENT + "22" : "#1A1A1A",
+                  backgroundColor: filterType === t.key ? ACCENT + "22" : colors.gray[800],
                   borderWidth: 1,
                   borderColor: filterType === t.key ? ACCENT + "44" : "rgba(255,255,255,0.06)",
                 }}
               >
-                <Text style={{ color: filterType === t.key ? ACCENT : "#737373", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
+                <Text style={{ color: filterType === t.key ? ACCENT : colors.gray[300], fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
                   {t.label}
                 </Text>
               </Pressable>
@@ -101,8 +102,8 @@ export function ContactsView() {
         {contacts.length === 0 && !loading && (
           <View style={{ alignItems: "center", paddingVertical: 40 }}>
             <Text style={{ fontSize: 40, marginBottom: 12 }}>👥</Text>
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 13 }}>No contacts yet</Text>
-            <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11, marginTop: 4 }}>Add buyers, suppliers & partners</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 13 }}>No contacts yet</Text>
+            <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11, marginTop: 4 }}>Add buyers, suppliers & partners</Text>
           </View>
         )}
       </ScrollView>
@@ -119,14 +120,14 @@ export function ContactsView() {
 }
 
 function ContactCard({ contact, onPress }: { contact: BusinessContact; onPress: () => void }) {
-  const typeColor = TYPE_COLORS[contact.type] || "#737373";
+  const typeColor = TYPE_COLORS[contact.type] || colors.gray[300];
   const flag = COUNTRY_FLAGS[contact.country] || "🌍";
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => ({
-        backgroundColor: pressed ? "#222" : "#1A1A1A",
+        backgroundColor: pressed ? "#222" : colors.gray[800],
         borderRadius: 10,
         padding: 14,
         marginBottom: 8,
@@ -137,7 +138,7 @@ function ContactCard({ contact, onPress }: { contact: BusinessContact; onPress: 
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
           <Text style={{ fontSize: 16 }}>{flag}</Text>
-          <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 13, fontWeight: "bold", flex: 1 }} numberOfLines={1}>
+          <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 13, fontWeight: "bold", flex: 1 }} numberOfLines={1}>
             {contact.name}
           </Text>
         </View>
@@ -148,11 +149,11 @@ function ContactCard({ contact, onPress }: { contact: BusinessContact; onPress: 
         </View>
       </View>
       {contact.company && (
-        <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 11, marginLeft: 28 }}>{contact.company}</Text>
+        <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11, marginLeft: 28 }}>{contact.company}</Text>
       )}
       <View style={{ flexDirection: "row", gap: 16, marginTop: 6, marginLeft: 28 }}>
-        {contact.email && <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 10 }}>{contact.email}</Text>}
-        {contact.phone && <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 10 }}>{contact.phone}</Text>}
+        {contact.email && <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>{contact.email}</Text>}
+        {contact.phone && <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>{contact.phone}</Text>}
       </View>
     </Pressable>
   );

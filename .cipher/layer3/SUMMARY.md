@@ -1,36 +1,36 @@
 # Cipher Layer 3 — Drift Report
 
-Generated: 2026-05-17T14:07:34.302Z
-Scanned 8717 files in 0.4s
+Generated: 2026-05-17T16:23:44.284Z
+Scanned 8718 files in 3.1s
 
 Cipher: **read this before claiming the codebase is clean.**
 
 ## hardcoded-hex-color
 *Hex colors hardcoded outside design-tokens.ts (use the design system)*
 
-**1193 findings:**
+**292 findings:**
 
-- `frontend/components/business/TaskDetailSheet.tsx` — **79** hex literals
-- `frontend/app/(tabs)/music.tsx` — **71** hex literals
-- `frontend/app/metrics.tsx` — **67** hex literals
-- `frontend/app/training.tsx` — **57** hex literals
-- `frontend/components/business/AddExpenseModal.tsx` — **53** hex literals
-- `frontend/components/business/AddTaskModal.tsx` — **48** hex literals
-- `frontend/components/business/ExpenseDetailSheet.tsx` — **48** hex literals
-- `frontend/app/(tabs)/identity.tsx` — **47** hex literals
-- `frontend/app/upload.tsx` — **44** hex literals
-- `frontend/components/business/ProjectDetailSheet.tsx` — **44** hex literals
-- `frontend/components/business/FinancialSummaryCard.tsx` — **39** hex literals
-- `frontend/app/(tabs)/finance.tsx` — **38** hex literals
-- `frontend/components/business/DashboardView.tsx` — **33** hex literals
-- `frontend/components/business/AddProjectModal.tsx` — **32** hex literals
-- `frontend/app/(tabs)/files.tsx` — **29** hex literals
-- `frontend/components/business/ShipmentDetailSheet.tsx` — **28** hex literals
-- `frontend/app/backup.tsx` — **26** hex literals
-- `frontend/components/business/AddShipmentModal.tsx` — **23** hex literals
-- `frontend/components/business/ContactDetailSheet.tsx` — **23** hex literals
-- `frontend/components/business/TaskCard.tsx` — **23** hex literals
-- ... +36 more files (1193 total)
+- `frontend/app/(tabs)/music.tsx` — **70** hex literals
+- `frontend/app/(tabs)/identity.tsx` — **32** hex literals
+- `frontend/app/backup.tsx` — **19** hex literals
+- `frontend/app/training.tsx` — **18** hex literals
+- `frontend/components/directives/MessageApprovalModal.tsx` — **13** hex literals
+- `frontend/app/(tabs)/home.tsx` — **11** hex literals
+- `frontend/app/metrics.tsx` — **11** hex literals
+- `frontend/app/(tabs)/files.tsx` — **10** hex literals
+- `frontend/components/ContentPanel.tsx` — **7** hex literals
+- `frontend/components/business/AddExpenseModal.tsx` — **7** hex literals
+- `frontend/components/glasses/PhotoCaptureOverlay.tsx` — **7** hex literals
+- `frontend/app/upload.tsx` — **6** hex literals
+- `frontend/components/business/ExpenseDetailSheet.tsx` — **6** hex literals
+- `frontend/components/directives/DirectiveListItem.tsx` — **6** hex literals
+- `frontend/components/ops/RouterCard.tsx` — **5** hex literals
+- `frontend/app/directive/[id].tsx` — **4** hex literals
+- `frontend/app/(tabs)/cipher.tsx` — **3** hex literals
+- `frontend/app/(tabs)/finance.tsx` — **3** hex literals
+- `frontend/app/glasses.tsx` — **3** hex literals
+- `frontend/components/business/AddTaskModal.tsx` — **3** hex literals
+- ... +29 more files (292 total)
 
 ## duplicated-layout-constants
 *Layout constants like TOP_BAR_HEIGHT redefined per screen (move to shared)*

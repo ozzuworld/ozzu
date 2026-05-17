@@ -5,12 +5,13 @@ import { CostField, formatCOPDisplay } from "./CostField";
 import type { BusinessExpense, ReceiptData } from "../../lib/bridge-api";
 import { uploadTaskAttachment, extractReceipt } from "../../lib/bridge-api";
 
+import { colors } from "../../lib/design-tokens";
 const CATEGORIES = ["materials", "labor", "services", "equipment", "transport", "permits", "fees", "other"] as const;
 const PAYMENT_STATUSES = [
-  { value: "pending", label: "PENDING", color: "#EAB308" },
-  { value: "paid", label: "PAID", color: "#22C55E" },
-  { value: "partial", label: "PARTIAL", color: "#F97316" },
-  { value: "overdue", label: "OVERDUE", color: "#EF4444" },
+  { value: "pending", label: "PENDING", color: colors.brand.amberDeep },
+  { value: "paid", label: "PAID", color: colors.success },
+  { value: "partial", label: "PARTIAL", color: colors.brand.orange },
+  { value: "overdue", label: "OVERDUE", color: colors.error },
 ] as const;
 
 interface ExpenseDetailSheetProps {
@@ -122,14 +123,14 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
         <Pressable style={{ height: 120 }} onPress={onClose} />
-        <View style={{ flex: 1, backgroundColor: "#111111", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+        <View style={{ flex: 1, backgroundColor: colors.gray[850], borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
           <Pressable onPress={onClose} style={{ alignItems: "center", paddingTop: 12, paddingBottom: 8 }}>
             <View style={{ width: 40, height: 4, backgroundColor: "#555", borderRadius: 2 }} />
           </Pressable>
 
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2 }}>
+              <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 2 }}>
                 EXPENSE DETAIL
               </Text>
               <View style={{
@@ -139,7 +140,7 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
                 borderRadius: 4,
               }}>
                 <Text style={{
-                  color: (expense.verified || scannedReceiptData) ? "#22C55E" : "#EAB308",
+                  color: (expense.verified || scannedReceiptData) ? colors.success : colors.brand.amberDeep,
                   fontFamily: "monospace",
                   fontSize: 9,
                   fontWeight: "bold",
@@ -158,7 +159,7 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
             </View>
 
             {/* Category */}
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginTop: 12, marginBottom: 6 }}>CATEGORY</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginTop: 12, marginBottom: 6 }}>CATEGORY</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
               {CATEGORIES.map((c) => (
                 <Pressable
@@ -168,39 +169,39 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
                     paddingHorizontal: 10,
                     paddingVertical: 5,
                     borderRadius: 6,
-                    backgroundColor: category === c ? "#06B6D422" : "#1A1A1A",
+                    backgroundColor: category === c ? "#06B6D422" : colors.gray[800],
                     borderWidth: 1,
-                    borderColor: category === c ? "#06B6D4" : "#2A2A2A",
+                    borderColor: category === c ? colors.accent : colors.gray[700],
                   }}
                 >
-                  <Text style={{ color: category === c ? "#06B6D4" : "#525252", fontFamily: "monospace", fontSize: 10 }}>{c}</Text>
+                  <Text style={{ color: category === c ? colors.accent : colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>{c}</Text>
                 </Pressable>
               ))}
             </View>
 
             {/* Vendor */}
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>VENDOR</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>VENDOR</Text>
             <TextInput
               value={vendor}
               onChangeText={setVendor}
               placeholder="Vendor name..."
-              placeholderTextColor="#525252"
-              style={{ backgroundColor: "#1A1A1A", color: "#E5E5E5", borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, borderWidth: 1, borderColor: "#2A2A2A" }}
+              placeholderTextColor=colors.gray[400]
+              style={{ backgroundColor: colors.gray[800], color: colors.gray[50], borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, borderWidth: 1, borderColor: colors.gray[700] }}
             />
 
             {/* Description */}
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>DESCRIPTION</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 4 }}>DESCRIPTION</Text>
             <TextInput
               value={description}
               onChangeText={setDescription}
               placeholder="Details..."
-              placeholderTextColor="#525252"
+              placeholderTextColor=colors.gray[400]
               multiline
-              style={{ backgroundColor: "#1A1A1A", color: "#E5E5E5", borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, minHeight: 50, borderWidth: 1, borderColor: "#2A2A2A", textAlignVertical: "top" }}
+              style={{ backgroundColor: colors.gray[800], color: colors.gray[50], borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, minHeight: 50, borderWidth: 1, borderColor: colors.gray[700], textAlignVertical: "top" }}
             />
 
             {/* Payment status */}
-            <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>PAYMENT STATUS</Text>
+            <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>PAYMENT STATUS</Text>
             <View style={{ flexDirection: "row", gap: 6, marginBottom: 16 }}>
               {PAYMENT_STATUSES.map((s) => (
                 <Pressable
@@ -211,12 +212,12 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
                     paddingVertical: 6,
                     borderRadius: 6,
                     alignItems: "center",
-                    backgroundColor: paymentStatus === s.value ? s.color + "22" : "#1A1A1A",
+                    backgroundColor: paymentStatus === s.value ? s.color + "22" : colors.gray[800],
                     borderWidth: 1,
-                    borderColor: paymentStatus === s.value ? s.color : "#2A2A2A",
+                    borderColor: paymentStatus === s.value ? s.color : colors.gray[700],
                   }}
                 >
-                  <Text style={{ color: paymentStatus === s.value ? s.color : "#525252", fontFamily: "monospace", fontSize: 9, fontWeight: "bold" }}>
+                  <Text style={{ color: paymentStatus === s.value ? s.color : colors.gray[400], fontFamily: "monospace", fontSize: 9, fontWeight: "bold" }}>
                     {s.label}
                   </Text>
                 </Pressable>
@@ -237,13 +238,13 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
                   paddingVertical: 10,
                   borderRadius: 8,
                   borderWidth: 1,
-                  borderColor: "#06B6D4",
+                  borderColor: colors.accent,
                   marginBottom: 16,
                   opacity: scanning ? 0.5 : 1,
                 }}
               >
-                {scanning ? <ActivityIndicator size={14} color="#06B6D4" /> : null}
-                <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
+                {scanning ? <ActivityIndicator size={14} color=colors.accent /> : null}
+                <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
                   {scanning ? "SCANNING RECEIPT..." : "SCAN RECEIPT"}
                 </Text>
               </Pressable>
@@ -252,24 +253,24 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
             {/* Receipt data panel */}
             {receiptData ? (
               <View style={{ marginBottom: 16 }}>
-                <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 8 }}>RECEIPT DATA</Text>
-                <View style={{ backgroundColor: "#1A1A1A", borderRadius: 8, padding: 12 }}>
+                <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 8 }}>RECEIPT DATA</Text>
+                <View style={{ backgroundColor: colors.gray[800], borderRadius: 8, padding: 12 }}>
                   {receiptData.vendor ? (
-                    <Text style={{ color: "#A3A3A3", fontSize: 12, marginBottom: 4 }}>Vendor: {receiptData.vendor}</Text>
+                    <Text style={{ color: colors.gray[200], fontSize: 12, marginBottom: 4 }}>Vendor: {receiptData.vendor}</Text>
                   ) : null}
                   {receiptData.date ? (
-                    <Text style={{ color: "#A3A3A3", fontSize: 12, marginBottom: 4 }}>Date: {receiptData.date}</Text>
+                    <Text style={{ color: colors.gray[200], fontSize: 12, marginBottom: 4 }}>Date: {receiptData.date}</Text>
                   ) : null}
                   {receiptData.documentNumber ? (
-                    <Text style={{ color: "#A3A3A3", fontSize: 12, marginBottom: 4 }}>Doc #: {receiptData.documentNumber}</Text>
+                    <Text style={{ color: colors.gray[200], fontSize: 12, marginBottom: 4 }}>Doc #: {receiptData.documentNumber}</Text>
                   ) : null}
                   {receiptData.lineItems && receiptData.lineItems.length > 0 ? (
                     <View style={{ marginTop: 8 }}>
-                      <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, marginBottom: 4 }}>LINE ITEMS</Text>
+                      <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginBottom: 4 }}>LINE ITEMS</Text>
                       {receiptData.lineItems.map((item, i) => (
                         <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 3, borderBottomWidth: 1, borderBottomColor: "#222" }}>
-                          <Text style={{ color: "#A3A3A3", fontSize: 11, flex: 1 }} numberOfLines={1}>{item.description}</Text>
-                          <Text style={{ color: "#E5E5E5", fontSize: 11, fontFamily: "monospace" }}>{formatCOPDisplay(item.total)}</Text>
+                          <Text style={{ color: colors.gray[200], fontSize: 11, flex: 1 }} numberOfLines={1}>{item.description}</Text>
+                          <Text style={{ color: colors.gray[50], fontSize: 11, fontFamily: "monospace" }}>{formatCOPDisplay(item.total)}</Text>
                         </View>
                       ))}
                     </View>
@@ -281,13 +282,13 @@ export function ExpenseDetailSheet({ expense, visible, onClose, onSave, onDelete
             {/* Actions */}
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
               <Pressable onPress={handleDelete} style={{ paddingVertical: 10 }}>
-                <Text style={{ color: "#EF4444", fontFamily: "monospace", fontSize: 11 }}>DELETE</Text>
+                <Text style={{ color: colors.error, fontFamily: "monospace", fontSize: 11 }}>DELETE</Text>
               </Pressable>
               <Pressable
                 onPress={handleSave}
-                style={{ backgroundColor: "#06B6D4", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
+                style={{ backgroundColor: colors.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
               >
-                <Text style={{ color: "#111", fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>SAVE</Text>
+                <Text style={{ color: colors.gray[850], fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>SAVE</Text>
               </Pressable>
             </View>
           </ScrollView>

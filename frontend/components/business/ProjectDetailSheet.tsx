@@ -23,10 +23,11 @@ import {
   type BusinessExpense,
 } from "../../lib/bridge-api";
 
+import { colors } from "../../lib/design-tokens";
 const PROJECT_STATUSES = [
-  { value: "active", label: "ACTIVE", color: "#22C55E" },
-  { value: "paused", label: "PAUSED", color: "#EAB308" },
-  { value: "completed", label: "COMPLETED", color: "#06B6D4" },
+  { value: "active", label: "ACTIVE", color: colors.success },
+  { value: "paused", label: "PAUSED", color: colors.brand.amberDeep },
+  { value: "completed", label: "COMPLETED", color: colors.accent },
 ] as const;
 
 type ViewMode = "phases" | "status";
@@ -213,12 +214,12 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
               }}
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Text style={{ color: "#525252", fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</Text>
-                <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>
+                <Text style={{ color: colors.gray[400], fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</Text>
+                <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>
                   {phase}
                 </Text>
               </View>
-              <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9 }}>
+              <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>
                 {phaseDone}/{phaseTasks.length}
               </Text>
             </Pressable>
@@ -233,19 +234,19 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
     <>
       {inProgressTasks.length > 0 ? (
         <>
-          <Text style={{ color: "#EAB308", fontFamily: "monospace", fontSize: 9, letterSpacing: 1, marginBottom: 4 }}>IN PROGRESS</Text>
+          <Text style={{ color: colors.brand.amberDeep, fontFamily: "monospace", fontSize: 9, letterSpacing: 1, marginBottom: 4 }}>IN PROGRESS</Text>
           {inProgressTasks.map(renderTaskCard)}
         </>
       ) : null}
       {pendingTasks.length > 0 ? (
         <>
-          <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 9, letterSpacing: 1, marginBottom: 4, marginTop: inProgressTasks.length > 0 ? 8 : 0 }}>PENDING</Text>
+          <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, letterSpacing: 1, marginBottom: 4, marginTop: inProgressTasks.length > 0 ? 8 : 0 }}>PENDING</Text>
           {pendingTasks.map(renderTaskCard)}
         </>
       ) : null}
       {doneTasks.length > 0 ? (
         <>
-          <Text style={{ color: "#22C55E", fontFamily: "monospace", fontSize: 9, letterSpacing: 1, marginBottom: 4, marginTop: 8 }}>COMPLETED</Text>
+          <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 9, letterSpacing: 1, marginBottom: 4, marginTop: 8 }}>COMPLETED</Text>
           {doneTasks.map(renderTaskCard)}
         </>
       ) : null}
@@ -256,7 +257,7 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
         <Pressable style={{ height: 100 }} onPress={onClose} />
-        <View style={{ flex: 1, backgroundColor: "#111111", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+        <View style={{ flex: 1, backgroundColor: colors.gray[850], borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
           {/* Handle — tappable to dismiss */}
           <Pressable onPress={onClose} style={{ alignItems: "center", paddingTop: 12, paddingBottom: 8 }}>
             <View style={{ width: 40, height: 4, backgroundColor: "#555", borderRadius: 2 }} />
@@ -265,13 +266,13 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
           {/* Close button */}
           <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16, marginBottom: 4 }}>
             <Pressable onPress={onClose} hitSlop={16} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 11 }}>CLOSE</Text>
+              <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 11 }}>CLOSE</Text>
             </Pressable>
           </View>
 
           {loading || !project ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: "#525252", fontFamily: "monospace" }}>Loading...</Text>
+              <Text style={{ color: colors.gray[400], fontFamily: "monospace" }}>Loading...</Text>
             </View>
           ) : (
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={false}>
@@ -279,30 +280,30 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
                 <Text style={{ fontSize: 28 }}>{project.emoji}</Text>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: "#E5E5E5", fontFamily: "monospace", fontSize: 16, fontWeight: "bold" }}>
+                  <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 16, fontWeight: "bold" }}>
                     {project.name}
                   </Text>
                   {project.description ? (
-                    <Text style={{ color: "#737373", fontSize: 12, marginTop: 2 }}>{project.description}</Text>
+                    <Text style={{ color: colors.gray[300], fontSize: 12, marginTop: 2 }}>{project.description}</Text>
                   ) : null}
                 </View>
               </View>
 
               {/* Progress summary */}
-              <View style={{ backgroundColor: "#1A1A1A", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+              <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, marginBottom: 16 }}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
-                  <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 11 }}>PROGRESS</Text>
-                  <Text style={{ color: project.color || "#06B6D4", fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>{pct}%</Text>
+                  <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11 }}>PROGRESS</Text>
+                  <Text style={{ color: project.color || colors.accent, fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>{pct}%</Text>
                 </View>
-                <ProgressBar done={doneCount} total={totalTasks} color={project.color || "#06B6D4"} height={6} />
+                <ProgressBar done={doneCount} total={totalTasks} color={project.color || colors.accent} height={6} />
                 <View style={{ flexDirection: "row", gap: 16, marginTop: 10 }}>
-                  <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 10 }}>
+                  <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>
                     {pendingTasks.length} pending
                   </Text>
-                  <Text style={{ color: "#EAB308", fontFamily: "monospace", fontSize: 10 }}>
+                  <Text style={{ color: colors.brand.amberDeep, fontFamily: "monospace", fontSize: 10 }}>
                     {inProgressTasks.length} in progress
                   </Text>
-                  <Text style={{ color: "#22C55E", fontFamily: "monospace", fontSize: 10 }}>
+                  <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 10 }}>
                     {doneCount} done
                   </Text>
                 </View>
@@ -317,16 +318,16 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
                   <CostField value={budgetVal} onChange={setBudgetVal} label="PROJECT BUDGET (COP)" />
                   <View style={{ flexDirection: "row", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
                     <Pressable onPress={() => setEditingBudget(false)} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
-                      <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 10 }}>CANCEL</Text>
+                      <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>CANCEL</Text>
                     </Pressable>
-                    <Pressable onPress={handleBudgetSave} style={{ backgroundColor: "#06B6D4", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}>
-                      <Text style={{ color: "#111", fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>SAVE</Text>
+                    <Pressable onPress={handleBudgetSave} style={{ backgroundColor: colors.accent, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}>
+                      <Text style={{ color: colors.gray[850], fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>SAVE</Text>
                     </Pressable>
                   </View>
                 </View>
               ) : (
                 <Pressable onPress={() => { setBudgetVal(project.budget || null); setEditingBudget(true); }} style={{ marginBottom: 16 }}>
-                  <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>
+                  <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10 }}>
                     {project.budget ? "EDIT BUDGET" : "+ SET BUDGET"}
                   </Text>
                 </Pressable>
@@ -339,14 +340,14 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
                   style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, letterSpacing: 2 }}>
+                    <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, letterSpacing: 2 }}>
                       EXPENSES ({projectExpenses.length})
                     </Text>
-                    <Text style={{ color: "#525252", fontSize: 10 }}>{expensesExpanded ? "▾" : "▸"}</Text>
+                    <Text style={{ color: colors.gray[400], fontSize: 10 }}>{expensesExpanded ? "▾" : "▸"}</Text>
                   </View>
                   <Pressable onPress={() => setAddProjectExpenseVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <Text style={{ color: "#06B6D4", fontSize: 16 }}>+</Text>
-                    <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 10 }}>LOG EXPENSE</Text>
+                    <Text style={{ color: colors.accent, fontSize: 16 }}>+</Text>
+                    <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 10 }}>LOG EXPENSE</Text>
                   </Pressable>
                 </Pressable>
                 {expensesExpanded ? (
@@ -360,7 +361,7 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
                       />
                     ))
                   ) : (
-                    <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 11, paddingVertical: 8 }}>
+                    <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11, paddingVertical: 8 }}>
                       No expenses logged yet. Tap + to add transport, fees, or other costs.
                     </Text>
                   )
@@ -368,7 +369,7 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
               </View>
 
               {/* Status toggles */}
-              <Text style={{ color: "#737373", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>STATUS</Text>
+              <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>STATUS</Text>
               <View style={{ flexDirection: "row", gap: 6, marginBottom: 16 }}>
                 {PROJECT_STATUSES.map((s) => (
                   <Pressable
@@ -379,12 +380,12 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
                       paddingVertical: 6,
                       borderRadius: 6,
                       alignItems: "center",
-                      backgroundColor: project.status === s.value ? s.color + "22" : "#1A1A1A",
+                      backgroundColor: project.status === s.value ? s.color + "22" : colors.gray[800],
                       borderWidth: 1,
-                      borderColor: project.status === s.value ? s.color : "#2A2A2A",
+                      borderColor: project.status === s.value ? s.color : colors.gray[700],
                     }}
                   >
-                    <Text style={{ color: project.status === s.value ? s.color : "#525252", fontFamily: "monospace", fontSize: 9, fontWeight: "bold" }}>
+                    <Text style={{ color: project.status === s.value ? s.color : colors.gray[400], fontFamily: "monospace", fontSize: 9, fontWeight: "bold" }}>
                       {s.label}
                     </Text>
                   </Pressable>
@@ -394,7 +395,7 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
               {/* Task header + view toggle + add button */}
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Text style={{ color: "#A3A3A3", fontFamily: "monospace", fontSize: 11, letterSpacing: 1 }}>
+                  <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11, letterSpacing: 1 }}>
                     TASKS ({totalTasks})
                   </Text>
                   {hasPhases ? (
@@ -407,11 +408,11 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
                             paddingHorizontal: 8,
                             paddingVertical: 3,
                             borderRadius: 4,
-                            backgroundColor: viewMode === mode ? "#2A2A2A" : "transparent",
+                            backgroundColor: viewMode === mode ? colors.gray[700] : "transparent",
                           }}
                         >
                           <Text style={{
-                            color: viewMode === mode ? "#E5E5E5" : "#525252",
+                            color: viewMode === mode ? colors.gray[50] : colors.gray[400],
                             fontFamily: "monospace",
                             fontSize: 9,
                             fontWeight: "bold",
@@ -424,8 +425,8 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
                   ) : null}
                 </View>
                 <Pressable onPress={() => setAddTaskVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <Text style={{ color: "#06B6D4", fontSize: 16 }}>+</Text>
-                  <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 11 }}>ADD</Text>
+                  <Text style={{ color: colors.accent, fontSize: 16 }}>+</Text>
+                  <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 11 }}>ADD</Text>
                 </Pressable>
               </View>
 
@@ -434,16 +435,16 @@ export function ProjectDetailSheet({ projectId, visible, onClose, onRefreshList 
 
               {totalTasks === 0 ? (
                 <View style={{ alignItems: "center", paddingVertical: 32 }}>
-                  <Text style={{ color: "#525252", fontFamily: "monospace", fontSize: 12 }}>No tasks yet</Text>
+                  <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 12 }}>No tasks yet</Text>
                   <Pressable onPress={() => setAddTaskVisible(true)} style={{ marginTop: 8 }}>
-                    <Text style={{ color: "#06B6D4", fontFamily: "monospace", fontSize: 12 }}>+ Add your first task</Text>
+                    <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: 12 }}>+ Add your first task</Text>
                   </Pressable>
                 </View>
               ) : null}
 
               {/* Archive button */}
               <Pressable onPress={handleArchive} style={{ alignItems: "center", marginTop: 24, marginBottom: 40, paddingVertical: 8 }}>
-                <Text style={{ color: "#EF4444", fontFamily: "monospace", fontSize: 11 }}>ARCHIVE PROJECT</Text>
+                <Text style={{ color: colors.error, fontFamily: "monospace", fontSize: 11 }}>ARCHIVE PROJECT</Text>
               </Pressable>
             </ScrollView>
           )}

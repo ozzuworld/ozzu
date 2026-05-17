@@ -11,6 +11,7 @@ import { GlobalApprovalGate } from "../components/GlobalApprovalGate";
 import * as BleBeacon from "../modules/ble-beacon";
 import { registerForPushNotifications } from "../lib/push-notifications";
 
+import { colors } from "../lib/design-tokens";
 if (!__DEV__) {
   LogBox.ignoreAllLogs();
 }
@@ -82,14 +83,14 @@ class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <View style={{ flex: 1, backgroundColor: "#111", alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ color: "#EF4444", fontSize: 16, fontFamily: "monospace", marginBottom: 8 }}>
+        <View style={{ flex: 1, backgroundColor: colors.gray[850], alignItems: "center", justifyContent: "center" }}>
+          <Text style={{ color: colors.error, fontSize: 16, fontFamily: "monospace", marginBottom: 8 }}>
             Something went wrong
           </Text>
           <Text style={{ color: "#6B7280", fontSize: 12, fontFamily: "monospace", textAlign: "center", paddingHorizontal: 32 }}>
             {this.state.error}
           </Text>
-          <Text style={{ color: "#525252", fontSize: 11, fontFamily: "monospace", marginTop: 16 }}>
+          <Text style={{ color: colors.gray[400], fontSize: 11, fontFamily: "monospace", marginTop: 16 }}>
             Recovering in 5s...
           </Text>
         </View>
@@ -169,7 +170,7 @@ export default function RootLayout() {
             <Stack
               screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: "#111111" },
+                contentStyle: { backgroundColor: colors.gray[850] },
               }}
             />
           </GlassesProvider>

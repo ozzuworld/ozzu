@@ -11,15 +11,15 @@ interface DirectiveListItemProps {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  feature: "#3B82F6",
-  epic: "#A855F7",
-  explore: "#06B6D4",
+  feature: colors.brand.blue,
+  epic: colors.brand.purple,
+  explore: colors.accent,
   quick: "#6B7280",
 };
 
 export function DirectiveListItem({ directive, onPress, variant = "list", showDivider = true }: DirectiveListItemProps) {
   const pill = statusPillStyle(directive.status);
-  const statusColor = colors.status[directive.status] || "#737373";
+  const statusColor = colors.status[directive.status] || colors.gray[300];
 
   // Epic progress
   const isEpic = directive.type === "epic" && Array.isArray(directive.phases) && directive.phases.length > 0;

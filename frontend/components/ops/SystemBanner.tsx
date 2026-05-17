@@ -1,7 +1,8 @@
 import { View, Text } from "react-native";
 import type { ServiceStatus } from "../../lib/ops-hooks";
 
-const ACCENT = "#06B6D4";
+import { colors } from "../../lib/design-tokens";
+const ACCENT = colors.accent;
 
 interface Props {
   services: Record<string, ServiceStatus>;
@@ -19,8 +20,8 @@ export default function SystemBanner({ services }: Props) {
     ? "rgba(239, 68, 68, 0.15)"
     : "rgba(234, 179, 8, 0.12)";
 
-  const borderColor = allHealthy ? "#22C55E" : downServices.length > 0 ? "#EF4444" : "#EAB308";
-  const textColor = allHealthy ? "#22C55E" : downServices.length > 0 ? "#EF4444" : "#EAB308";
+  const borderColor = allHealthy ? colors.success : downServices.length > 0 ? colors.error : colors.brand.amberDeep;
+  const textColor = allHealthy ? colors.success : downServices.length > 0 ? colors.error : colors.brand.amberDeep;
 
   let label: string;
   if (allHealthy) {

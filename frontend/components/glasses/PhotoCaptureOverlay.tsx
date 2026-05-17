@@ -27,6 +27,7 @@ import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { uploadFile, bridgeShare, sendToIntel } from "../../lib/bridge-api";
 
+import { colors } from "../../lib/design-tokens";
 export interface CapturedPhoto {
   data: string; // base64 JPEG
   timestamp: number;
@@ -269,7 +270,7 @@ export default function PhotoCaptureOverlay({
           <View>
             <Text
               style={{
-                color: "#06B6D4",
+                color: colors.accent,
                 fontSize: 11,
                 fontFamily: "monospace",
                 letterSpacing: 1,
@@ -348,7 +349,7 @@ export default function PhotoCaptureOverlay({
           >
             <Text
               style={{
-                color: intelResult.startsWith("Failed") ? "#EF4444" : "#A855F7",
+                color: intelResult.startsWith("Failed") ? colors.error : colors.brand.purple,
                 fontSize: 11,
                 fontFamily: "monospace",
                 textAlign: "center",
@@ -441,7 +442,7 @@ export default function PhotoCaptureOverlay({
                 ? "rgba(168,85,247,0.25)"
                 : "rgba(168,85,247,0.12)",
               borderWidth: 1,
-              borderColor: "#A855F7",
+              borderColor: colors.brand.purple,
               flexDirection: "row",
               alignItems: "center",
               gap: 6,
@@ -449,13 +450,13 @@ export default function PhotoCaptureOverlay({
             }}
           >
             {intelLoading ? (
-              <ActivityIndicator size="small" color="#A855F7" />
+              <ActivityIndicator size="small" color=colors.brand.purple />
             ) : (
               <Text style={{ fontSize: 16 }}>{"\u{1F50D}"}</Text>
             )}
             <Text
               style={{
-                color: "#A855F7",
+                color: colors.brand.purple,
                 fontSize: 11,
                 fontFamily: "monospace",
                 fontWeight: "600",
@@ -477,7 +478,7 @@ export default function PhotoCaptureOverlay({
                 ? "rgba(6,182,212,0.25)"
                 : "rgba(6,182,212,0.12)",
               borderWidth: 1,
-              borderColor: "#06B6D4",
+              borderColor: colors.accent,
               flexDirection: "row",
               alignItems: "center",
               gap: 6,
@@ -485,13 +486,13 @@ export default function PhotoCaptureOverlay({
             }}
           >
             {bridgeLoading ? (
-              <ActivityIndicator size="small" color="#06B6D4" />
+              <ActivityIndicator size="small" color=colors.accent />
             ) : (
               <Text style={{ fontSize: 16 }}>{bridgeDone ? "\u2713" : "\u{1F517}"}</Text>
             )}
             <Text
               style={{
-                color: "#06B6D4",
+                color: colors.accent,
                 fontSize: 11,
                 fontFamily: "monospace",
                 fontWeight: "600",

@@ -1,6 +1,7 @@
 import { View, Text } from "react-native";
 import type { ServiceStatus } from "../../lib/ops-hooks";
 
+import { colors } from "../../lib/design-tokens";
 interface Props {
   gpu: ServiceStatus | undefined;
 }
@@ -29,7 +30,7 @@ export default function GpuCard({ gpu }: Props) {
     ? "RUNNING"
     : (d.status || "OFFLINE").toUpperCase();
 
-  const statusColor = noInstances ? "#525252" : isIdle ? "#EAB308" : isRunning ? "#22C55E" : "#EF4444";
+  const statusColor = noInstances ? colors.gray[400] : isIdle ? colors.brand.amberDeep : isRunning ? colors.success : colors.error;
 
   return (
     <View
@@ -79,13 +80,13 @@ export default function GpuCard({ gpu }: Props) {
 function MetricItem({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   return (
     <View>
-      <Text style={{ fontFamily: "monospace", fontSize: 9, color: "#525252", letterSpacing: 1 }}>{label}</Text>
+      <Text style={{ fontFamily: "monospace", fontSize: 9, color: colors.gray[400], letterSpacing: 1 }}>{label}</Text>
       <Text
         style={{
           fontFamily: "monospace",
           fontWeight: "700",
           fontSize: 12,
-          color: warn ? "#EAB308" : "#CBD5E1",
+          color: warn ? colors.brand.amberDeep : colors.gray[100],
         }}
       >
         {value}

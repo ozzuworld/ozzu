@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Animated, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { colors } from "../lib/design-tokens";
 interface TranscriptBubbleProps {
   inputTranscript: string;
   responseText: string;
@@ -99,7 +100,7 @@ export function TranscriptBubble({
           {isStreaming && responseText && (
             <Text
               style={{
-                color: "#06B6D4",
+                color: colors.accent,
                 fontSize: 11,
                 fontFamily: "monospace",
                 lineHeight: 16,

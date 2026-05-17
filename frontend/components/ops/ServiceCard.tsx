@@ -3,11 +3,12 @@ import { useState } from "react";
 import type { ServiceStatus } from "../../lib/ops-hooks";
 import { formatRelativeTime } from "../../lib/format";
 
+import { colors } from "../../lib/design-tokens";
 const STATUS_COLORS: Record<string, string> = {
-  healthy: "#22C55E",
-  degraded: "#EAB308",
-  down: "#EF4444",
-  unknown: "#525252",
+  healthy: colors.success,
+  degraded: colors.brand.amberDeep,
+  down: colors.error,
+  unknown: colors.gray[400],
 };
 
 const SERVICE_EMOJI: Record<string, string> = {
@@ -37,7 +38,7 @@ function formatLatency(ms: number | null): string {
 
 export default function ServiceCard({ name, status }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const dotColor = STATUS_COLORS[status.status] || "#525252";
+  const dotColor = STATUS_COLORS[status.status] || colors.gray[400];
   const emoji = SERVICE_EMOJI[name] || "📦";
 
   return (
@@ -71,10 +72,10 @@ export default function ServiceCard({ name, status }: Props) {
         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor }} />
       </View>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-        <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#525252" }}>
+        <Text style={{ fontFamily: "monospace", fontSize: 10, color: colors.gray[400] }}>
           {formatLatency(status.latencyMs)}
         </Text>
-        <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#525252" }}>
+        <Text style={{ fontFamily: "monospace", fontSize: 10, color: colors.gray[400] }}>
           {formatRelativeTime(status.lastCheck)}
         </Text>
       </View>

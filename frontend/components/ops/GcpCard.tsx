@@ -4,12 +4,13 @@ import { useState } from "react";
 import type { InfraState, DockerContainer, DeviceResources } from "../../lib/infra-hooks";
 import { ResourceBar, MetricPill } from "./InfraDeviceCard";
 
-const GREEN = "#22C55E";
-const RED = "#EF4444";
-const YELLOW = "#EAB308";
-const GRAY = "#525252";
+import { colors } from "../../lib/design-tokens";
+const GREEN = colors.success;
+const RED = colors.error;
+const YELLOW = colors.brand.amberDeep;
+const GRAY = colors.gray[400];
 const DIM = "#64748B";
-const ACCENT = "#06B6D4";
+const ACCENT = colors.accent;
 
 interface Props {
   gcp: InfraState["gcp"];
@@ -20,7 +21,7 @@ function DockerRow({ c }: { c: DockerContainer }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 3 }}>
       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: running ? GREEN : RED }} />
-      <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#CBD5E1", flex: 1 }} numberOfLines={1}>{c.name}</Text>
+      <Text style={{ fontFamily: "monospace", fontSize: 10, color: colors.gray[100], flex: 1 }} numberOfLines={1}>{c.name}</Text>
       <Text style={{ fontFamily: "monospace", fontSize: 8, color: DIM }} numberOfLines={1}>{c.image}</Text>
       <Text style={{ fontFamily: "monospace", fontSize: 8, color: GRAY }}>{c.status}</Text>
     </View>
