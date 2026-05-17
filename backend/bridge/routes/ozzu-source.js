@@ -225,6 +225,25 @@ module.exports = function createOzzuSourceRoutes(ctx) {
       return true;
     }
 
+    // GET /icon.png — Serve the Ozzu app icon for SideStore manifest's iconURL.
+    // Read from frontend/assets/icon.png (the same image baked into the IPA).
+    if (req.method === "GET" && pathname === "/icon.png") {
+      const ICON_PATH = "/home/gcp/ozzu/frontend/assets/icon.png";
+      if (!fs.existsSync(ICON_PATH)) {
+        sendJSON(res, 404, { error: "Icon asset missing" });
+        return true;
+      }
+      const st = fs.statSync(ICON_PATH);
+      res.writeHead(200, {
+        "Content-Type": "image/png",
+        "Content-Length": st.size,
+        "Cache-Control": "public, max-age=300",
+        "Access-Control-Allow-Origin": "*",
+      });
+      fs.createReadStream(ICON_PATH).pipe(res);
+      return true;
+    }
+
     // GET /ozzu-latest.ipa — Stream the IPA binary
     if (req.method === "GET" && pathname === "/ozzu-latest.ipa") {
       if (!fs.existsSync(IPA_PATH)) {
