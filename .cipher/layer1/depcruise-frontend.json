@@ -140,30 +140,7 @@
         "app/metrics.tsx",
         "app/soc/[id].tsx",
         "app/training.tsx",
-        "app/upload.tsx",
-        "components/SciFiOrb.tsx",
-        "components/StreamingText.tsx",
-        "components/business/AddInvestmentModal.tsx",
-        "components/business/AddInvoiceModal.tsx",
-        "components/devices/ACWidget.tsx",
-        "lib/useVacuum.ts",
-        "components/directives/AuditTrail.tsx",
-        "components/directives/DirectiveCard.tsx",
-        "components/glasses/ExerciseHUD.tsx",
-        "components/glasses/FaceOverlay.tsx",
-        "components/glasses/HandOverlay.tsx",
-        "components/glasses/ObjectOverlay.tsx",
-        "components/glasses/PoseOverlay.tsx",
-        "components/glasses/VisionOverlay.tsx",
-        "components/home/BLEPairingModal.tsx",
-        "components/home/DevicePin.tsx",
-        "components/home/sheets/ACSheet.tsx",
-        "components/home/sheets/CameraSheet.tsx",
-        "components/home/sheets/MediaSheet.tsx",
-        "components/home/FloorPlanMap.tsx",
-        "components/home/HomeMap3D.tsx",
-        "lib/kg-hooks.ts",
-        "lib/osint-hooks.ts"
+        "app/upload.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -359,6 +336,23 @@
           "valid": true
         },
         {
+          "module": "../../lib/design-tokens",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "import"
+          ],
+          "resolved": "lib/design-tokens.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        },
+        {
           "module": "../../lib/usePhoneLayout",
           "moduleSystem": "es6",
           "dynamic": false,
@@ -532,36 +526,7 @@
         "app/metrics.tsx",
         "app/soc/[id].tsx",
         "app/training.tsx",
-        "app/upload.tsx",
-        "components/SciFiOrb.tsx",
-        "components/StreamingText.tsx",
-        "components/business/AddInvestmentModal.tsx",
-        "components/business/AddInvoiceModal.tsx",
-        "components/business/InvestmentCard.tsx",
-        "components/devices/ACWidget.tsx",
-        "components/devices/VacuumMapCard.tsx",
-        "components/devices/VacuumWidget.tsx",
-        "components/directives/AuditTrail.tsx",
-        "components/directives/DirectiveCard.tsx",
-        "components/directives/SummaryStatsBar.tsx",
-        "components/glasses/ExerciseHUD.tsx",
-        "components/glasses/FaceMatchOverlay.tsx",
-        "components/glasses/FaceOverlay.tsx",
-        "components/glasses/ObjectOverlay.tsx",
-        "components/glasses/PoseOverlay.tsx",
-        "components/glasses/SettingsSheet.tsx",
-        "components/glasses/VisionOverlay.tsx",
-        "components/home/BLEPairingModal.tsx",
-        "components/home/DevicePin.tsx",
-        "components/home/DeviceSheet.tsx",
-        "components/home/sheets/ACSheet.tsx",
-        "components/home/sheets/CameraSheet.tsx",
-        "components/home/sheets/MediaSheet.tsx",
-        "components/home/sheets/VacuumSheet.tsx",
-        "components/home/FloorPlanMap.tsx",
-        "components/home/HomeMap3D.tsx",
-        "components/ops/DeviceRow.tsx",
-        "lib/remote-logger.ts"
+        "app/upload.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -627,7 +592,25 @@
     },
     {
       "source": "lib/bridge-api.ts",
-      "dependencies": [],
+      "dependencies": [
+        {
+          "module": "./format",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "export"
+          ],
+          "resolved": "lib/format.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        }
+      ],
       "dependents": [
         "components/business/AddProjectModal.tsx",
         "components/business/ContactsView.tsx",
@@ -671,15 +654,19 @@
         "components/directives/BuildRunBadge.tsx",
         "app/metrics.tsx",
         "app/soc/[id].tsx",
-        "app/training.tsx",
-        "components/business/AddInvestmentModal.tsx",
-        "components/business/AddInvoiceModal.tsx",
-        "components/business/InvestmentCard.tsx",
-        "components/directives/DirectiveCard.tsx",
-        "components/directives/SummaryStatsBar.tsx",
-        "lib/kg-hooks.ts",
-        "lib/osint-hooks.ts",
-        "lib/remote-logger.ts"
+        "app/training.tsx"
+      ],
+      "orphan": false,
+      "valid": true
+    },
+    {
+      "source": "lib/format.ts",
+      "dependencies": [],
+      "dependents": [
+        "lib/bridge-api.ts",
+        "app/(tabs)/files.tsx",
+        "app/(tabs)/finance.tsx",
+        "components/ops/InfraDeviceCard.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -838,8 +825,7 @@
         "components/business/PipelineView.tsx",
         "components/business/AddShipmentModal.tsx",
         "components/business/ProjectDetailSheet.tsx",
-        "app/(tabs)/home.tsx",
-        "components/business/AddInvoiceModal.tsx"
+        "app/(tabs)/home.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -2406,8 +2392,7 @@
         "components/glasses/PhotoCaptureOverlay.tsx",
         "app/backup.tsx",
         "components/directives/BuildRunBadge.tsx",
-        "app/upload.tsx",
-        "components/home/HomeMap3D.tsx"
+        "app/upload.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -2506,17 +2491,22 @@
       "source": "lib/design-tokens.ts",
       "dependencies": [],
       "dependents": [
+        "app/(tabs)/business.tsx",
         "components/GroupNav.tsx",
         "app/(tabs)/directives.tsx",
         "components/directives/DirectiveListItem.tsx",
         "components/directives/PlanReviewModal.tsx",
         "components/directives/StatusChangeSheet.tsx",
+        "app/(tabs)/finance.tsx",
         "app/(tabs)/home.tsx",
+        "app/(tabs)/music.tsx",
         "app/(tabs)/soc.tsx",
         "app/directive/[id].tsx",
         "components/directives/BuildRunBadge.tsx",
+        "app/metrics.tsx",
         "app/soc/[id].tsx",
-        "components/directives/AuditTrail.tsx"
+        "app/training.tsx",
+        "app/upload.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -2661,9 +2651,7 @@
         "components/ContentPanel.tsx",
         "app/(tabs)/directives.tsx",
         "app/metrics.tsx",
-        "app/upload.tsx",
-        "components/glasses/FaceMatchOverlay.tsx",
-        "components/glasses/SettingsSheet.tsx"
+        "app/upload.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -2819,13 +2807,7 @@
         "lib/useMediaPlayer.ts",
         "lib/useEntity.ts",
         "app/_layout.tsx",
-        "lib/glasses-context.tsx",
-        "components/devices/ACWidget.tsx",
-        "lib/useVacuum.ts",
-        "components/home/DeviceSheet.tsx",
-        "components/home/sheets/ACSheet.tsx",
-        "components/home/sheets/CameraSheet.tsx",
-        "components/home/sheets/MediaSheet.tsx"
+        "lib/glasses-context.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -2871,8 +2853,7 @@
       "dependents": [
         "lib/ha-context.tsx",
         "lib/ha-connection.ts",
-        "app/(tabs)/music.tsx",
-        "lib/useVacuum.ts"
+        "app/(tabs)/music.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -2969,8 +2950,7 @@
         "app/metrics.tsx",
         "app/soc/[id].tsx",
         "app/training.tsx",
-        "app/upload.tsx",
-        "components/home/DevicePin.tsx"
+        "app/upload.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -3967,8 +3947,7 @@
       "dependents": [
         "app/(tabs)/cipher.tsx",
         "lib/glasses-context.tsx",
-        "app/upload.tsx",
-        "lib/gesture-actions.ts"
+        "app/upload.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -4361,10 +4340,7 @@
         "components/directives/PlanReviewModal.tsx",
         "components/directives/StatusChangeSheet.tsx",
         "app/directive/[id].tsx",
-        "components/directives/BuildRunBadge.tsx",
-        "components/directives/AuditTrail.tsx",
-        "components/directives/DirectiveCard.tsx",
-        "components/directives/SummaryStatsBar.tsx"
+        "components/directives/BuildRunBadge.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -4641,6 +4617,23 @@
           "valid": true
         },
         {
+          "module": "../../lib/format",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "import"
+          ],
+          "resolved": "lib/format.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        },
+        {
           "module": "expo-document-picker",
           "moduleSystem": "es6",
           "dynamic": false,
@@ -4821,6 +4814,40 @@
             "import"
           ],
           "resolved": "lib/bridge-api.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        },
+        {
+          "module": "../../lib/design-tokens",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "import"
+          ],
+          "resolved": "lib/design-tokens.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        },
+        {
+          "module": "../../lib/format",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "import"
+          ],
+          "resolved": "lib/format.ts",
           "coreModule": false,
           "followable": true,
           "couldNotResolve": false,
@@ -5217,6 +5244,23 @@
           "valid": true
         },
         {
+          "module": "../../lib/design-tokens",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "import"
+          ],
+          "resolved": "lib/design-tokens.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        },
+        {
           "module": "../../lib/useMediaPlayer",
           "moduleSystem": "es6",
           "dynamic": false,
@@ -5449,14 +5493,7 @@
         }
       ],
       "dependents": [
-        "lib/useMediaPlayer.ts",
-        "components/devices/ACWidget.tsx",
-        "lib/useVacuum.ts",
-        "components/home/DevicePin.tsx",
-        "components/home/DeviceSheet.tsx",
-        "components/home/sheets/ACSheet.tsx",
-        "components/home/sheets/CameraSheet.tsx",
-        "components/home/sheets/MediaSheet.tsx"
+        "lib/useMediaPlayer.ts"
       ],
       "orphan": false,
       "valid": true
@@ -5849,6 +5886,23 @@
       "source": "components/ops/InfraDeviceCard.tsx",
       "dependencies": [
         {
+          "module": "../../lib/format",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "import"
+          ],
+          "resolved": "lib/format.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        },
+        {
           "module": "../../lib/infra-hooks",
           "moduleSystem": "es6",
           "dynamic": false,
@@ -5992,8 +6046,7 @@
         "components/ops/GpuCard.tsx",
         "components/ops/IncidentList.tsx",
         "components/ops/ServiceCard.tsx",
-        "components/ops/SystemBanner.tsx",
-        "components/ops/DeviceRow.tsx"
+        "components/ops/SystemBanner.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -7256,13 +7309,7 @@
       ],
       "dependents": [
         "lib/glasses-context.tsx",
-        "lib/gestures.ts",
-        "lib/exercise-tracker.ts",
-        "components/glasses/FaceOverlay.tsx",
-        "components/glasses/HandOverlay.tsx",
-        "components/glasses/ObjectOverlay.tsx",
-        "components/glasses/PoseOverlay.tsx",
-        "lib/gesture-target.ts"
+        "lib/gestures.ts"
       ],
       "orphan": false,
       "valid": true
@@ -7271,9 +7318,7 @@
       "source": "lib/device-map.ts",
       "dependencies": [],
       "dependents": [
-        "lib/glasses-context.tsx",
-        "lib/gesture-actions.ts",
-        "lib/gesture-target.ts"
+        "lib/glasses-context.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -7300,8 +7345,7 @@
         }
       ],
       "dependents": [
-        "lib/glasses-context.tsx",
-        "lib/gesture-actions.ts"
+        "lib/glasses-context.tsx"
       ],
       "orphan": false,
       "valid": true
@@ -8003,8 +8047,7 @@
         }
       ],
       "dependents": [
-        "app/directive/[id].tsx",
-        "components/directives/DirectiveCard.tsx"
+        "app/directive/[id].tsx"
       ],
       "orphan": false,
       "valid": true
@@ -8187,6 +8230,23 @@
             "import"
           ],
           "resolved": "lib/bridge-api.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        },
+        {
+          "module": "../lib/design-tokens",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "import"
+          ],
+          "resolved": "lib/design-tokens.ts",
           "coreModule": false,
           "followable": true,
           "couldNotResolve": false,
@@ -8457,6 +8517,23 @@
           "valid": true
         },
         {
+          "module": "../lib/design-tokens",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "import"
+          ],
+          "resolved": "lib/design-tokens.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        },
+        {
           "module": "../lib/usePhoneLayout",
           "moduleSystem": "es6",
           "dynamic": false,
@@ -8677,6 +8754,23 @@
           "valid": true
         },
         {
+          "module": "../lib/design-tokens",
+          "moduleSystem": "es6",
+          "dynamic": false,
+          "exoticallyRequired": false,
+          "dependencyTypes": [
+            "local",
+            "import"
+          ],
+          "resolved": "lib/design-tokens.ts",
+          "coreModule": false,
+          "followable": true,
+          "couldNotResolve": false,
+          "matchesDoNotFollow": false,
+          "circular": false,
+          "valid": true
+        },
+        {
           "module": "../lib/usePhoneLayout",
           "moduleSystem": "es6",
           "dynamic": false,
@@ -8809,2594 +8903,16 @@
       "dependents": [],
       "orphan": false,
       "valid": true
-    },
-    {
-      "source": "components/SciFiOrb.tsx",
-      "dependencies": [
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/StreamingText.tsx",
-      "dependencies": [
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/business/AddInvestmentModal.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/bridge-api",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/bridge-api.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/business/AddInvoiceModal.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/bridge-api",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/bridge-api.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/business-hooks",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/business-hooks.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/business/InvestmentCard.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/bridge-api",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/bridge-api.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/devices/ACWidget.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/ha-context",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/ha-context.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/useEntity",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useEntity.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/devices/VacuumMapCard.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/useVacuum",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useVacuum.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/useVacuum.ts",
-      "dependencies": [
-        {
-          "module": "./config",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/config.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./ha-context",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/ha-context.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./useEntity",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useEntity.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [
-        "components/devices/VacuumMapCard.tsx",
-        "components/devices/VacuumWidget.tsx",
-        "components/home/sheets/VacuumSheet.tsx",
-        "components/home/FloorPlanMap.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/devices/VacuumWidget.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/useVacuum",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useVacuum.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/directives/AuditTrail.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/design-tokens",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/design-tokens.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/directive-constants",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/directive-constants.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [
-        "components/directives/DirectiveCard.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/directives/DirectiveCard.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/bridge-api",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/bridge-api.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/directive-constants",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/directive-constants.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./AuditTrail",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/directives/AuditTrail.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./BuildRunBadge",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/directives/BuildRunBadge.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/directives/SummaryStatsBar.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/bridge-api",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/bridge-api.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/directive-constants",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/directive-constants.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/glasses/ExerciseHUD.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/exercise-tracker",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/exercise-tracker.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/exercise-tracker.ts",
-      "dependencies": [
-        {
-          "module": "../modules/expo-mediapipe",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "modules/expo-mediapipe/index.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [
-        "components/glasses/ExerciseHUD.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/glasses/FaceMatchOverlay.tsx",
-      "dependencies": [
-        {
-          "module": "../TVPressable",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/TVPressable.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/glasses/FaceOverlay.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/expressions",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/expressions.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../modules/expo-mediapipe",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "modules/expo-mediapipe/index.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/expressions.ts",
-      "dependencies": [],
-      "dependents": [
-        "components/glasses/FaceOverlay.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/glasses/HandOverlay.tsx",
-      "dependencies": [
-        {
-          "module": "../../modules/expo-mediapipe",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "modules/expo-mediapipe/index.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native-svg",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native-svg",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "react-native-svg",
-      "followable": false,
-      "coreModule": false,
-      "couldNotResolve": true,
-      "matchesDoNotFollow": false,
-      "dependencyTypes": [
-        "unknown"
-      ],
-      "dependencies": [],
-      "dependents": [
-        "components/glasses/HandOverlay.tsx",
-        "components/glasses/ObjectOverlay.tsx",
-        "components/glasses/PoseOverlay.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/glasses/ObjectOverlay.tsx",
-      "dependencies": [
-        {
-          "module": "../../modules/expo-mediapipe",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "modules/expo-mediapipe/index.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native-svg",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native-svg",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/glasses/PoseOverlay.tsx",
-      "dependencies": [
-        {
-          "module": "../../modules/expo-mediapipe",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "modules/expo-mediapipe/index.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native-svg",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native-svg",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/glasses/SettingsSheet.tsx",
-      "dependencies": [
-        {
-          "module": "../TVPressable",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/TVPressable.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./VisionOverlay",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/glasses/VisionOverlay.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/glasses/VisionOverlay.tsx",
-      "dependencies": [
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [
-        "components/glasses/SettingsSheet.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/home/BLEPairingModal.tsx",
-      "dependencies": [
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native-ble-plx",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native-ble-plx",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "react-native-ble-plx",
-      "followable": false,
-      "coreModule": false,
-      "couldNotResolve": true,
-      "matchesDoNotFollow": false,
-      "dependencyTypes": [
-        "unknown"
-      ],
-      "dependencies": [],
-      "dependents": [
-        "components/home/BLEPairingModal.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/home/DevicePin.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/map-config",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/map-config.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/useEntity",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useEntity.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/usePhoneLayout",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/usePhoneLayout.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [
-        "components/home/FloorPlanMap.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/map-config.ts",
-      "dependencies": [],
-      "dependents": [
-        "components/home/DevicePin.tsx",
-        "components/home/DeviceSheet.tsx",
-        "components/home/sheets/CameraSheet.tsx",
-        "components/home/sheets/MediaSheet.tsx",
-        "components/home/FloorPlanMap.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/home/DeviceSheet.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/ha-context",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/ha-context.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/map-config",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/map-config.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/useEntity",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useEntity.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./sheets/ACSheet",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/home/sheets/ACSheet.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./sheets/CameraSheet",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/home/sheets/CameraSheet.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./sheets/MediaSheet",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/home/sheets/MediaSheet.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./sheets/VacuumSheet",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/home/sheets/VacuumSheet.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/home/sheets/ACSheet.tsx",
-      "dependencies": [
-        {
-          "module": "../../../lib/ha-context",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/ha-context.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../../lib/useEntity",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useEntity.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [
-        "components/home/DeviceSheet.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/home/sheets/CameraSheet.tsx",
-      "dependencies": [
-        {
-          "module": "../../../lib/ha-context",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/ha-context.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../../lib/map-config",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/map-config.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../../lib/useEntity",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useEntity.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [
-        "components/home/DeviceSheet.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/home/sheets/MediaSheet.tsx",
-      "dependencies": [
-        {
-          "module": "../../../lib/ha-context",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/ha-context.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../../lib/map-config",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/map-config.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../../lib/useEntity",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useEntity.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [
-        "components/home/DeviceSheet.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/home/sheets/VacuumSheet.tsx",
-      "dependencies": [
-        {
-          "module": "../../../lib/useVacuum",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useVacuum.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [
-        "components/home/DeviceSheet.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/home/FloorPlanMap.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/map-config",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/map-config.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../lib/useVacuum",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/useVacuum.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./DevicePin",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "components/home/DevicePin.tsx",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/home/HomeMap3D.tsx",
-      "dependencies": [
-        {
-          "module": "../../assets/home-map/apartment.glb",
-          "moduleSystem": "cjs",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "require"
-          ],
-          "resolved": "assets/home-map/apartment.glb",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "../../assets/home-map/rooms.json",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "assets/home-map/rooms.json",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "@react-three/fiber/native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "@react-three/fiber/native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "expo-asset",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "expo-asset",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "expo-file-system/legacy",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "expo-file-system/legacy",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "three",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "three",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "three/examples/jsm/loaders/GLTFLoader",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "three/examples/jsm/loaders/GLTFLoader",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "assets/home-map/apartment.glb",
-      "followable": false,
-      "coreModule": false,
-      "couldNotResolve": false,
-      "matchesDoNotFollow": false,
-      "dependencyTypes": [
-        "local",
-        "require"
-      ],
-      "dependencies": [],
-      "dependents": [
-        "components/home/HomeMap3D.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "assets/home-map/rooms.json",
-      "followable": false,
-      "coreModule": false,
-      "couldNotResolve": false,
-      "matchesDoNotFollow": false,
-      "dependencyTypes": [
-        "local",
-        "import"
-      ],
-      "dependencies": [],
-      "dependents": [
-        "components/home/HomeMap3D.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "@react-three/fiber/native",
-      "followable": false,
-      "coreModule": false,
-      "couldNotResolve": true,
-      "matchesDoNotFollow": false,
-      "dependencyTypes": [
-        "unknown"
-      ],
-      "dependencies": [],
-      "dependents": [
-        "components/home/HomeMap3D.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "expo-asset",
-      "followable": false,
-      "coreModule": false,
-      "couldNotResolve": true,
-      "matchesDoNotFollow": false,
-      "dependencyTypes": [
-        "unknown"
-      ],
-      "dependencies": [],
-      "dependents": [
-        "components/home/HomeMap3D.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "three",
-      "followable": false,
-      "coreModule": false,
-      "couldNotResolve": true,
-      "matchesDoNotFollow": false,
-      "dependencyTypes": [
-        "unknown"
-      ],
-      "dependencies": [],
-      "dependents": [
-        "components/home/HomeMap3D.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "three/examples/jsm/loaders/GLTFLoader",
-      "followable": false,
-      "coreModule": false,
-      "couldNotResolve": true,
-      "matchesDoNotFollow": false,
-      "dependencyTypes": [
-        "unknown"
-      ],
-      "dependencies": [],
-      "dependents": [
-        "components/home/HomeMap3D.tsx"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "components/ops/DeviceRow.tsx",
-      "dependencies": [
-        {
-          "module": "../../lib/ops-hooks",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/ops-hooks.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/gemini.ts",
-      "dependencies": [
-        {
-          "module": "@google/genai",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "@google/genai",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "@google/genai",
-      "followable": false,
-      "coreModule": false,
-      "couldNotResolve": true,
-      "matchesDoNotFollow": false,
-      "dependencyTypes": [
-        "unknown"
-      ],
-      "dependencies": [],
-      "dependents": [
-        "lib/gemini.ts"
-      ],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/gesture-actions.ts",
-      "dependencies": [
-        {
-          "module": "./bridge-session",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/bridge-session.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./device-map",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/device-map.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./gesture-commands",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/gesture-commands.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/gesture-target.ts",
-      "dependencies": [
-        {
-          "module": "../modules/expo-mediapipe",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "modules/expo-mediapipe/index.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "./device-map",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/device-map.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/immersive-state.ts",
-      "dependencies": [],
-      "dependents": [],
-      "orphan": true,
-      "valid": false,
-      "rules": [
-        {
-          "severity": "warn",
-          "name": "no-orphans"
-        }
-      ]
-    },
-    {
-      "source": "lib/kg-hooks.ts",
-      "dependencies": [
-        {
-          "module": "./bridge-api",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/bridge-api.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/osint-constants.ts",
-      "dependencies": [],
-      "dependents": [],
-      "orphan": true,
-      "valid": false,
-      "rules": [
-        {
-          "severity": "warn",
-          "name": "no-orphans"
-        }
-      ]
-    },
-    {
-      "source": "lib/osint-hooks.ts",
-      "dependencies": [
-        {
-          "module": "./bridge-api",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/bridge-api.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
-    },
-    {
-      "source": "lib/remote-logger.ts",
-      "dependencies": [
-        {
-          "module": "./bridge-api",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "local",
-            "import"
-          ],
-          "resolved": "lib/bridge-api.ts",
-          "coreModule": false,
-          "followable": true,
-          "couldNotResolve": false,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        },
-        {
-          "module": "react-native",
-          "moduleSystem": "es6",
-          "dynamic": false,
-          "exoticallyRequired": false,
-          "dependencyTypes": [
-            "unknown"
-          ],
-          "resolved": "react-native",
-          "coreModule": false,
-          "followable": false,
-          "couldNotResolve": true,
-          "matchesDoNotFollow": false,
-          "circular": false,
-          "valid": true
-        }
-      ],
-      "dependents": [],
-      "orphan": false,
-      "valid": true
     }
   ],
   "summary": {
-    "violations": [
-      {
-        "type": "module",
-        "from": "lib/immersive-state.ts",
-        "to": "lib/immersive-state.ts",
-        "rule": {
-          "severity": "warn",
-          "name": "no-orphans"
-        }
-      },
-      {
-        "type": "module",
-        "from": "lib/osint-constants.ts",
-        "to": "lib/osint-constants.ts",
-        "rule": {
-          "severity": "warn",
-          "name": "no-orphans"
-        }
-      }
-    ],
+    "violations": [],
     "error": 0,
-    "warn": 2,
+    "warn": 0,
     "info": 0,
     "ignore": 0,
-    "totalCruised": 165,
-    "totalDependenciesCruised": 556,
+    "totalCruised": 116,
+    "totalDependenciesCruised": 442,
     "optionsUsed": {
       "baseDir": "/home/gcp/ozzu/frontend",
       "combinedDependencies": false,

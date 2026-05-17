@@ -1735,23 +1735,9 @@ export async function reverifyAttachment(attachmentId: number): Promise<{ ok: bo
   return res.json();
 }
 
-// ── COP Formatting ──
+// ── COP Formatting (re-export from lib/format for backwards compat) ──
 
-export function formatCOP(amount: number | null | undefined): string {
-  if (amount == null || isNaN(amount)) return "$0";
-  const rounded = Math.round(amount);
-  return "$" + rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-
-export function formatCOPCompact(amount: number | null | undefined): string {
-  if (amount == null || isNaN(amount)) return "$0";
-  const abs = Math.abs(amount);
-  const sign = amount < 0 ? "-" : "";
-  if (abs >= 1_000_000_000) return sign + "$" + (abs / 1_000_000_000).toFixed(1) + "B";
-  if (abs >= 1_000_000) return sign + "$" + (abs / 1_000_000).toFixed(1) + "M";
-  if (abs >= 1_000) return sign + "$" + (abs / 1_000).toFixed(0) + "K";
-  return sign + "$" + Math.round(abs);
-}
+export { formatCOP, formatCOPCompact } from "./format";
 
 // ── Business Expenses & Financial Tracking ──
 

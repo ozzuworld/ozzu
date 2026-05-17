@@ -13,8 +13,8 @@ import { DashboardView } from "../../components/business/DashboardView";
 import { PipelineView } from "../../components/business/PipelineView";
 import { ContactsView } from "../../components/business/ContactsView";
 import { GroupNav } from "../../components/GroupNav";
+import { layout } from "../../lib/design-tokens";
 
-const TOP_BAR_HEIGHT = 48;
 const ACCENT = "#06B6D4";
 
 const SUB_TABS = [
@@ -59,7 +59,7 @@ export default function BusinessScreen() {
       <View
         style={{
           paddingTop: insets.top,
-          height: TOP_BAR_HEIGHT + insets.top,
+          height: layout.topBarHeight + insets.top,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",

@@ -33,7 +33,7 @@ import { PlanReviewModal } from "../../components/directives/PlanReviewModal";
 import { StatusChangeSheet } from "../../components/directives/StatusChangeSheet";
 import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
-import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha, statusPillStyle } from "../../lib/design-tokens";
+import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha, statusPillStyle, layout } from "../../lib/design-tokens";
 
 if (
   Platform.OS === "android" &&
@@ -42,7 +42,6 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const TOP_BAR_HEIGHT = 48;
 
 type ViewMode = "overview" | "board" | "timeline" | "list";
 
@@ -206,7 +205,7 @@ export default function DirectivesScreen() {
       {/* Top Bar */}
       <View style={{
         paddingTop: insets.top,
-        height: TOP_BAR_HEIGHT + insets.top,
+        height: layout.topBarHeight + insets.top,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",

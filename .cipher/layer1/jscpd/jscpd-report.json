@@ -1,6 +1,6 @@
 {
   "statistics": {
-    "detectionDate": "2026-05-17T13:35:17.809Z",
+    "detectionDate": "2026-05-17T13:57:39.631Z",
     "formats": {
       "javascript": {
         "sources": {
@@ -1960,54 +1960,6 @@
             "newDuplicatedLines": 0,
             "newClones": 0
           },
-          "frontend/components/home/sheets/VacuumSheet.tsx": {
-            "lines": 86,
-            "tokens": 834,
-            "sources": 1,
-            "clones": 1,
-            "duplicatedLines": 28,
-            "duplicatedTokens": 232,
-            "percentage": 32.56,
-            "percentageTokens": 27.82,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/sheets/MediaSheet.tsx": {
-            "lines": 35,
-            "tokens": 283,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/sheets/CameraSheet.tsx": {
-            "lines": 71,
-            "tokens": 717,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/sheets/ACSheet.tsx": {
-            "lines": 113,
-            "tokens": 977,
-            "sources": 1,
-            "clones": 3,
-            "duplicatedLines": 32,
-            "duplicatedTokens": 191,
-            "percentage": 28.32,
-            "percentageTokens": 19.55,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
           "frontend/components/ops/SystemBanner.tsx": {
             "lines": 30,
             "tokens": 133,
@@ -2116,189 +2068,9 @@
             "newDuplicatedLines": 0,
             "newClones": 0
           },
-          "frontend/components/ops/DeviceRow.tsx": {
-            "lines": 37,
-            "tokens": 293,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/HomeMap3D.tsx": {
-            "lines": 831,
-            "tokens": 8776,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/FloorPlanMap.tsx": {
-            "lines": 23,
-            "tokens": 208,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/DeviceSheet.tsx": {
-            "lines": 74,
-            "tokens": 725,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/DevicePin.tsx": {
-            "lines": 30,
-            "tokens": 197,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/BLEPairingModal.tsx": {
-            "lines": 85,
-            "tokens": 1109,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/VisionOverlay.tsx": {
-            "lines": 63,
-            "tokens": 330,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/SettingsSheet.tsx": {
-            "lines": 234,
-            "tokens": 2721,
-            "sources": 1,
-            "clones": 8,
-            "duplicatedLines": 102,
-            "duplicatedTokens": 1076,
-            "percentage": 43.59,
-            "percentageTokens": 39.54,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/PoseOverlay.tsx": {
-            "lines": 35,
-            "tokens": 393,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
           "frontend/components/glasses/PhotoCaptureOverlay.tsx": {
             "lines": 274,
             "tokens": 1475,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/ObjectOverlay.tsx": {
-            "lines": 94,
-            "tokens": 1221,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/HandOverlay.tsx": {
-            "lines": 36,
-            "tokens": 379,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/FaceOverlay.tsx": {
-            "lines": 41,
-            "tokens": 399,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/FaceMatchOverlay.tsx": {
-            "lines": 65,
-            "tokens": 608,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/ExerciseHUD.tsx": {
-            "lines": 68,
-            "tokens": 449,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/directives/SummaryStatsBar.tsx": {
-            "lines": 50,
-            "tokens": 622,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -2356,18 +2128,6 @@
             "newDuplicatedLines": 0,
             "newClones": 0
           },
-          "frontend/components/directives/DirectiveCard.tsx": {
-            "lines": 429,
-            "tokens": 3915,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
           "frontend/components/directives/BuildRunBadge.tsx": {
             "lines": 46,
             "tokens": 386,
@@ -2377,54 +2137,6 @@
             "duplicatedTokens": 0,
             "percentage": 0,
             "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/directives/AuditTrail.tsx": {
-            "lines": 70,
-            "tokens": 736,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/devices/VacuumWidget.tsx": {
-            "lines": 112,
-            "tokens": 1098,
-            "sources": 1,
-            "clones": 2,
-            "duplicatedLines": 36,
-            "duplicatedTokens": 364,
-            "percentage": 32.14,
-            "percentageTokens": 33.15,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/devices/VacuumMapCard.tsx": {
-            "lines": 27,
-            "tokens": 209,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/devices/ACWidget.tsx": {
-            "lines": 133,
-            "tokens": 1094,
-            "sources": 1,
-            "clones": 4,
-            "duplicatedLines": 40,
-            "duplicatedTokens": 323,
-            "percentage": 30.08,
-            "percentageTokens": 29.52,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -2504,23 +2216,11 @@
             "lines": 101,
             "tokens": 1356,
             "sources": 1,
-            "clones": 5,
-            "duplicatedLines": 112,
-            "duplicatedTokens": 1284,
-            "percentage": 110.89,
-            "percentageTokens": 94.69,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/business/InvestmentCard.tsx": {
-            "lines": 30,
-            "tokens": 473,
-            "sources": 1,
-            "clones": 1,
-            "duplicatedLines": 10,
-            "duplicatedTokens": 79,
-            "percentage": 33.33,
-            "percentageTokens": 16.7,
+            "clones": 4,
+            "duplicatedLines": 95,
+            "duplicatedTokens": 1068,
+            "percentage": 94.06,
+            "percentageTokens": 78.76,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -2589,10 +2289,10 @@
             "tokens": 1278,
             "sources": 1,
             "clones": 2,
-            "duplicatedLines": 72,
-            "duplicatedTokens": 743,
-            "percentage": 69.23,
-            "percentageTokens": 58.14,
+            "duplicatedLines": 65,
+            "duplicatedTokens": 606,
+            "percentage": 62.5,
+            "percentageTokens": 47.42,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -2600,11 +2300,11 @@
             "lines": 98,
             "tokens": 1855,
             "sources": 1,
-            "clones": 7,
-            "duplicatedLines": 75,
-            "duplicatedTokens": 1471,
-            "percentage": 76.53,
-            "percentageTokens": 79.3,
+            "clones": 5,
+            "duplicatedLines": 59,
+            "duplicatedTokens": 1009,
+            "percentage": 60.2,
+            "percentageTokens": 54.39,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -2624,11 +2324,11 @@
             "lines": 116,
             "tokens": 2040,
             "sources": 1,
-            "clones": 4,
-            "duplicatedLines": 56,
-            "duplicatedTokens": 733,
-            "percentage": 48.28,
-            "percentageTokens": 35.93,
+            "clones": 2,
+            "duplicatedLines": 36,
+            "duplicatedTokens": 523,
+            "percentage": 31.03,
+            "percentageTokens": 25.64,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -2641,30 +2341,6 @@
             "duplicatedTokens": 291,
             "percentage": 42.86,
             "percentageTokens": 29.88,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/business/AddInvoiceModal.tsx": {
-            "lines": 71,
-            "tokens": 1298,
-            "sources": 1,
-            "clones": 5,
-            "duplicatedLines": 78,
-            "duplicatedTokens": 1343,
-            "percentage": 109.86,
-            "percentageTokens": 103.47,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/business/AddInvestmentModal.tsx": {
-            "lines": 81,
-            "tokens": 1532,
-            "sources": 1,
-            "clones": 5,
-            "duplicatedLines": 78,
-            "duplicatedTokens": 1380,
-            "percentage": 96.3,
-            "percentageTokens": 90.08,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -2686,9 +2362,9 @@
             "sources": 1,
             "clones": 4,
             "duplicatedLines": 45,
-            "duplicatedTokens": 927,
+            "duplicatedTokens": 918,
             "percentage": 80.36,
-            "percentageTokens": 83.97,
+            "percentageTokens": 83.15,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -2716,33 +2392,9 @@
             "newDuplicatedLines": 0,
             "newClones": 0
           },
-          "frontend/components/StreamingText.tsx": {
-            "lines": 23,
-            "tokens": 144,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
           "frontend/components/StatusBadge.tsx": {
             "lines": 20,
             "tokens": 89,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/SciFiOrb.tsx": {
-            "lines": 8,
-            "tokens": 58,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -2838,7 +2490,7 @@
           },
           "frontend/app/(tabs)/soc.tsx": {
             "lines": 120,
-            "tokens": 1216,
+            "tokens": 1217,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -2994,68 +2646,20 @@
           }
         },
         "total": {
-          "lines": 55348,
-          "tokens": 559338,
-          "sources": 249,
-          "clones": 129,
-          "duplicatedLines": 1697,
-          "duplicatedTokens": 18976,
-          "percentage": 3.07,
-          "percentageTokens": 3.39,
+          "lines": 52293,
+          "tokens": 527541,
+          "sources": 220,
+          "clones": 112,
+          "duplicatedLines": 1465,
+          "duplicatedTokens": 15965,
+          "percentage": 2.8,
+          "percentageTokens": 3.03,
           "newDuplicatedLines": 0,
           "newClones": 0
         }
       },
       "tsx": {
         "sources": {
-          "frontend/components/home/sheets/VacuumSheet.tsx": {
-            "lines": 130,
-            "tokens": 1169,
-            "sources": 1,
-            "clones": 1,
-            "duplicatedLines": 12,
-            "duplicatedTokens": 108,
-            "percentage": 9.23,
-            "percentageTokens": 9.24,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/sheets/MediaSheet.tsx": {
-            "lines": 74,
-            "tokens": 736,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/sheets/CameraSheet.tsx": {
-            "lines": 102,
-            "tokens": 998,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/sheets/ACSheet.tsx": {
-            "lines": 240,
-            "tokens": 2410,
-            "sources": 1,
-            "clones": 3,
-            "duplicatedLines": 172,
-            "duplicatedTokens": 1720,
-            "percentage": 71.67,
-            "percentageTokens": 71.37,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
           "frontend/components/ops/SystemBanner.tsx": {
             "lines": 73,
             "tokens": 629,
@@ -3117,8 +2721,8 @@
             "newClones": 0
           },
           "frontend/components/ops/InfraDeviceCard.tsx": {
-            "lines": 255,
-            "tokens": 3653,
+            "lines": 249,
+            "tokens": 3548,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -3164,189 +2768,9 @@
             "newDuplicatedLines": 0,
             "newClones": 0
           },
-          "frontend/components/ops/DeviceRow.tsx": {
-            "lines": 65,
-            "tokens": 549,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/HomeMap3D.tsx": {
-            "lines": 994,
-            "tokens": 10879,
-            "sources": 1,
-            "clones": 2,
-            "duplicatedLines": 18,
-            "duplicatedTokens": 254,
-            "percentage": 1.81,
-            "percentageTokens": 2.33,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/FloorPlanMap.tsx": {
-            "lines": 82,
-            "tokens": 879,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/DeviceSheet.tsx": {
-            "lines": 106,
-            "tokens": 1055,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/DevicePin.tsx": {
-            "lines": 106,
-            "tokens": 916,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/home/BLEPairingModal.tsx": {
-            "lines": 295,
-            "tokens": 2945,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/VisionOverlay.tsx": {
-            "lines": 110,
-            "tokens": 649,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/SettingsSheet.tsx": {
-            "lines": 308,
-            "tokens": 3284,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/PoseOverlay.tsx": {
-            "lines": 100,
-            "tokens": 1052,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
           "frontend/components/glasses/PhotoCaptureOverlay.tsx": {
             "lines": 506,
             "tokens": 3617,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/ObjectOverlay.tsx": {
-            "lines": 154,
-            "tokens": 1665,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/HandOverlay.tsx": {
-            "lines": 104,
-            "tokens": 874,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/FaceOverlay.tsx": {
-            "lines": 85,
-            "tokens": 788,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/FaceMatchOverlay.tsx": {
-            "lines": 95,
-            "tokens": 831,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/glasses/ExerciseHUD.tsx": {
-            "lines": 98,
-            "tokens": 640,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/directives/SummaryStatsBar.tsx": {
-            "lines": 91,
-            "tokens": 914,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -3404,18 +2828,6 @@
             "newDuplicatedLines": 0,
             "newClones": 0
           },
-          "frontend/components/directives/DirectiveCard.tsx": {
-            "lines": 477,
-            "tokens": 4244,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
           "frontend/components/directives/BuildRunBadge.tsx": {
             "lines": 207,
             "tokens": 1915,
@@ -3425,54 +2837,6 @@
             "duplicatedTokens": 0,
             "percentage": 0,
             "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/directives/AuditTrail.tsx": {
-            "lines": 108,
-            "tokens": 1103,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/devices/VacuumWidget.tsx": {
-            "lines": 156,
-            "tokens": 1430,
-            "sources": 1,
-            "clones": 1,
-            "duplicatedLines": 12,
-            "duplicatedTokens": 108,
-            "percentage": 7.69,
-            "percentageTokens": 7.55,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/devices/VacuumMapCard.tsx": {
-            "lines": 43,
-            "tokens": 327,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/devices/ACWidget.tsx": {
-            "lines": 258,
-            "tokens": 2517,
-            "sources": 1,
-            "clones": 3,
-            "duplicatedLines": 172,
-            "duplicatedTokens": 1720,
-            "percentage": 66.67,
-            "percentageTokens": 68.34,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -3557,18 +2921,6 @@
             "duplicatedTokens": 137,
             "percentage": 8.22,
             "percentageTokens": 6.99,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/business/InvestmentCard.tsx": {
-            "lines": 65,
-            "tokens": 753,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -3672,11 +3024,11 @@
             "lines": 180,
             "tokens": 2780,
             "sources": 1,
-            "clones": 3,
-            "duplicatedLines": 39,
-            "duplicatedTokens": 677,
-            "percentage": 21.67,
-            "percentageTokens": 24.35,
+            "clones": 1,
+            "duplicatedLines": 11,
+            "duplicatedTokens": 202,
+            "percentage": 6.11,
+            "percentageTokens": 7.27,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -3689,30 +3041,6 @@
             "duplicatedTokens": 0,
             "percentage": 0,
             "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/business/AddInvoiceModal.tsx": {
-            "lines": 127,
-            "tokens": 1932,
-            "sources": 1,
-            "clones": 5,
-            "duplicatedLines": 76,
-            "duplicatedTokens": 1285,
-            "percentage": 59.84,
-            "percentageTokens": 66.51,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/business/AddInvestmentModal.tsx": {
-            "lines": 128,
-            "tokens": 2131,
-            "sources": 1,
-            "clones": 3,
-            "duplicatedLines": 48,
-            "duplicatedTokens": 806,
-            "percentage": 37.5,
-            "percentageTokens": 37.82,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -3734,9 +3062,9 @@
             "sources": 1,
             "clones": 4,
             "duplicatedLines": 44,
-            "duplicatedTokens": 752,
+            "duplicatedTokens": 748,
             "percentage": 44.9,
-            "percentageTokens": 46.13,
+            "percentageTokens": 45.89,
             "newDuplicatedLines": 0,
             "newClones": 0
           },
@@ -3764,33 +3092,9 @@
             "newDuplicatedLines": 0,
             "newClones": 0
           },
-          "frontend/components/StreamingText.tsx": {
-            "lines": 74,
-            "tokens": 541,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
           "frontend/components/StatusBadge.tsx": {
             "lines": 63,
             "tokens": 550,
-            "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
-            "newDuplicatedLines": 0,
-            "newClones": 0
-          },
-          "frontend/components/SciFiOrb.tsx": {
-            "lines": 154,
-            "tokens": 1172,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -3885,8 +3189,8 @@
             "newClones": 0
           },
           "frontend/app/(tabs)/soc.tsx": {
-            "lines": 237,
-            "tokens": 2186,
+            "lines": 235,
+            "tokens": 2180,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -3933,8 +3237,8 @@
             "newClones": 0
           },
           "frontend/app/(tabs)/finance.tsx": {
-            "lines": 333,
-            "tokens": 3584,
+            "lines": 327,
+            "tokens": 3542,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -3945,8 +3249,8 @@
             "newClones": 0
           },
           "frontend/app/(tabs)/files.tsx": {
-            "lines": 578,
-            "tokens": 7193,
+            "lines": 572,
+            "tokens": 7060,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -3957,8 +3261,8 @@
             "newClones": 0
           },
           "frontend/app/(tabs)/directives.tsx": {
-            "lines": 430,
-            "tokens": 5068,
+            "lines": 429,
+            "tokens": 5062,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -3982,7 +3286,7 @@
           },
           "frontend/app/(tabs)/business.tsx": {
             "lines": 232,
-            "tokens": 2756,
+            "tokens": 2760,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -4005,8 +3309,8 @@
             "newClones": 0
           },
           "frontend/app/upload.tsx": {
-            "lines": 527,
-            "tokens": 4894,
+            "lines": 526,
+            "tokens": 4897,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -4054,14 +3358,14 @@
           }
         },
         "total": {
-          "lines": 18002,
-          "tokens": 194332,
-          "sources": 87,
-          "clones": 24,
-          "duplicatedLines": 452,
-          "duplicatedTokens": 5610,
-          "percentage": 2.51,
-          "percentageTokens": 2.89,
+          "lines": 13051,
+          "tokens": 144664,
+          "sources": 58,
+          "clones": 14,
+          "duplicatedLines": 183,
+          "duplicatedTokens": 2370,
+          "percentage": 1.4,
+          "percentageTokens": 1.64,
           "newDuplicatedLines": 0,
           "newClones": 0
         }
@@ -4192,14 +3496,14 @@
       }
     },
     "total": {
-      "lines": 73350,
-      "tokens": 753706,
-      "sources": 345,
-      "clones": 153,
-      "duplicatedLines": 2149,
-      "duplicatedTokens": 24586,
-      "percentage": 2.93,
-      "percentageTokens": 3.26,
+      "lines": 65344,
+      "tokens": 672241,
+      "sources": 287,
+      "clones": 126,
+      "duplicatedLines": 1648,
+      "duplicatedTokens": 18335,
+      "percentage": 2.52,
+      "percentageTokens": 2.73,
       "newDuplicatedLines": 0,
       "newClones": 0
     }
@@ -6948,17 +6252,17 @@
       "tokens": 0,
       "firstFile": {
         "name": "frontend/components/ops/InfraDeviceCard.tsx",
-        "start": 83,
-        "end": 126,
+        "start": 77,
+        "end": 120,
         "startLoc": {
-          "line": 83,
+          "line": 77,
           "column": 105,
-          "position": 1328
+          "position": 1223
         },
         "endLoc": {
-          "line": 126,
+          "line": 120,
           "column": 41,
-          "position": 1766
+          "position": 1661
         }
       },
       "secondFile": {
@@ -6984,17 +6288,17 @@
       "tokens": 0,
       "firstFile": {
         "name": "frontend/components/ops/InfraDeviceCard.tsx",
-        "start": 132,
-        "end": 140,
+        "start": 126,
+        "end": 134,
         "startLoc": {
-          "line": 132,
+          "line": 126,
           "column": 105,
-          "position": 1929
+          "position": 1824
         },
         "endLoc": {
-          "line": 140,
+          "line": 134,
           "column": 95,
-          "position": 2071
+          "position": 1966
         }
       },
       "secondFile": {
@@ -7020,17 +6324,17 @@
       "tokens": 0,
       "firstFile": {
         "name": "frontend/components/ops/InfraDeviceCard.tsx",
-        "start": 183,
-        "end": 192,
+        "start": 177,
+        "end": 186,
         "startLoc": {
-          "line": 183,
+          "line": 177,
           "column": 93,
-          "position": 2638
+          "position": 2533
         },
         "endLoc": {
-          "line": 192,
+          "line": 186,
           "column": 68,
-          "position": 2776
+          "position": 2671
         }
       },
       "secondFile": {
@@ -7056,17 +6360,17 @@
       "tokens": 0,
       "firstFile": {
         "name": "frontend/components/ops/InfraDeviceCard.tsx",
-        "start": 209,
-        "end": 224,
+        "start": 203,
+        "end": 218,
         "startLoc": {
-          "line": 209,
+          "line": 203,
           "column": 84,
-          "position": 3029
+          "position": 2924
         },
         "endLoc": {
-          "line": 224,
+          "line": 218,
           "column": 55,
-          "position": 3244
+          "position": 3139
         }
       },
       "secondFile": {
@@ -7118,510 +6422,6 @@
           "line": 100,
           "column": 64,
           "position": 1480
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 10,
-      "fragment": ",\n                        justifyContent: \"center\",\n                        alignItems: \"center\",\n                      }}\n                    >\n                      <Text style={{ fontSize: 18 }}>{device.icon}</Text>\n                    </View>\n                    <View style={{ flex: 1 }}>\n                      <Text style={{ color: \"#FFF\", fontSize: 14, fontWeight: \"600\" }}>{device.name}</Text>\n                      <Text style={{ color: \"rgba(255,255,255,0.35)\", fontSize: 11 }}>{device",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/home/HomeMap3D.tsx",
-        "start": 649,
-        "end": 658,
-        "startLoc": {
-          "line": 649,
-          "column": 61,
-          "position": 7417
-        },
-        "endLoc": {
-          "line": 658,
-          "column": 94,
-          "position": 7544
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/home/HomeMap3D.tsx",
-        "start": 463,
-        "end": 475,
-        "startLoc": {
-          "line": 463,
-          "column": 89,
-          "position": 5555
-        },
-        "endLoc": {
-          "line": 475,
-          "column": 28,
-          "position": 5694
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 15,
-      "fragment": " }}>\n                      {QUALITY_LABELS[q]}\n                    </Text>\n                  </TVPressable>\n                ))}\n              </View>\n            </View>\n\n            {/* Vision Mode */}\n            {isStreaming && (\n              <View style={{ marginBottom: 16 }}>\n                <Text style={{ color: \"#737373\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2, marginBottom: 8 }}>\n                  VISION MODE\n                </Text>\n                <View style={{ flexDirection: \"row\", gap: 6",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/glasses/SettingsSheet.tsx",
-        "start": 109,
-        "end": 123,
-        "startLoc": {
-          "line": 109,
-          "column": 154,
-          "position": 997
-        },
-        "endLoc": {
-          "line": 123,
-          "column": 60,
-          "position": 1134
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/glasses/SettingsSheet.tsx",
-        "start": 88,
-        "end": 94,
-        "startLoc": {
-          "line": 88,
-          "column": 76,
-          "position": 743
-        },
-        "endLoc": {
-          "line": 94,
-          "column": 58,
-          "position": 836
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 15,
-      "fragment": " }}>\n                    {visionLoading ? \"ANALYZING...\" : `ANALYZE (${visionMode.toUpperCase()})`}\n                  </Text>\n                </TVPressable>\n              </View>\n            )}\n\n            {/* OSINT Scan Mode */}\n            {isStreaming && onToggleOsint && (\n              <View style={{ marginBottom: 16 }}>\n                <Text style={{ color: \"#737373\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2, marginBottom: 8 }}>\n                  OSINT SCAN MODE\n                </Text>\n                <TVPressable\n                  onPress={onToggleOsint",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/glasses/SettingsSheet.tsx",
-        "start": 159,
-        "end": 173,
-        "startLoc": {
-          "line": 159,
-          "column": 127,
-          "position": 1474
-        },
-        "endLoc": {
-          "line": 173,
-          "column": 41,
-          "position": 1615
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/glasses/SettingsSheet.tsx",
-        "start": 88,
-        "end": 94,
-        "startLoc": {
-          "line": 88,
-          "column": 76,
-          "position": 743
-        },
-        "endLoc": {
-          "line": 94,
-          "column": 29,
-          "position": 827
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 15,
-      "fragment": " }}>\n                    Scanning faces against local DB every 5s\n                  </Text>\n                )}\n              </View>\n            )}\n\n            {/* Debug Tools */}\n            <View style={{ marginBottom: 16 }}>\n              <Text style={{ color: \"#737373\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2, marginBottom: 8 }}>\n                DEBUG\n              </Text>\n              <View style={{ flexDirection: \"row\", gap: 8 }}>\n                <TVPressable\n                  onPress={onDiagnostics",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/glasses/SettingsSheet.tsx",
-        "start": 188,
-        "end": 202,
-        "startLoc": {
-          "line": 188,
-          "column": 102,
-          "position": 1771
-        },
-        "endLoc": {
-          "line": 202,
-          "column": 41,
-          "position": 1912
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/glasses/SettingsSheet.tsx",
-        "start": 88,
-        "end": 97,
-        "startLoc": {
-          "line": 88,
-          "column": 76,
-          "position": 743
-        },
-        "endLoc": {
-          "line": 97,
-          "column": 27,
-          "position": 879
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 10,
-      "fragment": "}\n                  style={{ flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: \"#164E63\", alignItems: \"center\" }}\n                >\n                  <Text style={{ color: \"#06B6D4\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 1 }}>\n                    SHOW LOGS\n                  </Text>\n                </TVPressable>\n              </View>\n              {urlEvents.length > 0 && (\n                <Text style={{",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/glasses/SettingsSheet.tsx",
-        "start": 210,
-        "end": 219,
-        "startLoc": {
-          "line": 210,
-          "column": 34,
-          "position": 2012
-        },
-        "endLoc": {
-          "line": 219,
-          "column": 31,
-          "position": 2131
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/glasses/SettingsSheet.tsx",
-        "start": 202,
-        "end": 210,
-        "startLoc": {
-          "line": 202,
-          "column": 41,
-          "position": 1913
-        },
-        "endLoc": {
-          "line": 210,
-          "column": 34,
-          "position": 2011
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 29,
-      "fragment": " }}>\n                📐 {state.area} m²\n              </Text>\n            )}\n          </View>\n          {state.progress > 0 && (\n            <View style={{ height: 4, backgroundColor: \"#333\", borderRadius: 2 }}>\n              <View\n                style={{\n                  width: `${Math.min(100, state.progress)}%`,\n                  height: 4,\n                  backgroundColor: \"#22C55E\",\n                  borderRadius: 2,\n                }}\n              />\n            </View>\n          )}\n        </View>\n      )}\n\n      {/* Control buttons */}\n      <View style={{ flexDirection: \"row\", gap: 8 }}>\n        {/* Start / Resume */}\n        {(state.isDocked || state.isPaused) && (\n          <Pressable\n            onPress={controls.start}\n            style={({ pressed }) => ({\n              flex: 1,\n              paddingVertical: 8",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/devices/VacuumWidget.tsx",
-        "start": 64,
-        "end": 92,
-        "startLoc": {
-          "line": 64,
-          "column": 85,
-          "position": 698
-        },
-        "endLoc": {
-          "line": 92,
-          "column": 33,
-          "position": 930
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/home/sheets/VacuumSheet.tsx",
-        "start": 51,
-        "end": 78,
-        "startLoc": {
-          "line": 51,
-          "column": 114,
-          "position": 549
-        },
-        "endLoc": {
-          "line": 78,
-          "column": 34,
-          "position": 780
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 13,
-      "fragment": "state.progress > 0 && (\n            <View style={{ height: 4, backgroundColor: \"#333\", borderRadius: 2 }}>\n              <View\n                style={{\n                  width: `${Math.min(100, state.progress)}%`,\n                  height: 4,\n                  backgroundColor: \"#22C55E\",\n                  borderRadius: 2,\n                }}\n              />\n            </View>\n          )}\n        </",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/devices/VacuumWidget.tsx",
-        "start": 69,
-        "end": 81,
-        "startLoc": {
-          "line": 69,
-          "column": 12,
-          "position": 730
-        },
-        "endLoc": {
-          "line": 81,
-          "column": 11,
-          "position": 838
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/home/sheets/VacuumSheet.tsx",
-        "start": 58,
-        "end": 71,
-        "startLoc": {
-          "line": 58,
-          "column": 28,
-          "position": 594
-        },
-        "endLoc": {
-          "line": 71,
-          "column": 8,
-          "position": 703
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 9,
-      "fragment": "={{ marginTop: 8 }}>\n      {/* Header: AC icon + current temp */}\n      <View style={{ flexDirection: \"row\", alignItems: \"center\", gap: 8, marginBottom: 8 }}>\n        <Text style={{ fontSize: 16 }}>❄️</Text>\n        <Text style={{ color: \"#D4D4D4\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\" }}>\n          AC\n        </Text>\n        {currentTemp !== null && (\n          <Text style={{ color: ",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/devices/ACWidget.tsx",
-        "start": 115,
-        "end": 123,
-        "startLoc": {
-          "line": 115,
-          "column": 16,
-          "position": 1375
-        },
-        "endLoc": {
-          "line": 123,
-          "column": 33,
-          "position": 1507
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/devices/VacuumWidget.tsx",
-        "start": 37,
-        "end": 45,
-        "startLoc": {
-          "line": 37,
-          "column": 16,
-          "position": 293
-        },
-        "endLoc": {
-          "line": 45,
-          "column": 38,
-          "position": 429
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 13,
-      "fragment": "}}\n          onLayout={onSliderLayout}\n        >\n          {/* Fill */}\n          <View\n            style={{\n              position: \"absolute\",\n              left: 0,\n              top: 0,\n              bottom: 0,\n              width: sliderWidth > 0 ? tempToX(targetTemp) : 0,\n              backgroundColor: modeColor,\n              borderRadius: 2",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/devices/ACWidget.tsx",
-        "start": 151,
-        "end": 163,
-        "startLoc": {
-          "line": 151,
-          "column": 11,
-          "position": 1722
-        },
-        "endLoc": {
-          "line": 163,
-          "column": 30,
-          "position": 1791
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/home/sheets/ACSheet.tsx",
-        "start": 138,
-        "end": 149,
-        "startLoc": {
-          "line": 138,
-          "column": 72,
-          "position": 1634
-        },
-        "endLoc": {
-          "line": 149,
-          "column": 30,
-          "position": 1698
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 11,
-      "fragment": ",\n                borderWidth: 1,\n                borderColor: active ? ACCENT : \"#333\",\n                backgroundColor: active ? \"rgba(6,182,212,0.15)\" : \"transparent\",\n              }}\n            >\n              <Text\n                style={{\n                  color: active ? ACCENT : \"#737373\",\n                  fontFamily: \"monospace\",\n                  fontSize: 10",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/devices/ACWidget.tsx",
-        "start": 200,
-        "end": 210,
-        "startLoc": {
-          "line": 200,
-          "column": 32,
-          "position": 2124
-        },
-        "endLoc": {
-          "line": 210,
-          "column": 31,
-          "position": 2185
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/home/sheets/ACSheet.tsx",
-        "start": 184,
-        "end": 194,
-        "startLoc": {
-          "line": 184,
-          "column": 32,
-          "position": 2021
-        },
-        "endLoc": {
-          "line": 194,
-          "column": 31,
-          "position": 2082
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 11,
-      "fragment": ",\n                  borderWidth: 1,\n                  borderColor: active ? ACCENT : \"#333\",\n                  backgroundColor: active ? \"rgba(6,182,212,0.15)\" : \"transparent\",\n                }}\n              >\n                <Text\n                  style={{\n                    color: active ? ACCENT : \"#737373\",\n                    fontFamily: \"monospace\",\n                    fontSize: 10",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/devices/ACWidget.tsx",
-        "start": 236,
-        "end": 246,
-        "startLoc": {
-          "line": 236,
-          "column": 34,
-          "position": 2399
-        },
-        "endLoc": {
-          "line": 246,
-          "column": 33,
-          "position": 2460
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/home/sheets/ACSheet.tsx",
-        "start": 218,
-        "end": 228,
-        "startLoc": {
-          "line": 218,
-          "column": 34,
-          "position": 2292
-        },
-        "endLoc": {
-          "line": 228,
-          "column": 33,
-          "position": 2353
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 11,
-      "fragment": "},\n];\n\nconst FAN_MODES = [\n  { key: \"auto\", label: \"AUTO\" },\n  { key: \"low\", label: \"LOW\" },\n  { key: \"medium\", label: \"MED\" },\n  { key: \"high\", label: \"HIGH\" },\n];\n\nexport",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/devices/ACWidget.tsx",
-        "start": 20,
-        "end": 30,
-        "startLoc": {
-          "line": 20,
-          "column": 42,
-          "position": 258
-        },
-        "endLoc": {
-          "line": 30,
-          "column": 7,
-          "position": 345
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/home/sheets/ACSheet.tsx",
-        "start": 16,
-        "end": 26,
-        "startLoc": {
-          "line": 16,
-          "column": 47,
-          "position": 242
-        },
-        "endLoc": {
-          "line": 26,
-          "column": 10,
-          "position": 329
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 86,
-      "fragment": ") {\n  const entity = useEntity(entityId);\n  const { callService } = useHA();\n  const [sliderWidth, setSliderWidth] = useState(0);\n  const [dragging, setDragging] = useState(false);\n  const [dragTemp, setDragTemp] = useState<number | null>(null);\n  const sliderRef = useRef(0);\n  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);\n\n  const attrs = entity?.attributes ?? {};\n  const currentTemp = (attrs.current_temperature as number) ?? null;\n  const targetTemp = dragTemp ?? (attrs.temperature as number) ?? 72;\n  const hvacMode = (attrs.hvac_mode as string) ?? (entity?.state as string) ?? \"off\";\n  const fanMode = (attrs.fan_mode as string) ?? \"auto\";\n  const isOff = entity?.state === \"off\";\n\n  const tempToX = (temp: number) => {\n    const pct = (temp - TEMP_MIN) / (TEMP_MAX - TEMP_MIN);\n    return pct * sliderWidth;\n  };\n\n  const xToTemp = (x: number) => {\n    const pct = Math.max(0, Math.min(1, x / sliderWidth));\n    return Math.round(TEMP_MIN + pct * (TEMP_MAX - TEMP_MIN));\n  };\n\n  const setTemperature = useCallback(\n    (temp: number) => {\n      if (debounceRef.current) clearTimeout(debounceRef.current);\n      debounceRef.current = setTimeout(() => {\n        callService(\"climate\", \"set_temperature\", { temperature: temp }, { entity_id: entityId });\n      }, 300);\n    },\n    [callService, entityId]\n  );\n\n  const setHvacMode = useCallback(\n    (mode: string) => {\n      callService(\"climate\", \"set_hvac_mode\", { hvac_mode: mode }, { entity_id: entityId });\n    },\n    [callService, entityId]\n  );\n\n  const setFanMode = useCallback(\n    (mode: string) => {\n      callService(\"climate\", \"set_fan_mode\", { fan_mode: mode }, { entity_id: entityId });\n    },\n    [callService, entityId]\n  );\n\n  const panResponder = useRef(\n    PanResponder.create({\n      onStartShouldSetPanResponder: () => true,\n      onMoveShouldSetPanResponder: () => true,\n      onPanResponderGrant: (_, gs) => {\n        setDragging(true);\n        const x = gs.x0 - sliderRef.current;\n        const temp = xToTemp(x);\n        setDragTemp(temp);\n      },\n      onPanResponderMove: (_, gs) => {\n        const x = gs.x0 + gs.dx - sliderRef.current;\n        const temp = xToTemp(x);\n        setDragTemp(temp);\n      },\n      onPanResponderRelease: () => {\n        setDragging(false);\n        if (dragTemp !== null) {\n          setTemperature(dragTemp);\n        }\n        setDragTemp(null);\n      },\n    })\n  ).current;\n\n  const onSliderLayout = (e: LayoutChangeEvent) => {\n    setSliderWidth(e.nativeEvent.layout.width);\n    sliderRef.current = e.nativeEvent.layout.x;\n  };\n\n  if (!entity) return null;\n\n  const modeColor = isOff ? \"#525252\" : hvacMode === \"cool\" ? \"#3B82F6\" : hvacMode === \"heat\" ? \"#EF4444\" : ACCENT;\n\n  return (\n    <View ",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/devices/ACWidget.tsx",
-        "start": 30,
-        "end": 115,
-        "startLoc": {
-          "line": 30,
-          "column": 53,
-          "position": 359
-        },
-        "endLoc": {
-          "line": 115,
-          "column": 11,
-          "position": 1373
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/home/sheets/ACSheet.tsx",
-        "start": 30,
-        "end": 115,
-        "startLoc": {
-          "line": 30,
-          "column": 51,
-          "position": 359
-        },
-        "endLoc": {
-          "line": 115,
-          "column": 11,
-          "position": 1373
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 78,
-      "fragment": "}\n        <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", marginTop: 4 }}>\n          <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 9 }}>{TEMP_MIN}°</Text>\n          <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 9 }}>{TEMP_MAX}°</Text>\n        </View>\n      </View>\n\n      {/* HVAC mode pills */}\n      <View style={{ flexDirection: \"row\", flexWrap: \"wrap\", gap: 6, marginTop: 8 }}>\n        {HVAC_MODES.map((m) => {\n          const active = hvacMode === m.key;\n          return (\n            <Pressable\n              key={m.key}\n              onPress={() => setHvacMode(m.key)}\n              style={{\n                paddingHorizontal: 8,\n                paddingVertical: 4,\n                borderRadius: 6,\n                borderWidth: 1,\n                borderColor: active ? ACCENT : \"#333\",\n                backgroundColor: active ? \"rgba(6,182,212,0.15)\" : \"transparent\",\n              }}\n            >\n              <Text\n                style={{\n                  color: active ? ACCENT : \"#737373\",\n                  fontFamily: \"monospace\",\n                  fontSize: 10,\n                  fontWeight: \"bold\",\n                }}\n              >\n                {m.emoji} {m.label}\n              </Text>\n            </Pressable>\n          );\n        })}\n      </View>\n\n      {/* Fan speed pills */}\n      {!isOff && (\n        <View style={{ flexDirection: \"row\", gap: 6, marginTop: 6 }}>\n          <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, alignSelf: \"center\" }}>\n            FAN:\n          </Text>\n          {FAN_MODES.map((f) => {\n            const active = fanMode === f.key;\n            return (\n              <Pressable\n                key={f.key}\n                onPress={() => setFanMode(f.key)}\n                style={{\n                  paddingHorizontal: 8,\n                  paddingVertical: 3,\n                  borderRadius: 6,\n                  borderWidth: 1,\n                  borderColor: active ? ACCENT : \"#333\",\n                  backgroundColor: active ? \"rgba(6,182,212,0.15)\" : \"transparent\",\n                }}\n              >\n                <Text\n                  style={{\n                    color: active ? ACCENT : \"#737373\",\n                    fontFamily: \"monospace\",\n                    fontSize: 10,\n                    fontWeight: \"bold\",\n                  }}\n                >\n                  {f.label}\n                </Text>\n              </Pressable>\n            );\n          })}\n        </View>\n      )}\n    </View>\n  );\n}",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/devices/ACWidget.tsx",
-        "start": 182,
-        "end": 259,
-        "startLoc": {
-          "line": 182,
-          "column": 30,
-          "position": 1898
-        },
-        "endLoc": {
-          "line": 259,
-          "column": 2,
-          "position": 2517
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/home/sheets/ACSheet.tsx",
-        "start": 166,
-        "end": 241,
-        "startLoc": {
-          "line": 166,
-          "column": 10,
-          "position": 1795
-        },
-        "endLoc": {
-          "line": 241,
-          "column": 2,
-          "position": 2410
         }
       }
     },
@@ -7807,42 +6607,6 @@
     },
     {
       "format": "javascript",
-      "lines": 11,
-      "fragment": "={onPress}\n      style={({ pressed }) => ({\n        backgroundColor: pressed ? \"#222\" : \"#1A1A1A\",\n        borderRadius: 10,\n        padding: 14,\n        marginBottom: 8,\n        borderWidth: 1,\n        borderColor: \"rgba(255,255,255,0.06)\",\n      })}\n    >\n      <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", alignItems",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/InvestmentCard.tsx",
-        "start": 32,
-        "end": 42,
-        "startLoc": {
-          "line": 32,
-          "column": 14,
-          "position": 256
-        },
-        "endLoc": {
-          "line": 42,
-          "column": 87,
-          "position": 335
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/PipelineView.tsx",
-        "start": 106,
-        "end": 116,
-        "startLoc": {
-          "line": 106,
-          "column": 14,
-          "position": 1374
-        },
-        "endLoc": {
-          "line": 116,
-          "column": 89,
-          "position": 1453
-        }
-      }
-    },
-    {
-      "format": "javascript",
       "lines": 10,
       "fragment": " }}\n            />\n\n            {/* Payment status */}\n            <Text style={{ color: \"#737373\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>PAYMENT STATUS</Text>\n            <View style={{ flexDirection: \"row\", gap: 6, marginBottom: 16 }}>\n              {PAYMENT_STATUSES.map((s) => (\n                <Pressable\n                  key={s.value}\n                  onPress={() => setPaymentStatus",
       "tokens": 0,
@@ -8023,37 +6787,37 @@
     },
     {
       "format": "javascript",
-      "lines": 47,
-      "fragment": ".id)} />\n        ))}\n\n        {contacts.length === 0 && !loading && (\n          <View style={{ alignItems: \"center\", paddingVertical: 40 }}>\n            <Text style={{ fontSize: 40, marginBottom: 12 }}>👥</Text>\n            <Text style={{ color: \"#737373\", fontFamily: \"monospace\", fontSize: 13 }}>No contacts yet</Text>\n            <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 11, marginTop: 4 }}>Add buyers, suppliers & partners</Text>\n          </View>\n        )}\n      </ScrollView>\n\n      <ContactDetailSheet\n        contactId={selectedId}\n        visible={detailVisible}\n        onClose={() => setDetailVisible(false)}\n        onRefresh={reload}\n      />\n      <AddContactModal visible={addVisible} onClose={() => setAddVisible(false)} onCreated={reload} />\n    </View>\n  );\n}\n\nfunction ContactCard({ contact, onPress }: { contact: BusinessContact; onPress: () => void }) {\n  const typeColor = TYPE_COLORS[contact.type] || \"#737373\";\n  const flag = COUNTRY_FLAGS[contact.country] || \"🌍\";\n\n  return (\n    <Pressable\n      onPress={onPress}\n      style={({ pressed }) => ({\n        backgroundColor: pressed ? \"#222\" : \"#1A1A1A\",\n        borderRadius: 10,\n        padding: 14,\n        marginBottom: 8,\n        borderWidth: 1,\n        borderColor: \"rgba(255,255,255,0.06)\",\n      })}\n    >\n      <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", alignItems: \"center\", marginBottom: 4 }}>\n        <View style={{ flexDirection: \"row\", alignItems: \"center\", gap: 8, flex: 1 }}>\n          <Text style={{ fontSize: 16 }}>{flag}</Text>\n          <Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\", flex: 1 }} numberOfLines={1}>\n            {contact.name}\n          </Text>\n        </View>\n        <View style={{ backgroundColor",
+      "lines": 40,
+      "fragment": ".id)} />\n        ))}\n\n        {contacts.length === 0 && !loading && (\n          <View style={{ alignItems: \"center\", paddingVertical: 40 }}>\n            <Text style={{ fontSize: 40, marginBottom: 12 }}>👥</Text>\n            <Text style={{ color: \"#737373\", fontFamily: \"monospace\", fontSize: 13 }}>No contacts yet</Text>\n            <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 11, marginTop: 4 }}>Add buyers, suppliers & partners</Text>\n          </View>\n        )}\n      </ScrollView>\n\n      <ContactDetailSheet\n        contactId={selectedId}\n        visible={detailVisible}\n        onClose={() => setDetailVisible(false)}\n        onRefresh={reload}\n      />\n      <AddContactModal visible={addVisible} onClose={() => setAddVisible(false)} onCreated={reload} />\n    </View>\n  );\n}\n\nfunction ContactCard({ contact, onPress }: { contact: BusinessContact; onPress: () => void }) {\n  const typeColor = TYPE_COLORS[contact.type] || \"#737373\";\n  const flag = COUNTRY_FLAGS[contact.country] || \"🌍\";\n\n  return (\n    <Pressable\n      onPress={onPress}\n      style={({ pressed }) => ({\n        backgroundColor: pressed ? \"#222\" : \"#1A1A1A\",\n        borderRadius: 10,\n        padding: 14,\n        marginBottom: 8,\n        borderWidth: 1,\n        borderColor: \"rgba(255,255,255,0.06)\",\n      })}\n    >\n      <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", alignItems",
       "tokens": 0,
       "firstFile": {
         "name": "frontend/components/business/ContactsView.tsx",
         "start": 98,
-        "end": 144,
+        "end": 137,
         "startLoc": {
           "line": 98,
           "column": 75,
           "position": 1033
         },
         "endLoc": {
-          "line": 144,
-          "column": 39,
-          "position": 1592
+          "line": 137,
+          "column": 87,
+          "position": 1455
         }
       },
       "secondFile": {
         "name": "frontend/components/business/PipelineView.tsx",
         "start": 77,
-        "end": 49,
+        "end": 116,
         "startLoc": {
           "line": 77,
           "column": 87,
           "position": 1058
         },
         "endLoc": {
-          "line": 49,
-          "column": 29,
-          "position": 472
+          "line": 116,
+          "column": 89,
+          "position": 1453
         }
       }
     },
@@ -8342,438 +7106,6 @@
           "line": 211,
           "column": 33,
           "position": 2429
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 9,
-      "fragment": "={visible} animationType=\"slide\" transparent>\n      <View style={{ flex: 1, backgroundColor: \"rgba(0,0,0,0.6)\", justifyContent: \"flex-end\" }}>\n        <View style={{ backgroundColor: \"#111111\", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: \"85%\" }}>\n          <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", alignItems: \"center\", padding: 16, borderBottomWidth: 1, borderBottomColor: \"rgba(255,255,255,0.06)\" }}>\n            <Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"bold\" }}>New Invoice</Text>\n            <Pressable onPress={onClose}><Text style={{ color: \"#525252\", fontSize: 22 }}>×</Text></Pressable>\n          </View>\n          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>\n            <FieldInput label=\"Invoice #\" value={invoiceNumber",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 53,
-        "end": 61,
-        "startLoc": {
-          "line": 53,
-          "column": 19,
-          "position": 621
-        },
-        "endLoc": {
-          "line": 61,
-          "column": 63,
-          "position": 852
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/ContactDetailSheet.tsx",
-        "start": 68,
-        "end": 69,
-        "startLoc": {
-          "line": 68,
-          "column": 19,
-          "position": 859
-        },
-        "endLoc": {
-          "line": 69,
-          "column": 61,
-          "position": 958
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 12,
-      "fragment": " }}>{c}</Text>\n                    </Pressable>\n                  ))}\n                </View>\n              </View>\n            </View>\n\n            {contacts.length > 0 && (\n              <>\n                <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>CONTACT</Text>\n                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>\n                  <View style={{ flexDirection: \"row\", gap: 6",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 73,
-        "end": 84,
-        "startLoc": {
-          "line": 73,
-          "column": 118,
-          "position": 1148
-        },
-        "endLoc": {
-          "line": 84,
-          "column": 62,
-          "position": 1280
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddShipmentModal.tsx",
-        "start": 111,
-        "end": 120,
-        "startLoc": {
-          "line": 111,
-          "column": 107,
-          "position": 1751
-        },
-        "endLoc": {
-          "line": 120,
-          "column": 62,
-          "position": 1877
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 18,
-      "fragment": ",\n              }}\n            >\n              <Text style={{ color: \"#111\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\" }}>{saving ? \"Creating...\" : \"CREATE INVOICE\"}</Text>\n            </Pressable>\n          </ScrollView>\n        </View>\n      </View>\n    </Modal>\n  );\n}\n\nfunction FieldInput({ label, value, onChangeText, placeholder, keyboardType, multiline }: { label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; keyboardType?: any; multiline?: boolean }) {\n  return (\n    <View style={{ marginBottom: 16 }}>\n      <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>{label.toUpperCase()}</Text>\n      <TextInput\n        value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor=\"#404040\" keyboardType={keyboardType} multiline={multiline",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 106,
-        "end": 123,
-        "startLoc": {
-          "line": 106,
-          "column": 42,
-          "position": 1596
-        },
-        "endLoc": {
-          "line": 123,
-          "column": 156,
-          "position": 1862
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddShipmentModal.tsx",
-        "start": 155,
-        "end": 177,
-        "startLoc": {
-          "line": 155,
-          "column": 107,
-          "position": 2469
-        },
-        "endLoc": {
-          "line": 177,
-          "column": 17,
-          "position": 2725
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 12,
-      "fragment": "(\"\");\n    } catch {} finally { setSaving(false); }\n  };\n\n  if (!visible) return null;\n\n  return (\n    <Modal visible={visible} animationType=\"slide\" transparent>\n      <View style={{ flex: 1, backgroundColor: \"rgba(0,0,0,0.6)\", justifyContent: \"flex-end\" }}>\n        <View style={{ backgroundColor: \"#111111\", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: \"85%\" }}>\n          <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", alignItems: \"center\", padding: 16, borderBottomWidth: 1, borderBottomColor: \"rgba(255,255,255,0.06)\" }}>\n            <Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"bold\" }}>New Invoice",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 46,
-        "end": 57,
-        "startLoc": {
-          "line": 46,
-          "column": 88,
-          "position": 567
-        },
-        "endLoc": {
-          "line": 57,
-          "column": 118,
-          "position": 769
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddShipmentModal.tsx",
-        "start": 54,
-        "end": 65,
-        "startLoc": {
-          "line": 54,
-          "column": 48,
-          "position": 673
-        },
-        "endLoc": {
-          "line": 65,
-          "column": 119,
-          "position": 875
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 18,
-      "fragment": "\" value={amount} onChangeText={setAmount} keyboardType=\"numeric\" /></View>\n              <View style={{ flex: 1 }}>\n                <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>CURRENCY</Text>\n                <View style={{ flexDirection: \"row\", gap: 4, marginBottom: 16 }}>\n                  {CURRENCIES.map(c => (\n                    <Pressable key={c} onPress={() => setCurrency(c)} style={{\n                      paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6,\n                      backgroundColor: currency === c ? ACCENT + \"22\" : \"#1A1A1A\",\n                      borderWidth: 1, borderColor: currency === c ? ACCENT + \"44\" : \"rgba(255,255,255,0.06)\",\n                    }}>\n                      <Text style={{ color: currency === c ? ACCENT : \"#737373\", fontFamily: \"monospace\", fontSize: 9 }}>{c}</Text>\n                    </Pressable>\n                  ))}\n                </View>\n              </View>\n            </View>\n\n            {contacts",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 63,
-        "end": 80,
-        "startLoc": {
-          "line": 63,
-          "column": 66,
-          "position": 914
-        },
-        "endLoc": {
-          "line": 80,
-          "column": 22,
-          "position": 1187
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddShipmentModal.tsx",
-        "start": 91,
-        "end": 108,
-        "startLoc": {
-          "line": 91,
-          "column": 68,
-          "position": 1376
-        },
-        "endLoc": {
-          "line": 108,
-          "column": 24,
-          "position": 1649
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 9,
-      "fragment": "={visible} animationType=\"slide\" transparent>\n      <View style={{ flex: 1, backgroundColor: \"rgba(0,0,0,0.6)\", justifyContent: \"flex-end\" }}>\n        <View style={{ backgroundColor: \"#111111\", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: \"85%\" }}>\n          <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", alignItems: \"center\", padding: 16, borderBottomWidth: 1, borderBottomColor: \"rgba(255,255,255,0.06)\" }}>\n            <Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"bold\" }}>New Investment</Text>\n            <Pressable onPress={onClose}><Text style={{ color: \"#525252\", fontSize: 22 }}>×</Text></Pressable>\n          </View>\n          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>\n            <FieldInput label=\"Title\" value={title",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvestmentModal.tsx",
-        "start": 44,
-        "end": 52,
-        "startLoc": {
-          "line": 44,
-          "column": 19,
-          "position": 586
-        },
-        "endLoc": {
-          "line": 52,
-          "column": 51,
-          "position": 817
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/ContactDetailSheet.tsx",
-        "start": 68,
-        "end": 69,
-        "startLoc": {
-          "line": 68,
-          "column": 19,
-          "position": 859
-        },
-        "endLoc": {
-          "line": 69,
-          "column": 61,
-          "position": 958
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 25,
-      "fragment": "}>{c}</Text>\n                </Pressable>\n              ))}\n            </View>\n\n            <View style={{ flexDirection: \"row\", gap: 10 }}>\n              <View style={{ flex: 2 }}><FieldInput label=\"Amount\" value={amount} onChangeText={setAmount} keyboardType=\"numeric\" /></View>\n              <View style={{ flex: 1 }}>\n                <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>CURRENCY</Text>\n                <View style={{ flexDirection: \"row\", gap: 4, marginBottom: 16 }}>\n                  {CURRENCIES.map(c => (\n                    <Pressable key={c} onPress={() => setCurrency(c)} style={{\n                      paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6,\n                      backgroundColor: currency === c ? ACCENT + \"22\" : \"#1A1A1A\",\n                      borderWidth: 1, borderColor: currency === c ? ACCENT + \"44\" : \"rgba(255,255,255,0.06)\",\n                    }}>\n                      <Text style={{ color: currency === c ? ACCENT : \"#737373\", fontFamily: \"monospace\", fontSize: 9 }}>{c}</Text>\n                    </Pressable>\n                  ))}\n                </View>\n              </View>\n            </View>\n\n            <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>STATUS</Text>\n            <View style={{",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvestmentModal.tsx",
-        "start": 63,
-        "end": 87,
-        "startLoc": {
-          "line": 63,
-          "column": 144,
-          "position": 1071
-        },
-        "endLoc": {
-          "line": 87,
-          "column": 27,
-          "position": 1455
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 61,
-        "end": 83,
-        "startLoc": {
-          "line": 61,
-          "column": 95,
-          "position": 859
-        },
-        "endLoc": {
-          "line": 83,
-          "column": 77,
-          "position": 1248
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 11,
-      "fragment": " }}>{c}</Text>\n                    </Pressable>\n                  ))}\n                </View>\n              </View>\n            </View>\n\n            <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>STATUS</Text>\n            <View style={{ flexDirection: \"row\", gap: 6, marginBottom: 16 }}>\n              {STATUSES.map(s => (\n                <Pressable key={s",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvestmentModal.tsx",
-        "start": 79,
-        "end": 89,
-        "startLoc": {
-          "line": 79,
-          "column": 118,
-          "position": 1375
-        },
-        "endLoc": {
-          "line": 89,
-          "column": 34,
-          "position": 1494
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddShipmentModal.tsx",
-        "start": 92,
-        "end": 96,
-        "startLoc": {
-          "line": 92,
-          "column": 37,
-          "position": 1413
-        },
-        "endLoc": {
-          "line": 96,
-          "column": 38,
-          "position": 1500
-        }
-      }
-    },
-    {
-      "format": "javascript",
-      "lines": 19,
-      "fragment": "? 1 : 0.5,\n              }}\n            >\n              <Text style={{ color: \"#111\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\" }}>{saving ? \"Creating...\" : \"CREATE INVESTMENT\"}</Text>\n            </Pressable>\n          </ScrollView>\n        </View>\n      </View>\n    </Modal>\n  );\n}\n\nfunction FieldInput({ label, value, onChangeText, placeholder, keyboardType, multiline }: { label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; keyboardType?: any; multiline?: boolean }) {\n  return (\n    <View style={{ marginBottom: 16 }}>\n      <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>{label.toUpperCase()}</Text>\n      <TextInput\n        value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor=\"#404040\" keyboardType={keyboardType} multiline={multiline}\n        style={{ backgroundColor: \"#1A1A1A\", borderRadius: 8, padding: 12, color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 13, borderWidth: 1, borderColor: \"rgba(255,255,255,0.06)\", minHeight: multiline ? 60 : undefined }}",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvestmentModal.tsx",
-        "start": 107,
-        "end": 125,
-        "startLoc": {
-          "line": 107,
-          "column": 51,
-          "position": 1788
-        },
-        "endLoc": {
-          "line": 125,
-          "column": 228,
-          "position": 2118
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 106,
-        "end": 166,
-        "startLoc": {
-          "line": 106,
-          "column": 33,
-          "position": 1589
-        },
-        "endLoc": {
-          "line": 166,
-          "column": 228,
-          "position": 2714
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 12,
-      "fragment": "(\"\");\n    } catch {} finally { setSaving(false); }\n  };\n\n  if (!visible) return null;\n\n  return (\n    <Modal visible={visible} animationType=\"slide\" transparent>\n      <View style={{ flex: 1, backgroundColor: \"rgba(0,0,0,0.6)\", justifyContent: \"flex-end\" }}>\n        <View style={{ backgroundColor: \"#111111\", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: \"85%\" }}>\n          <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", alignItems: \"center\", padding: 16, borderBottomWidth: 1, borderBottomColor: \"rgba(255,255,255,0.06)\" }}>\n            <Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"bold\" }}>New Investment",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvestmentModal.tsx",
-        "start": 37,
-        "end": 48,
-        "startLoc": {
-          "line": 37,
-          "column": 134,
-          "position": 532
-        },
-        "endLoc": {
-          "line": 48,
-          "column": 121,
-          "position": 734
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddShipmentModal.tsx",
-        "start": 54,
-        "end": 65,
-        "startLoc": {
-          "line": 54,
-          "column": 48,
-          "position": 673
-        },
-        "endLoc": {
-          "line": 65,
-          "column": 119,
-          "position": 875
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 19,
-      "fragment": "<View style={{ flexDirection: \"row\", gap: 10 }}>\n              <View style={{ flex: 2 }}><FieldInput label=\"Amount\" value={amount} onChangeText={setAmount} keyboardType=\"numeric\" /></View>\n              <View style={{ flex: 1 }}>\n                <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>CURRENCY</Text>\n                <View style={{ flexDirection: \"row\", gap: 4, marginBottom: 16 }}>\n                  {CURRENCIES.map(c => (\n                    <Pressable key={c} onPress={() => setCurrency(c)} style={{\n                      paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6,\n                      backgroundColor: currency === c ? ACCENT + \"22\" : \"#1A1A1A\",\n                      borderWidth: 1, borderColor: currency === c ? ACCENT + \"44\" : \"rgba(255,255,255,0.06)\",\n                    }}>\n                      <Text style={{ color: currency === c ? ACCENT : \"#737373\", fontFamily: \"monospace\", fontSize: 9 }}>{c}</Text>\n                    </Pressable>\n                  ))}\n                </View>\n              </View>\n            </View>\n\n            <",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvestmentModal.tsx",
-        "start": 68,
-        "end": 86,
-        "startLoc": {
-          "line": 68,
-          "column": 13,
-          "position": 1097
-        },
-        "endLoc": {
-          "line": 86,
-          "column": 14,
-          "position": 1413
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 62,
-        "end": 108,
-        "startLoc": {
-          "line": 62,
-          "column": 13,
-          "position": 870
-        },
-        "endLoc": {
-          "line": 108,
-          "column": 14,
-          "position": 1648
-        }
-      }
-    },
-    {
-      "format": "tsx",
-      "lines": 20,
-      "fragment": "}</Text>\n            </Pressable>\n          </ScrollView>\n        </View>\n      </View>\n    </Modal>\n  );\n}\n\nfunction FieldInput({ label, value, onChangeText, placeholder, keyboardType, multiline }: { label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; keyboardType?: any; multiline?: boolean }) {\n  return (\n    <View style={{ marginBottom: 16 }}>\n      <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>{label.toUpperCase()}</Text>\n      <TextInput\n        value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor=\"#404040\" keyboardType={keyboardType} multiline={multiline}\n        style={{ backgroundColor: \"#1A1A1A\", borderRadius: 8, padding: 12, color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 13, borderWidth: 1, borderColor: \"rgba(255,255,255,0.06)\", minHeight: multiline ? 60 : undefined }}\n      />\n    </View>\n  );\n}",
-      "tokens": 0,
-      "firstFile": {
-        "name": "frontend/components/business/AddInvestmentModal.tsx",
-        "start": 110,
-        "end": 129,
-        "startLoc": {
-          "line": 110,
-          "column": 151,
-          "position": 1843
-        },
-        "endLoc": {
-          "line": 129,
-          "column": 2,
-          "position": 2131
-        }
-      },
-      "secondFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 109,
-        "end": 128,
-        "startLoc": {
-          "line": 109,
-          "column": 148,
-          "position": 1644
-        },
-        "endLoc": {
-          "line": 128,
-          "column": 2,
-          "position": 1932
         }
       }
     },
@@ -9284,7 +7616,7 @@
     {
       "format": "javascript",
       "lines": 19,
-      "fragment": ") ? 1 : 0.5,\n              }}\n            >\n              <Text style={{ color: \"#111\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\" }}>{saving ? \"Creating...\" : \"CREATE CONTACT\"}</Text>\n            </Pressable>\n          </ScrollView>\n        </View>\n      </View>\n    </Modal>\n  );\n}\n\nfunction FieldInput({ label, value, onChangeText, placeholder, multiline }: { label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean }) {\n  return (\n    <View style={{ marginBottom: 16 }}>\n      <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>{label.toUpperCase()}</Text>\n      <TextInput\n        value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor=\"#404040\" multiline={multiline}\n        style={{ backgroundColor: \"#1A1A1A\", borderRadius: 8, padding: 12, color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 13, borderWidth: 1, borderColor: \"rgba(255,255,255,0.06)\", minHeight: multiline ? 60 : undefined }}",
+      "fragment": ",\n              }}\n            >\n              <Text style={{ color: \"#111\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\" }}>{saving ? \"Creating...\" : \"CREATE CONTACT\"}</Text>\n            </Pressable>\n          </ScrollView>\n        </View>\n      </View>\n    </Modal>\n  );\n}\n\nfunction FieldInput({ label, value, onChangeText, placeholder, multiline }: { label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean }) {\n  return (\n    <View style={{ marginBottom: 16 }}>\n      <Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>{label.toUpperCase()}</Text>\n      <TextInput\n        value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor=\"#404040\" multiline={multiline}\n        style={{ backgroundColor: \"#1A1A1A\", borderRadius: 8, padding: 12, color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 13, borderWidth: 1, borderColor: \"rgba(255,255,255,0.06)\", minHeight: multiline ? 60 : undefined }}",
       "tokens": 0,
       "firstFile": {
         "name": "frontend/components/business/AddContactModal.tsx",
@@ -9292,8 +7624,8 @@
         "end": 95,
         "startLoc": {
           "line": 77,
-          "column": 36,
-          "position": 1301
+          "column": 47,
+          "position": 1310
         },
         "endLoc": {
           "line": 95,
@@ -9302,13 +7634,13 @@
         }
       },
       "secondFile": {
-        "name": "frontend/components/business/AddInvestmentModal.tsx",
-        "start": 107,
+        "name": "frontend/components/business/AddShipmentModal.tsx",
+        "start": 155,
         "end": 166,
         "startLoc": {
-          "line": 107,
-          "column": 49,
-          "position": 1786
+          "line": 155,
+          "column": 107,
+          "position": 2469
         },
         "endLoc": {
           "line": 166,
@@ -9356,7 +7688,7 @@
     {
       "format": "tsx",
       "lines": 12,
-      "fragment": "); setNotes(\"\");\n    } catch {} finally { setSaving(false); }\n  };\n\n  if (!visible) return null;\n\n  return (\n    <Modal visible={visible} animationType=\"slide\" transparent>\n      <View style={{ flex: 1, backgroundColor: \"rgba(0,0,0,0.6)\", justifyContent: \"flex-end\" }}>\n        <View style={{ backgroundColor: \"#111111\", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: \"85%\" }}>\n          <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", alignItems: \"center\", padding: 16, borderBottomWidth: 1, borderBottomColor: \"rgba(255,255,255,0.06)\" }}>\n            <Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"bold\" }}>New Contact",
+      "fragment": "(\"\");\n    } catch {} finally { setSaving(false); }\n  };\n\n  if (!visible) return null;\n\n  return (\n    <Modal visible={visible} animationType=\"slide\" transparent>\n      <View style={{ flex: 1, backgroundColor: \"rgba(0,0,0,0.6)\", justifyContent: \"flex-end\" }}>\n        <View style={{ backgroundColor: \"#111111\", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: \"85%\" }}>\n          <View style={{ flexDirection: \"row\", justifyContent: \"space-between\", alignItems: \"center\", padding: 16, borderBottomWidth: 1, borderBottomColor: \"rgba(255,255,255,0.06)\" }}>\n            <Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"bold\" }}>New Contact",
       "tokens": 0,
       "firstFile": {
         "name": "frontend/components/business/AddContactModal.tsx",
@@ -9364,8 +7696,8 @@
         "end": 43,
         "startLoc": {
           "line": 32,
-          "column": 116,
-          "position": 455
+          "column": 127,
+          "position": 459
         },
         "endLoc": {
           "line": 43,
@@ -9374,13 +7706,13 @@
         }
       },
       "secondFile": {
-        "name": "frontend/components/business/AddInvoiceModal.tsx",
-        "start": 46,
+        "name": "frontend/components/business/AddShipmentModal.tsx",
+        "start": 54,
         "end": 65,
         "startLoc": {
-          "line": 46,
-          "column": 77,
-          "position": 563
+          "line": 54,
+          "column": 48,
+          "position": 673
         },
         "endLoc": {
           "line": 65,
@@ -9540,32 +7872,32 @@
       "tokens": 0,
       "firstFile": {
         "name": "frontend/app/(tabs)/finance.tsx",
-        "start": 226,
-        "end": 235,
+        "start": 220,
+        "end": 229,
         "startLoc": {
-          "line": 226,
+          "line": 220,
           "column": 129,
-          "position": 2491
+          "position": 2449
         },
         "endLoc": {
-          "line": 235,
+          "line": 229,
           "column": 52,
-          "position": 2614
+          "position": 2572
         }
       },
       "secondFile": {
         "name": "frontend/app/(tabs)/finance.tsx",
-        "start": 221,
-        "end": 226,
+        "start": 215,
+        "end": 220,
         "startLoc": {
-          "line": 221,
+          "line": 215,
           "column": 79,
-          "position": 2376
+          "position": 2334
         },
         "endLoc": {
-          "line": 226,
+          "line": 220,
           "column": 50,
-          "position": 2467
+          "position": 2425
         }
       }
     },
@@ -9576,53 +7908,53 @@
       "tokens": 0,
       "firstFile": {
         "name": "frontend/app/(tabs)/finance.tsx",
-        "start": 258,
-        "end": 280,
+        "start": 252,
+        "end": 274,
         "startLoc": {
-          "line": 258,
+          "line": 252,
           "column": 54,
-          "position": 2904
+          "position": 2862
         },
         "endLoc": {
-          "line": 280,
+          "line": 274,
           "column": 33,
-          "position": 3122
+          "position": 3080
         }
       },
       "secondFile": {
         "name": "frontend/app/(tabs)/finance.tsx",
-        "start": 197,
-        "end": 221,
+        "start": 191,
+        "end": 215,
         "startLoc": {
-          "line": 197,
+          "line": 191,
           "column": 97,
-          "position": 2143
+          "position": 2101
         },
         "endLoc": {
-          "line": 221,
+          "line": 215,
           "column": 43,
-          "position": 2360
+          "position": 2318
         }
       }
     },
     {
       "format": "javascript",
       "lines": 11,
-      "fragment": "={{ flex: 1, backgroundColor: \"#111111\" }}>\n      {/* Top Bar */}\n      <View\n        style={{\n          paddingTop: insets.top,\n          height: TOP_BAR_HEIGHT + insets.top,\n          flexDirection: \"row\",\n          alignItems: \"center\",\n          justifyContent: \"space-between\",\n          paddingHorizontal: Math.max(16, insets.left, insets.right),\n        ",
+      "fragment": "={{ flex: 1, backgroundColor: \"#111111\" }}>\n      {/* Top Bar */}\n      <View\n        style={{\n          paddingTop: insets.top,\n          height: layout.topBarHeight + insets.top,\n          flexDirection: \"row\",\n          alignItems: \"center\",\n          justifyContent: \"space-between\",\n          paddingHorizontal: Math.max(16, insets.left, insets.right),\n        ",
       "tokens": 0,
       "firstFile": {
         "name": "frontend/app/upload.tsx",
-        "start": 201,
-        "end": 211,
+        "start": 200,
+        "end": 210,
         "startLoc": {
-          "line": 201,
+          "line": 200,
           "column": 16,
-          "position": 2592
+          "position": 2595
         },
         "endLoc": {
-          "line": 211,
+          "line": 210,
           "column": 9,
-          "position": 2670
+          "position": 2673
         }
       },
       "secondFile": {
@@ -9632,12 +7964,12 @@
         "startLoc": {
           "line": 57,
           "column": 16,
-          "position": 746
+          "position": 750
         },
         "endLoc": {
           "line": 67,
           "column": 26,
-          "position": 824
+          "position": 828
         }
       }
     },
@@ -9648,32 +7980,32 @@
       "tokens": 0,
       "firstFile": {
         "name": "frontend/app/upload.tsx",
-        "start": 316,
-        "end": 343,
+        "start": 315,
+        "end": 342,
         "startLoc": {
-          "line": 316,
+          "line": 315,
           "column": 35,
-          "position": 3340
+          "position": 3343
         },
         "endLoc": {
-          "line": 343,
+          "line": 342,
           "column": 29,
-          "position": 3473
+          "position": 3476
         }
       },
       "secondFile": {
         "name": "frontend/app/upload.tsx",
-        "start": 292,
-        "end": 316,
+        "start": 291,
+        "end": 315,
         "startLoc": {
-          "line": 292,
+          "line": 291,
           "column": 38,
-          "position": 3231
+          "position": 3234
         },
         "endLoc": {
-          "line": 316,
+          "line": 315,
           "column": 35,
-          "position": 3339
+          "position": 3342
         }
       }
     },
@@ -9684,32 +8016,32 @@
       "tokens": 0,
       "firstFile": {
         "name": "frontend/app/upload.tsx",
-        "start": 505,
-        "end": 517,
+        "start": 504,
+        "end": 516,
         "startLoc": {
-          "line": 505,
+          "line": 504,
           "column": 62,
-          "position": 4740
+          "position": 4743
         },
         "endLoc": {
-          "line": 517,
+          "line": 516,
           "column": 17,
-          "position": 4816
+          "position": 4819
         }
       },
       "secondFile": {
         "name": "frontend/app/upload.tsx",
-        "start": 479,
-        "end": 491,
+        "start": 478,
+        "end": 490,
         "startLoc": {
-          "line": 479,
+          "line": 478,
           "column": 62,
-          "position": 4541
+          "position": 4544
         },
         "endLoc": {
-          "line": 491,
+          "line": 490,
           "column": 17,
-          "position": 4617
+          "position": 4620
         }
       }
     }

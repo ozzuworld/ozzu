@@ -20,6 +20,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { useMediaPlayer } from "../../lib/useMediaPlayer";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { HA_URL, HA_TOKEN } from "../../lib/config";
+import { layout } from "../../lib/design-tokens";
 
 const BRIDGE_URL =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
@@ -27,7 +28,6 @@ const BRIDGE_URL =
 const ACCENT = "#1DB954";
 const BAR_COLOR = "#FFFFFF";
 const BAR_BG = "rgba(255,255,255,0.1)";
-const TOP_BAR_HEIGHT = 48;
 const MINI_PLAYER_HEIGHT = 56;
 
 type MusicView = "library" | "playlist" | "nowPlaying";
@@ -729,7 +729,7 @@ function NowPlayingView({
   });
 
   const isLandscape = screenWidth > screenHeight;
-  const contentHeight = screenHeight - TOP_BAR_HEIGHT - insets.top - insets.bottom - 24;
+  const contentHeight = screenHeight - layout.topBarHeight - insets.top - insets.bottom - 24;
   const artSize = isPhone
     ? Math.min(screenWidth * 0.7, 280)
     : Math.min(contentHeight * 0.85, 380);
@@ -785,7 +785,7 @@ function NowPlayingView({
       <View
         style={{
           paddingTop: insets.top,
-          height: TOP_BAR_HEIGHT + insets.top,
+          height: layout.topBarHeight + insets.top,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
@@ -1231,7 +1231,7 @@ export default function MusicScreen() {
         <View
           style={{
             paddingTop: insets.top,
-            height: TOP_BAR_HEIGHT + insets.top,
+            height: layout.topBarHeight + insets.top,
             flexDirection: "row",
             alignItems: "center",
             justifyContent: "space-between",

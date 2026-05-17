@@ -13,9 +13,7 @@ import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
 import { getBridgeUrl } from "../../lib/bridge-api";
-import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha } from "../../lib/design-tokens";
-
-const TOP_BAR_HEIGHT = 48;
+import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha, layout } from "../../lib/design-tokens";
 
 type Engagement = {
   id: string;
@@ -85,7 +83,7 @@ export default function SOCScreen() {
       {/* Top Bar */}
       <View
         style={{
-          height: TOP_BAR_HEIGHT,
+          height: layout.topBarHeight,
           flexDirection: "row",
           alignItems: "center",
           paddingHorizontal: spacing.md,

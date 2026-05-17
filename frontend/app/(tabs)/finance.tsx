@@ -11,8 +11,8 @@ import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { getBridgeUrl } from "../../lib/bridge-api";
-
-const TOP_BAR_HEIGHT = 48;
+import { layout } from "../../lib/design-tokens";
+import { formatCOP } from "../../lib/format";
 
 // Matches actual API response from GET /api/finance/summary
 type MonthRow = {
@@ -50,12 +50,6 @@ const TYPE_EMOJI: Record<string, string> = {
   transfer_out: "📤",
   deposit: "💵",
 };
-
-function formatCOP(amount: number): string {
-  const abs = Math.abs(amount);
-  const formatted = abs.toLocaleString("es-CO");
-  return `$${formatted}`;
-}
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
@@ -166,7 +160,7 @@ export default function FinanceScreen() {
       {/* Top Bar */}
       <View style={{
         paddingTop: insets.top,
-        height: TOP_BAR_HEIGHT + insets.top,
+        height: layout.topBarHeight + insets.top,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",

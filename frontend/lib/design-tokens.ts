@@ -64,6 +64,12 @@ export const spacing = {
   xxxl: 32,
 } as const;
 
+// ── Layout ──
+
+export const layout = {
+  topBarHeight: 48,
+} as const;
+
 // ── Border Radius ──
 
 export const radius = {

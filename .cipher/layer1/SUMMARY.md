@@ -1,53 +1,20 @@
 # Cipher Layer 1 — Codebase Map Summary
 
-Generated: 2026-05-17T13:35:34.725Z
+Generated: 2026-05-17T13:57:55.140Z
 
 Cipher: **read this first** before answering questions about the codebase.
 Raw outputs live in `.cipher/layer1/` next to this file.
 
 ## Repo map (`repomap.txt`)
-- Size: 1910 KB
-- Generated: 2026-05-17T13:34:57.877Z
+- Size: 1911 KB
+- Generated: 2026-05-17T13:57:19.205Z
 - Use: pass to LLM context when you need to grep across the whole repo at once
 
 ## Dead code (knip)
 
 ### Frontend
-- **Orphan files (zero imports):** 41
-```
-  lib/exercise-tracker.ts
-  lib/expressions.ts
-  lib/gemini.ts
-  lib/gesture-actions.ts
-  lib/gesture-target.ts
-  lib/immersive-state.ts
-  lib/kg-hooks.ts
-  lib/map-config.ts
-  lib/osint-constants.ts
-  lib/osint-hooks.ts
-  lib/remote-logger.ts
-  lib/useVacuum.ts
-  components/SciFiOrb.tsx
-  components/StreamingText.tsx
-  components/business/AddInvestmentModal.tsx
-  components/business/AddInvoiceModal.tsx
-  components/business/InvestmentCard.tsx
-  components/devices/ACWidget.tsx
-  components/devices/VacuumMapCard.tsx
-  components/devices/VacuumWidget.tsx
-  components/directives/AuditTrail.tsx
-  components/directives/DirectiveCard.tsx
-  components/directives/SummaryStatsBar.tsx
-  components/glasses/ExerciseHUD.tsx
-  components/glasses/FaceMatchOverlay.tsx
-  components/glasses/FaceOverlay.tsx
-  components/glasses/HandOverlay.tsx
-  components/glasses/ObjectOverlay.tsx
-  components/glasses/PoseOverlay.tsx
-  components/glasses/SettingsSheet.tsx
-  ... +11 more
-```
-- **Unused symbols across 28 files:** 11 dependencies, 126 exports, 76 types
+- **Orphan files (zero imports):** 0
+- **Unused symbols across 29 files:** 11 dependencies, 127 exports, 76 types
 
 ### Backend bridge
 - **Orphan files (zero imports):** 5
@@ -63,23 +30,23 @@ Raw outputs live in `.cipher/layer1/` next to this file.
 ## Import graph (dependency-cruiser)
 
 ### Frontend
-- Modules cruised: 165
-- Dependencies: 556
-- Rule violations: 2 (warn=2, error=0)
+- Modules cruised: 116
+- Dependencies: 442
+- Rule violations: 0 (warn=0, error=0)
 - **Most-imported modules (top 10):**
 ```
-   96 ← react-native
-   81 ← react
-   51 ← lib/bridge-api.ts
+   67 ← react-native
+   58 ← react
+   43 ← lib/bridge-api.ts
    17 ← expo-router
-   14 ← lib/usePhoneLayout.ts
+   16 ← lib/design-tokens.ts
+   13 ← lib/usePhoneLayout.ts
    12 ← expo-status-bar
    12 ← components/GroupNav.tsx
-   11 ← lib/design-tokens.ts
-   11 ← lib/ha-context.tsx
    10 ← react-native-safe-area-context
+    9 ← components/business/CostField.tsx
 ```
-- **Orphan modules (no dependents, not entry):** 47
+- **Orphan modules (no dependents, not entry):** 17
 ```
   app/(tabs)/business.tsx
   app/(tabs)/cipher.tsx
@@ -96,7 +63,7 @@ Raw outputs live in `.cipher/layer1/` next to this file.
   app/glasses.tsx
   app/metrics.tsx
   app/soc/[id].tsx
-  ... +32 more
+  ... +2 more
 ```
 
 ### Backend bridge
@@ -119,9 +86,9 @@ Raw outputs live in `.cipher/layer1/` next to this file.
 
 ## Copy-paste duplication (jscpd)
 
-- Total clones: 153
-- Duplicated lines: 2149 / 73350 (2.93%)
-- Duplicated tokens: 24586 / 753706
+- Total clones: 126
+- Duplicated lines: 1648 / 65344 (2.52%)
+- Duplicated tokens: 18335 / 672241
 
 **Top duplications (first 10):**
 

@@ -9,8 +9,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
 import { BridgeSession, type BridgeCallbacks } from "../lib/bridge-session";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
-
-const TOP_BAR_HEIGHT = 48;
+import { layout } from "../lib/design-tokens";
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB (3D scans can be large)
 
 const ALLOWED_MIME_PREFIXES = ["image/", "text/", "audio/", "video/", "application/pdf", "application/json", "model/", "application/octet-stream"];
@@ -203,7 +202,7 @@ export default function UploadScreen() {
       <View
         style={{
           paddingTop: insets.top,
-          height: TOP_BAR_HEIGHT + insets.top,
+          height: layout.topBarHeight + insets.top,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",

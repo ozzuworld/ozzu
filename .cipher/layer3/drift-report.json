@@ -152,433 +152,433 @@
     },
     {
       "file": "frontend/app/(tabs)/directives.tsx",
-      "line": 135,
+      "line": 134,
       "snippet": "{ key: \"needs_action\", label: \"Needs Action\", color: \"#EF4444\", items: [] },",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/(tabs)/directives.tsx",
-      "line": 136,
+      "line": 135,
       "snippet": "{ key: \"todo\", label: \"To Do\", color: \"#737373\", items: [] },",
       "match": "\"#737373\""
     },
     {
       "file": "frontend/app/(tabs)/directives.tsx",
-      "line": 137,
+      "line": 136,
       "snippet": "{ key: \"in_progress\", label: \"In Progress\", color: \"#3B82F6\", items: [] },",
       "match": "\"#3B82F6\""
     },
     {
       "file": "frontend/app/(tabs)/directives.tsx",
-      "line": 138,
+      "line": 137,
       "snippet": "{ key: \"done\", label: \"Done\", color: \"#22C55E\", items: [] },",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/(tabs)/directives.tsx",
-      "line": 249,
+      "line": 248,
       "snippet": "borderBottomColor: withAlpha(\"#ffffff\", 0.06),",
       "match": "\"#ffffff\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 34,
+      "line": 35,
       "snippet": "const ACCENT = \"#06B6D4\";",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 35,
+      "line": 36,
       "snippet": "const DIM = \"#525252\";",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 138,
+      "line": 132,
       "snippet": "backgroundColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 143,
+      "line": 137,
       "snippet": "borderColor: \"#2A2A2A\",",
       "match": "\"#2A2A2A\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 149,
+      "line": 143,
       "snippet": "<Text style={{ color: \"#E5E5E5\", fontSize: 13, fontFamily: \"monospace\", fontWeight: \"600\" }}>",
       "match": "\"#E5E5E5\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 179,
+      "line": 173,
       "snippet": "backgroundColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 181,
+      "line": 175,
       "snippet": "borderColor: \"#2A2A2A\",",
       "match": "\"#2A2A2A\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 197,
+      "line": 191,
       "snippet": "<Text numberOfLines={1} style={{ color: \"#ccc\", fontSize: 10, fontFamily: \"monospace\", marginTop: 4 }}>",
       "match": "\"#ccc\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 220,
+      "line": 214,
       "snippet": "<Text style={{ color: \"#fff\", fontSize: 18, fontWeight: \"600\" }}>✕</Text>",
       "match": "\"#fff\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 227,
+      "line": 221,
       "snippet": "<Text style={{ color: \"#fff\", fontSize: 14, fontFamily: \"monospace\", marginTop: 12 }}>{file.filename}</Text>",
       "match": "\"#fff\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 231,
+      "line": 225,
       "snippet": "<Text style={{ color: \"#fff\", fontSize: 13, fontFamily: \"monospace\", fontWeight: \"600\" }}>{file.filename}</Text>",
       "match": "\"#fff\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 240,
+      "line": 234,
       "snippet": "<Pressable onPress={onDelete} style={{ paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: \"r",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 241,
+      "line": 235,
       "snippet": "<Text style={{ color: \"#EF4444\", fontSize: 12, fontFamily: \"monospace\", fontWeight: \"700\" }}>DELETE</Text>",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 255,
+      "line": 249,
       "snippet": "<View style={{ backgroundColor: \"#1A1A1A\", borderRadius: 12, padding: 24, width: \"100%\", borderWidth: 1, borderColor: \"#",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 255,
+      "line": 249,
       "snippet": "<View style={{ backgroundColor: \"#1A1A1A\", borderRadius: 12, padding: 24, width: \"100%\", borderWidth: 1, borderColor: \"#",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 256,
+      "line": 250,
       "snippet": "<Text style={{ color: \"#fff\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"700\", marginBottom: 16, letterSpacing:",
       "match": "\"#fff\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 263,
+      "line": 257,
       "snippet": "style={{ backgroundColor: \"#111\", color: \"#fff\", fontFamily: \"monospace\", fontSize: 14, borderRadius: 8, padding: 12, bo",
       "match": "\"#111\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 263,
+      "line": 257,
       "snippet": "style={{ backgroundColor: \"#111\", color: \"#fff\", fontFamily: \"monospace\", fontSize: 14, borderRadius: 8, padding: 12, bo",
       "match": "\"#fff\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 263,
+      "line": 257,
       "snippet": "style={{ backgroundColor: \"#111\", color: \"#fff\", fontFamily: \"monospace\", fontSize: 14, borderRadius: 8, padding: 12, bo",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 266,
+      "line": 260,
       "snippet": "<Pressable onPress={onClose} style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: \"#2A2A2A\", alignItems: \"ce",
       "match": "\"#2A2A2A\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 267,
+      "line": 261,
       "snippet": "<Text style={{ color: \"#aaa\", fontFamily: \"monospace\", fontSize: 12 }}>CANCEL</Text>",
       "match": "\"#aaa\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 415,
+      "line": 409,
       "snippet": "<View style={{ flex: 1, backgroundColor: \"#111\", paddingTop: insets.top }}>",
       "match": "\"#111\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 428,
+      "line": 422,
       "snippet": "color: index === breadcrumbs.length - 1 ? \"#fff\" : ACCENT,",
       "match": "\"#fff\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 450,
+      "line": 444,
       "snippet": "style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: \"rgba(255,255,255,0.07)\", borderW",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 452,
+      "line": 446,
       "snippet": "<Text style={{ color: \"#aaa\", fontSize: 11, fontFamily: \"monospace\", fontWeight: \"700\" }}>📁 NEW</Text>",
       "match": "\"#aaa\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 483,
+      "line": 477,
       "snippet": "<Text style={{ color: \"#333\", fontSize: 11, fontFamily: \"monospace\", marginTop: 8, textAlign: \"center\" }}>",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 539,
+      "line": 533,
       "snippet": "backgroundColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 544,
+      "line": 538,
       "snippet": "borderColor: \"#2A2A2A\",",
       "match": "\"#2A2A2A\""
     },
     {
       "file": "frontend/app/(tabs)/files.tsx",
-      "line": 550,
+      "line": 544,
       "snippet": "<Text numberOfLines={1} style={{ color: \"#ccc\", fontSize: 12, fontFamily: \"monospace\" }}>{f.filename}</Text>",
       "match": "\"#ccc\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 81,
+      "line": 75,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 10, width: 28, fontFamily: \"monospace\" }}>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 84,
+      "line": 78,
       "snippet": "<View style={{ flex: 1, height: 18, backgroundColor: \"#1A1A1A\", borderRadius: 4, overflow: \"hidden\" }}>",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 89,
+      "line": 83,
       "snippet": "backgroundColor: ratio > 0.8 ? \"#EF4444\" : ratio > 0.5 ? \"#F59E0B\" : \"#06B6D4\",",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 89,
+      "line": 83,
       "snippet": "backgroundColor: ratio > 0.8 ? \"#EF4444\" : ratio > 0.5 ? \"#F59E0B\" : \"#06B6D4\",",
       "match": "\"#F59E0B\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 89,
+      "line": 83,
       "snippet": "backgroundColor: ratio > 0.8 ? \"#EF4444\" : ratio > 0.5 ? \"#F59E0B\" : \"#06B6D4\",",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 94,
+      "line": 88,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 10, width: 72, textAlign: \"right\", fontFamily: \"monospace\" }}>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 165,
+      "line": 159,
       "snippet": "<View style={{ flex: 1, backgroundColor: \"#0A0A0A\" }}>",
       "match": "\"#0A0A0A\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 175,
+      "line": 169,
       "snippet": "<Text style={{ color: \"#F59E0B\", fontSize: 22, fontWeight: \"bold\", letterSpacing: 2 }}>",
       "match": "\"#F59E0B\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 184,
+      "line": 178,
       "snippet": "<View style={{ height: 1, backgroundColor: \"#1A1A1A\", marginHorizontal: hPad }} />",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 192,
+      "line": 186,
       "snippet": "<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor=\"#06B6D4\" colors={[\"#06B6D4\"]} />",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 192,
+      "line": 186,
       "snippet": "<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor=\"#06B6D4\" colors={[\"#06B6D4\"]} />",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 197,
+      "line": 191,
       "snippet": "<Text style={{ color: \"#F59E0B\", fontSize: 13, fontWeight: \"700\", letterSpacing: 1.5 }}>",
       "match": "\"#F59E0B\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 204,
+      "line": 198,
       "snippet": "backgroundColor: \"#111111\",",
       "match": "\"#111111\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 208,
+      "line": 202,
       "snippet": "borderColor: \"#1E1E1E\",",
       "match": "\"#1E1E1E\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 210,
+      "line": 204,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 11, fontWeight: \"700\", letterSpacing: 1.5, marginBottom: 12 }}>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 215,
+      "line": 209,
       "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 13, opacity: 0.6 }}>Loading...</Text>",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 217,
+      "line": 211,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 12 }}>{errorSummary}</Text>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 222,
+      "line": 216,
       "snippet": "<View style={{ flex: 1, backgroundColor: \"#1A1A1A\", borderRadius: 10, padding: 12 }}>",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 223,
+      "line": 217,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 10, fontWeight: \"600\", letterSpacing: 1, marginBottom: 4 }}>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 226,
+      "line": 220,
       "snippet": "<Text style={{ color: \"#EF4444\", fontSize: 22, fontWeight: \"bold\", fontFamily: \"monospace\" }} numberOfLines={1} adjustsF",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 231,
+      "line": 225,
       "snippet": "<View style={{ flex: 1, backgroundColor: \"#1A1A1A\", borderRadius: 10, padding: 12 }}>",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 232,
+      "line": 226,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 10, fontWeight: \"600\", letterSpacing: 1, marginBottom: 4 }}>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 235,
+      "line": 229,
       "snippet": "<Text style={{ color: \"#22C55E\", fontSize: 22, fontWeight: \"bold\", fontFamily: \"monospace\" }} numberOfLines={1} adjustsF",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 244,
+      "line": 238,
       "snippet": "<View style={{ backgroundColor: \"#1A1A1A\", borderRadius: 10, padding: 12, marginBottom: 16 }}>",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 245,
+      "line": 239,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 10, fontWeight: \"600\", letterSpacing: 1, marginBottom: 4 }}>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 248,
+      "line": 242,
       "snippet": "<Text style={{ color: \"#F59E0B\", fontSize: 18, fontWeight: \"bold\", fontFamily: \"monospace\" }}>",
       "match": "\"#F59E0B\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 255,
+      "line": 249,
       "snippet": "<Text style={{ color: \"#3A3A3A\", fontSize: 10, fontWeight: \"600\", letterSpacing: 1, marginBottom: 4 }}>",
       "match": "\"#3A3A3A\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 265,
+      "line": 259,
       "snippet": "backgroundColor: \"#111111\",",
       "match": "\"#111111\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 269,
+      "line": 263,
       "snippet": "borderColor: \"#1E1E1E\",",
       "match": "\"#1E1E1E\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 271,
+      "line": 265,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 11, fontWeight: \"700\", letterSpacing: 1.5, marginBottom: 12 }}>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 276,
+      "line": 270,
       "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 13, opacity: 0.6 }}>Loading...</Text>",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 278,
+      "line": 272,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 12 }}>{errorTx}</Text>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 280,
+      "line": 274,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 12 }}>No transactions</Text>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 294,
+      "line": 288,
       "snippet": "borderBottomColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 303,
+      "line": 297,
       "snippet": "style={{ color: \"#E5E5E5\", fontSize: 13, fontWeight: \"600\" }}",
       "match": "\"#E5E5E5\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 308,
+      "line": 302,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 11, marginTop: 1 }}>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 315,
+      "line": 309,
       "snippet": "color: isPositive ? \"#22C55E\" : \"#EF4444\",",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/(tabs)/finance.tsx",
-      "line": 315,
+      "line": 309,
       "snippet": "color: isPositive ? \"#22C55E\" : \"#EF4444\",",
       "match": "\"#EF4444\""
     },
@@ -932,13 +932,13 @@
     },
     {
       "file": "frontend/app/(tabs)/music.tsx",
-      "line": 27,
+      "line": 28,
       "snippet": "const ACCENT = \"#1DB954\";",
       "match": "\"#1DB954\""
     },
     {
       "file": "frontend/app/(tabs)/music.tsx",
-      "line": 28,
+      "line": 29,
       "snippet": "const BAR_COLOR = \"#FFFFFF\";",
       "match": "\"#FFFFFF\""
     },
@@ -1730,403 +1730,403 @@
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 18,
+      "line": 17,
       "snippet": "const CYAN = \"#06B6D4\";",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 19,
+      "line": 18,
       "snippet": "const CARD_BG = \"#111111\";",
       "match": "\"#111111\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 20,
+      "line": 19,
       "snippet": "const BORDER = \"#222\";",
       "match": "\"#222\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 79,
+      "line": 78,
       "snippet": "color: \"#737373\",",
       "match": "\"#737373\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 117,
+      "line": 116,
       "snippet": "valueColor = \"#E5E5E5\",",
       "match": "\"#E5E5E5\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 130,
+      "line": 129,
       "snippet": "borderBottomColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 135,
+      "line": 134,
       "snippet": "color: \"#737373\",",
       "match": "\"#737373\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 173,
+      "line": 172,
       "snippet": "backgroundColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 211,
+      "line": 210,
       "snippet": "<Text style={{ fontSize: 8, color: isOnline ? \"#22C55E\" : \"#EF4444\" }}>",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 211,
+      "line": 210,
       "snippet": "<Text style={{ fontSize: 8, color: isOnline ? \"#22C55E\" : \"#EF4444\" }}>",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 216,
+      "line": 215,
       "snippet": "color: \"#A3A3A3\",",
       "match": "\"#A3A3A3\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 226,
+      "line": 225,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 257,
+      "line": 256,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 283,
+      "line": 282,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 294,
+      "line": 293,
       "snippet": "color: \"#737373\",",
       "match": "\"#737373\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 351,
+      "line": 350,
       "snippet": "<View style={{ flex: 1, backgroundColor: \"#0A0A0A\" }}>",
       "match": "\"#0A0A0A\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 363,
+      "line": 362,
       "snippet": "borderBottomColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 372,
+      "line": 371,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 413,
+      "line": 412,
       "snippet": "color: \"#EF4444\",",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 427,
+      "line": 426,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 460,
+      "line": 459,
       "snippet": "color=\"#A78BFA\"",
       "match": "\"#A78BFA\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 465,
+      "line": 464,
       "snippet": "color=\"#FBBF24\"",
       "match": "\"#FBBF24\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 470,
+      "line": 469,
       "snippet": "color=\"#6EE7B7\"",
       "match": "\"#6EE7B7\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 497,
+      "line": 496,
       "snippet": "color: \"#E5E5E5\",",
       "match": "\"#E5E5E5\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 507,
+      "line": 506,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 520,
+      "line": 519,
       "snippet": "? \"#EF4444\"",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 521,
+      "line": 520,
       "snippet": ": \"#FBBF24\",",
       "match": "\"#FBBF24\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 531,
+      "line": 530,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 543,
+      "line": 542,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 567,
+      "line": 566,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 578,
+      "line": 577,
       "snippet": "color=\"#FBBF24\"",
       "match": "\"#FBBF24\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 605,
+      "line": 604,
       "snippet": "? \"#22C55E\"",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 606,
+      "line": 605,
       "snippet": ": \"#EF4444\"",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 620,
+      "line": 619,
       "snippet": "valueColor=\"#22C55E\"",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 627,
+      "line": 626,
       "snippet": "? \"#EF4444\"",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 628,
+      "line": 627,
       "snippet": ": \"#737373\"",
       "match": "\"#737373\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 651,
+      "line": 650,
       "snippet": "valueColor=\"#22C55E\"",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 665,
+      "line": 664,
       "snippet": "(live?.memoryMB?.heap || 0) > 300 ? \"#EF4444\" : \"#E5E5E5\"",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 665,
+      "line": 664,
       "snippet": "(live?.memoryMB?.heap || 0) > 300 ? \"#EF4444\" : \"#E5E5E5\"",
       "match": "\"#E5E5E5\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 701,
+      "line": 700,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 740,
+      "line": 739,
       "snippet": "evt.event === \"connect\" ? \"#22C55E\" : \"#EF4444\",",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 740,
+      "line": 739,
       "snippet": "evt.event === \"connect\" ? \"#22C55E\" : \"#EF4444\",",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 747,
+      "line": 746,
       "snippet": "color: \"#737373\",",
       "match": "\"#737373\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 757,
+      "line": 756,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 849,
+      "line": 848,
       "snippet": "(today?.gemini?.reconnects || 0) > 10 ? \"#FBBF24\" : \"#E5E5E5\"",
       "match": "\"#FBBF24\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 849,
+      "line": 848,
       "snippet": "(today?.gemini?.reconnects || 0) > 10 ? \"#FBBF24\" : \"#E5E5E5\"",
       "match": "\"#E5E5E5\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 876,
+      "line": 875,
       "snippet": "valueColor=\"#22C55E\"",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 894,
+      "line": 893,
       "snippet": "color: \"#737373\",",
       "match": "\"#737373\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 904,
+      "line": 903,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 931,
+      "line": 930,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 951,
+      "line": 950,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 965,
+      "line": 964,
       "snippet": "? \"#EF4444\"",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 984,
+      "line": 983,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1004,
+      "line": 1003,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1018,
+      "line": 1017,
       "snippet": "? \"#EF4444\"",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1042,
+      "line": 1041,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1068,
+      "line": 1067,
       "snippet": "color=\"#A78BFA\"",
       "match": "\"#A78BFA\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1073,
+      "line": 1072,
       "snippet": "color=\"#FBBF24\"",
       "match": "\"#FBBF24\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1080,
+      "line": 1079,
       "snippet": "color=\"#22C55E\"",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1085,
+      "line": 1084,
       "snippet": "color=\"#6EE7B7\"",
       "match": "\"#6EE7B7\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1108,
+      "line": 1107,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1127,
+      "line": 1126,
       "snippet": "color=\"#FBBF24\"",
       "match": "\"#FBBF24\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1153,
+      "line": 1152,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1176,
+      "line": 1175,
       "snippet": "borderBottomColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1181,
+      "line": 1180,
       "snippet": "color: \"#A3A3A3\",",
       "match": "\"#A3A3A3\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1192,
+      "line": 1191,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/metrics.tsx",
-      "line": 1201,
+      "line": 1200,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
@@ -2474,265 +2474,265 @@
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 201,
+      "line": 200,
       "snippet": "<View style={{ flex: 1, backgroundColor: \"#111111\" }}>",
       "match": "\"#111111\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 213,
+      "line": 212,
       "snippet": "<Text style={{ color: \"#F59E0B\", fontSize: 24, fontWeight: \"bold\" }}>",
       "match": "\"#F59E0B\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 227,
+      "line": 226,
       "snippet": "color: \"#A3A3A3\",",
       "match": "\"#A3A3A3\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 247,
+      "line": 246,
       "snippet": "color: \"#06B6D4\",",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 267,
+      "line": 266,
       "snippet": "backgroundColor: mode === m ? \"#06B6D4\" : \"#1A1A1A\",",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 267,
+      "line": 266,
       "snippet": "backgroundColor: mode === m ? \"#06B6D4\" : \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 269,
+      "line": 268,
       "snippet": "borderColor: mode === m ? \"#06B6D4\" : \"#333\",",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 269,
+      "line": 268,
       "snippet": "borderColor: mode === m ? \"#06B6D4\" : \"#333\",",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 274,
+      "line": 273,
       "snippet": "color: mode === m ? \"#000\" : \"#737373\",",
       "match": "\"#000\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 274,
+      "line": 273,
       "snippet": "color: mode === m ? \"#000\" : \"#737373\",",
       "match": "\"#737373\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 297,
+      "line": 296,
       "snippet": "backgroundColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 299,
+      "line": 298,
       "snippet": "borderColor: \"#333\",",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 305,
+      "line": 304,
       "snippet": "color: \"#A3A3A3\",",
       "match": "\"#A3A3A3\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 321,
+      "line": 320,
       "snippet": "backgroundColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 323,
+      "line": 322,
       "snippet": "borderColor: \"#333\",",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 329,
+      "line": 328,
       "snippet": "color: \"#A3A3A3\",",
       "match": "\"#A3A3A3\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 345,
+      "line": 344,
       "snippet": "<Text style={{ color: \"#737373\", fontSize: 11, fontFamily: \"monospace\" }}>",
       "match": "\"#737373\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 349,
+      "line": 348,
       "snippet": "<Text style={{ color: \"#EF4444\", fontSize: 11, fontFamily: \"monospace\", fontWeight: \"bold\" }}>",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 358,
+      "line": 357,
       "snippet": "backgroundColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 360,
+      "line": 359,
       "snippet": "borderColor: \"#333\",",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 369,
+      "line": 368,
       "snippet": "style={{ width: \"100%\", height: 120, borderRadius: 6, backgroundColor: \"#222\" }}",
       "match": "\"#222\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 378,
+      "line": 377,
       "snippet": "<Text style={{ color: \"#E5E5E5\", fontSize: 12, fontFamily: \"monospace\" }} numberOfLines={1}>",
       "match": "\"#E5E5E5\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 381,
+      "line": 380,
       "snippet": "<Text style={{ color: \"#525252\", fontSize: 10, fontFamily: \"monospace\" }}>",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 386,
+      "line": 385,
       "snippet": "<Text style={{ color: \"#EF4444\", fontSize: 14 }}>✕</Text>",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 403,
+      "line": 402,
       "snippet": "placeholderTextColor=\"#525252\"",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 406,
+      "line": 405,
       "snippet": "backgroundColor: \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 408,
+      "line": 407,
       "snippet": "borderColor: \"#333\",",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 411,
+      "line": 410,
       "snippet": "color: \"#E5E5E5\",",
       "match": "\"#E5E5E5\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 420,
+      "line": 419,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 435,
+      "line": 434,
       "snippet": "color: \"#EF4444\",",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 448,
+      "line": 447,
       "snippet": "backgroundColor: \"#064E3B\",",
       "match": "\"#064E3B\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 456,
+      "line": 455,
       "snippet": "color: \"#34D399\",",
       "match": "\"#34D399\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 477,
+      "line": 476,
       "snippet": "backgroundColor: hasContent && !sending ? \"#06B6D4\" : \"#1A1A1A\",",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 477,
+      "line": 476,
       "snippet": "backgroundColor: hasContent && !sending ? \"#06B6D4\" : \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 479,
+      "line": 478,
       "snippet": "borderColor: hasContent && !sending ? \"#06B6D4\" : \"#333\",",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 479,
+      "line": 478,
       "snippet": "borderColor: hasContent && !sending ? \"#06B6D4\" : \"#333\",",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 486,
+      "line": 485,
       "snippet": "color: hasContent && !sending ? \"#000\" : \"#525252\",",
       "match": "\"#000\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 486,
+      "line": 485,
       "snippet": "color: hasContent && !sending ? \"#000\" : \"#525252\",",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 503,
+      "line": 502,
       "snippet": "backgroundColor: hasContent && !sending ? \"#F59E0B\" : \"#1A1A1A\",",
       "match": "\"#F59E0B\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 503,
+      "line": 502,
       "snippet": "backgroundColor: hasContent && !sending ? \"#F59E0B\" : \"#1A1A1A\",",
       "match": "\"#1A1A1A\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 505,
+      "line": 504,
       "snippet": "borderColor: hasContent && !sending ? \"#F59E0B\" : \"#333\",",
       "match": "\"#F59E0B\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 505,
+      "line": 504,
       "snippet": "borderColor: hasContent && !sending ? \"#F59E0B\" : \"#333\",",
       "match": "\"#333\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 512,
+      "line": 511,
       "snippet": "color: hasContent && !sending ? \"#000\" : \"#525252\",",
       "match": "\"#000\""
     },
     {
       "file": "frontend/app/upload.tsx",
-      "line": 512,
+      "line": 511,
       "snippet": "color: hasContent && !sending ? \"#000\" : \"#525252\",",
       "match": "\"#525252\""
     },
@@ -2935,12 +2935,6 @@
       "match": "\"#EF4444\""
     },
     {
-      "file": "frontend/components/SciFiOrb.tsx",
-      "line": 12,
-      "snippet": "const CYAN = \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
       "file": "frontend/components/StatusBadge.tsx",
       "line": 6,
       "snippet": "connected: { dot: \"#22C55E\" },",
@@ -2969,18 +2963,6 @@
       "line": 54,
       "snippet": "color: \"#525252\",",
       "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/StreamingText.tsx",
-      "line": 51,
-      "snippet": "color: \"#E0E0E0\",",
-      "match": "\"#E0E0E0\""
-    },
-    {
-      "file": "frontend/components/StreamingText.tsx",
-      "line": 62,
-      "snippet": "color: \"#06B6D4\",",
-      "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/components/TranscriptBubble.tsx",
@@ -3395,216 +3377,6 @@
       "line": 321,
       "snippet": "<Text style={{ color: amount ? \"#111\" : \"#525252\", fontFamily: \"monospace\", fontSize: 12, fontWeight: \"bold\" }}>",
       "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 5,
-      "snippet": "const ACCENT = \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 46,
-      "snippet": "<View style={{ backgroundColor: \"#111111\", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: \"85%\" }}>",
-      "match": "\"#111111\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 48,
-      "snippet": "<Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"bold\" }}>New Investment</Text>",
-      "match": "\"#E5E5E5\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 49,
-      "snippet": "<Pressable onPress={onClose}><Text style={{ color: \"#525252\", fontSize: 22 }}>×</Text></Pressable>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 55,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>CATEGORY</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 60,
-      "snippet": "backgroundColor: category === c ? ACCENT + \"22\" : \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 63,
-      "snippet": "<Text style={{ color: category === c ? ACCENT : \"#737373\", fontFamily: \"monospace\", fontSize: 9, textTransform: \"upperca",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 71,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>CURRENCY</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 76,
-      "snippet": "backgroundColor: currency === c ? ACCENT + \"22\" : \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 79,
-      "snippet": "<Text style={{ color: currency === c ? ACCENT : \"#737373\", fontFamily: \"monospace\", fontSize: 9 }}>{c}</Text>",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 86,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>STATUS</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 91,
-      "snippet": "backgroundColor: status === s ? ACCENT + \"22\" : \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 94,
-      "snippet": "<Text style={{ color: status === s ? ACCENT : \"#737373\", fontFamily: \"monospace\", fontSize: 10, textTransform: \"uppercas",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 105,
-      "snippet": "backgroundColor: (title.trim() && amount) ? ACCENT : \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 110,
-      "snippet": "<Text style={{ color: \"#111\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\" }}>{saving ? \"Creating...\" : \"CR",
-      "match": "\"#111\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 122,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>{label.toUpperCase()}</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 124,
-      "snippet": "value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor=\"#404040\" keyboardType={keyboar",
-      "match": "\"#404040\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 125,
-      "snippet": "style={{ backgroundColor: \"#1A1A1A\", borderRadius: 8, padding: 12, color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: ",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/business/AddInvestmentModal.tsx",
-      "line": 125,
-      "snippet": "style={{ backgroundColor: \"#1A1A1A\", borderRadius: 8, padding: 12, color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: ",
-      "match": "\"#E5E5E5\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 6,
-      "snippet": "const ACCENT = \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 55,
-      "snippet": "<View style={{ backgroundColor: \"#111111\", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: \"85%\" }}>",
-      "match": "\"#111111\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 57,
-      "snippet": "<Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"bold\" }}>New Invoice</Text>",
-      "match": "\"#E5E5E5\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 58,
-      "snippet": "<Pressable onPress={onClose}><Text style={{ color: \"#525252\", fontSize: 22 }}>×</Text></Pressable>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 65,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>CURRENCY</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 70,
-      "snippet": "backgroundColor: currency === c ? ACCENT + \"22\" : \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 73,
-      "snippet": "<Text style={{ color: currency === c ? ACCENT : \"#737373\", fontFamily: \"monospace\", fontSize: 9 }}>{c}</Text>",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 82,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>CONTACT</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 88,
-      "snippet": "backgroundColor: contactId === c.id ? ACCENT + \"22\" : \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 91,
-      "snippet": "<Text style={{ color: contactId === c.id ? ACCENT : \"#737373\", fontFamily: \"monospace\", fontSize: 10 }}>{c.name}</Text>",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 105,
-      "snippet": "backgroundColor: amount ? ACCENT : \"#333\", borderRadius: 10, padding: 14, alignItems: \"center\", marginTop: 8,",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 109,
-      "snippet": "<Text style={{ color: \"#111\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\" }}>{saving ? \"Creating...\" : \"CR",
-      "match": "\"#111\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 121,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, marginBottom: 6 }}>{label.toUpperCase()}</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 123,
-      "snippet": "value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor=\"#404040\" keyboardType={keyboar",
-      "match": "\"#404040\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 124,
-      "snippet": "style={{ backgroundColor: \"#1A1A1A\", borderRadius: 8, padding: 12, color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: ",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/business/AddInvoiceModal.tsx",
-      "line": 124,
-      "snippet": "style={{ backgroundColor: \"#1A1A1A\", borderRadius: 8, padding: 12, color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: ",
-      "match": "\"#E5E5E5\""
     },
     {
       "file": "frontend/components/business/AddProjectModal.tsx",
@@ -5329,66 +5101,6 @@
       "match": "\"#E5E5E5\""
     },
     {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 5,
-      "snippet": "planned: \"#737373\",",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 6,
-      "snippet": "committed: \"#F59E0B\",",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 7,
-      "snippet": "paid: \"#3B82F6\",",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 8,
-      "snippet": "recovered: \"#22C55E\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 27,
-      "snippet": "const statusColor = STATUS_COLORS[investment.status] || \"#737373\";",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 34,
-      "snippet": "backgroundColor: pressed ? \"#222\" : \"#1A1A1A\",",
-      "match": "\"#222\""
-    },
-    {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 34,
-      "snippet": "backgroundColor: pressed ? \"#222\" : \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 45,
-      "snippet": "<Text style={{ color: \"#E5E5E5\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\", flex: 1 }} numberOfLines={1}",
-      "match": "\"#E5E5E5\""
-    },
-    {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 59,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 9, textTransform: \"uppercase\" }}>{investment.categor",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/business/InvestmentCard.tsx",
-      "line": 62,
-      "snippet": "<Text style={{ color: \"#404040\", fontFamily: \"monospace\", fontSize: 10, marginTop: 6, marginLeft: 28 }} numberOfLines={1",
-      "match": "\"#404040\""
-    },
-    {
       "file": "frontend/components/business/PipelineView.tsx",
       "line": 8,
       "snippet": "const ACCENT = \"#06B6D4\";",
@@ -6655,252 +6367,6 @@
       "match": "\"#525252\""
     },
     {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 12,
-      "snippet": "const ACCENT = \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 112,
-      "snippet": "const modeColor = isOff ? \"#525252\" : hvacMode === \"cool\" ? \"#3B82F6\" : hvacMode === \"heat\" ? \"#EF4444\" : ACCENT;",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 112,
-      "snippet": "const modeColor = isOff ? \"#525252\" : hvacMode === \"cool\" ? \"#3B82F6\" : hvacMode === \"heat\" ? \"#EF4444\" : ACCENT;",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 112,
-      "snippet": "const modeColor = isOff ? \"#525252\" : hvacMode === \"cool\" ? \"#3B82F6\" : hvacMode === \"heat\" ? \"#EF4444\" : ACCENT;",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 119,
-      "snippet": "<Text style={{ color: \"#D4D4D4\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\" }}>",
-      "match": "\"#D4D4D4\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 123,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 12 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 149,
-      "snippet": "backgroundColor: \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 176,
-      "snippet": "backgroundColor: dragging ? \"#FFF\" : modeColor,",
-      "match": "\"#FFF\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 178,
-      "snippet": "borderColor: \"#111\",",
-      "match": "\"#111\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 184,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 9 }}>{TEMP_MIN}°</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 185,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 9 }}>{TEMP_MAX}°</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 202,
-      "snippet": "borderColor: active ? ACCENT : \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 208,
-      "snippet": "color: active ? ACCENT : \"#737373\",",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 224,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10, alignSelf: \"center\" }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 238,
-      "snippet": "borderColor: active ? ACCENT : \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/devices/ACWidget.tsx",
-      "line": 244,
-      "snippet": "color: active ? ACCENT : \"#737373\",",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumMapCard.tsx",
-      "line": 15,
-      "snippet": "borderColor: \"#2A2A2A\",",
-      "match": "\"#2A2A2A\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumMapCard.tsx",
-      "line": 16,
-      "snippet": "backgroundColor: \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumMapCard.tsx",
-      "line": 23,
-      "snippet": "style={{ width: \"100%\", height: 160, backgroundColor: \"#0A0A0A\" }}",
-      "match": "\"#0A0A0A\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumMapCard.tsx",
-      "line": 35,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 10, fontWeight: \"bold\" }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumMapCard.tsx",
-      "line": 38,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10 }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 8,
-      "snippet": "const ACCENT = \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 11,
-      "snippet": "cleaning: \"#22C55E\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 12,
-      "snippet": "returning: \"#EAB308\",",
-      "match": "\"#EAB308\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 13,
-      "snippet": "docked: \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 14,
-      "snippet": "idle: \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 15,
-      "snippet": "paused: \"#F97316\",",
-      "match": "\"#F97316\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 16,
-      "snippet": "error: \"#EF4444\",",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 31,
-      "snippet": "const stateColor = STATE_COLORS[state.state] ?? \"#525252\";",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 41,
-      "snippet": "<Text style={{ color: \"#D4D4D4\", fontFamily: \"monospace\", fontSize: 13, fontWeight: \"bold\" }}>",
-      "match": "\"#D4D4D4\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 45,
-      "snippet": "<Text style={{ color: state.battery < 20 ? \"#EF4444\" : \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 11 }}>",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 45,
-      "snippet": "<Text style={{ color: state.battery < 20 ? \"#EF4444\" : \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 11 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 59,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 10 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 64,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 10 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 70,
-      "snippet": "<View style={{ height: 4, backgroundColor: \"#333\", borderRadius: 2 }}>",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 75,
-      "snippet": "backgroundColor: \"#22C55E\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 95,
-      "snippet": "borderColor: \"#22C55E\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 100,
-      "snippet": "<Text style={{ color: \"#22C55E\", fontFamily: \"monospace\", fontSize: 11, fontWeight: \"bold\" }}>",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 115,
-      "snippet": "borderColor: \"#F97316\",",
-      "match": "\"#F97316\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 120,
-      "snippet": "<Text style={{ color: \"#F97316\", fontFamily: \"monospace\", fontSize: 11, fontWeight: \"bold\" }}>",
-      "match": "\"#F97316\""
-    },
-    {
-      "file": "frontend/components/devices/VacuumWidget.tsx",
-      "line": 149,
-      "snippet": "<Text style={{ color: \"#EAB308\", fontFamily: \"monospace\", fontSize: 11, fontWeight: \"bold\" }}>",
-      "match": "\"#EAB308\""
-    },
-    {
       "file": "frontend/components/directives/BuildRunBadge.tsx",
       "line": 33,
       "snippet": "const badgeColor = isActive ? \"#3B82F6\" : succeeded ? \"#10B981\" : failed ? \"#EF4444\" : \"#6B7280\";",
@@ -6923,336 +6389,6 @@
       "line": 33,
       "snippet": "const badgeColor = isActive ? \"#3B82F6\" : succeeded ? \"#10B981\" : failed ? \"#EF4444\" : \"#6B7280\";",
       "match": "\"#6B7280\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 47,
-      "snippet": "color: filled ? \"#fff\" : color,",
-      "match": "\"#fff\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 63,
-      "snippet": "color: \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 72,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontSize: 12 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 99,
-      "snippet": "const statusColor = STATUS_COLORS[directive.status] || \"#737373\";",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 114,
-      "snippet": "backgroundColor: \"#141414\",",
-      "match": "\"#141414\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 128,
-      "snippet": "color: \"#F5F5F5\",",
-      "match": "\"#F5F5F5\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 138,
-      "snippet": "<Text style={{ color: \"#3A3A3A\", fontSize: 12 }}>",
-      "match": "\"#3A3A3A\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 150,
-      "snippet": "backgroundColor: directive.type === \"feature\" ? \"#3B82F615\" : directive.type === \"epic\" ? \"#A855F715\" : \"#22C55E15\",",
-      "match": "\"#3B82F615\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 150,
-      "snippet": "backgroundColor: directive.type === \"feature\" ? \"#3B82F615\" : directive.type === \"epic\" ? \"#A855F715\" : \"#22C55E15\",",
-      "match": "\"#A855F715\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 150,
-      "snippet": "backgroundColor: directive.type === \"feature\" ? \"#3B82F615\" : directive.type === \"epic\" ? \"#A855F715\" : \"#22C55E15\",",
-      "match": "\"#22C55E15\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 153,
-      "snippet": "color: directive.type === \"feature\" ? \"#60A5FA\" : directive.type === \"epic\" ? \"#C084FC\" : \"#4ADE80\",",
-      "match": "\"#60A5FA\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 153,
-      "snippet": "color: directive.type === \"feature\" ? \"#60A5FA\" : directive.type === \"epic\" ? \"#C084FC\" : \"#4ADE80\",",
-      "match": "\"#C084FC\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 153,
-      "snippet": "color: directive.type === \"feature\" ? \"#60A5FA\" : directive.type === \"epic\" ? \"#C084FC\" : \"#4ADE80\",",
-      "match": "\"#4ADE80\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 167,
-      "snippet": "backgroundColor: directive.priority <= 1 ? \"#EF444415\" : \"#F59E0B15\",",
-      "match": "\"#EF444415\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 167,
-      "snippet": "backgroundColor: directive.priority <= 1 ? \"#EF444415\" : \"#F59E0B15\",",
-      "match": "\"#F59E0B15\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 170,
-      "snippet": "color: directive.priority <= 1 ? \"#FCA5A5\" : \"#FCD34D\",",
-      "match": "\"#FCA5A5\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 170,
-      "snippet": "color: directive.priority <= 1 ? \"#FCA5A5\" : \"#FCD34D\",",
-      "match": "\"#FCD34D\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 181,
-      "snippet": "<Text style={{ color: \"#525252\", fontSize: 11 }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 187,
-      "snippet": "<Text style={{ color: \"#3A3A3A\", fontSize: 11 }}>",
-      "match": "\"#3A3A3A\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 193,
-      "snippet": "<Text style={{ color: \"#3A3A3A\", fontSize: 11 }}>",
-      "match": "\"#3A3A3A\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 207,
-      "snippet": "<View style={{ flex: 1, height: 4, backgroundColor: \"#1A1A1A\", borderRadius: 2, overflow: \"hidden\" }}>",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 208,
-      "snippet": "<View style={{ width: `${pct}%` as any, height: \"100%\", backgroundColor: \"#22C55E\", borderRadius: 2 }} />",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 210,
-      "snippet": "<Text style={{ color: \"#525252\", fontSize: 11 }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 226,
-      "snippet": "backgroundColor: \"#A855F715\",",
-      "match": "\"#A855F715\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 228,
-      "snippet": "<Text style={{ color: \"#C084FC\", fontSize: 11, fontWeight: \"600\" }}>",
-      "match": "\"#C084FC\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 239,
-      "snippet": "backgroundColor: \"#EF444410\",",
-      "match": "\"#EF444410\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 247,
-      "snippet": "color: \"#FCA5A5\",",
-      "match": "\"#FCA5A5\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 274,
-      "snippet": "color: \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 290,
-      "snippet": "<ActionChip label=\"Approve\" icon=\"\" color=\"#22C55E\" filled onPress={() => onAction(\"approve\", directive.id)} />",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 291,
-      "snippet": "<ActionChip label=\"Deny\" color=\"#EF4444\" onPress={() => onAction(\"deny\", directive.id)} />",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 296,
-      "snippet": "<ActionChip label=\"Retry Merge\" icon=\"\" color=\"#F59E0B\" onPress={() => onAction(\"retry_merge\", directive.id)} />",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 297,
-      "snippet": "<ActionChip label=\"Retry Full\" icon=\"\" color=\"#3B82F6\" onPress={() => onAction(\"retry\", directive.id)} />",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 302,
-      "snippet": "<ActionChip label=\"Unblock\" color=\"#A855F7\" onPress={() => onAction(\"unblock\", directive.id)} />",
-      "match": "\"#A855F7\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 303,
-      "snippet": "<ActionChip label=\"Cancel\" color=\"#EF4444\" onPress={() => onAction(\"cancel\", directive.id)} />",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 307,
-      "snippet": "<ActionChip label=\"Retry\" icon=\"\" color=\"#3B82F6\" onPress={() => onAction(\"retry\", directive.id)} />",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 310,
-      "snippet": "<ActionChip label=\"Cancel\" color=\"#EF4444\" onPress={() => onAction(\"cancel\", directive.id)} />",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 314,
-      "snippet": "<ActionChip label=\"View Plan\" icon=\"\" color=\"#06B6D4\" onPress={() => onPlanReview(directive)} />",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 318,
-      "snippet": "<ActionChip label=\"Status\" color=\"#737373\" onPress={() => onStatusChange(directive)} />",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 325,
-      "snippet": "<View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: \"#1E1E1E\", paddingTop: 12 }}>",
-      "match": "\"#1E1E1E\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 330,
-      "snippet": "color: \"#A3A3A3\",",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 346,
-      "snippet": "borderColor: \"#1E1E1E\",",
-      "match": "\"#1E1E1E\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 350,
-      "snippet": "backgroundColor: \"#111111\",",
-      "match": "\"#111111\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 356,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 12, fontWeight: \"600\" }}>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 359,
-      "snippet": "<Text style={{ color: \"#3B82F6\", fontSize: 11 }}>",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 365,
-      "snippet": "color: \"#737373\",",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 379,
-      "snippet": "backgroundColor: \"#111111\",",
-      "match": "\"#111111\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 384,
-      "snippet": "borderLeftColor: \"#3B82F6\",",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 386,
-      "snippet": "<Text style={{ color: \"#525252\", fontSize: 10, fontWeight: \"700\", letterSpacing: 0.5, marginBottom: 4 }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 389,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontSize: 12, lineHeight: 18 }} numberOfLines={8}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 398,
-      "snippet": "backgroundColor: \"#111111\",",
-      "match": "\"#111111\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 403,
-      "snippet": "borderLeftColor: \"#A855F7\",",
-      "match": "\"#A855F7\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 405,
-      "snippet": "<Text style={{ color: \"#525252\", fontSize: 10, fontWeight: \"700\", letterSpacing: 0.5, marginBottom: 4 }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 408,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontSize: 12, lineHeight: 18 }} numberOfLines={6}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 447,
-      "snippet": "color: \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/directives/DirectiveCard.tsx",
-      "line": 460,
-      "snippet": "color: \"#737373\",",
-      "match": "\"#737373\""
     },
     {
       "file": "frontend/components/directives/DirectiveListItem.tsx",
@@ -7417,258 +6553,6 @@
       "match": "\"#4ADE80\""
     },
     {
-      "file": "frontend/components/directives/SummaryStatsBar.tsx",
-      "line": 85,
-      "snippet": "<StatChip emoji=\"🔥\" count={needsAction} label=\"NEEDS ACTION\" color=\"#F59E0B\" onPress={() => onFilterSelect(\"needs_actio",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/directives/SummaryStatsBar.tsx",
-      "line": 86,
-      "snippet": "<StatChip emoji=\"🚀\" count={active} label=\"ACTIVE\" color=\"#3B82F6\" onPress={() => onFilterSelect(\"active\")} />",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/directives/SummaryStatsBar.tsx",
-      "line": 87,
-      "snippet": "{epics > 0 ? <StatChip emoji=\"📦\" count={epics} label=\"EPICS\" color=\"#A855F7\" onPress={() => onFilterSelect(\"epics\")} />",
-      "match": "\"#A855F7\""
-    },
-    {
-      "file": "frontend/components/directives/SummaryStatsBar.tsx",
-      "line": 88,
-      "snippet": "<StatChip emoji=\"✅\" count={completed} label=\"COMPLETED\" color=\"#22C55E\" onPress={() => onFilterSelect(\"completed\")} />",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/directives/SummaryStatsBar.tsx",
-      "line": 89,
-      "snippet": "<StatChip emoji=\"📊\" count={successRate} label=\"% SUCCESS\" color=\"#06B6D4\" onPress={() => onFilterSelect(\"all\")} />",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/ExerciseHUD.tsx",
-      "line": 12,
-      "snippet": "good: \"#10B981\",",
-      "match": "\"#10B981\""
-    },
-    {
-      "file": "frontend/components/glasses/ExerciseHUD.tsx",
-      "line": 13,
-      "snippet": "warning: \"#F59E0B\",",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/ExerciseHUD.tsx",
-      "line": 14,
-      "snippet": "bad: \"#EF4444\",",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/glasses/ExerciseHUD.tsx",
-      "line": 39,
-      "snippet": "borderColor: \"#06B6D4\",",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/ExerciseHUD.tsx",
-      "line": 42,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 9, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 1 }}>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/ExerciseHUD.tsx",
-      "line": 58,
-      "snippet": "<Text style={{ color: \"#FFF\", fontSize: 18, fontFamily: \"monospace\", fontWeight: \"bold\" }}>",
-      "match": "\"#FFF\""
-    },
-    {
-      "file": "frontend/components/glasses/ExerciseHUD.tsx",
-      "line": 61,
-      "snippet": "<Text style={{ color: \"#737373\", fontSize: 8, fontFamily: \"monospace\", letterSpacing: 1 }}>",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/ExerciseHUD.tsx",
-      "line": 75,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontSize: 10, fontFamily: \"monospace\" }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 30,
-      "snippet": "borderColor: scanning ? \"#F59E0B\" : \"#00FF88\",",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 30,
-      "snippet": "borderColor: scanning ? \"#F59E0B\" : \"#00FF88\",",
-      "match": "\"#00FF88\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 36,
-      "snippet": "<ActivityIndicator size=\"small\" color=\"#F59E0B\" />",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 37,
-      "snippet": "<Text style={{ color: \"#F59E0B\", fontSize: 12, fontFamily: \"monospace\" }}>",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 46,
-      "snippet": "<Text style={{ color: \"#00FF88\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2 }}>",
-      "match": "\"#00FF88\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 49,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 10, fontFamily: \"monospace\" }}>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 54,
-      "snippet": "<Text style={{ color: \"#FFF\", fontSize: 16, fontFamily: \"monospace\", fontWeight: \"bold\", marginBottom: 4 }}>",
-      "match": "\"#FFF\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 57,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontSize: 12, fontFamily: \"monospace\", marginBottom: 12 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 66,
-      "snippet": "backgroundColor: \"#06B6D4\",",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 72,
-      "snippet": "<Text style={{ color: \"#000\", fontSize: 12, fontFamily: \"monospace\", fontWeight: \"bold\" }}>",
-      "match": "\"#000\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 83,
-      "snippet": "borderColor: \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceMatchOverlay.tsx",
-      "line": 87,
-      "snippet": "<Text style={{ color: \"#737373\", fontSize: 12, fontFamily: \"monospace\" }}>",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceOverlay.tsx",
-      "line": 15,
-      "snippet": "const FACE_COLORS = [\"#FF6B9D\", \"#A855F7\", \"#06B6D4\"]; // pink, purple, cyan for up to 3 faces",
-      "match": "\"#FF6B9D\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceOverlay.tsx",
-      "line": 15,
-      "snippet": "const FACE_COLORS = [\"#FF6B9D\", \"#A855F7\", \"#06B6D4\"]; // pink, purple, cyan for up to 3 faces",
-      "match": "\"#A855F7\""
-    },
-    {
-      "file": "frontend/components/glasses/FaceOverlay.tsx",
-      "line": 15,
-      "snippet": "const FACE_COLORS = [\"#FF6B9D\", \"#A855F7\", \"#06B6D4\"]; // pink, purple, cyan for up to 3 faces",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/HandOverlay.tsx",
-      "line": 79,
-      "snippet": "stroke=\"#00FF88\"",
-      "match": "\"#00FF88\""
-    },
-    {
-      "file": "frontend/components/glasses/HandOverlay.tsx",
-      "line": 95,
-      "snippet": "fill={isActive ? \"#FF4444\" : \"#00FF88\"}",
-      "match": "\"#FF4444\""
-    },
-    {
-      "file": "frontend/components/glasses/HandOverlay.tsx",
-      "line": 95,
-      "snippet": "fill={isActive ? \"#FF4444\" : \"#00FF88\"}",
-      "match": "\"#00FF88\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 20,
-      "snippet": "\"#06B6D4\", // cyan",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 21,
-      "snippet": "\"#A855F7\", // purple",
-      "match": "\"#A855F7\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 22,
-      "snippet": "\"#F59E0B\", // amber",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 23,
-      "snippet": "\"#10B981\", // emerald",
-      "match": "\"#10B981\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 24,
-      "snippet": "\"#EF4444\", // red",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 25,
-      "snippet": "\"#3B82F6\", // blue",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 26,
-      "snippet": "\"#EC4899\", // pink",
-      "match": "\"#EC4899\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 27,
-      "snippet": "\"#F97316\", // orange",
-      "match": "\"#F97316\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 30,
-      "snippet": "const LOCKED_COLOR = \"#00FF88\"; // green",
-      "match": "\"#00FF88\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 31,
-      "snippet": "const CANDIDATE_COLOR = \"#FFAA00\"; // yellow/orange",
-      "match": "\"#FFAA00\""
-    },
-    {
-      "file": "frontend/components/glasses/ObjectOverlay.tsx",
-      "line": 141,
-      "snippet": "color: isLocked ? \"#000\" : color,",
-      "match": "\"#000\""
-    },
-    {
       "file": "frontend/components/glasses/PhotoCaptureOverlay.tsx",
       "line": 231,
       "snippet": "backgroundColor: \"#fff\",",
@@ -7763,1020 +6647,6 @@
       "line": 494,
       "snippet": "color: \"#06B6D4\",",
       "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/PoseOverlay.tsx",
-      "line": 42,
-      "snippet": "good: \"#10B981\",",
-      "match": "\"#10B981\""
-    },
-    {
-      "file": "frontend/components/glasses/PoseOverlay.tsx",
-      "line": 43,
-      "snippet": "warning: \"#F59E0B\",",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/PoseOverlay.tsx",
-      "line": 44,
-      "snippet": "bad: \"#EF4444\",",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/glasses/PoseOverlay.tsx",
-      "line": 47,
-      "snippet": "const SKELETON_COLOR = \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/PoseOverlay.tsx",
-      "line": 48,
-      "snippet": "const JOINT_COLOR = \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 36,
-      "snippet": "describe: \"#06B6D4\",",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 37,
-      "snippet": "ocr: \"#A855F7\",",
-      "match": "\"#A855F7\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 38,
-      "snippet": "identify: \"#10B981\",",
-      "match": "\"#10B981\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 39,
-      "snippet": "translate: \"#F59E0B\",",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 76,
-      "snippet": "backgroundColor: \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 86,
-      "snippet": "<View style={{ alignSelf: \"center\", width: 36, height: 4, borderRadius: 2, backgroundColor: \"#444\", marginBottom: 16 }} ",
-      "match": "\"#444\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 91,
-      "snippet": "<Text style={{ color: \"#737373\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2, marginBott",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 103,
-      "snippet": "backgroundColor: quality === q ? \"#06B6D4\" : \"#111\",",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 103,
-      "snippet": "backgroundColor: quality === q ? \"#06B6D4\" : \"#111\",",
-      "match": "\"#111\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 105,
-      "snippet": "borderColor: quality === q ? \"#06B6D4\" : \"#333\",",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 105,
-      "snippet": "borderColor: quality === q ? \"#06B6D4\" : \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 109,
-      "snippet": "<Text style={{ color: quality === q ? \"#000\" : \"#737373\", fontSize: 11, fontFamily: \"monospace\", fontWeight: \"bold\", let",
-      "match": "\"#000\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 109,
-      "snippet": "<Text style={{ color: quality === q ? \"#000\" : \"#737373\", fontSize: 11, fontFamily: \"monospace\", fontWeight: \"bold\", let",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 120,
-      "snippet": "<Text style={{ color: \"#737373\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2, marginBott",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 135,
-      "snippet": "backgroundColor: active ? `${c}22` : \"#111\",",
-      "match": "\"#111\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 137,
-      "snippet": "borderColor: active ? c : \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 141,
-      "snippet": "<Text style={{ color: active ? c : \"#737373\", fontSize: 9, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 1",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 155,
-      "snippet": "borderColor: \"#164E63\",",
-      "match": "\"#164E63\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 159,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 11, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2 }}>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 169,
-      "snippet": "<Text style={{ color: \"#737373\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2, marginBott",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 177,
-      "snippet": "backgroundColor: osintMode ? \"rgba(6,182,212,0.15)\" : \"#111\",",
-      "match": "\"#111\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 179,
-      "snippet": "borderColor: osintMode ? \"#06B6D4\" : \"#333\",",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 179,
-      "snippet": "borderColor: osintMode ? \"#06B6D4\" : \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 183,
-      "snippet": "<Text style={{ color: osintMode ? \"#06B6D4\" : \"#737373\", fontSize: 11, fontFamily: \"monospace\", fontWeight: \"bold\", lett",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 183,
-      "snippet": "<Text style={{ color: osintMode ? \"#06B6D4\" : \"#737373\", fontSize: 11, fontFamily: \"monospace\", fontWeight: \"bold\", lett",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 188,
-      "snippet": "<Text style={{ color: \"#525252\", fontSize: 9, fontFamily: \"monospace\", marginTop: 4 }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 197,
-      "snippet": "<Text style={{ color: \"#737373\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2, marginBott",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 203,
-      "snippet": "style={{ flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: \"#164E63\", alignItems: \"center\" }}",
-      "match": "\"#164E63\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 205,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 1 }}>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 211,
-      "snippet": "style={{ flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: \"#164E63\", alignItems: \"center\" }}",
-      "match": "\"#164E63\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 213,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 1 }}>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 219,
-      "snippet": "<Text style={{ color: \"#F59E0B\", fontSize: 9, fontFamily: \"monospace\", marginTop: 6 }}>",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 227,
-      "snippet": "<View style={{ backgroundColor: \"rgba(6,182,212,0.05)\", borderWidth: 1, borderColor: \"#164E63\", borderRadius: 8, padding",
-      "match": "\"#164E63\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 229,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 1 }}>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 233,
-      "snippet": "<Text style={{ color: \"#525252\", fontSize: 9, fontFamily: \"monospace\" }}>CLOSE</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 237,
-      "snippet": "<Text key={key} style={{ color: \"#737373\", fontSize: 9, fontFamily: \"monospace\" }}>",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 246,
-      "snippet": "<View style={{ backgroundColor: \"rgba(6,182,212,0.05)\", borderWidth: 1, borderColor: \"#164E63\", borderRadius: 8, padding",
-      "match": "\"#164E63\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 248,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 10, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 1 }}>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 253,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 9, fontFamily: \"monospace\" }}>REFRESH</Text>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 256,
-      "snippet": "<Text style={{ color: \"#525252\", fontSize: 9, fontFamily: \"monospace\" }}>CLOSE</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 262,
-      "snippet": "<Text key={i} style={{ color: \"#737373\", fontSize: 8, fontFamily: \"monospace\", lineHeight: 12 }}>",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 267,
-      "snippet": "<Text style={{ color: \"#525252\", fontSize: 9, fontFamily: \"monospace\" }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 273,
-      "snippet": "<Text style={{ color: \"#F59E0B\", fontSize: 9, fontFamily: \"monospace\", fontWeight: \"bold\", marginTop: 6 }}>",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 277,
-      "snippet": "<Text key={`url-${i}`} style={{ color: \"#F59E0B\", fontSize: 8, fontFamily: \"monospace\", lineHeight: 12 }}>",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 293,
-      "snippet": "backgroundColor: \"#111\",",
-      "match": "\"#111\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 295,
-      "snippet": "borderColor: \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/glasses/SettingsSheet.tsx",
-      "line": 300,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontSize: 11, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/glasses/VisionOverlay.tsx",
-      "line": 22,
-      "snippet": "describe: \"#06B6D4\", // cyan",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/glasses/VisionOverlay.tsx",
-      "line": 23,
-      "snippet": "ocr: \"#A855F7\", // purple",
-      "match": "\"#A855F7\""
-    },
-    {
-      "file": "frontend/components/glasses/VisionOverlay.tsx",
-      "line": 24,
-      "snippet": "identify: \"#10B981\", // green",
-      "match": "\"#10B981\""
-    },
-    {
-      "file": "frontend/components/glasses/VisionOverlay.tsx",
-      "line": 25,
-      "snippet": "translate: \"#F59E0B\", // amber",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/glasses/VisionOverlay.tsx",
-      "line": 100,
-      "snippet": "color: \"#E5E5E5\",",
-      "match": "\"#E5E5E5\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 200,
-      "snippet": "const stepColor = step === \"success\" ? \"#66BB6A\" : step === \"error\" ? \"#EF5350\" : \"#4FC3F7\";",
-      "match": "\"#66BB6A\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 200,
-      "snippet": "const stepColor = step === \"success\" ? \"#66BB6A\" : step === \"error\" ? \"#EF5350\" : \"#4FC3F7\";",
-      "match": "\"#EF5350\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 200,
-      "snippet": "const stepColor = step === \"success\" ? \"#66BB6A\" : step === \"error\" ? \"#EF5350\" : \"#4FC3F7\";",
-      "match": "\"#4FC3F7\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 206,
-      "snippet": "width: 400, backgroundColor: \"#1a1a1a\", borderRadius: 16,",
-      "match": "\"#1a1a1a\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 209,
-      "snippet": "<Text style={{ color: \"#fff\", fontSize: 18, fontWeight: \"700\", marginBottom: 4 }}>",
-      "match": "\"#fff\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 233,
-      "snippet": "<Text style={{ color: \"#fff\", fontSize: 15, fontWeight: \"600\" }}>",
-      "match": "\"#fff\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 240,
-      "snippet": "<Text style={{ color: \"#4FC3F7\", fontSize: 13, fontWeight: \"600\" }}>PAIR</Text>",
-      "match": "\"#4FC3F7\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 253,
-      "snippet": "<Text style={{ color: \"#FFB830\", fontSize: 13, marginTop: 8, textAlign: \"center\", fontWeight: \"600\" }}>",
-      "match": "\"#FFB830\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 263,
-      "snippet": "<Text style={{ color: \"#66BB6A\", fontSize: 15, marginTop: 12, textAlign: \"center\", fontWeight: \"600\" }}>",
-      "match": "\"#66BB6A\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 272,
-      "snippet": "<Text style={{ color: \"#EF5350\", fontSize: 14, marginTop: 12, textAlign: \"center\" }}>",
-      "match": "\"#EF5350\""
-    },
-    {
-      "file": "frontend/components/home/BLEPairingModal.tsx",
-      "line": 279,
-      "snippet": "<Text style={{ color: \"#fff\", fontSize: 13 }}>Try Again</Text>",
-      "match": "\"#fff\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 8,
-      "snippet": "if (!state || state === \"unavailable\") return \"#525252\";",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 13,
-      "snippet": "return \"#22C55E\";",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 15,
-      "snippet": "return \"#3B82F6\";",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 17,
-      "snippet": "return \"#EF4444\";",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 19,
-      "snippet": "return \"#F97316\";",
-      "match": "\"#F97316\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 21,
-      "snippet": "return \"#EF4444\";",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 25,
-      "snippet": "return \"#525252\";",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 28,
-      "snippet": "if (type === \"ac\" && state !== \"off\") return \"#3B82F6\";",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 29,
-      "snippet": "return \"#525252\";",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 81,
-      "snippet": "backgroundColor: \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/home/DevicePin.tsx",
-      "line": 94,
-      "snippet": "color: \"#A3A3A3\",",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/home/DeviceSheet.tsx",
-      "line": 29,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 12 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/home/DeviceSheet.tsx",
-      "line": 40,
-      "snippet": "borderColor: isOn ? \"#22C55E\" : \"#525252\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/DeviceSheet.tsx",
-      "line": 40,
-      "snippet": "borderColor: isOn ? \"#22C55E\" : \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/DeviceSheet.tsx",
-      "line": 43,
-      "snippet": "<Text style={{ color: isOn ? \"#22C55E\" : \"#525252\", fontFamily: \"monospace\", fontSize: 12, fontWeight: \"bold\" }}>",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/DeviceSheet.tsx",
-      "line": 43,
-      "snippet": "<Text style={{ color: isOn ? \"#22C55E\" : \"#525252\", fontFamily: \"monospace\", fontSize: 12, fontWeight: \"bold\" }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/DeviceSheet.tsx",
-      "line": 79,
-      "snippet": "backgroundColor: \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/home/DeviceSheet.tsx",
-      "line": 89,
-      "snippet": "<View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: \"#525252\" }} />",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/DeviceSheet.tsx",
-      "line": 95,
-      "snippet": "<Text style={{ color: \"#D4D4D4\", fontFamily: \"monospace\", fontSize: 14, fontWeight: \"bold\", flex: 1 }}>",
-      "match": "\"#D4D4D4\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 51,
-      "snippet": "{ id: \"main_tv\", name: \"Main TV\", icon: \"📺\", entityId: \"media_player.main_tv\", domain: \"media_player\", color: \"#CE93D8\"",
-      "match": "\"#CE93D8\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 52,
-      "snippet": "{ id: \"spotify\", name: \"Spotify\", icon: \"🎵\", entityId: \"media_player.spotify_king_kazuma\", domain: \"media_player\", colo",
-      "match": "\"#1DB954\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 53,
-      "snippet": "{ id: \"ac\", name: \"AC\", icon: \"❄️\", entityId: \"climate.living_room_ac\", domain: \"climate\", color: \"#4FC3F7\", room: \"livi",
-      "match": "\"#4FC3F7\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 54,
-      "snippet": "{ id: \"midea_washer\", name: \"Washer\", icon: \"🫧\", entityId: \"switch.151732606804847_power\", domain: \"switch\", color: \"#3",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 55,
-      "snippet": "{ id: \"living_room_cam\", name: \"LR Camera\", icon: \"📹\", entityId: \"switch.living_room_cam_power\", domain: \"switch\", colo",
-      "match": "\"#F59E0B\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 56,
-      "snippet": "{ id: \"security_cam\", name: \"Security Cam\", icon: \"📹\", entityId: \"switch.cam1_power\", domain: \"switch\", color: \"#EF4444",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 57,
-      "snippet": "{ id: \"sous_vide\", name: \"Sous Vide\", icon: \"🍳\", entityId: \"switch.s_vide_switch\", domain: \"switch\", color: \"#F97316\", ",
-      "match": "\"#F97316\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 58,
-      "snippet": "{ id: \"dusk_vader\", name: \"Dusk Vader\", icon: \"🤖\", entityId: \"vacuum.dusk_vader\", domain: \"vacuum\", color: \"#8B5CF6\", r",
-      "match": "\"#8B5CF6\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 59,
-      "snippet": "{ id: \"node_1\", name: \"ESP32 Node 1\", icon: \"📡\", entityId: \"_node_1\", domain: \"sensor\", color: \"#EF4444\", room: \"living",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 60,
-      "snippet": "{ id: \"node_2\", name: \"ESP32 Node 2\", icon: \"📡\", entityId: \"_node_2\", domain: \"sensor\", color: \"#EF4444\", room: \"master",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 61,
-      "snippet": "{ id: \"node_3\", name: \"ESP32 Node 3\", icon: \"📡\", entityId: \"_node_3\", domain: \"sensor\", color: \"#EF4444\", room: \"office",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 114,
-      "snippet": "mat.color.set(\"#d4d4d8\");",
-      "match": "\"#d4d4d8\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 150,
-      "snippet": "mat.color.set(\"#a1a1aa\");",
-      "match": "\"#a1a1aa\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 216,
-      "snippet": "color={editMode ? \"#06B6D4\" : (isOn ? device.color : \"#525252\")}",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 216,
-      "snippet": "color={editMode ? \"#06B6D4\" : (isOn ? device.color : \"#525252\")}",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 228,
-      "snippet": "color={editMode ? \"#06B6D4\" : device.color}",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 237,
-      "snippet": "color={editMode ? \"#06B6D4\" : device.color}",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 332,
-      "snippet": "const color = position.method?.includes(\"ble\") ? \"#22C55E\" : \"#06B6D4\";",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 332,
-      "snippet": "const color = position.method?.includes(\"ble\") ? \"#22C55E\" : \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 471,
-      "snippet": "<Text style={{ color: \"#FFF\", fontSize: 16, fontWeight: \"600\" }}>",
-      "match": "\"#FFF\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 523,
-      "snippet": "<Text style={{ color: \"#FFF\", fontSize: 12, fontWeight: \"600\" }}>",
-      "match": "\"#FFF\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 564,
-      "snippet": "<Text style={{ color: \"#EF4444\", fontSize: 14, fontWeight: \"600\" }}>",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 616,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 13, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 2, textAlign:",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 657,
-      "snippet": "<Text style={{ color: \"#FFF\", fontSize: 14, fontWeight: \"600\" }}>{device.name}</Text>",
-      "match": "\"#FFF\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 843,
-      "snippet": "<View style={{ flex: 1, backgroundColor: \"#0A0A0A\" }}>",
-      "match": "\"#0A0A0A\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 925,
-      "snippet": "<Text style={{ color: \"#FFF\", fontSize: 15, fontWeight: \"600\" }}>",
-      "match": "\"#FFF\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 944,
-      "snippet": "color: conf > 60 ? \"#22C55E\" : conf > 35 ? \"#FBBF24\" : \"#EF4444\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 944,
-      "snippet": "color: conf > 60 ? \"#22C55E\" : conf > 35 ? \"#FBBF24\" : \"#EF4444\",",
-      "match": "\"#FBBF24\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 944,
-      "snippet": "color: conf > 60 ? \"#22C55E\" : conf > 35 ? \"#FBBF24\" : \"#EF4444\",",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/HomeMap3D.tsx",
-      "line": 974,
-      "snippet": "<Text style={{ color: \"#06B6D4\", fontSize: 12, fontFamily: \"monospace\", fontWeight: \"bold\", letterSpacing: 1 }}>",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 8,
-      "snippet": "const ACCENT = \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 112,
-      "snippet": "const modeColor = isOff ? \"#525252\" : hvacMode === \"cool\" ? \"#3B82F6\" : hvacMode === \"heat\" ? \"#EF4444\" : ACCENT;",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 112,
-      "snippet": "const modeColor = isOff ? \"#525252\" : hvacMode === \"cool\" ? \"#3B82F6\" : hvacMode === \"heat\" ? \"#EF4444\" : ACCENT;",
-      "match": "\"#3B82F6\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 112,
-      "snippet": "const modeColor = isOff ? \"#525252\" : hvacMode === \"cool\" ? \"#3B82F6\" : hvacMode === \"heat\" ? \"#EF4444\" : ACCENT;",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 119,
-      "snippet": "<Text style={{ color: \"#D4D4D4\", fontFamily: \"monospace\", fontSize: 28, fontWeight: \"bold\" }}>",
-      "match": "\"#D4D4D4\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 138,
-      "snippet": "style={{ height: 6, backgroundColor: \"#333\", borderRadius: 3 }}",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 161,
-      "snippet": "backgroundColor: dragging ? \"#FFF\" : modeColor,",
-      "match": "\"#FFF\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 163,
-      "snippet": "borderColor: \"#1A1A1A\",",
-      "match": "\"#1A1A1A\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 168,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10 }}>{TEMP_MIN}°</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 169,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 10 }}>{TEMP_MAX}°</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 186,
-      "snippet": "borderColor: active ? ACCENT : \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 192,
-      "snippet": "color: active ? ACCENT : \"#737373\",",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 208,
-      "snippet": "<Text style={{ color: \"#525252\", fontFamily: \"monospace\", fontSize: 11, alignSelf: \"center\" }}>FAN:</Text>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 220,
-      "snippet": "borderColor: active ? ACCENT : \"#333\",",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/home/sheets/ACSheet.tsx",
-      "line": 226,
-      "snippet": "color: active ? ACCENT : \"#737373\",",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 25,
-      "snippet": "<Text style={{ color: \"#D4D4D4\", fontFamily: \"monospace\", fontSize: 13 }}>{label}</Text>",
-      "match": "\"#D4D4D4\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 34,
-      "snippet": "borderColor: isOn ? \"#22C55E\" : \"#525252\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 34,
-      "snippet": "borderColor: isOn ? \"#22C55E\" : \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 37,
-      "snippet": "<Text style={{ color: isOn ? \"#22C55E\" : \"#525252\", fontFamily: \"monospace\", fontSize: 11, fontWeight: \"bold\" }}>",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 37,
-      "snippet": "<Text style={{ color: isOn ? \"#22C55E\" : \"#525252\", fontFamily: \"monospace\", fontSize: 11, fontWeight: \"bold\" }}>",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 68,
-      "snippet": "<View style={{ height: 1, backgroundColor: \"#2A2A2A\" }} />",
-      "match": "\"#2A2A2A\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 75,
-      "snippet": "<View style={{ height: 1, backgroundColor: \"#2A2A2A\" }} />",
-      "match": "\"#2A2A2A\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 82,
-      "snippet": "<View style={{ height: 1, backgroundColor: \"#2A2A2A\", marginTop: 4 }} />",
-      "match": "\"#2A2A2A\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 91,
-      "snippet": "borderColor: \"#EF4444\",",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/sheets/CameraSheet.tsx",
-      "line": 95,
-      "snippet": "<Text style={{ color: \"#EF4444\", fontFamily: \"monospace\", fontSize: 12, fontWeight: \"bold\" }}>",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/sheets/MediaSheet.tsx",
-      "line": 36,
-      "snippet": "<Text style={{ color: \"#D4D4D4\", fontFamily: \"monospace\", fontSize: 14 }}>",
-      "match": "\"#D4D4D4\""
-    },
-    {
-      "file": "frontend/components/home/sheets/MediaSheet.tsx",
-      "line": 40,
-      "snippet": "<Text style={{ color: \"#737373\", fontFamily: \"monospace\", fontSize: 11 }}>",
-      "match": "\"#737373\""
-    },
-    {
-      "file": "frontend/components/home/sheets/MediaSheet.tsx",
-      "line": 57,
-      "snippet": "borderColor: isOn ? \"#EF4444\" : \"#22C55E\",",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/sheets/MediaSheet.tsx",
-      "line": 57,
-      "snippet": "borderColor: isOn ? \"#EF4444\" : \"#22C55E\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/sheets/MediaSheet.tsx",
-      "line": 64,
-      "snippet": "color: isOn ? \"#EF4444\" : \"#22C55E\",",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/sheets/MediaSheet.tsx",
-      "line": 64,
-      "snippet": "color: isOn ? \"#EF4444\" : \"#22C55E\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 4,
-      "snippet": "const ACCENT = \"#06B6D4\";",
-      "match": "\"#06B6D4\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 20,
-      "snippet": "case \"cleaning\": return \"#22C55E\";",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 21,
-      "snippet": "case \"returning\": return \"#EAB308\";",
-      "match": "\"#EAB308\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 22,
-      "snippet": "case \"paused\": return \"#F97316\";",
-      "match": "\"#F97316\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 23,
-      "snippet": "case \"error\": return \"#EF4444\";",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 24,
-      "snippet": "default: return \"#525252\";",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 45,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 11, marginTop: 2 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 51,
-      "snippet": "<Text style={{ color: state.battery < 20 ? \"#EF4444\" : \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 12 }}>",
-      "match": "\"#EF4444\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 51,
-      "snippet": "<Text style={{ color: state.battery < 20 ? \"#EF4444\" : \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 12 }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 59,
-      "snippet": "<View style={{ height: 4, backgroundColor: \"#333\", borderRadius: 2 }}>",
-      "match": "\"#333\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 64,
-      "snippet": "backgroundColor: \"#22C55E\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 82,
-      "snippet": "borderColor: \"#22C55E\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 86,
-      "snippet": "<Text style={{ color: \"#22C55E\", fontFamily: \"monospace\", fontSize: 12, fontWeight: \"bold\" }}>",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 100,
-      "snippet": "borderColor: \"#F97316\",",
-      "match": "\"#F97316\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 104,
-      "snippet": "<Text style={{ color: \"#F97316\", fontFamily: \"monospace\", fontSize: 12, fontWeight: \"bold\" }}>",
-      "match": "\"#F97316\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 118,
-      "snippet": "borderColor: \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/home/sheets/VacuumSheet.tsx",
-      "line": 122,
-      "snippet": "<Text style={{ color: \"#A3A3A3\", fontFamily: \"monospace\", fontSize: 12, fontWeight: \"bold\" }}>",
-      "match": "\"#A3A3A3\""
-    },
-    {
-      "file": "frontend/components/ops/DeviceRow.tsx",
-      "line": 35,
-      "snippet": "color: \"#525252\",",
-      "match": "\"#525252\""
-    },
-    {
-      "file": "frontend/components/ops/DeviceRow.tsx",
-      "line": 49,
-      "snippet": "<Text style={{ fontFamily: \"monospace\", fontWeight: \"700\", fontSize: 9, color: \"#CBD5E1\" }}>",
-      "match": "\"#CBD5E1\""
-    },
-    {
-      "file": "frontend/components/ops/DeviceRow.tsx",
-      "line": 57,
-      "snippet": "backgroundColor: reachable ? \"#22C55E\" : \"#525252\",",
-      "match": "\"#22C55E\""
-    },
-    {
-      "file": "frontend/components/ops/DeviceRow.tsx",
-      "line": 57,
-      "snippet": "backgroundColor: reachable ? \"#22C55E\" : \"#525252\",",
-      "match": "\"#525252\""
     },
     {
       "file": "frontend/components/ops/GcpCard.tsx",
@@ -8954,85 +6824,85 @@
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 6,
+      "line": 7,
       "snippet": "const ACCENT = \"#06B6D4\";",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 7,
+      "line": 8,
       "snippet": "const GREEN = \"#22C55E\";",
       "match": "\"#22C55E\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 8,
+      "line": 9,
       "snippet": "const RED = \"#EF4444\";",
       "match": "\"#EF4444\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 9,
+      "line": 10,
       "snippet": "const YELLOW = \"#EAB308\";",
       "match": "\"#EAB308\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 10,
+      "line": 11,
       "snippet": "const GRAY = \"#525252\";",
       "match": "\"#525252\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 11,
+      "line": 12,
       "snippet": "const DIM = \"#64748B\";",
       "match": "\"#64748B\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 36,
+      "line": 30,
       "snippet": "<Text style={{ fontFamily: \"monospace\", fontSize: 9, color: \"#CBD5E1\" }}>",
       "match": "\"#CBD5E1\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 54,
+      "line": 48,
       "snippet": "<Text style={{ fontFamily: \"monospace\", fontSize: 10, color: \"#CBD5E1\", flex: 1 }}>{name}</Text>",
       "match": "\"#CBD5E1\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 83,
+      "line": 77,
       "snippet": "<Text style={{ fontFamily: \"monospace\", fontWeight: \"700\", fontSize: 11, color: color || \"#CBD5E1\" }}>{value}</Text>",
       "match": "\"#CBD5E1\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 97,
+      "line": 91,
       "snippet": "{ label: \"ESP32 HUB\", color: \"#06B6D4\" },",
       "match": "\"#06B6D4\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 98,
+      "line": 92,
       "snippet": "{ label: \"WiFi AP\", color: \"#8B5CF6\" },",
       "match": "\"#8B5CF6\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 127,
+      "line": 121,
       "snippet": "<Text style={{ fontFamily: \"monospace\", fontWeight: \"700\", fontSize: 12, color: \"#E2E8F0\", letterSpacing: 0.5 }}>",
       "match": "\"#E2E8F0\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 208,
+      "line": 202,
       "snippet": "<Text style={{ fontFamily: \"monospace\", fontSize: 10, color: \"#CBD5E1\" }}>{iface}</Text>",
       "match": "\"#CBD5E1\""
     },
     {
       "file": "frontend/components/ops/InfraDeviceCard.tsx",
-      "line": 226,
+      "line": 220,
       "snippet": "<Text style={{ fontFamily: \"monospace\", fontSize: 9, color: \"#CBD5E1\", flex: 1 }}>{c.mac}</Text>",
       "match": "\"#CBD5E1\""
     },
@@ -9289,98 +7159,23 @@
       "match": "\"#EAB308\""
     }
   ],
-  "duplicated-layout-constants": [
-    {
-      "name": "TOP_BAR_HEIGHT",
-      "count": 8,
-      "definitions": [
-        {
-          "file": "frontend/app/(tabs)/business.tsx",
-          "line": 17,
-          "value": "48"
-        },
-        {
-          "file": "frontend/app/(tabs)/directives.tsx",
-          "line": 45,
-          "value": "48"
-        },
-        {
-          "file": "frontend/app/(tabs)/finance.tsx",
-          "line": 15,
-          "value": "48"
-        },
-        {
-          "file": "frontend/app/(tabs)/music.tsx",
-          "line": 30,
-          "value": "48"
-        },
-        {
-          "file": "frontend/app/(tabs)/soc.tsx",
-          "line": 18,
-          "value": "48"
-        },
-        {
-          "file": "frontend/app/metrics.tsx",
-          "line": 17,
-          "value": "48"
-        },
-        {
-          "file": "frontend/app/training.tsx",
-          "line": 46,
-          "value": "52"
-        },
-        {
-          "file": "frontend/app/upload.tsx",
-          "line": 13,
-          "value": "48"
-        }
-      ]
-    }
-  ],
+  "duplicated-layout-constants": [],
   "duplicated-format-helpers": [
-    {
-      "name": "formatBytes",
-      "count": 2,
-      "definitions": [
-        {
-          "file": "frontend/app/(tabs)/files.tsx",
-          "line": 52
-        },
-        {
-          "file": "frontend/components/ops/InfraDeviceCard.tsx",
-          "line": 19
-        }
-      ]
-    },
     {
       "name": "formatDate",
       "count": 3,
       "definitions": [
         {
           "file": "frontend/app/(tabs)/files.tsx",
-          "line": 59
+          "line": 53
         },
-        {
-          "file": "frontend/app/(tabs)/finance.tsx",
-          "line": 60
-        },
-        {
-          "file": "frontend/app/(tabs)/identity.tsx",
-          "line": 98
-        }
-      ]
-    },
-    {
-      "name": "formatCOP",
-      "count": 2,
-      "definitions": [
         {
           "file": "frontend/app/(tabs)/finance.tsx",
           "line": 54
         },
         {
-          "file": "frontend/lib/bridge-api.ts",
-          "line": 1740
+          "file": "frontend/app/(tabs)/identity.tsx",
+          "line": 98
         }
       ]
     },
@@ -9408,7 +7203,7 @@
         },
         {
           "file": "frontend/app/metrics.tsx",
-          "line": 37
+          "line": 36
         }
       ]
     }

@@ -2,6 +2,7 @@
 import { View, Text, Pressable } from "react-native";
 import { useState } from "react";
 import type { InfraDevice, DeviceResources } from "../../lib/infra-hooks";
+import { formatBytes } from "../../lib/format";
 
 const ACCENT = "#06B6D4";
 const GREEN = "#22C55E";
@@ -14,13 +15,6 @@ interface Props {
   id: string;
   device: InfraDevice;
   children?: React.ReactNode;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
-  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${bytes} B`;
 }
 
 function ResourceBar({ label, used, total, unit, warnPct = 80 }: {

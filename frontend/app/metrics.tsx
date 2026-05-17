@@ -13,8 +13,7 @@ import { TVPressable } from "../components/TVPressable";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { fetchUsageMetrics, fetchAnthropicUsage, type UsageMetrics, type AnthropicUsageData } from "../lib/bridge-api";
 import { GroupNav } from "../components/GroupNav";
-
-const TOP_BAR_HEIGHT = 48;
+import { layout } from "../lib/design-tokens";
 const CYAN = "#06B6D4";
 const CARD_BG = "#111111";
 const BORDER = "#222";
@@ -354,7 +353,7 @@ export default function MetricsScreen() {
       {/* Top bar */}
       <View
         style={{
-          height: TOP_BAR_HEIGHT + insets.top,
+          height: layout.topBarHeight + insets.top,
           paddingTop: insets.top,
           flexDirection: "row",
           alignItems: "center",

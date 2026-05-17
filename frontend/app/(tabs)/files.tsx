@@ -30,6 +30,7 @@ import {
 import { getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
 import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
+import { formatBytes } from "../../lib/format";
 
 const ACCENT = "#06B6D4";
 const DIM = "#525252";
@@ -49,13 +50,6 @@ interface BreadcrumbItem {
 }
 
 // ── Helpers ──
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)}GB`;
-}
-
 function formatDate(iso: string): string {
   const d = new Date(iso);
   const now = new Date();
