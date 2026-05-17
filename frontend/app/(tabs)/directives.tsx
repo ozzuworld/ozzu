@@ -25,8 +25,6 @@ import {
 import {
   STATUS_ORDER,
   ACTIVE_STATUSES,
-  HUMAN_STATUS,
-  relativeTime,
 } from "../../lib/directive-constants";
 import { DirectiveListItem } from "../../components/directives/DirectiveListItem";
 import { PlanReviewModal } from "../../components/directives/PlanReviewModal";
@@ -34,7 +32,7 @@ import { StatusChangeSheet } from "../../components/directives/StatusChangeSheet
 import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
 import { TopBar } from "../../components/TopBar";
-import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha, statusPillStyle, layout } from "../../lib/design-tokens";
+import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha } from "../../lib/design-tokens";
 
 if (
   Platform.OS === "android" &&
@@ -337,55 +335,14 @@ export default function DirectivesScreen() {
                   </View>
                 ) : (
                   <View style={{ gap: spacing.sm }}>
-                    {col.items.map((d) => {
-                      const pill = statusPillStyle(d.status);
-                      return (
-                        <Pressable
-                          key={d.id}
-                          onPress={() => navigateToDirective(d)}
-                          style={({ pressed }) => ({
-                            backgroundColor: pressed ? colors.bg.overlay : colors.bg.surface,
-                            borderRadius: radius.md,
-                            padding: spacing.md,
-                            transform: [{ scale: pressed ? 0.98 : 1 }],
-                          })}
-                        >
-                          {/* Card: emoji + title */}
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                            <Text style={{ fontSize: 14 }}>{d.emoji || ""}</Text>
-                            <Text
-                              style={{ color: colors.text.primary, fontSize: fs.base, fontWeight: fw.semibold, flex: 1 }}
-                              numberOfLines={2}
-                            >
-                              {d.title}
-                            </Text>
-                          </View>
-
-                          {/* Card: status pill + time */}
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: pill.bg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full }}>
-                              <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: pill.dot }} />
-                              <Text style={{ color: pill.text, fontSize: 9, fontWeight: fw.bold }}>
-                                {HUMAN_STATUS[d.status] || d.status}
-                              </Text>
-                            </View>
-                            <Text style={{ color: colors.text.disabled, fontSize: fs.xs }}>
-                              {relativeTime(d.updatedAt)}
-                            </Text>
-                          </View>
-
-                          {/* Card: work summary preview */}
-                          {d.work_summary ? (
-                            <Text
-                              style={{ color: colors.text.tertiary, fontSize: fs.xs, marginTop: 4, lineHeight: 14 }}
-                              numberOfLines={2}
-                            >
-                              {d.work_summary}
-                            </Text>
-                          ) : null}
-                        </Pressable>
-                      );
-                    })}
+                    {col.items.map((d) => (
+                      <DirectiveListItem
+                        key={d.id}
+                        directive={enrichDirective(d)}
+                        onPress={navigateToDirective}
+                        variant="board"
+                      />
+                    ))}
                   </View>
                 )}
               </View>
