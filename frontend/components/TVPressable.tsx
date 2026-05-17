@@ -55,7 +55,12 @@ export function TVPressable({
     <Pressable
       onFocus={handleFocus}
       onBlur={handleBlur}
-      style={[baseStyle, getGlowStyle(rarity, focused), style]}
+      style={({ pressed }) => [
+        baseStyle,
+        getGlowStyle(rarity, focused),
+        style,
+        pressed && { opacity: 0.85, transform: [{ scale: (focused ? 1.08 : 1) * 0.97 }] },
+      ]}
       {...props}
     >
       {children}

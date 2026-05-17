@@ -407,7 +407,10 @@ export default function FilesScreen() {
             {breadcrumbs.map((crumb, index) => (
               <View key={index} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 {index > 0 && <Text style={{ color: DIM, fontSize: 12 }}>/</Text>}
-                <Pressable onPress={() => navigateToBreadcrumb(index)}>
+                <Pressable
+                  onPress={() => navigateToBreadcrumb(index)}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+                >
                   <Text style={{
                     color: index === breadcrumbs.length - 1 ? "#fff" : ACCENT,
                     fontFamily: "monospace",
@@ -431,14 +434,32 @@ export default function FilesScreen() {
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Pressable
               onPress={() => setNewFolderVisible(true)}
-              style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: colors.gray[600] }}
+              style={({ pressed }) => ({
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 16,
+                backgroundColor: "rgba(255,255,255,0.07)",
+                borderWidth: 1,
+                borderColor: colors.gray[600],
+                opacity: pressed ? 0.7 : 1,
+                transform: [{ scale: pressed ? 0.97 : 1 }],
+              })}
             >
               <Text style={{ color: "#aaa", fontSize: 11, fontFamily: "monospace", fontWeight: "700" }}>📁 NEW</Text>
             </Pressable>
             <Pressable
               onPress={handleUpload}
               disabled={uploading}
-              style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: "rgba(6,182,212,0.15)", borderWidth: 1, borderColor: ACCENT, opacity: uploading ? 0.5 : 1 }}
+              style={({ pressed }) => ({
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+                borderRadius: 16,
+                backgroundColor: "rgba(6,182,212,0.15)",
+                borderWidth: 1,
+                borderColor: ACCENT,
+                opacity: uploading ? 0.5 : pressed ? 0.7 : 1,
+                transform: [{ scale: pressed ? 0.97 : 1 }],
+              })}
             >
               {uploading
                 ? <ActivityIndicator size="small" color={ACCENT} />

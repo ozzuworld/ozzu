@@ -150,7 +150,10 @@ export default function HomeScreen() {
             </Text>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 18 }}>
-            <Pressable onPress={() => router.push("/directives" as any)}>
+            <Pressable
+              onPress={() => router.push("/directives" as any)}
+              style={({ pressed }) => ({ opacity: pressed ? 0.4 : 1 })}
+            >
               <Text style={{ fontSize: 20, opacity: 0.5 }}>{"🔔"}</Text>
               {stats.attentionCount > 0 && (
                 <View style={{
@@ -160,7 +163,10 @@ export default function HomeScreen() {
                 }} />
               )}
             </Pressable>
-            <Pressable onPress={() => router.push("/upload" as any)}>
+            <Pressable
+              onPress={() => router.push("/upload" as any)}
+              style={({ pressed }) => ({ opacity: pressed ? 0.4 : 1 })}
+            >
               <Text style={{ fontSize: 19, opacity: 0.55 }}>{"📤"}</Text>
             </Pressable>
           </View>
@@ -433,7 +439,13 @@ export default function HomeScreen() {
           <Pressable
             key={i}
             onPress={() => tab.route ? router.push(tab.route as any) : null}
-            style={{ alignItems: "center", paddingHorizontal: 12, paddingVertical: 4 }}
+            style={({ pressed }) => ({
+              alignItems: "center",
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              opacity: pressed ? 0.6 : 1,
+              transform: [{ scale: pressed ? 0.95 : 1 }],
+            })}
           >
             <Text style={{
               fontSize: 20,

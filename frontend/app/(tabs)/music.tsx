@@ -92,7 +92,7 @@ function MiniPlayer({
   return (
     <Pressable
       onPress={onPress}
-      style={{
+      style={({ pressed }) => ({
         position: "absolute",
         bottom: 0,
         left: 0,
@@ -100,7 +100,8 @@ function MiniPlayer({
         height: MINI_PLAYER_HEIGHT + insets.bottom,
         paddingBottom: insets.bottom,
         backgroundColor: "#282828",
-      }}
+        opacity: pressed ? 0.92 : 1,
+      })}
     >
       {/* Progress line */}
       <View style={{ height: 2, backgroundColor: "rgba(255,255,255,0.1)" }}>

@@ -453,14 +453,16 @@ export default function LandingScreen() {
       {/* Center — Lottie talking animation (tappable = mute toggle) */}
       <Pressable
         onPress={toggleMute}
-        style={{
+        style={({ pressed }) => ({
           flex: 1,
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: "#000000",
           zIndex: 2,
           elevation: 2,
-        }}
+          opacity: pressed ? 0.85 : 1,
+          transform: [{ scale: pressed ? 0.98 : 1 }],
+        })}
       >
         <LottieView
           source={require("../../assets/talking.json")}

@@ -217,7 +217,13 @@ export default function IdentityScreen() {
           <Text style={styles.headerName}>{profile?.full_name ?? "…"}</Text>
           <Text style={styles.headerSub}>🇨🇴 Colombian · CC {profile?.cedula ?? "…"}</Text>
         </View>
-        <Pressable onPress={() => setAuthenticated(false)} style={styles.lockBtn}>
+        <Pressable
+          onPress={() => setAuthenticated(false)}
+          style={({ pressed }) => [
+            styles.lockBtn,
+            pressed && { opacity: 0.7, transform: [{ scale: 0.95 }] },
+          ]}
+        >
           <Text style={styles.lockBtnTxt}>🔒</Text>
         </Pressable>
       </View>
@@ -235,7 +241,15 @@ export default function IdentityScreen() {
       {/* ── Section tabs ── */}
       <View style={styles.tabs}>
         {(["overview", "travel", "documents"] as const).map((s) => (
-          <Pressable key={s} style={[styles.tab, section === s && styles.tabActive]} onPress={() => setSection(s)}>
+          <Pressable
+            key={s}
+            style={({ pressed }) => [
+              styles.tab,
+              section === s && styles.tabActive,
+              pressed && { opacity: 0.7, transform: [{ scale: 0.98 }] },
+            ]}
+            onPress={() => setSection(s)}
+          >
             <Text style={[styles.tabTxt, section === s && styles.tabTxtActive]}>
               {s === "overview" ? "📋 Profile" : s === "travel" ? "✈️ Travel" : "📄 Docs"}
             </Text>
@@ -319,7 +333,14 @@ export default function IdentityScreen() {
             <>
               <Text style={styles.sectionNote}>Tap any document to view · Face ID required once per session</Text>
               {documents.map((doc) => (
-                <Pressable key={doc.id} style={styles.docCard} onPress={() => setViewingDoc(doc)}>
+                <Pressable
+                  key={doc.id}
+                  style={({ pressed }) => [
+                    styles.docCard,
+                    pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+                  ]}
+                  onPress={() => setViewingDoc(doc)}
+                >
                   <Text style={styles.docIcon}>{doc.doc_type === "passport_bio" ? "🛂" : doc.doc_type === "us_visa" ? "🇺🇸" : "📷"}</Text>
                   <View style={styles.docInfo}>
                     <Text style={styles.docLabel}>{doc.label}</Text>

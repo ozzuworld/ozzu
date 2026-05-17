@@ -242,12 +242,13 @@ export default function DirectivesScreen() {
             <Pressable
               key={mode}
               onPress={() => setViewMode(mode)}
-              style={{
+              style={({ pressed }) => ({
                 paddingHorizontal: 14,
                 paddingVertical: 8,
                 borderBottomWidth: 2,
                 borderBottomColor: isActive ? colors.accent : "transparent",
-              }}
+                opacity: pressed ? 0.6 : 1,
+              })}
             >
               <Text style={{
                 color: isActive ? colors.text.primary : colors.text.disabled,
@@ -272,7 +273,10 @@ export default function DirectivesScreen() {
         {error ? (
           <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
             <Text style={{ color: colors.error, fontSize: fs.md, textAlign: "center" }}>{error}</Text>
-            <Pressable onPress={refresh} style={{ marginTop: 12 }}>
+            <Pressable
+              onPress={refresh}
+              style={({ pressed }) => ({ marginTop: 12, opacity: pressed ? 0.6 : 1 })}
+            >
               <Text style={{ color: colors.accent, fontSize: fs.md, fontWeight: fw.bold }}>TAP TO RETRY</Text>
             </Pressable>
           </View>
@@ -343,6 +347,7 @@ export default function DirectivesScreen() {
                             backgroundColor: pressed ? colors.bg.overlay : colors.bg.surface,
                             borderRadius: radius.md,
                             padding: spacing.md,
+                            transform: [{ scale: pressed ? 0.98 : 1 }],
                           })}
                         >
                           {/* Card: emoji + title */}
