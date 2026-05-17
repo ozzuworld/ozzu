@@ -1,7 +1,7 @@
 # Cipher Layer 3 — Drift Report
 
-Generated: 2026-05-17T16:23:44.284Z
-Scanned 8718 files in 3.1s
+Generated: 2026-05-17T17:56:35.264Z
+Scanned 8720 files in 3.7s
 
 Cipher: **read this before claiming the codebase is clean.**
 
@@ -46,6 +46,12 @@ Cipher: **read this before claiming the codebase is clean.**
 *router.push() to routes that don't exist*
 
 ✅ No findings
+
+## bridge-tmp-path-usage
+*Bridge code referencing /tmp/ paths for non-ephemeral content (see intent/cipher.md mount contract)*
+
+**26 findings:**
+
 
 ## broken-menu-references
 *HamburgerMenu / shortcut tile entries pointing at deleted screens*

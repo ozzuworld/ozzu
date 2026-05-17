@@ -150,6 +150,35 @@ const rules = {
     return findings;
   },
 
+  // ── /tmp/ paths in bridge code (catches the LLM-failure class) ──
+  "bridge-tmp-path-usage": (files) => {
+    // Bridge code SHOULD NOT reference /tmp/ paths for persistent or asset-like
+    // content. /tmp is ephemeral cross-restart messaging only — see intent/cipher.md
+    // § "Bridge container mount contract".
+    //
+    // Whitelisted: scripts/agent-spawner.js (legitimately uses /tmp for ephemeral
+    // deploy scripts), routes that handle pairing files with explicit self-delete.
+    const findings = [];
+    const allowlist = [
+      /agent-spawner\.js$/,           // deploy script staging
+      /routes\/ozzu-source\.js$/,     // pairing file (self-deletes after first use)
+      /^backend\/bridge\/orchestrator\.js$/,  // existing orchestrator scratch
+    ];
+    const re = /["']\/tmp\/(?!ozzu-bridge\/(deploy|iphone-pairing|osint))[^"']*["']/;
+    for (const f of files) {
+      const rel = relPath(f);
+      if (!rel.match(/^backend\/bridge\/.*\.js$/)) continue;
+      if (allowlist.some((p) => p.test(rel))) continue;
+      const content = fs.readFileSync(f, "utf8");
+      const lines = content.split("\n");
+      lines.forEach((line, i) => {
+        const m = line.match(re);
+        if (m) findings.push({ file: rel, line: i + 1, match: m[0], snippet: line.trim().slice(0, 120) });
+      });
+    }
+    return findings;
+  },
+
   // ── HamburgerMenu / shortcut tile entries → check route exists ──
   "broken-menu-references": (files) => {
     const appDir = path.join(REPO_ROOT, "frontend/app");
@@ -220,6 +249,7 @@ const ruleDescriptions = {
   "duplicated-format-helpers": "Time/format helpers reimplemented per screen (one shared lib should win)",
   "broken-route-references": "router.push() to routes that don't exist",
   "broken-menu-references": "HamburgerMenu / shortcut tile entries pointing at deleted screens",
+  "bridge-tmp-path-usage": "Bridge code referencing /tmp/ paths for non-ephemeral content (see intent/cipher.md mount contract)",
 };
 
 for (const [name, findings] of Object.entries(report)) {

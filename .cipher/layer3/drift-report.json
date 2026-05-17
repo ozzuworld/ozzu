@@ -1756,5 +1756,163 @@
   "duplicated-layout-constants": [],
   "duplicated-format-helpers": [],
   "broken-route-references": [],
+  "bridge-tmp-path-usage": [
+    {
+      "file": "backend/bridge/build-verifier.js",
+      "line": 212,
+      "match": "\"/tmp/ozzu-verify-bundles\"",
+      "snippet": "const bundleDir = \"/tmp/ozzu-verify-bundles\";"
+    },
+    {
+      "file": "backend/bridge/cipher-daemon.js",
+      "line": 566,
+      "match": "\"/tmp/cipher-session.lock\"",
+      "snippet": "const KAIROS_SESSION_LOCK = \"/tmp/cipher-session.lock\";"
+    },
+    {
+      "file": "backend/bridge/face-crawler.js",
+      "line": 22,
+      "match": "\"/tmp/osint-data/crawl-state.json\"",
+      "snippet": "const CRAWL_STATE_FILE = \"/tmp/osint-data/crawl-state.json\";"
+    },
+    {
+      "file": "backend/bridge/face-crawler.js",
+      "line": 23,
+      "match": "\"/tmp/osint-data/crawl-names.json\"",
+      "snippet": "const CRAWL_NAMES_FILE = \"/tmp/osint-data/crawl-names.json\";"
+    },
+    {
+      "file": "backend/bridge/octoprint-pipeline.js",
+      "line": 17,
+      "match": "\"/tmp/ozzu-bridge/slice\"",
+      "snippet": "const LOCAL_DIR = process.env.OCTOPRINT_SLICE_LOCAL_DIR || \"/tmp/ozzu-bridge/slice\";"
+    },
+    {
+      "file": "backend/bridge/octoprint-recorder.js",
+      "line": 19,
+      "match": "\"/tmp/ozzu-rec\"",
+      "snippet": "const LOCAL_REC_DIR = process.env.OCTOPRINT_REC_LOCAL_DIR || \"/tmp/ozzu-rec\";"
+    },
+    {
+      "file": "backend/bridge/osint-modules/sherlock-cli.js",
+      "line": 29,
+      "match": "\"/tmp/osint-data/sherlock-output.json\"",
+      "snippet": "\"--json\", \"/tmp/osint-data/sherlock-output.json\","
+    },
+    {
+      "file": "backend/bridge/osint-modules/sherlock-cli.js",
+      "line": 36,
+      "match": "\"/tmp/osint-data/sherlock-output.json\"",
+      "snippet": "const fileResult = await cliRunner.runTool(\"cat\", [\"/tmp/osint-data/sherlock-output.json\"], {"
+    },
+    {
+      "file": "backend/bridge/osint-modules/sherlock-cli.js",
+      "line": 46,
+      "match": "\"/tmp/osint-data/sherlock-output.json\"",
+      "snippet": "cliRunner.runTool(\"rm\", [\"-f\", \"/tmp/osint-data/sherlock-output.json\"], { timeout: 5000 }).catch(() => {});"
+    },
+    {
+      "file": "backend/bridge/routes/business.js",
+      "line": 8,
+      "match": "\"/tmp/ozzu-bridge/business-attachments\"",
+      "snippet": "const ATTACHMENTS_DIR = \"/tmp/ozzu-bridge/business-attachments\";"
+    },
+    {
+      "file": "backend/bridge/routes/cedula.js",
+      "line": 49,
+      "match": "\"/tmp/osint-data/cedula-photos\"",
+      "snippet": "const photoDir = \"/tmp/osint-data/cedula-photos\";"
+    },
+    {
+      "file": "backend/bridge/routes/directives.js",
+      "line": 1507,
+      "match": "\"/tmp/ozzu-bridge/uploads\"",
+      "snippet": "const uploadsDir = \"/tmp/ozzu-bridge/uploads\";"
+    },
+    {
+      "file": "backend/bridge/routes/files.js",
+      "line": 8,
+      "match": "\"/tmp/ozzu-bridge/shared\"",
+      "snippet": "const TEMP_DIR = \"/tmp/ozzu-bridge/shared\";"
+    },
+    {
+      "file": "backend/bridge/routes/pipeline.js",
+      "line": 745,
+      "match": "\"/tmp/ozzu-bridge/tv-releases\"",
+      "snippet": "const TV_RELEASES_DIR = \"/tmp/ozzu-bridge/tv-releases\";"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 166,
+      "match": "\"/tmp/ozzu-bridge\"",
+      "snippet": "const DATA_DIR = \"/tmp/ozzu-bridge\";"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 575,
+      "match": "\"/tmp/ozzu-bridge/\"",
+      "snippet": "const REDIRECT_ALLOWED_PREFIXES = [\"/home/gcp/ozzu/\", \"/tmp/ozzu-bridge/\", \"/tmp/\"];"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 1806,
+      "match": "\"/tmp/agrovision-training-state.json\"",
+      "snippet": "fs.writeFileSync(\"/tmp/agrovision-training-state.json\", JSON.stringify(state));"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 1810,
+      "match": "\"/tmp/agrovision-training-state.json\"",
+      "snippet": "fs.writeFileSync(\"/tmp/agrovision-training-state.json\", JSON.stringify({"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 1861,
+      "match": "\"/tmp/pipeline-state.json\"",
+      "snippet": "const stateFile = \"/tmp/pipeline-state.json\";"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 1871,
+      "match": "\"/tmp/pipeline-progress.json\"",
+      "snippet": "const progressFile = \"/tmp/pipeline-progress.json\";"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 1933,
+      "match": "\"/tmp/agrovision-training-state.json\"",
+      "snippet": "const avFile = \"/tmp/agrovision-training-state.json\";"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 2015,
+      "match": "\"/tmp/pipeline-state.json\"",
+      "snippet": "fs.writeFileSync(\"/tmp/pipeline-state.json\", JSON.stringify(state));"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 2033,
+      "match": "\"/tmp/pipeline-progress.json\"",
+      "snippet": "fs.writeFileSync(\"/tmp/pipeline-progress.json\", JSON.stringify(progress));"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 2045,
+      "match": "\"/tmp/pipeline-progress.json\"",
+      "snippet": "const file = \"/tmp/pipeline-progress.json\";"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 6286,
+      "match": "\"/tmp/ozzu-bridge/uploads\"",
+      "snippet": "const uploadsDir = \"/tmp/ozzu-bridge/uploads\";"
+    },
+    {
+      "file": "backend/bridge/server.js",
+      "line": 6430,
+      "match": "\"/tmp/ozzu-bridge/uploads\"",
+      "snippet": "const uploadsDir = \"/tmp/ozzu-bridge/uploads\";"
+    }
+  ],
   "broken-menu-references": []
 }

@@ -104,6 +104,36 @@ Opus would historically block pentest commands via API policy refusals. Sonnet w
 
 When in doubt about a fork, defer to King Kazuma. When the path is obvious within authorized scope, execute without asking. That's the contract.
 
+## Bridge container mount contract (CRITICAL — read before touching any bridge code that reads/writes files)
+
+**Inside the bridge container, the host filesystem looks like this:**
+
+| Container path | Host path | Mode | Use for |
+|---|---|---|---|
+| `/home/gcp/ozzu/**` | `/home/gcp/ozzu/**` | **read-write** | **Any repo file.** Bridge has the entire repo bind-mounted. Read assets, configs, source files. Use canonical paths — do NOT copy to /tmp first. |
+| `/app/**` | `/home/gcp/ozzu/backend/bridge/**` | read-write | Bridge's own source (also visible via `/home/gcp/ozzu/backend/bridge/`). |
+| `/tmp/ozzu-bridge/**` | `/tmp/ozzu-bridge/**` | read-write | **Only ephemeral / cross-restart messaging.** Deploy scripts, pairing files, upload temp. **Never persistent user artifacts** — auto-cleaned by systemd-tmpfiles. |
+| `/root/.config/gh/**`, `/root/.ssh/**`, `/root/.gitconfig` | host equivalents | read-only | gh CLI auth, ssh keys, git config |
+| `/var/run/docker.sock` | host | read-write | bridge can spawn other containers (used by spawnDetachedDeploy) |
+| `/usr/local/bin/{gh,docker,adb,claude}` | host bin equivalents | read-only | CLI tools |
+| `/root/.claude/**`, `/root/.local/share/claude/**` | host | rw / ro | Cipher's memory + Claude CLI state |
+| `/root/.ozzu-secrets` | host | read-only | Infra secrets bootstrap |
+
+**Rules derived from this:**
+
+1. **Read any repo file via its canonical path** `/home/gcp/ozzu/<...>`. Never copy assets to `/tmp/ozzu-bridge` as a "make it visible to bridge" workaround — bridge already sees the repo.
+2. **`/tmp/ozzu-bridge` is for ephemeral plumbing only**: deploy scripts (consumed immediately), pairing files (one-shot, self-delete), bridge upload buffer. NOT for user artifacts, NOT for assets that should persist.
+3. **Verify mounts with `docker inspect bridge --format '{{ range .Mounts }}{{ .Source }} -> {{ .Destination }}{{ "\n" }}{{ end }}'`** before assuming a path isn't visible. Don't trust truncated output.
+4. **Bridge can spawn sibling containers** via `docker run` because it has docker.sock. Use this for any process that must survive bridge restart (deploys, watchers) — see `spawnDetachedDeploy`.
+
+**This contract is checked into the repo so future-Cipher (and future-me) doesn't redrift.** When in doubt about a path, read this section first.
+
+## Deploy lifecycle isolation
+
+Deploys (Android OTA, iOS CI watch, bridge restart, etc.) run in **ephemeral docker containers** spawned by `spawnDetachedDeploy`, not as subprocesses of the bridge node process. Reason: bridge restart used to kill in-flight deploys (the kernel reaps all PIDs in a container's PID namespace on container restart, even detached children). Today's design uses `docker run --rm -d backend-bridge:latest bash <script>` — the deploy container has its own PID namespace and survives bridge restarts. Container self-cleans on exit via `--rm`.
+
+If you find spawnDetachedDeploy regressed back to in-process subprocess (`spawn("bash", ...)` directly), that's a regression — fix in code, not memory.
+
 ## Related principles & memories
 
 - PRINCIPLES § I.1 (commands/executes), § II (pipeline), § III (acting safely), § IV (read first), § VIII.25 (code wins)

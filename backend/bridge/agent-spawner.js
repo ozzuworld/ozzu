@@ -1490,10 +1490,25 @@ function detectFirmwareChanges() {
 // Spawn a deploy command as a detached process that survives bridge restarts.
 // Writes a wrapper script to /tmp, runs it with nohup, logs to /tmp/ozzu-bridge/.
 // On completion, POSTs a notification to the bridge.
+// Deploys run in EPHEMERAL containers, not as subprocesses of the bridge.
+//
+// Why: the previous design spawned `bash` as a detached subprocess of the bridge
+// node process. Bridge container restart → kernel kills every PID in the container's
+// PID namespace, including detached children. We lost two iOS-build watchers
+// today (2026-05-17) this way: smartDeploy succeeded, IPA was on GitHub, but the
+// deploy script was killed mid-cp and `artifacts/ozzu-latest.ipa` never updated.
+//
+// Fix: each deploy runs in its own short-lived `docker run --rm` container off
+// the same `backend-bridge` image. It has its own PID namespace + its own
+// lifecycle, totally decoupled from the bridge's. Bridge restart leaves the
+// deploy container running. The container exits on its own when bash exits;
+// --rm cleans the container record.
 function spawnDetachedDeploy(platform, command) {
   const fs = require("fs");
   const { spawn } = require("child_process");
-  const scriptPath = `/tmp/ozzu-bridge/deploy-${platform}-${Date.now()}.sh`;
+  const timestamp = Date.now();
+  const containerName = `ozzu-deploy-${platform}-${timestamp}`;
+  const scriptPath = `/tmp/ozzu-bridge/deploy-${platform}-${timestamp}.sh`;
   const logPath = `/tmp/ozzu-bridge/deploy-${platform}.log`;
   const notifyUrl = `${BRIDGE}/notify`;
 
@@ -1504,9 +1519,11 @@ function spawnDetachedDeploy(platform, command) {
     ? "iOS build failed — check GitHub Actions."
     : "Android update failed — check deploy log.";
 
+  // Script written to /tmp/ozzu-bridge (shared via bind mount) so the deploy
+  // container can read it under the same path.
   const script = `#!/bin/bash
 exec > "${logPath}" 2>&1
-echo "=== ${platform} deploy started at $(date -u) ==="
+echo "=== ${platform} deploy started at $(date -u) (container: ${containerName}) ==="
 ${command}
 EXIT_CODE=$?
 if [ $EXIT_CODE -eq 0 ]; then
@@ -1518,15 +1535,35 @@ else
 fi
 rm -f "${scriptPath}"
 `;
-
   fs.writeFileSync(scriptPath, script, { mode: 0o755 });
-  const child = spawn("bash", [scriptPath], {
-    cwd: WORKDIR,
-    detached: true,
+
+  // Mounts mirror the bridge's so paths inside the deploy container match the host.
+  // --network host: the deploy needs to talk to GitHub (gh CLI) + bridge (127.0.0.1:3333 for callbacks).
+  // --rm: auto-clean the container record on exit.
+  // -d: detach so this spawn returns immediately and bridge's lifecycle is decoupled.
+  const dockerArgs = [
+    "run", "--rm", "-d",
+    "--name", containerName,
+    "--network", "host",
+    "-v", "/home/gcp/ozzu:/home/gcp/ozzu",
+    "-v", "/tmp/ozzu-bridge:/tmp/ozzu-bridge",
+    "-v", "/root/.config/gh:/root/.config/gh:ro",
+    "-v", "/root/.ssh:/root/.ssh:ro",
+    "-v", "/root/.gitconfig:/root/.gitconfig:ro",
+    "-v", "/usr/bin/gh:/usr/local/bin/gh:ro",
+    "-v", "/usr/bin/docker:/usr/local/bin/docker:ro",
+    "-v", "/var/run/docker.sock:/var/run/docker.sock",
+    "-w", WORKDIR,
+    "backend-bridge:latest",
+    "bash", scriptPath,
+  ];
+
+  const child = spawn("docker", dockerArgs, {
     stdio: "ignore",
+    detached: true,
   });
   child.unref();
-  log(`Detached ${platform} deploy started (pid ${child.pid}, log: ${logPath})`);
+  log(`Ephemeral ${platform} deploy container started (${containerName}, log: ${logPath})`);
 }
 
 function smartDeploy(directive) {
@@ -1723,9 +1760,6 @@ function buildIosDeployCommand(directive) {
     `META_FILE=$(find /tmp/ozzu-ipa-cache -name "ozzu-build-meta.json" 2>/dev/null | head -1)`,
     `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
     `test -n "$META_FILE" && cp "$META_FILE" ${WORKDIR}/artifacts/ozzu-latest.meta.json && echo "Build meta cached" || echo "Build meta sidecar not present (older workflow)"`,
-    // Mirror the app icon to a path the bridge container can read (it has /tmp/ozzu-bridge mounted but NOT frontend/assets).
-    // Keeps the SideStore source's /icon.png in sync with whatever icon was baked into the IPA.
-    `test -f ${WORKDIR}/frontend/assets/icon.png && cp ${WORKDIR}/frontend/assets/icon.png /tmp/ozzu-bridge/ozzu-icon.png && echo "Source icon mirrored" || echo "Source icon copy skipped"`,
     `rm -rf /tmp/ozzu-ipa-cache`,
   ].join(" && ");
 }
