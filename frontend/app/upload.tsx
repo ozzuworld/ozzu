@@ -271,14 +271,20 @@ export default function UploadScreen() {
                 onPress={pickDocument}
                 style={{
                   flex: 1,
+                  flexDirection: "row",
                   paddingVertical: 14,
                   borderRadius: 8,
                   backgroundColor: colors.gray[800],
                   borderWidth: 1,
                   borderColor: colors.gray[600],
+                  borderLeftWidth: 3,
+                  borderLeftColor: colors.brand.blue,
                   alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
                 }}
               >
+                <Text style={{ fontSize: 16 }}>📄</Text>
                 <Text
                   style={{
                     color: colors.gray[200],
@@ -295,14 +301,20 @@ export default function UploadScreen() {
                 onPress={pickImage}
                 style={{
                   flex: 1,
+                  flexDirection: "row",
                   paddingVertical: 14,
                   borderRadius: 8,
                   backgroundColor: colors.gray[800],
                   borderWidth: 1,
                   borderColor: colors.gray[600],
+                  borderLeftWidth: 3,
+                  borderLeftColor: colors.accent,
                   alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
                 }}
               >
+                <Text style={{ fontSize: 16 }}>🖼️</Text>
                 <Text
                   style={{
                     color: colors.gray[200],
@@ -330,43 +342,48 @@ export default function UploadScreen() {
                     </Text>
                   </TVPressable>
                 </View>
-                {files.map((f, i) => (
-                  <View
-                    key={`${f.name}-${i}`}
-                    style={{
-                      backgroundColor: colors.gray[800],
-                      borderWidth: 1,
-                      borderColor: colors.gray[600],
-                      borderRadius: 8,
-                      padding: 10,
-                      gap: 6,
-                    }}
-                  >
-                    {f.previewUri && (
-                      <Image
-                        source={{ uri: f.previewUri }}
-                        style={{ width: "100%", height: 120, borderRadius: 6, backgroundColor: "#222" }}
-                        resizeMode="contain"
-                      />
-                    )}
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <Text style={{ fontSize: 14 }}>
-                        {f.contentType === "image" ? "🖼️" : "📄"}
-                      </Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: colors.gray[50], fontSize: 12, fontFamily: "monospace" }} numberOfLines={1}>
-                          {f.name}
+                {files.map((f, i) => {
+                  const accentColor = f.contentType === "image" ? colors.accent : colors.brand.blue;
+                  return (
+                    <View
+                      key={`${f.name}-${i}`}
+                      style={{
+                        backgroundColor: colors.gray[800],
+                        borderWidth: 1,
+                        borderColor: "rgba(255,255,255,0.04)",
+                        borderLeftWidth: 3,
+                        borderLeftColor: accentColor,
+                        borderRadius: 10,
+                        padding: 12,
+                        gap: 8,
+                      }}
+                    >
+                      {f.previewUri && (
+                        <Image
+                          source={{ uri: f.previewUri }}
+                          style={{ width: "100%", height: 120, borderRadius: 6, backgroundColor: colors.gray[900] }}
+                          resizeMode="contain"
+                        />
+                      )}
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                        <Text style={{ fontSize: 18 }}>
+                          {f.contentType === "image" ? "🖼️" : "📄"}
                         </Text>
-                        <Text style={{ color: colors.gray[400], fontSize: 10, fontFamily: "monospace" }}>
-                          {formatSize(f.size)} · {f.contentType.toUpperCase()}
-                        </Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: colors.gray[50], fontSize: 13, fontWeight: "600" }} numberOfLines={1}>
+                            {f.name}
+                          </Text>
+                          <Text style={{ color: colors.gray[500], fontSize: 11, fontFamily: "monospace", marginTop: 2 }}>
+                            {formatSize(f.size)} · {f.contentType.toUpperCase()}
+                          </Text>
+                        </View>
+                        <TVPressable onPress={() => removeFile(i)} style={{ padding: 6 }}>
+                          <Text style={{ color: colors.error, fontSize: 14 }}>✕</Text>
+                        </TVPressable>
                       </View>
-                      <TVPressable onPress={() => removeFile(i)} style={{ padding: 6 }}>
-                        <Text style={{ color: colors.error, fontSize: 14 }}>✕</Text>
-                      </TVPressable>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </View>
@@ -451,15 +468,19 @@ export default function UploadScreen() {
             disabled={!hasContent || sending}
             style={{
               flex: 1,
+              flexDirection: "row",
               paddingVertical: 14,
               borderRadius: 8,
               backgroundColor: hasContent && !sending ? colors.accent : colors.gray[800],
               borderWidth: 1,
               borderColor: hasContent && !sending ? colors.accent : colors.gray[600],
               alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
               opacity: hasContent && !sending ? 1 : 0.4,
             }}
           >
+            <Text style={{ fontSize: 16 }}>🤖</Text>
             <Text
               style={{
                 color: hasContent && !sending ? "#000" : colors.gray[400],
@@ -469,7 +490,7 @@ export default function UploadScreen() {
                 letterSpacing: 1,
               }}
             >
-              {sending ? "SENDING..." : files.length > 1 ? `SEND ${files.length} TO CIPHER` : "SEND TO CIPHER"}
+              {sending ? "SENDING..." : files.length > 1 ? `${files.length} → CIPHER` : "→ CIPHER"}
             </Text>
           </TVPressable>
           <TVPressable
@@ -477,15 +498,19 @@ export default function UploadScreen() {
             disabled={!hasContent || sending}
             style={{
               flex: 1,
+              flexDirection: "row",
               paddingVertical: 14,
               borderRadius: 8,
               backgroundColor: hasContent && !sending ? colors.brand.amber : colors.gray[800],
               borderWidth: 1,
               borderColor: hasContent && !sending ? colors.brand.amber : colors.gray[600],
               alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
               opacity: hasContent && !sending ? 1 : 0.4,
             }}
           >
+            <Text style={{ fontSize: 16 }}>🌸</Text>
             <Text
               style={{
                 color: hasContent && !sending ? "#000" : colors.gray[400],
@@ -495,7 +520,7 @@ export default function UploadScreen() {
                 letterSpacing: 1,
               }}
             >
-              {sending ? "SENDING..." : files.length > 1 ? `SEND ${files.length} TO JUNE` : "SEND TO JUNE"}
+              {sending ? "SENDING..." : files.length > 1 ? `${files.length} → JUNE` : "→ JUNE"}
             </Text>
           </TVPressable>
         </View>
