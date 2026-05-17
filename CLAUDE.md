@@ -1,15 +1,19 @@
 # Ozzu — Project Rules
 
-## RULE 0 — READ THE CIPHER INDEX BEFORE BULLSHITTING ABOUT THE CODEBASE
+## RULE 0 — READ THE CIPHER LAYERS BEFORE BULLSHITTING
 
-When King Kazuma asks "read the codebase / what does X do / where's Y / what's duplicated / what's dead":
-1. **READ `.cipher/layer1/SUMMARY.md`** — repo map, dead exports, import graph, copy-paste hotspots.
-2. **READ `.cipher/layer3/SUMMARY.md`** — drift / consistency findings (hardcoded hex, duplicated layout constants, dup format helpers, broken routes).
-3. **QUERY `.cipher/bin/query-intent.sh "<terms>"`** — semantic lookup over the Layer 2 intent index (every source file has a 2-sentence purpose stored).
+**Layer 4 (intent + principles) — read FIRST, every session:**
+1. **`.cipher/layer4/PRINCIPLES.md`** — the 25 inviolable rules. Inviolable. Check every proposal against these.
+2. **`.cipher/layer4/intent/<domain>.md`** — the WHY behind a specific area. Read the relevant one before working on cipher / pipeline / ui / work / security / hardware / identity / voice topics.
 
-The repo is too big for any single LLM context window. You CANNOT "read the whole codebase" by opening 5 files. Use the index. If a layer is stale, refresh: `scripts/cipher-analyze.sh {layer1|layer2|layer3|all}`.
+**Layers 1–3 (codebase observation) — read when answering codebase questions:**
+3. **`.cipher/layer1/SUMMARY.md`** — repo map, dead exports, import graph, copy-paste hotspots.
+4. **`.cipher/layer3/SUMMARY.md`** — drift / consistency findings (hardcoded hex, duplicated constants, broken routes).
+5. **`.cipher/bin/query-intent.sh "<terms>"`** — semantic lookup over the Layer 2 per-file intent index.
 
-Existence of the index is the whole point of `.cipher/`. See `.cipher/README.md`.
+The repo is too big for any single LLM context window. You CANNOT "read the whole codebase" by opening 5 files. Use the layers. If a layer is stale, refresh: `scripts/cipher-analyze.sh {layer1|layer2|layer3|all}`.
+
+Existence of the layers is the whole point of `.cipher/`. See `.cipher/README.md` (Layer 1-3) and `.cipher/layer4/README.md` (Layer 4).
 
 ## RULE 1 — READ BEFORE RESPONDING
 
