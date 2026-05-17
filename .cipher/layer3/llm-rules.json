@@ -1,0 +1,42 @@
+{
+  "_schema": "Each rule: name, scopeGlob (regex applied to repo-relative path), excludeGlob (optional), principle (free-form reference), prompt (template — {{content}} substitutes file content), maxFiles (per-rule cap to control cost), severity (warn|error)",
+  "rules": [
+    {
+      "name": "top-bar-reimplementation",
+      "scopeGlob": "^frontend/app/(\\(tabs\\)/)?[a-z][a-z0-9_-]*\\.tsx$",
+      "excludeGlob": "_layout\\.tsx$|home\\.tsx$",
+      "principle": "intent/ui.md — top bars should be a shared component, not reimplemented per screen. PRINCIPLES § VIII.25 — code wins; if the screen does its own top bar, that's drift from intent.",
+      "prompt": "You are auditing a React Native screen for the Ozzu app.\n\nPRINCIPLE: Top bars should be a shared component, not reimplemented per screen. A 'top bar' is the strip at the top with paddingTop:insets.top, a fixed height (usually layout.topBarHeight or 48), and contains the screen title + HamburgerMenu + StatusBadge or similar.\n\nFILE: {{path}}\n\n```tsx\n{{content}}\n```\n\nDoes this screen reimplement a top bar inline (e.g., a View with paddingTop:insets.top + a fixed height containing title/buttons), instead of using a shared component? Reply with strict JSON only:\n\n{\"violates\": true|false, \"reason\": \"<one-sentence explanation citing specific line numbers or code patterns>\"}",
+      "maxFiles": 12,
+      "severity": "warn"
+    },
+    {
+      "name": "uses-design-tokens",
+      "scopeGlob": "^frontend/(app|components)/.*\\.tsx$",
+      "excludeGlob": "design-tokens\\.ts$|format\\.ts$",
+      "principle": "intent/ui.md — ALL colors come from design-tokens.ts. PRINCIPLES § VIII.25.",
+      "prompt": "You are auditing a React Native component for the Ozzu app.\n\nPRINCIPLE: All UI colors must come from `colors` imported from `lib/design-tokens.ts`. Hardcoded hex/RGB/RGBA literals for UI colors are drift. Exceptions: animation interpolation outputs, color-string parsing helpers, comments.\n\nFILE: {{path}}\n\n```tsx\n{{content}}\n```\n\nDoes this file still have hardcoded color literals (hex, rgb, rgba) used as UI colors that should be replaced with `colors.X.Y` references? Reply with strict JSON only:\n\n{\"violates\": true|false, \"reason\": \"<list up to 5 specific hardcoded color literals with their line numbers>\"}",
+      "maxFiles": 10,
+      "severity": "warn"
+    },
+    {
+      "name": "file-matches-intent",
+      "scopeGlob": "^(frontend/app|frontend/components|backend/bridge/routes)/.*\\.(tsx?|jsx?)$",
+      "excludeGlob": "_layout\\.tsx$|index\\.tsx$",
+      "principle": ".cipher/layer2/intent-index.json — every file has a recorded 2-sentence intent. PRINCIPLES § VIII.25 — code wins, but if code drifts past its declared intent, that's a signal the intent (or the code) is stale.",
+      "prompt": "You are auditing a source file against its recorded intent.\n\nRECORDED INTENT (from Layer 2 index, written by LLM extraction earlier):\n{{intent}}\n\nFILE: {{path}}\n\n```\n{{content}}\n```\n\nDoes the current file content still match the recorded intent, or has it grown to do significantly more / something different? Reply with strict JSON only:\n\n{\"violates\": true|false, \"reason\": \"<one sentence: matches intent OR specifically what's new/different>\"}",
+      "maxFiles": 15,
+      "severity": "warn",
+      "needsIntent": true
+    },
+    {
+      "name": "screen-anti-slop",
+      "scopeGlob": "^frontend/app/(\\(tabs\\)/)?[a-z][a-z0-9_-]*\\.tsx$",
+      "excludeGlob": "_layout\\.tsx$",
+      "principle": "intent/ui.md anti-slop rules: (1) one focal point, (2) visual hierarchy (size+weight+color contrast for different info levels), (3) structured cards (header row + content + metadata, not just text), (4) interactive feedback on pressables (scale/opacity).",
+      "prompt": "You are auditing a React Native screen against Ozzu's anti-slop UI rules.\n\nANTI-SLOP RULES:\n1. ONE FOCAL POINT — the screen shouldn't compete with itself; one primary action or content area dominates.\n2. VISUAL HIERARCHY — title/subtitle/metadata must differ in size + weight + color (not all the same fontSize/color/weight).\n3. CARDS HAVE STRUCTURE — cards are NOT 'text on a slightly different background'. A card has: container (bg + border or accent), header row (icon + title + status), content (description, progress), metadata row (pills, timestamps).\n4. PRESSABLE FEEDBACK — Pressables/Buttons need opacity change OR scale animation on press (e.g., transform:[{scale:0.98}], opacity:0.92).\n\nFILE: {{path}}\n\n```tsx\n{{content}}\n```\n\nWhich of these four rules does this screen visibly violate? Reply with strict JSON only:\n\n{\"violates\": true|false, \"reason\": \"<which numbered rules are violated, one sentence each>\"}",
+      "maxFiles": 10,
+      "severity": "warn"
+    }
+  ]
+}
