@@ -1720,7 +1720,9 @@ function buildIosDeployCommand(directive) {
     `echo "Caching IPA artifact locally..."`,
     `rm -rf /tmp/ozzu-ipa-cache && gh run download "$RUN_ID" --name ozzu-ios --dir /tmp/ozzu-ipa-cache -R ozzuworld/ozzu`,
     `IPA_FILE=$(find /tmp/ozzu-ipa-cache -name "*.ipa" 2>/dev/null | head -1)`,
+    `META_FILE=$(find /tmp/ozzu-ipa-cache -name "ozzu-build-meta.json" 2>/dev/null | head -1)`,
     `test -n "$IPA_FILE" && cp "$IPA_FILE" ${WORKDIR}/artifacts/ozzu-latest.ipa && echo "IPA cached: $IPA_FILE" || echo "IPA cache skipped — no .ipa found"`,
+    `test -n "$META_FILE" && cp "$META_FILE" ${WORKDIR}/artifacts/ozzu-latest.meta.json && echo "Build meta cached" || echo "Build meta sidecar not present (older workflow)"`,
     `rm -rf /tmp/ozzu-ipa-cache`,
   ].join(" && ");
 }

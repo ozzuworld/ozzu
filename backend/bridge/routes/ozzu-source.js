@@ -16,6 +16,7 @@ module.exports = function createOzzuSourceRoutes(ctx) {
   const log = typeof logObj === 'function' ? logObj : (...a) => (logObj.bridge ? logObj.bridge.info(...a) : console.log(...a));
 
   const IPA_PATH = "/home/gcp/ozzu/artifacts/ozzu-latest.ipa";
+  const IPA_META_PATH = "/home/gcp/ozzu/artifacts/ozzu-latest.meta.json";
   const APP_JSON_PATH = "/home/gcp/ozzu/frontend/app.json";
   const PUBLIC_BASE = process.env.BRIDGE_PUBLIC_URL || "https://home.ozzu.world";
 
@@ -27,6 +28,20 @@ module.exports = function createOzzuSourceRoutes(ctx) {
   const PAIR_TOKEN_FILE = "/tmp/ozzu-bridge/iphone-pairing.token";
 
   function readAppMetadata() {
+    // Prefer the CI-emitted sidecar — it's the source of truth for what's
+    // actually inside the IPA (CFBundleShortVersionString + CFBundleVersion).
+    // Falls back to app.json only when the sidecar is missing (older workflow
+    // or fresh-cloned bridge before the first CI run).
+    try {
+      const sidecar = JSON.parse(fs.readFileSync(IPA_META_PATH, "utf8"));
+      if (sidecar.version && sidecar.buildNumber) {
+        return {
+          version: sidecar.version,
+          bundleId: sidecar.bundleId || "com.ozzu.app",
+          buildNumber: String(sidecar.buildNumber),
+        };
+      }
+    } catch {}
     try {
       const raw = JSON.parse(fs.readFileSync(APP_JSON_PATH, "utf8"));
       const e = raw.expo || raw;

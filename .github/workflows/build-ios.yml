@@ -46,6 +46,16 @@ jobs:
           echo "EXPO_PUBLIC_BRIDGE_API_KEY=${EXPO_PUBLIC_BRIDGE_API_KEY}" >> .env
           echo "EXPO_PUBLIC_BRIDGE_PIN=${EXPO_PUBLIC_BRIDGE_PIN}" >> .env
 
+      - name: Bump iOS buildNumber from GITHUB_RUN_NUMBER
+        run: |
+          # Every IPA must have a unique CFBundleVersion or SideStore can't tell
+          # builds apart. We use GITHUB_RUN_NUMBER (monotonically increasing per
+          # workflow). The version (1.0.0) stays semantic; only buildNumber bumps.
+          jq --arg bn "$GITHUB_RUN_NUMBER" '.expo.ios.buildNumber = $bn' app.json > app.json.new
+          mv app.json.new app.json
+          echo "buildNumber set to $(jq -r '.expo.ios.buildNumber' app.json)"
+          echo "version is $(jq -r '.expo.version' app.json)"
+
       - name: Generate native iOS project (phone config)
         run: BUILD_TARGET=phone npx expo prebuild --platform ios --clean --no-install
 
@@ -72,9 +82,27 @@ jobs:
           mv Applications Payload
           zip -r ../../../ozzu.ipa Payload
 
-      - name: Upload IPA
+      - name: Write build metadata sidecar
+        run: |
+          # Cipher's bridge reads this sidecar to serve the SideStore source
+          # manifest with truthful version/buildNumber matching what's actually
+          # baked into the IPA's Info.plist (CFBundleShortVersionString + CFBundleVersion).
+          cat > ozzu-build-meta.json <<EOF
+          {
+            "version": "$(jq -r .expo.version app.json)",
+            "buildNumber": "$GITHUB_RUN_NUMBER",
+            "runId": "$GITHUB_RUN_ID",
+            "sha": "$GITHUB_SHA",
+            "builtAt": "$(date -u +%FT%TZ)"
+          }
+          EOF
+          cat ozzu-build-meta.json
+
+      - name: Upload IPA + metadata
         uses: actions/upload-artifact@v4
         with:
           name: ozzu-ios
-          path: frontend/ozzu.ipa
+          path: |
+            frontend/ozzu.ipa
+            frontend/ozzu-build-meta.json
           retention-days: 30
