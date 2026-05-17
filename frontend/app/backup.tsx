@@ -20,6 +20,7 @@ import {
   getBackupDownloadUrl,
   type BackupInfo,
 } from "../lib/bridge-api";
+import { GroupNav } from "../components/GroupNav";
 
 export default function BackupScreen() {
   const router = useRouter();
@@ -156,6 +157,8 @@ export default function BackupScreen() {
           </Text>
         </View>
       </View>
+
+      <GroupNav group="me" />
 
       <ScrollView
         style={{ flex: 1, paddingHorizontal: 16 }}

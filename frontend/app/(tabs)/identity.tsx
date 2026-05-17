@@ -14,6 +14,7 @@ import {
 import * as LocalAuthentication from "expo-local-authentication";
 import { apiFetch, getBridgeUrl } from "../../lib/bridge-api";
 import HamburgerMenu from "../../components/HamburgerMenu";
+import { GroupNav } from "../../components/GroupNav";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface Visa {
@@ -209,6 +210,8 @@ export default function IdentityScreen() {
     <View style={styles.root}>
       <HamburgerMenu />
       <DocumentModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />
+
+      <GroupNav group="me" />
 
       {/* ── Header ── */}
       <View style={styles.header}>

@@ -1,16 +1,13 @@
 import { Image, Pressable, Text, View } from "react-native";
-import { useRouter } from "expo-router";
 import { useVacuum } from "../../lib/useVacuum";
 
 export function VacuumMapCard() {
   const { state } = useVacuum();
-  const router = useRouter();
 
   if (!state.mapUrl) return null;
 
   return (
     <Pressable
-      onPress={() => router.push("/vacuum")}
       style={({ pressed }) => ({
         marginTop: 8,
         borderRadius: 8,

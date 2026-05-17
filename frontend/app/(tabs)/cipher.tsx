@@ -15,6 +15,7 @@ import { canUseBiometric, authenticateWithBiometric, BRIDGE_PIN } from "../../li
 import { fetchPendingApprovals, resolveApproval } from "../../lib/bridge-api";
 import { CameraOverlay } from "../../components/CameraOverlay";
 import { ContentPanel } from "../../components/ContentPanel";
+import { GroupNav } from "../../components/GroupNav";
 
 import { useKeepAwake } from "expo-keep-awake";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
@@ -461,6 +462,8 @@ export default function LandingScreen() {
         <HamburgerMenu />
         <StatusBadge />
       </View>
+
+      <GroupNav group="cipher" />
 
       {/* Center — Lottie talking animation (tappable = mute toggle) */}
       <Pressable

@@ -40,6 +40,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { getBridgeUrl } from "../lib/bridge-api";
+import { GroupNav } from "../components/GroupNav";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const TOP_BAR_HEIGHT = 52;
@@ -948,6 +949,8 @@ export default function TrainingScreen() {
 
         <Text style={{ color: "#1A1A1A", fontSize: 9, fontFamily: "monospace" }}>{timeStr}</Text>
       </View>
+
+      <GroupNav group="cipher" />
 
       {/* ── Main content ───────────────────────────────────────────── */}
       <ScrollView

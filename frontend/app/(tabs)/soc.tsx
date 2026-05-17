@@ -11,6 +11,7 @@ import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import HamburgerMenu from "../../components/HamburgerMenu";
+import { GroupNav } from "../../components/GroupNav";
 import { getBridgeUrl } from "../../lib/bridge-api";
 import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha } from "../../lib/design-tokens";
 
@@ -105,6 +106,8 @@ export default function SOCScreen() {
           🔐 SOC Engagements
         </Text>
       </View>
+
+      <GroupNav group="work" />
 
       {/* Content */}
       <ScrollView

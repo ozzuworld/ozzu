@@ -10,19 +10,7 @@ type MenuItem =
   | { icon: string; label: string; action: () => void };
 
 const staticMenuItems: MenuItem[] = [
-  { icon: "💬", label: "MESSAGES", route: "/messages" },
-  { icon: "🕵️", label: "INTEL", route: "/osint" },
-  { icon: "🔍", label: "INFLUENCE", route: "/influence" },
-  { icon: "🚀", label: "VENTURES", route: "/business" },
-  { icon: "📦", label: "FILES", route: "/files" },
-  { icon: "🪪", label: "IDENTITY", route: "/identity" },
   { icon: "🎵", label: "MUSIC", route: "/music" },
-  { icon: "📋", label: "DIRECTIVES", route: "/directives" },
-  { icon: "💰", label: "FINANCE", route: "/finance" },
-  { icon: "📤", label: "UPLOAD", route: "/upload" },
-  { icon: "👓", label: "GLASSES", route: "/glasses" },
-  { icon: "💾", label: "BACKUPS", route: "/backup" },
-  { icon: "🧠", label: "TRAINING", route: "/training" },
 ];
 
 export function HamburgerMenu() {

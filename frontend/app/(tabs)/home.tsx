@@ -150,7 +150,7 @@ export default function HomeScreen() {
             </Text>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 18 }}>
-            <Pressable onPress={() => router.push("/messages" as any)}>
+            <Pressable onPress={() => router.push("/directives" as any)}>
               <Text style={{ fontSize: 20, opacity: 0.5 }}>{"🔔"}</Text>
               {stats.attentionCount > 0 && (
                 <View style={{
@@ -160,8 +160,8 @@ export default function HomeScreen() {
                 }} />
               )}
             </Pressable>
-            <Pressable onPress={() => router.push("/ops" as any)}>
-              <Text style={{ fontSize: 18, opacity: 0.4 }}>{"⋮"}</Text>
+            <Pressable onPress={() => router.push("/upload" as any)}>
+              <Text style={{ fontSize: 19, opacity: 0.55 }}>{"📤"}</Text>
             </Pressable>
           </View>
         </View>
@@ -297,7 +297,7 @@ export default function HomeScreen() {
 
           <View style={{ width: cardWidth }}>
             <Pressable
-              onPress={() => router.push("/messages" as any)}
+              onPress={() => router.push("/cipher" as any)}
               style={({ pressed }) => ({
                 flex: 1,
                 backgroundColor: CARD_BG,
@@ -316,14 +316,14 @@ export default function HomeScreen() {
                 backgroundColor: ICON_BOX_BG,
                 alignItems: "center", justifyContent: "center",
               }}>
-                <Text style={{ fontSize: 20 }}>{"💬"}</Text>
+                <Text style={{ fontSize: 20 }}>{"🎙️"}</Text>
               </View>
               <Text style={{
                 color: colors.text.primary,
                 fontSize: 15,
                 fontWeight: fw.medium,
               }}>
-                Messages
+                Voice
               </Text>
             </Pressable>
           </View>
@@ -353,11 +353,11 @@ export default function HomeScreen() {
           {[
             [
               { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", badge: stats.ventureCount > 0 ? `${stats.ventureCount}` : "" },
-              { id: "intel", icon: "🕵️", label: "Intel", route: "/osint", badge: "" },
+              { id: "soc", icon: "🔐", label: "SOC", route: "/soc", badge: "" },
             ],
             [
-              { id: "soc", icon: "🔐", label: "SOC", route: "/soc", badge: "" },
-              { id: "ops", icon: "🖥️", label: "Ops", route: "/ops", badge: "" },
+              { id: "files", icon: "📦", label: "Files", route: "/files", badge: "" },
+              { id: "music", icon: "🎵", label: "Music", route: "/music", badge: "" },
             ],
           ].map((row, ri) => (
             <View key={ri} style={{ flexDirection: "row", gap: gridGap, marginBottom: gridGap }}>
@@ -425,10 +425,10 @@ export default function HomeScreen() {
       }}>
         {[
           { icon: "⌂", label: "Home", route: null, active: true },
-          { icon: "▶", label: "Directives", route: "/directives" },
-          { icon: "◎", label: "Finance", route: "/finance" },
-          { icon: "✉", label: "Inbox", route: "/messages" },
-          { icon: "◉", label: "Me", route: "/identity" },
+          { icon: "⚡", label: "Cipher", route: "/directives" },
+          { icon: "💼", label: "Work", route: "/business" },
+          { icon: "🪪", label: "Me", route: "/identity" },
+          { icon: "🖥️", label: "Ops", route: "/ops" },
         ].map((tab, i) => (
           <Pressable
             key={i}

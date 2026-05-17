@@ -8,6 +8,7 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { StatusBadge } from "../../components/StatusBadge";
 import HamburgerMenu from "../../components/HamburgerMenu";
+import { GroupNav } from "../../components/GroupNav";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { getBridgeUrl } from "../../lib/bridge-api";
 
@@ -181,6 +182,8 @@ export default function FinanceScreen() {
       </View>
 
       <View style={{ height: 1, backgroundColor: "#1A1A1A", marginHorizontal: hPad }} />
+
+      <GroupNav group="me" />
 
       <ScrollView
         style={{ flex: 1 }}

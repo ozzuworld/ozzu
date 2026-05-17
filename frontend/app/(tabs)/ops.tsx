@@ -19,6 +19,7 @@ import InfraDeviceCard from "../../components/ops/InfraDeviceCard";
 import GcpCard from "../../components/ops/GcpCard";
 import RouterCard from "../../components/ops/RouterCard";
 import PositioningCard from "../../components/ops/PositioningCard";
+import { GroupNav } from "../../components/GroupNav";
 
 const ACCENT = "#06B6D4";
 
@@ -92,6 +93,8 @@ export default function OpsScreen() {
           </Text>
         </Pressable>
       </View>
+
+      <GroupNav group="ops" />
 
       {/* Tab bar */}
       <View

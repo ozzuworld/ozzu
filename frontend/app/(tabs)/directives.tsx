@@ -32,6 +32,7 @@ import { DirectiveListItem } from "../../components/directives/DirectiveListItem
 import { PlanReviewModal } from "../../components/directives/PlanReviewModal";
 import { StatusChangeSheet } from "../../components/directives/StatusChangeSheet";
 import HamburgerMenu from "../../components/HamburgerMenu";
+import { GroupNav } from "../../components/GroupNav";
 import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha, statusPillStyle } from "../../lib/design-tokens";
 
 if (
@@ -212,13 +213,15 @@ export default function DirectivesScreen() {
         paddingHorizontal: hPad,
       }}>
         <Text style={{ color: colors.text.primary, fontSize: 18, fontWeight: fw.semibold }}>
-          Directives
+          Cipher
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusBadge />
           <HamburgerMenu />
         </View>
       </View>
+
+      <GroupNav group="cipher" />
 
       {/* Stats row — minimal, no box */}
       {summary ? (
@@ -293,7 +296,7 @@ export default function DirectivesScreen() {
         ) : filtered.length === 0 ? (
           <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
             <Text style={{ color: colors.text.disabled, fontSize: fs.base }}>
-              {searchQuery ? "No results" : "No directives"}
+              No directives
             </Text>
           </View>
         ) : viewMode === "overview" ? (

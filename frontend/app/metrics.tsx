@@ -12,6 +12,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { TVPressable } from "../components/TVPressable";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { fetchUsageMetrics, fetchAnthropicUsage, type UsageMetrics, type AnthropicUsageData } from "../lib/bridge-api";
+import { GroupNav } from "../components/GroupNav";
 
 const TOP_BAR_HEIGHT = 48;
 const CYAN = "#06B6D4";
@@ -390,6 +391,8 @@ export default function MetricsScreen() {
         <View style={{ flex: 1 }} />
         <StatusBadge />
       </View>
+
+      <GroupNav group="cipher" />
 
       <ScrollView
         contentContainerStyle={{

@@ -12,6 +12,7 @@ import { ProgressBar } from "../../components/business/ProgressBar";
 import { DashboardView } from "../../components/business/DashboardView";
 import { PipelineView } from "../../components/business/PipelineView";
 import { ContactsView } from "../../components/business/ContactsView";
+import { GroupNav } from "../../components/GroupNav";
 
 const TOP_BAR_HEIGHT = 48;
 const ACCENT = "#06B6D4";
@@ -70,7 +71,7 @@ export default function BusinessScreen() {
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <HamburgerMenu />
           <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 3 }}>
-            VENTURES
+            WORK
           </Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -92,6 +93,8 @@ export default function BusinessScreen() {
           <StatusBadge />
         </View>
       </View>
+
+      <GroupNav group="work" />
 
       {/* Sub-tab navigation */}
       <View style={{ paddingHorizontal: 16, paddingBottom: 8, backgroundColor: "#111111" }}>

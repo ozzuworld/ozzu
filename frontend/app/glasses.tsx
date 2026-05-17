@@ -6,6 +6,7 @@ import { View, Text, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useGlasses } from "../lib/glasses-context";
+import { GroupNav } from "../components/GroupNav";
 
 const CYAN = "#06B6D4";
 const DIM = "#525252";
@@ -30,9 +31,9 @@ export default function GlassesScreen() {
     : connectionState === "connecting" ? "CONNECTING..." : "DISCONNECTED";
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#111", paddingTop: insets.top + 16, paddingHorizontal: 20 }}>
+    <View style={{ flex: 1, backgroundColor: "#111", paddingTop: insets.top }}>
       {/* Header */}
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 32 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 16, marginBottom: 16 }}>
         <Pressable onPress={() => router.back()} hitSlop={20} style={{ padding: 8 }}>
           <Text style={{ color: DIM, fontSize: 22 }}>{"\u2190"}</Text>
         </Pressable>
@@ -41,6 +42,10 @@ export default function GlassesScreen() {
         </Text>
         <View style={{ width: 38 }} />
       </View>
+
+      <GroupNav group="ops" />
+
+      <View style={{ paddingHorizontal: 20, paddingTop: 16, flex: 1 }}>
 
       {/* Status indicator */}
       <View style={{ alignItems: "center", marginBottom: 40 }}>
@@ -132,6 +137,7 @@ export default function GlassesScreen() {
           <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "monospace" }}>{error}</Text>
         </View>
       )}
+      </View>
     </View>
   );
 }

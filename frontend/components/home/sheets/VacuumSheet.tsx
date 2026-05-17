@@ -1,5 +1,4 @@
 import { View, Text, Pressable } from "react-native";
-import { useRouter } from "expo-router";
 import { useVacuum } from "../../../lib/useVacuum";
 
 const ACCENT = "#06B6D4";
@@ -32,7 +31,6 @@ interface VacuumSheetProps {
 
 export function VacuumSheet({ onDismiss }: VacuumSheetProps) {
   const { state, controls } = useVacuum();
-  const router = useRouter();
 
   return (
     <View style={{ gap: 12 }}>
@@ -128,25 +126,6 @@ export function VacuumSheet({ onDismiss }: VacuumSheetProps) {
         )}
       </View>
 
-      {/* Full screen button */}
-      <Pressable
-        onPress={() => {
-          if (onDismiss) onDismiss();
-          router.push("/vacuum");
-        }}
-        style={({ pressed }) => ({
-          paddingVertical: 12,
-          borderRadius: 8,
-          backgroundColor: pressed ? "rgba(6,182,212,0.2)" : "rgba(6,182,212,0.1)",
-          borderWidth: 1,
-          borderColor: ACCENT,
-          alignItems: "center",
-        })}
-      >
-        <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 12, fontWeight: "bold", letterSpacing: 1 }}>
-          OPEN FULL SCREEN
-        </Text>
-      </Pressable>
     </View>
   );
 }
