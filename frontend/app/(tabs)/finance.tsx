@@ -8,9 +8,10 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { GroupNav } from "../../components/GroupNav";
 import { TopBar } from "../../components/TopBar";
+import { TransactionCard } from "../../components/finance/TransactionCard";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { getBridgeUrl } from "../../lib/bridge-api";
-import { formatCOP, formatShortDate } from "../../lib/format";
+import { formatCOP } from "../../lib/format";
 
 import { colors } from "../../lib/design-tokens";
 // Matches actual API response from GET /api/finance/summary
@@ -40,16 +41,6 @@ type Transaction = {
   date: string;
   amount: number;
 };
-
-const TYPE_EMOJI: Record<string, string> = {
-  purchase: "🛒",
-  payment: "💸",
-  withdrawal: "🏧",
-  transfer_in: "📥",
-  transfer_out: "📤",
-  deposit: "💵",
-};
-
 
 function BarChart({ months }: { months: MonthRow[] }) {
   if (!months || months.length === 0) return null;
@@ -85,6 +76,34 @@ function BarChart({ months }: { months: MonthRow[] }) {
           </View>
         );
       })}
+    </View>
+  );
+}
+
+function Stat({ label, value, color, signed }: { label: string; value: number; color: string; signed?: boolean }) {
+  const sign = signed ? (value >= 0 ? "+" : "−") : "";
+  const display = signed ? `${sign}${formatCOP(Math.abs(value))}` : formatCOP(Math.abs(value));
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: colors.gray[850],
+        borderRadius: 10,
+        padding: 12,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.04)",
+      }}
+    >
+      <Text style={{ color: colors.gray[500], fontSize: 9, fontWeight: "700", letterSpacing: 1.5, marginBottom: 4 }}>
+        {label}
+      </Text>
+      <Text
+        style={{ color, fontSize: 15, fontWeight: "bold", fontFamily: "monospace" }}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+      >
+        {display}
+      </Text>
     </View>
   );
 }
@@ -170,138 +189,86 @@ export default function FinanceScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} colors={[colors.accent]} />
         }
       >
-        {/* Section header */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
-          <Text style={{ color: colors.brand.amber, fontSize: 13, fontWeight: "700", letterSpacing: 1.5 }}>
-            💰 FINANCE
+        {/* ── HERO: balance is the focal point ── */}
+        <View
+          style={{
+            backgroundColor: colors.gray[800],
+            borderRadius: 14,
+            borderLeftWidth: 3,
+            borderLeftColor: colors.brand.amber,
+            padding: 18,
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.04)",
+          }}
+        >
+          <Text style={{ color: colors.gray[400], fontSize: 10, fontWeight: "700", letterSpacing: 2, marginBottom: 6 }}>
+            LAST KNOWN BALANCE
           </Text>
-        </View>
-
-        {/* Monthly Summary Card */}
-        <View style={{
-          backgroundColor: colors.gray[850],
-          borderRadius: 14,
-          padding: 16,
-          borderWidth: 1,
-          borderColor: "#1E1E1E",
-        }}>
-          <Text style={{ color: colors.gray[400], fontSize: 11, fontWeight: "700", letterSpacing: 1.5, marginBottom: 12 }}>
-            MONTHLY SUMMARY
-          </Text>
-
           {loadingSummary ? (
-            <Text style={{ color: colors.accent, fontSize: 13, opacity: 0.6 }}>Loading...</Text>
+            <Text style={{ color: colors.gray[400], fontSize: 13 }}>Loading…</Text>
           ) : errorSummary ? (
-            <Text style={{ color: colors.gray[400], fontSize: 12 }}>{errorSummary}</Text>
-          ) : summary ? (
-            <>
-              {/* Current month big numbers */}
-              <View style={{ flexDirection: "row", gap: 16, marginBottom: 16 }}>
-                <View style={{ flex: 1, backgroundColor: colors.gray[800], borderRadius: 10, padding: 12 }}>
-                  <Text style={{ color: colors.gray[400], fontSize: 10, fontWeight: "600", letterSpacing: 1, marginBottom: 4 }}>
-                    EXPENSES
-                  </Text>
-                  <Text style={{ color: colors.error, fontSize: 22, fontWeight: "bold", fontFamily: "monospace" }} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatCOP(currentExpenses)}
-                  </Text>
-                </View>
-                {currentIncome > 0 ? (
-                  <View style={{ flex: 1, backgroundColor: colors.gray[800], borderRadius: 10, padding: 12 }}>
-                    <Text style={{ color: colors.gray[400], fontSize: 10, fontWeight: "600", letterSpacing: 1, marginBottom: 4 }}>
-                      INCOME
-                    </Text>
-                    <Text style={{ color: colors.success, fontSize: 22, fontWeight: "bold", fontFamily: "monospace" }} numberOfLines={1} adjustsFontSizeToFit>
-                      {formatCOP(currentIncome)}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-
-              {/* Balance if known */}
-              {balance !== null ? (
-                <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 12, marginBottom: 16 }}>
-                  <Text style={{ color: colors.gray[400], fontSize: 10, fontWeight: "600", letterSpacing: 1, marginBottom: 4 }}>
-                    LAST KNOWN BALANCE
-                  </Text>
-                  <Text style={{ color: colors.brand.amber, fontSize: 18, fontWeight: "bold", fontFamily: "monospace" }}>
-                    {formatCOP(balance)}
-                  </Text>
-                </View>
-              ) : null}
-
-              {/* 6-month bar chart */}
-              <Text style={{ color: "#3A3A3A", fontSize: 10, fontWeight: "600", letterSpacing: 1, marginBottom: 4 }}>
-                LAST 6 MONTHS — EXPENSES
-              </Text>
-              <BarChart months={summary.monthly || []} />
-            </>
-          ) : null}
+            <Text style={{ color: colors.error, fontSize: 12 }}>{errorSummary}</Text>
+          ) : balance !== null ? (
+            <Text
+              style={{ color: colors.brand.amber, fontSize: 32, fontWeight: "bold", fontFamily: "monospace" }}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {formatCOP(balance)}
+            </Text>
+          ) : (
+            <Text style={{ color: colors.gray[300], fontSize: 18, fontFamily: "monospace" }}>—</Text>
+          )}
+          <Text style={{ color: colors.gray[500], fontSize: 11, marginTop: 6 }}>
+            {new Date().toLocaleString("en-US", { month: "long", year: "numeric" })}
+          </Text>
         </View>
 
-        {/* Recent Transactions */}
-        <View style={{
-          backgroundColor: colors.gray[850],
-          borderRadius: 14,
-          padding: 16,
-          borderWidth: 1,
-          borderColor: "#1E1E1E",
-        }}>
-          <Text style={{ color: colors.gray[400], fontSize: 11, fontWeight: "700", letterSpacing: 1.5, marginBottom: 12 }}>
+        {/* ── This month: out / in / net (compact 3-up) ── */}
+        {summary && !loadingSummary ? (
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Stat label="OUT" value={currentExpenses} color={colors.error} />
+            <Stat label="IN" value={currentIncome} color={colors.success} />
+            <Stat
+              label="NET"
+              value={currentIncome - currentExpenses}
+              color={currentIncome - currentExpenses >= 0 ? colors.success : colors.error}
+              signed
+            />
+          </View>
+        ) : null}
+
+        {/* ── Last 6 months (secondary, demoted) ── */}
+        {summary && summary.monthly && summary.monthly.length > 0 ? (
+          <View
+            style={{
+              backgroundColor: colors.gray[850],
+              borderRadius: 12,
+              padding: 14,
+              borderWidth: 1,
+              borderColor: "rgba(255,255,255,0.04)",
+            }}
+          >
+            <Text style={{ color: colors.gray[400], fontSize: 10, fontWeight: "700", letterSpacing: 1.5, marginBottom: 8 }}>
+              LAST 6 MONTHS · EXPENSES
+            </Text>
+            <BarChart months={summary.monthly} />
+          </View>
+        ) : null}
+
+        {/* ── Recent transactions: ProjectCard-style cards ── */}
+        <View>
+          <Text style={{ color: colors.gray[400], fontSize: 10, fontWeight: "700", letterSpacing: 2, marginBottom: 10, marginLeft: 2 }}>
             RECENT TRANSACTIONS
           </Text>
-
           {loadingTx ? (
-            <Text style={{ color: colors.accent, fontSize: 13, opacity: 0.6 }}>Loading...</Text>
+            <Text style={{ color: colors.gray[400], fontSize: 13, marginLeft: 2 }}>Loading…</Text>
           ) : errorTx ? (
-            <Text style={{ color: colors.gray[400], fontSize: 12 }}>{errorTx}</Text>
+            <Text style={{ color: colors.error, fontSize: 12, marginLeft: 2 }}>{errorTx}</Text>
           ) : transactions.length === 0 ? (
-            <Text style={{ color: colors.gray[400], fontSize: 12 }}>No transactions</Text>
+            <Text style={{ color: colors.gray[500], fontSize: 12, marginLeft: 2 }}>No transactions</Text>
           ) : (
-            <View style={{ gap: 2 }}>
-              {transactions.map((tx, i) => {
-                const isPositive = tx.amount > 0;
-                const emoji = TYPE_EMOJI[tx.type] || "💳";
-                return (
-                  <View
-                    key={tx.id || i}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      paddingVertical: 10,
-                      borderBottomWidth: i < transactions.length - 1 ? 1 : 0,
-                      borderBottomColor: colors.gray[800],
-                    }}
-                  >
-                    {/* Left: emoji */}
-                    <Text style={{ fontSize: 18, width: 28 }}>{emoji}</Text>
-
-                    {/* Center: merchant + date */}
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text
-                        style={{ color: colors.gray[50], fontSize: 13, fontWeight: "600" }}
-                        numberOfLines={1}
-                      >
-                        {tx.merchant || "Unknown"}
-                      </Text>
-                      <Text style={{ color: colors.gray[400], fontSize: 11, marginTop: 1 }}>
-                        {tx.date ? formatShortDate(tx.date) : ""}
-                      </Text>
-                    </View>
-
-                    {/* Right: amount */}
-                    <Text style={{
-                      color: isPositive ? colors.success : colors.error,
-                      fontSize: 13,
-                      fontWeight: "700",
-                      fontFamily: "monospace",
-                      marginLeft: 8,
-                    }}>
-                      {isPositive ? "+" : "-"}{formatCOP(tx.amount)}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
+            transactions.map((tx, i) => <TransactionCard key={tx.id || i} tx={tx} />)
           )}
         </View>
       </ScrollView>
