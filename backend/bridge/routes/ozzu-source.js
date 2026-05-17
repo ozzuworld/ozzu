@@ -79,7 +79,7 @@ module.exports = function createOzzuSourceRoutes(ctx) {
         iconURL: `${PUBLIC_BASE}/icon.png`,
         headerURL: `${PUBLIC_BASE}/icon.png`,
         website: PUBLIC_BASE,
-        tintColor: "111111",
+        tintColor: "0EA5E9",
         apps: stat ? [{
           name: "Ozzu",
           bundleIdentifier: meta.bundleId,
@@ -87,7 +87,7 @@ module.exports = function createOzzuSourceRoutes(ctx) {
           subtitle: "Skyline command",
           localizedDescription: "The Ozzu app — Cipher, directives, fleet, files, cameras, finance.",
           iconURL: `${PUBLIC_BASE}/icon.png`,
-          tintColor: "111111",
+          tintColor: "0EA5E9",
           category: "productivity",
           screenshotURLs: [],
           versions: [{
