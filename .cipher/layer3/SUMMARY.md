@@ -1,6 +1,6 @@
 # Cipher Layer 3 — Drift Report
 
-Generated: 2026-05-17T13:57:06.410Z
+Generated: 2026-05-17T14:07:34.302Z
 Scanned 8717 files in 0.4s
 
 Cipher: **read this before claiming the codebase is clean.**
@@ -40,18 +40,7 @@ Cipher: **read this before claiming the codebase is clean.**
 ## duplicated-format-helpers
 *Time/format helpers reimplemented per screen (one shared lib should win)*
 
-**3 findings:**
-
-- **`formatDate`** defined 3× in:
-  - frontend/app/(tabs)/files.tsx:53
-  - frontend/app/(tabs)/finance.tsx:54
-  - frontend/app/(tabs)/identity.tsx:98
-- **`formatTime`** defined 2× in:
-  - frontend/app/(tabs)/music.tsx:70
-  - frontend/components/ops/ServiceCard.tsx:36
-- **`formatDuration`** defined 2× in:
-  - frontend/app/(tabs)/music.tsx:77
-  - frontend/app/metrics.tsx:36
+✅ No findings
 
 ## broken-route-references
 *router.push() to routes that don't exist*

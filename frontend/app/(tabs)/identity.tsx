@@ -15,6 +15,7 @@ import * as LocalAuthentication from "expo-local-authentication";
 import { apiFetch, getBridgeUrl } from "../../lib/bridge-api";
 import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
+import { formatLongDate } from "../../lib/format";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface Visa {
@@ -95,10 +96,6 @@ function daysUntil(dateStr?: string | null): number {
   return Math.floor((t - Date.now()) / 86400000);
 }
 
-function formatDate(dateStr: string) {
-  if (!dateStr) return "—";
-  return new Date(dateStr).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-}
 
 // ── Document Viewer ────────────────────────────────────────────────────────
 function DocumentModal({ doc, onClose }: { doc: Document | null; onClose: () => void }) {
@@ -127,7 +124,7 @@ function ExpiryBadge({ dateStr, label }: { dateStr: string; label: string }) {
   return (
     <View style={[styles.expiryBadge, urgent && styles.expiryUrgent]}>
       <Text style={styles.expiryLabel}>{label}</Text>
-      <Text style={styles.expiryDate}>{formatDate(dateStr)}</Text>
+      <Text style={styles.expiryDate}>{formatLongDate(dateStr)}</Text>
       <Text style={[styles.expiryDays, expired && { color: "#ef4444" }, urgent && !expired && { color: "#f97316" }]}>
         {expired ? "EXPIRED" : `${days}d remaining`}
       </Text>
@@ -255,7 +252,7 @@ export default function IdentityScreen() {
             <>
               <InfoCard title="Personal">
                 <InfoRow label="Full Name" value={profile.full_name} />
-                <InfoRow label="Date of Birth" value={formatDate(profile.date_of_birth)} />
+                <InfoRow label="Date of Birth" value={formatLongDate(profile.date_of_birth)} />
                 <InfoRow label="Place of Birth" value={profile.place_of_birth} />
                 <InfoRow label="Nationality" value={profile.nationality} />
                 <InfoRow label="Cédula" value={`CC ${profile.cedula}`} mono />
@@ -263,16 +260,16 @@ export default function IdentityScreen() {
 
               <InfoCard title="Passport">
                 <InfoRow label="Number" value={profile.passport_number} mono />
-                <InfoRow label="Issued" value={`${formatDate(profile.passport_issued)} · ${profile.passport_issuing_authority}`} />
-                <InfoRow label="Expires" value={formatDate(profile.passport_expires)} urgent={daysUntil(profile.passport_expires) < 180} />
+                <InfoRow label="Issued" value={`${formatLongDate(profile.passport_issued)} · ${profile.passport_issuing_authority}`} />
+                <InfoRow label="Expires" value={formatLongDate(profile.passport_expires)} urgent={daysUntil(profile.passport_expires) < 180} />
               </InfoCard>
 
               {visas.map((v, i) => (
                 <InfoCard key={i} title={v.status === "cancelled" ? `${v.type} (Cancelled)` : v.type}>
                   <InfoRow label="Country" value={v.country} />
                   <InfoRow label="Control No." value={v.number} mono />
-                  <InfoRow label="Issued" value={`${formatDate(v.issued)} · ${v.issued_at}`} />
-                  <InfoRow label="Expires" value={formatDate(v.expires)} urgent={v.status === "active" && daysUntil(v.expires) < 180} />
+                  <InfoRow label="Issued" value={`${formatLongDate(v.issued)} · ${v.issued_at}`} />
+                  <InfoRow label="Expires" value={formatLongDate(v.expires)} urgent={v.status === "active" && daysUntil(v.expires) < 180} />
                   <InfoRow label="Entries" value={`${v.entries} · ${v.status.toUpperCase()}`} />
                 </InfoCard>
               ))}
@@ -307,7 +304,7 @@ export default function IdentityScreen() {
                         {DIRECTION_LABEL[t.direction]}
                       </Text>
                     </View>
-                    <Text style={styles.travelDate}>{formatDate(t.event_date)}</Text>
+                    <Text style={styles.travelDate}>{formatLongDate(t.event_date)}</Text>
                     {t.port ? <Text style={styles.travelPort}>{t.port}</Text> : null}
                     {t.notes ? <Text style={styles.travelNotes}>{t.notes}</Text> : null}
                   </View>

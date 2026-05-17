@@ -30,7 +30,7 @@ import {
 import { getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
 import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
-import { formatBytes } from "../../lib/format";
+import { formatBytes, formatRelativeOrShortDate } from "../../lib/format";
 
 const ACCENT = "#06B6D4";
 const DIM = "#525252";
@@ -50,15 +50,6 @@ interface BreadcrumbItem {
 }
 
 // ── Helpers ──
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  if (diff < 60000) return "just now";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
-}
 
 function isImage(mime: string): boolean {
   return mime.startsWith("image/");
@@ -144,7 +135,7 @@ function FolderItem({ folder, onPress, onLongPress }: { folder: Folder; onPress:
           {folder.name}
         </Text>
         <Text style={{ color: DIM, fontSize: 10, fontFamily: "monospace", marginTop: 2 }}>
-          {formatDate(folder.created_at)}
+          {formatRelativeOrShortDate(folder.created_at)}
         </Text>
       </View>
       <Text style={{ color: DIM, fontSize: 16 }}>›</Text>
@@ -192,7 +183,7 @@ function FileItem({ file, onPress, onLongPress }: { file: StoredFile; onPress: (
         {file.filename}
       </Text>
       <Text style={{ color: DIM, fontSize: 9, fontFamily: "monospace" }}>
-        {formatBytes(file.size_bytes)} · {formatDate(file.created_at)}
+        {formatBytes(file.size_bytes)} · {formatRelativeOrShortDate(file.created_at)}
       </Text>
     </Pressable>
   );
@@ -543,7 +534,7 @@ export default function FilesScreen() {
                     <View style={{ flex: 1 }}>
                       <Text numberOfLines={1} style={{ color: "#ccc", fontSize: 12, fontFamily: "monospace" }}>{f.filename}</Text>
                       <Text style={{ color: DIM, fontSize: 10, fontFamily: "monospace" }}>
-                        {formatBytes(f.size_bytes)} · {formatDate(f.created_at)}
+                        {formatBytes(f.size_bytes)} · {formatRelativeOrShortDate(f.created_at)}
                       </Text>
                     </View>
                     <Text style={{ color: DIM, fontSize: 16 }}>›</Text>

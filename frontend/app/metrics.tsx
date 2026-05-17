@@ -14,6 +14,7 @@ import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { fetchUsageMetrics, fetchAnthropicUsage, type UsageMetrics, type AnthropicUsageData } from "../lib/bridge-api";
 import { GroupNav } from "../components/GroupNav";
 import { layout } from "../lib/design-tokens";
+import { formatLongDuration } from "../lib/format";
 const CYAN = "#06B6D4";
 const CARD_BG = "#111111";
 const BORDER = "#222";
@@ -33,11 +34,6 @@ function formatNumber(n: number): string {
   return String(n);
 }
 
-function formatDuration(ms: number): string {
-  const min = Math.round(ms / 60000);
-  if (min < 60) return `${min}m`;
-  return `${Math.floor(min / 60)}h ${min % 60}m`;
-}
 
 // Stat card component
 function StatCard({
@@ -609,7 +605,7 @@ export default function MetricsScreen() {
                 label="Avg Duration"
                 value={
                   live?.directives?.avgDurationMs
-                    ? formatDuration(live.directives.avgDurationMs)
+                    ? formatLongDuration(live.directives.avgDurationMs)
                     : "N/A"
                 }
               />
@@ -823,7 +819,7 @@ export default function MetricsScreen() {
               />
               <MetricRow
                 label="Session Time"
-                value={formatDuration(today?.gemini?.sessionDurationMs || 0)}
+                value={formatLongDuration(today?.gemini?.sessionDurationMs || 0)}
               />
               <MetricRow
                 label="Audio Sent"

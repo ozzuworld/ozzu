@@ -21,6 +21,7 @@ import { useMediaPlayer } from "../../lib/useMediaPlayer";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { HA_URL, HA_TOKEN } from "../../lib/config";
 import { layout } from "../../lib/design-tokens";
+import { formatTrackTime, formatTrackDuration } from "../../lib/format";
 
 const BRIDGE_URL =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
@@ -67,16 +68,6 @@ interface NowPlayingContext {
   contextName: string | null;
 }
 
-function formatTime(seconds: number): string {
-  if (!seconds || seconds < 0) return "0:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function formatDuration(ms: number): string {
-  return formatTime(ms / 1000);
-}
 
 // ─── Mini Player ───────────────────────────────────────────────
 function MiniPlayer({
@@ -433,7 +424,7 @@ function PlaylistDetailView({
             </View>
           </View>
           <Text style={{ color: "#535353", fontSize: 12 }}>
-            {formatDuration(item.durationMs)}
+            {formatTrackDuration(item.durationMs)}
           </Text>
         </Pressable>
       );
@@ -915,8 +906,8 @@ function NowPlayingView({
               </View>
             </View>
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-              <Text style={{ color: "#A7A7A7", fontSize: 11 }}>{formatTime(playerState.position)}</Text>
-              <Text style={{ color: "#A7A7A7", fontSize: 11 }}>{formatTime(playerState.duration)}</Text>
+              <Text style={{ color: "#A7A7A7", fontSize: 11 }}>{formatTrackTime(playerState.position)}</Text>
+              <Text style={{ color: "#A7A7A7", fontSize: 11 }}>{formatTrackTime(playerState.duration)}</Text>
             </View>
           </View>
 

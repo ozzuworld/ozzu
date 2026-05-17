@@ -1,6 +1,7 @@
 import { View, Text, Pressable } from "react-native";
 import { useState } from "react";
 import type { ServiceStatus } from "../../lib/ops-hooks";
+import { formatRelativeTime } from "../../lib/format";
 
 const STATUS_COLORS: Record<string, string> = {
   healthy: "#22C55E",
@@ -33,15 +34,6 @@ function formatLatency(ms: number | null): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function formatTime(iso: string | null): string {
-  if (!iso) return "never";
-  const d = new Date(iso);
-  const now = Date.now();
-  const diff = Math.floor((now - d.getTime()) / 1000);
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return `${Math.floor(diff / 3600)}h ago`;
-}
 
 export default function ServiceCard({ name, status }: Props) {
   const [expanded, setExpanded] = useState(false);
@@ -83,7 +75,7 @@ export default function ServiceCard({ name, status }: Props) {
           {formatLatency(status.latencyMs)}
         </Text>
         <Text style={{ fontFamily: "monospace", fontSize: 10, color: "#525252" }}>
-          {formatTime(status.lastCheck)}
+          {formatRelativeTime(status.lastCheck)}
         </Text>
       </View>
       {expanded && Object.keys(status.details).length > 0 && (

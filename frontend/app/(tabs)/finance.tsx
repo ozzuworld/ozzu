@@ -12,7 +12,7 @@ import { GroupNav } from "../../components/GroupNav";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { getBridgeUrl } from "../../lib/bridge-api";
 import { layout } from "../../lib/design-tokens";
-import { formatCOP } from "../../lib/format";
+import { formatCOP, formatShortDate } from "../../lib/format";
 
 // Matches actual API response from GET /api/finance/summary
 type MonthRow = {
@@ -51,11 +51,6 @@ const TYPE_EMOJI: Record<string, string> = {
   deposit: "💵",
 };
 
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[d.getMonth()]} ${d.getDate()}`;
-}
 
 function BarChart({ months }: { months: MonthRow[] }) {
   if (!months || months.length === 0) return null;
@@ -300,7 +295,7 @@ export default function FinanceScreen() {
                         {tx.merchant || "Unknown"}
                       </Text>
                       <Text style={{ color: "#525252", fontSize: 11, marginTop: 1 }}>
-                        {tx.date ? formatDate(tx.date) : ""}
+                        {tx.date ? formatShortDate(tx.date) : ""}
                       </Text>
                     </View>
 
