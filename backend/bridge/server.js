@@ -426,8 +426,12 @@ const CAMERAS = [
   { id: 'cam_lroom',  name: 'Living Room Camera', streamName: 'ozzu-lroom-cam-01' },
 ];
 
-function getCameraStreamUrl(streamName) {
-  return `http://${WYZE_BRIDGE_HOST}:1984/api/stream.m3u8?src=${streamName}`;
+// go2rtc exposes two stream variants per cam:
+//   <streamName>       — main/HD (2560x1440 on V4)
+//   <streamName>-lo    — sub/SD (~640x360) — for thumbnails / small overlays
+function getCameraStreamUrl(streamName, quality = "hi") {
+  const src = quality === "lo" ? `${streamName}-lo` : streamName;
+  return `http://${WYZE_BRIDGE_HOST}:1984/api/stream.m3u8?src=${src}`;
 }
 
 const CONTROLLABLE_DOMAINS = new Set(["switch", "siren", "media_player", "number", "climate", "select"]);
@@ -3950,7 +3954,7 @@ async function handleToolCall(name, args) {
           const available = CAMERAS.map((c) => c.id).join(", ");
           return { success: false, message: `Unknown camera: ${cameraId}. Available: ${available}` };
         }
-        const streamUrl = getCameraStreamUrl(camera.streamName);
+        const streamUrl = getCameraStreamUrl(camera.streamName, "lo");
         broadcastToAll({ type: "showCamera", cameraId: camera.id, streamUrl, cameraName: camera.name });
         log.bridge.info(`Showing ${camera.name} → ${streamUrl}`);
         return { success: true, message: `Showing ${camera.name} on TV.` };

@@ -31,6 +31,8 @@ export function CameraOverlay({
 
   const player = useVideoPlayer(visible ? streamUrl : null, (p) => {
     p.loop = true;
+    p.muted = false;
+    p.volume = 1;
     p.play();
   });
 
