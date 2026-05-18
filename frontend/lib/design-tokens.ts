@@ -28,12 +28,24 @@ export const colors = {
   brand: {
     cyan: "#06B6D4",         // accent (alias)
     cyanLight: "#22d3ee",
-    spotify: "#1DB954",      // music tab
+    spotify: "#1DB954",      // music tab (the green)
     purple: "#A855F7",
     blue: "#3B82F6",
     amber: "#F59E0B",
     amberDeep: "#EAB308",
     orange: "#F97316",
+  },
+
+  // Spotify-look palette used by the music screen — single source of truth
+  // for the dark surface set the screen renders against.
+  spotify: {
+    bgDeep:        "#1E1E1E",   // skeleton rows, deepest bg
+    surface:       "#282828",   // card / row backgrounds
+    surfaceHover:  "#383838",   // pressed/hover state
+    textPrimary:   "#FFFFFF",
+    textSecondary: "#B3B3B3",   // artist line, captions
+    textDim:       "#535353",   // icons, chevrons, placeholders
+    likeHeart:     "#7B4FE0",   // liked-songs gradient cap
   },
 
   // Gray scale (mapped to the actual hexes the codebase has been using)

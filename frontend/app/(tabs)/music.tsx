@@ -20,16 +20,15 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { useMediaPlayer } from "../../lib/useMediaPlayer";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { HA_URL, HA_TOKEN } from "../../lib/config";
-import { layout } from "../../lib/design-tokens";
+import { layout, withAlpha, colors } from "../../lib/design-tokens";
 import { formatTrackTime, formatTrackDuration } from "../../lib/format";
 
-import { colors } from "../../lib/design-tokens";
 const BRIDGE_URL =
   process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
 
 const ACCENT = colors.brand.spotify;
-const BAR_COLOR = "#FFFFFF";
-const BAR_BG = "rgba(255,255,255,0.1)";
+const BAR_COLOR = colors.spotify.textPrimary;
+const BAR_BG = withAlpha(colors.spotify.textPrimary, 0.1);
 const MINI_PLAYER_HEIGHT = 56;
 
 type MusicView = "library" | "playlist" | "nowPlaying";
@@ -99,12 +98,12 @@ function MiniPlayer({
         right: 0,
         height: MINI_PLAYER_HEIGHT + insets.bottom,
         paddingBottom: insets.bottom,
-        backgroundColor: "#282828",
+        backgroundColor: colors.spotify.surface,
         opacity: pressed ? 0.92 : 1,
       })}
     >
       {/* Progress line */}
-      <View style={{ height: 2, backgroundColor: "rgba(255,255,255,0.1)" }}>
+      <View style={{ height: 2, backgroundColor: withAlpha(colors.spotify.textPrimary, 0.1) }}>
         <View
           style={{
             height: "100%",
@@ -129,7 +128,7 @@ function MiniPlayer({
               uri: albumArtUrl,
               headers: { Authorization: `Bearer ${HA_TOKEN}` },
             }}
-            style={{ width: 40, height: 40, borderRadius: 4, backgroundColor: "#383838" }}
+            style={{ width: 40, height: 40, borderRadius: 4, backgroundColor: colors.spotify.surfaceHover }}
             resizeMode="cover"
           />
         ) : (
@@ -138,20 +137,20 @@ function MiniPlayer({
               width: 40,
               height: 40,
               borderRadius: 4,
-              backgroundColor: "#383838",
+              backgroundColor: colors.spotify.surfaceHover,
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Ionicons name="musical-note" size={18} color="#535353" />
+            <Ionicons name="musical-note" size={18} color={colors.spotify.textDim} />
           </View>
         )}
         {/* Track info */}
         <View style={{ flex: 1 }}>
-          <Text numberOfLines={1} style={{ color: "#FFFFFF", fontSize: 14, fontWeight: "600" }}>
+          <Text numberOfLines={1} style={{ color: colors.spotify.textPrimary, fontSize: 14, fontWeight: "600" }}>
             {playerState.trackName || "Not Playing"}
           </Text>
-          <Text numberOfLines={1} style={{ color: "#B3B3B3", fontSize: 12 }}>
+          <Text numberOfLines={1} style={{ color: colors.spotify.textSecondary, fontSize: 12 }}>
             {playerState.artist || "---"}
           </Text>
         </View>
@@ -166,7 +165,7 @@ function MiniPlayer({
           <Ionicons
             name={playerState.isPlaying ? "pause" : "play"}
             size={24}
-            color="#FFFFFF"
+            color={colors.spotify.textPrimary}
           />
         </Pressable>
       </View>
@@ -214,15 +213,15 @@ function LibraryView({
               borderRadius: 4,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: "#7B4FE0",
+              backgroundColor: colors.spotify.likeHeart,
             }}
           >
-            <Ionicons name="heart" size={24} color="#FFFFFF" />
+            <Ionicons name="heart" size={24} color={colors.spotify.textPrimary} />
           </View>
         ) : item.imageUrl ? (
           <Image
             source={{ uri: item.imageUrl }}
-            style={{ width: 56, height: 56, borderRadius: 4, backgroundColor: "#282828" }}
+            style={{ width: 56, height: 56, borderRadius: 4, backgroundColor: colors.spotify.surface }}
             resizeMode="cover"
           />
         ) : (
@@ -231,29 +230,29 @@ function LibraryView({
               width: 56,
               height: 56,
               borderRadius: 4,
-              backgroundColor: "#282828",
+              backgroundColor: colors.spotify.surface,
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Ionicons name="musical-notes" size={24} color="#535353" />
+            <Ionicons name="musical-notes" size={24} color={colors.spotify.textDim} />
           </View>
         )}
         <View style={{ flex: 1, marginLeft: 12 }}>
           <Text
             numberOfLines={1}
-            style={{ color: "#FFFFFF", fontSize: 16, fontWeight: "600" }}
+            style={{ color: colors.spotify.textPrimary, fontSize: 16, fontWeight: "600" }}
           >
             {item.name}
           </Text>
           <Text
             numberOfLines={1}
-            style={{ color: "#B3B3B3", fontSize: 13, marginTop: 2 }}
+            style={{ color: colors.spotify.textSecondary, fontSize: 13, marginTop: 2 }}
           >
             Playlist · {item.trackCount} songs
           </Text>
         </View>
-        <Ionicons name="chevron-forward" size={18} color="#535353" />
+        <Ionicons name="chevron-forward" size={18} color={colors.spotify.textDim} />
       </Pressable>
     ),
     [onSelectPlaylist, hPad]
@@ -272,10 +271,10 @@ function LibraryView({
               paddingHorizontal: hPad,
             }}
           >
-            <View style={{ width: 56, height: 56, borderRadius: 4, backgroundColor: "#282828" }} />
+            <View style={{ width: 56, height: 56, borderRadius: 4, backgroundColor: colors.spotify.surface }} />
             <View style={{ flex: 1, marginLeft: 12, gap: 6 }}>
-              <View style={{ width: "60%", height: 14, borderRadius: 3, backgroundColor: "#282828" }} />
-              <View style={{ width: "40%", height: 12, borderRadius: 3, backgroundColor: "#1E1E1E" }} />
+              <View style={{ width: "60%", height: 14, borderRadius: 3, backgroundColor: colors.spotify.surface }} />
+              <View style={{ width: "40%", height: 12, borderRadius: 3, backgroundColor: colors.spotify.bgDeep }} />
             </View>
           </View>
         ))}
@@ -286,8 +285,8 @@ function LibraryView({
   if (error) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }}>
-        <Ionicons name="cloud-offline" size={48} color="#535353" />
-        <Text style={{ color: "#B3B3B3", fontSize: 16, marginTop: 12, textAlign: "center" }}>
+        <Ionicons name="cloud-offline" size={48} color={colors.spotify.textDim} />
+        <Text style={{ color: colors.spotify.textSecondary, fontSize: 16, marginTop: 12, textAlign: "center" }}>
           Couldn't load playlists
         </Text>
         <Pressable
@@ -297,11 +296,11 @@ function LibraryView({
             paddingHorizontal: 24,
             paddingVertical: 10,
             borderRadius: 20,
-            backgroundColor: "#282828",
+            backgroundColor: colors.spotify.surface,
             opacity: pressed ? 0.6 : 1,
           })}
         >
-          <Text style={{ color: "#FFFFFF", fontSize: 14, fontWeight: "600" }}>Retry</Text>
+          <Text style={{ color: colors.spotify.textPrimary, fontSize: 14, fontWeight: "600" }}>Retry</Text>
         </Pressable>
       </View>
     );
@@ -373,7 +372,7 @@ function PlaylistDetailView({
           {item.albumArt ? (
             <Image
               source={{ uri: item.albumArt }}
-              style={{ width: 48, height: 48, borderRadius: 4, backgroundColor: "#282828" }}
+              style={{ width: 48, height: 48, borderRadius: 4, backgroundColor: colors.spotify.surface }}
               resizeMode="cover"
             />
           ) : (
@@ -382,12 +381,12 @@ function PlaylistDetailView({
                 width: 48,
                 height: 48,
                 borderRadius: 4,
-                backgroundColor: "#282828",
+                backgroundColor: colors.spotify.surface,
                 alignItems: "center",
                 justifyContent: "center",
               }}
             >
-              <Ionicons name="musical-note" size={20} color="#535353" />
+              <Ionicons name="musical-note" size={20} color={colors.spotify.textDim} />
             </View>
           )}
           <View style={{ flex: 1, marginLeft: 12 }}>
@@ -398,7 +397,7 @@ function PlaylistDetailView({
               <Text
                 numberOfLines={1}
                 style={{
-                  color: isCurrentTrack ? ACCENT : "#FFFFFF",
+                  color: isCurrentTrack ? ACCENT : colors.spotify.textPrimary,
                   fontSize: 15,
                   fontWeight: "500",
                   flex: 1,
@@ -411,21 +410,21 @@ function PlaylistDetailView({
               {item.explicit ? (
                 <View
                   style={{
-                    backgroundColor: "#B3B3B3",
+                    backgroundColor: colors.spotify.textSecondary,
                     borderRadius: 2,
                     paddingHorizontal: 4,
                     paddingVertical: 1,
                   }}
                 >
-                  <Text style={{ color: "#000", fontSize: 9, fontWeight: "700" }}>E</Text>
+                  <Text style={{ color: colors.bg.base, fontSize: 9, fontWeight: "700" }}>E</Text>
                 </View>
               ) : null}
-              <Text numberOfLines={1} style={{ color: "#B3B3B3", fontSize: 13, flex: 1 }}>
+              <Text numberOfLines={1} style={{ color: colors.spotify.textSecondary, fontSize: 13, flex: 1 }}>
                 {item.artist}
               </Text>
             </View>
           </View>
-          <Text style={{ color: "#535353", fontSize: 12 }}>
+          <Text style={{ color: colors.spotify.textDim, fontSize: 12 }}>
             {formatTrackDuration(item.durationMs)}
           </Text>
         </Pressable>
@@ -448,8 +447,8 @@ function PlaylistDetailView({
             marginLeft: -4,
           })}
         >
-          <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
-          <Text style={{ color: "#FFFFFF", fontSize: 14, fontWeight: "600", marginLeft: 4 }}>
+          <Ionicons name="chevron-back" size={22} color={colors.spotify.textPrimary} />
+          <Text style={{ color: colors.spotify.textPrimary, fontSize: 14, fontWeight: "600", marginLeft: 4 }}>
             Library
           </Text>
         </Pressable>
@@ -457,11 +456,11 @@ function PlaylistDetailView({
         {/* Playlist info */}
         <Text
           numberOfLines={2}
-          style={{ color: "#FFFFFF", fontSize: 24, fontWeight: "700", marginTop: 8 }}
+          style={{ color: colors.spotify.textPrimary, fontSize: 24, fontWeight: "700", marginTop: 8 }}
         >
           {playlist.name}
         </Text>
-        <Text style={{ color: "#B3B3B3", fontSize: 14, marginTop: 4 }}>
+        <Text style={{ color: colors.spotify.textSecondary, fontSize: 14, marginTop: 4 }}>
           {total} songs
         </Text>
 
@@ -482,13 +481,13 @@ function PlaylistDetailView({
               paddingHorizontal: 16,
               paddingVertical: 8,
               borderRadius: 20,
-              backgroundColor: "rgba(255,255,255,0.08)",
+              backgroundColor: withAlpha(colors.spotify.textPrimary, 0.08),
               opacity: pressed ? 0.6 : 1,
               gap: 6,
             })}
           >
-            <Ionicons name="shuffle" size={18} color="#FFFFFF" />
-            <Text style={{ color: "#FFFFFF", fontSize: 14, fontWeight: "600" }}>Shuffle</Text>
+            <Ionicons name="shuffle" size={18} color={colors.spotify.textPrimary} />
+            <Text style={{ color: colors.spotify.textPrimary, fontSize: 14, fontWeight: "600" }}>Shuffle</Text>
           </Pressable>
           <Pressable
             onPress={onPlayAll}
@@ -502,7 +501,7 @@ function PlaylistDetailView({
               opacity: pressed ? 0.7 : 1,
             })}
           >
-            <Ionicons name="play" size={24} color="#000000" style={{ marginLeft: 2 }} />
+            <Ionicons name="play" size={24} color={colors.bg.base} style={{ marginLeft: 2 }} />
           </Pressable>
         </View>
       </View>
@@ -523,7 +522,7 @@ function PlaylistDetailView({
       <View style={{ flex: 1 }}>
         {ListHeader}
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ color: "#B3B3B3", fontSize: 16 }}>Couldn't load tracks</Text>
+          <Text style={{ color: colors.spotify.textSecondary, fontSize: 16 }}>Couldn't load tracks</Text>
           <Pressable
             onPress={onRetry}
             style={({ pressed }) => ({
@@ -531,11 +530,11 @@ function PlaylistDetailView({
               paddingHorizontal: 24,
               paddingVertical: 10,
               borderRadius: 20,
-              backgroundColor: "#282828",
+              backgroundColor: colors.spotify.surface,
               opacity: pressed ? 0.6 : 1,
             })}
           >
-            <Text style={{ color: "#FFFFFF", fontSize: 14, fontWeight: "600" }}>Retry</Text>
+            <Text style={{ color: colors.spotify.textPrimary, fontSize: 14, fontWeight: "600" }}>Retry</Text>
           </Pressable>
         </View>
       </View>
@@ -768,7 +767,7 @@ function NowPlayingView({
             right: 0,
             top: "30%",
             bottom: 0,
-            backgroundColor: "#121212",
+            backgroundColor: colors.gray[850],
             opacity: 0.85,
           }}
         />
@@ -792,10 +791,10 @@ function NowPlayingView({
             opacity: pressed ? 0.5 : 1,
           })}
         >
-          <Ionicons name="chevron-down" size={24} color="#FFFFFF" />
+          <Ionicons name="chevron-down" size={24} color={colors.spotify.textPrimary} />
         </Pressable>
         {contextLabel ? (
-          <Text numberOfLines={1} style={{ color: "#B3B3B3", fontSize: 12, fontWeight: "600", flex: 1, textAlign: "center", marginHorizontal: 8 }}>
+          <Text numberOfLines={1} style={{ color: colors.spotify.textSecondary, fontSize: 12, fontWeight: "600", flex: 1, textAlign: "center", marginHorizontal: 8 }}>
             {contextLabel}
           </Text>
         ) : <View style={{ flex: 1 }} />}
@@ -825,7 +824,7 @@ function NowPlayingView({
               transform: [{ scale: artPulseAnim }],
               ...(Platform.OS !== "web"
                 ? {
-                    shadowColor: "#000",
+                    shadowColor: colors.bg.base,
                     shadowOpacity: 0.5,
                     shadowRadius: 20,
                     shadowOffset: { width: 0, height: 8 },
@@ -847,12 +846,12 @@ function NowPlayingView({
               <View
                 style={{
                   flex: 1,
-                  backgroundColor: "#282828",
+                  backgroundColor: colors.spotify.surface,
                   alignItems: "center",
                   justifyContent: "center",
                 }}
               >
-                <Ionicons name="musical-notes" size={64} color="#535353" />
+                <Ionicons name="musical-notes" size={64} color={colors.spotify.textDim} />
               </View>
             )}
           </Animated.View>
@@ -869,14 +868,14 @@ function NowPlayingView({
         >
           {hasTrack ? (
             <>
-              <Text numberOfLines={1} style={{ color: "#FFFFFF", fontSize: 22, fontWeight: "700" }}>
+              <Text numberOfLines={1} style={{ color: colors.spotify.textPrimary, fontSize: 22, fontWeight: "700" }}>
                 {playerState.trackName}
               </Text>
-              <Text numberOfLines={1} style={{ color: "#B3B3B3", fontSize: 16, fontWeight: "400", marginTop: 4 }}>
+              <Text numberOfLines={1} style={{ color: colors.spotify.textSecondary, fontSize: 16, fontWeight: "400", marginTop: 4 }}>
                 {playerState.artist || "---"}
               </Text>
               {playerState.albumName ? (
-                <Text numberOfLines={1} style={{ color: "#686868", fontSize: 14, fontWeight: "400", marginTop: 2 }}>
+                <Text numberOfLines={1} style={{ color: colors.gray[300], fontSize: 14, fontWeight: "400", marginTop: 2 }}>
                   {playerState.albumName}
                 </Text>
               ) : null}
@@ -884,7 +883,7 @@ function NowPlayingView({
           ) : (
             <Text
               style={{
-                color: "#686868",
+                color: colors.gray[300],
                 fontSize: 18,
                 fontWeight: "500",
                 textAlign: isPhone ? "center" : "left",
@@ -908,8 +907,8 @@ function NowPlayingView({
               </View>
             </View>
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-              <Text style={{ color: "#A7A7A7", fontSize: 11 }}>{formatTrackTime(playerState.position)}</Text>
-              <Text style={{ color: "#A7A7A7", fontSize: 11 }}>{formatTrackTime(playerState.duration)}</Text>
+              <Text style={{ color: colors.gray[200], fontSize: 11 }}>{formatTrackTime(playerState.position)}</Text>
+              <Text style={{ color: colors.gray[200], fontSize: 11 }}>{formatTrackTime(playerState.duration)}</Text>
             </View>
           </View>
 
@@ -927,13 +926,13 @@ function NowPlayingView({
               onPress={controls.toggleShuffle}
               style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1 })}
             >
-              <Ionicons name="shuffle" size={22} color={playerState.shuffle ? ACCENT : "#B3B3B3"} />
+              <Ionicons name="shuffle" size={22} color={playerState.shuffle ? ACCENT : colors.spotify.textSecondary} />
             </Pressable>
             <Pressable
               onPress={controls.prevTrack}
               style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1 })}
             >
-              <Ionicons name="play-skip-back" size={24} color="#FFFFFF" />
+              <Ionicons name="play-skip-back" size={24} color={colors.spotify.textPrimary} />
             </Pressable>
             <Pressable
               onPress={controls.playPause}
@@ -942,14 +941,14 @@ function NowPlayingView({
               <Ionicons
                 name={playerState.isPlaying ? "pause-circle" : "play-circle"}
                 size={64}
-                color="#FFFFFF"
+                color={colors.spotify.textPrimary}
               />
             </Pressable>
             <Pressable
               onPress={controls.nextTrack}
               style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1 })}
             >
-              <Ionicons name="play-skip-forward" size={24} color="#FFFFFF" />
+              <Ionicons name="play-skip-forward" size={24} color={colors.spotify.textPrimary} />
             </Pressable>
             <Pressable
               onPress={() => {
@@ -959,7 +958,7 @@ function NowPlayingView({
               }}
               style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1 })}
             >
-              <Ionicons name="repeat" size={22} color={playerState.repeat !== "off" ? ACCENT : "#B3B3B3"} />
+              <Ionicons name="repeat" size={22} color={playerState.repeat !== "off" ? ACCENT : colors.spotify.textSecondary} />
               {playerState.repeat === "one" ? (
                 <View
                   style={{
@@ -974,7 +973,7 @@ function NowPlayingView({
                     justifyContent: "center",
                   }}
                 >
-                  <Text style={{ color: "#000", fontSize: 8, fontWeight: "700" }}>1</Text>
+                  <Text style={{ color: colors.bg.base, fontSize: 8, fontWeight: "700" }}>1</Text>
                 </View>
               ) : null}
             </Pressable>
@@ -985,7 +984,7 @@ function NowPlayingView({
             <Ionicons
               name={playerState.volume === 0 ? "volume-mute" : playerState.volume < 0.5 ? "volume-low" : "volume-high"}
               size={18}
-              color="#B3B3B3"
+              color={colors.spotify.textSecondary}
             />
             <View
               onLayout={(e) => { volumeBarWidth.current = e.nativeEvent.layout.width; }}
@@ -1008,7 +1007,7 @@ function NowPlayingView({
           {/* Queue preview */}
           {queue.length > 0 ? (
             <View style={{ marginTop: 24 }}>
-              <Text style={{ color: "#B3B3B3", fontSize: 12, fontWeight: "700", letterSpacing: 1, marginBottom: 10 }}>
+              <Text style={{ color: colors.spotify.textSecondary, fontSize: 12, fontWeight: "700", letterSpacing: 1, marginBottom: 10 }}>
                 UP NEXT
               </Text>
               {queue.slice(0, 3).map((item, i) => (
@@ -1019,7 +1018,7 @@ function NowPlayingView({
                   {item.imageUrl ? (
                     <Image
                       source={{ uri: item.imageUrl }}
-                      style={{ width: 36, height: 36, borderRadius: 4, backgroundColor: "#282828" }}
+                      style={{ width: 36, height: 36, borderRadius: 4, backgroundColor: colors.spotify.surface }}
                       resizeMode="cover"
                     />
                   ) : (
@@ -1028,17 +1027,17 @@ function NowPlayingView({
                         width: 36,
                         height: 36,
                         borderRadius: 4,
-                        backgroundColor: "#282828",
+                        backgroundColor: colors.spotify.surface,
                         alignItems: "center",
                         justifyContent: "center",
                       }}
                     >
-                      <Ionicons name="musical-note" size={16} color="#535353" />
+                      <Ionicons name="musical-note" size={16} color={colors.spotify.textDim} />
                     </View>
                   )}
                   <View style={{ flex: 1 }}>
-                    <Text numberOfLines={1} style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "500" }}>{item.name}</Text>
-                    <Text numberOfLines={1} style={{ color: "#B3B3B3", fontSize: 11 }}>{item.artist}</Text>
+                    <Text numberOfLines={1} style={{ color: colors.spotify.textPrimary, fontSize: 13, fontWeight: "500" }}>{item.name}</Text>
+                    <Text numberOfLines={1} style={{ color: colors.spotify.textSecondary, fontSize: 11 }}>{item.artist}</Text>
                   </View>
                 </View>
               ))}
@@ -1218,7 +1217,7 @@ export default function MusicScreen() {
   const currentTracks = selectedPlaylist ? (playlistTracks.get(selectedPlaylist.id) || []) : [];
 
   return (
-    <View style={{ flex: 1, backgroundColor: view === "nowPlaying" ? "#121212" : "#000000" }}>
+    <View style={{ flex: 1, backgroundColor: view === "nowPlaying" ? colors.gray[850] : colors.bg.base }}>
       {/* Library header */}
       {view === "library" ? (
         <View
@@ -1242,9 +1241,9 @@ export default function MusicScreen() {
               paddingRight: 12,
             })}
           >
-            <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+            <Ionicons name="chevron-back" size={22} color={colors.spotify.textPrimary} />
           </Pressable>
-          <Text style={{ color: "#FFFFFF", fontSize: 20, fontWeight: "700", flex: 1 }}>
+          <Text style={{ color: colors.spotify.textPrimary, fontSize: 20, fontWeight: "700", flex: 1 }}>
             Your Library
           </Text>
           <StatusBadge />
