@@ -21,6 +21,9 @@
         "NSMicrophoneUsageDescription": "Ozzu needs microphone access for voice communication",
         "NSSpeechRecognitionUsageDescription": "Ozzu uses on-device speech recognition for the Cipher voice pipeline",
         "NSBluetoothAlwaysUsageDescription": "Ozzu uses Bluetooth to pair with room positioning nodes for indoor tracking",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
         "UIBackgroundModes": [
           "audio",
           "bluetooth-peripheral"

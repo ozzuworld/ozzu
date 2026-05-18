@@ -418,9 +418,13 @@ const ENTITY_CONFIG = [
 
 // ── Camera config ──
 
-// Cameras live behind go2rtc on dev-01 (10.9.0.5 over WG, 192.168.1.14 on home LAN).
+// Cameras live behind go2rtc on dev-01. Dev-01 is reachable on two paths:
+//   - 192.168.1.14 (home LAN — direct, no GCP hop, no egress)
+//   - 10.9.0.5     (WG VPN  — works from anywhere on the WG mesh, but bytes relay through GCP)
+// We expose BOTH to clients; the app races them and uses the first reachable one.
 // See backend/docker-compose.yml comment block for the full deployment story.
 const WYZE_BRIDGE_HOST = "10.9.0.5";
+const WYZE_BRIDGE_LAN_HOST = "192.168.1.14";
 const CAMERAS = [
   { id: 'cam_loving', name: 'Loving Cam',         streamName: 'ozzu-cam-loving' },
   { id: 'cam_lroom',  name: 'Living Room Camera', streamName: 'ozzu-lroom-cam-01' },
@@ -429,9 +433,21 @@ const CAMERAS = [
 // go2rtc exposes two stream variants per cam:
 //   <streamName>       — main/HD (2560x1440 on V4)
 //   <streamName>-lo    — sub/SD (~640x360) — for thumbnails / small overlays
-function getCameraStreamUrl(streamName, quality = "hi") {
+function getCameraStreamPath(streamName, quality = "hi") {
   const src = quality === "lo" ? `${streamName}-lo` : streamName;
-  return `http://${WYZE_BRIDGE_HOST}:1984/api/stream.m3u8?src=${src}`;
+  return `/api/stream.m3u8?src=${src}`;
+}
+
+function getCameraStreamHosts() {
+  return [
+    `http://${WYZE_BRIDGE_LAN_HOST}:1984`,  // home-LAN-direct (preferred)
+    `http://${WYZE_BRIDGE_HOST}:1984`,      // WG fallback (works remote via WG mesh)
+  ];
+}
+
+// Backward-compat: returns the WG-host URL (the path that always works for on-WG clients).
+function getCameraStreamUrl(streamName, quality = "hi") {
+  return `http://${WYZE_BRIDGE_HOST}:1984${getCameraStreamPath(streamName, quality)}`;
 }
 
 const CONTROLLABLE_DOMAINS = new Set(["switch", "siren", "media_player", "number", "climate", "select"]);
@@ -3954,8 +3970,10 @@ async function handleToolCall(name, args) {
           const available = CAMERAS.map((c) => c.id).join(", ");
           return { success: false, message: `Unknown camera: ${cameraId}. Available: ${available}` };
         }
-        const streamUrl = getCameraStreamUrl(camera.streamName, "lo");
-        broadcastToAll({ type: "showCamera", cameraId: camera.id, streamUrl, cameraName: camera.name });
+        const streamPath = getCameraStreamPath(camera.streamName, "lo");
+        const streamHosts = getCameraStreamHosts();
+        const streamUrl = `${streamHosts[streamHosts.length - 1]}${streamPath}`; // legacy fallback (WG host)
+        broadcastToAll({ type: "showCamera", cameraId: camera.id, streamUrl, streamHosts, streamPath, cameraName: camera.name });
         log.bridge.info(`Showing ${camera.name} → ${streamUrl}`);
         return { success: true, message: `Showing ${camera.name} on TV.` };
       }

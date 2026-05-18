@@ -25,6 +25,37 @@ const PUBLIC_WS_URL =
 
 const BRIDGE_API_KEY = process.env.EXPO_PUBLIC_BRIDGE_API_KEY || "";
 
+// Race a list of candidate hosts and return the first one that responds OK to
+// /api/streams within timeoutMs. Used by dual-path camera URL selection so the
+// app prefers a LAN-direct host when on the home network, else falls back to
+// the WG path. Returns null if no host responds in time.
+async function raceReachableHost(hosts: string[], timeoutMs: number): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    let pending = hosts.length;
+    let settled = false;
+    const finish = (val: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(val);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    for (const host of hosts) {
+      const ctrl = new AbortController();
+      const inner = setTimeout(() => ctrl.abort(), timeoutMs);
+      fetch(`${host}/api/streams`, { method: "GET", signal: ctrl.signal })
+        .then((res) => {
+          clearTimeout(inner);
+          if (res.ok) { clearTimeout(timer); finish(host); }
+        })
+        .catch(() => { /* unreachable host — ignored */ })
+        .finally(() => {
+          clearTimeout(inner);
+          if (--pending === 0) { clearTimeout(timer); finish(null); }
+        });
+    }
+  });
+}
+
 function getWsUrl(): string {
   const mode = getBridgeMode();
   if (mode === "remote") {
@@ -250,9 +281,24 @@ export class BridgeSession {
         case "pinResolved":
           this.callbacks?.onPinResolved();
           break;
-        case "showCamera":
-          this.callbacks?.onShowCamera(msg.cameraId, msg.streamUrl, msg.cameraName);
+        case "showCamera": {
+          // Dual-path: bridge sends a list of candidate hosts (LAN-direct first, WG fallback).
+          // Race them with a short probe; first reachable wins. Done off the message-handler
+          // hot path so it doesn't block audio frames behind the probe.
+          const hosts: string[] | undefined = msg.streamHosts;
+          const path: string | undefined = msg.streamPath;
+          const fallbackUrl: string = msg.streamUrl;
+          const cb = this.callbacks;
+          if (Array.isArray(hosts) && hosts.length > 0 && typeof path === "string") {
+            raceReachableHost(hosts, 600).then((winner) => {
+              const url = winner ? `${winner}${path}` : fallbackUrl;
+              cb?.onShowCamera(msg.cameraId, url, msg.cameraName);
+            });
+          } else {
+            cb?.onShowCamera(msg.cameraId, fallbackUrl, msg.cameraName);
+          }
           break;
+        }
         case "hideCamera":
           this.callbacks?.onHideCamera();
           break;
