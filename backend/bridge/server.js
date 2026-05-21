@@ -3106,7 +3106,7 @@ const GEMINI_BRIDGE_TOOLS = [
   },
   {
     name: "vacuum_history",
-    description: "Report Dusk Vader's recent cleaning runs (audit log). Returns when the vacuum cleaned, for how long, how much area, and whether it completed cleanly. Use when King Kazuma asks 'when did the vacuum last run', 'is the vacuum cleaning', 'how often does it clean', or 'show vacuum history'. The vacuum runs on its own schedule (Dreame app, daily 3 AM) — Ozzu polls the cloud every 10 min for the audit log.",
+    description: "Report Dusk Vader's recent cleaning runs (audit log). Returns when the vacuum cleaned, for how long, how much area, and whether it completed cleanly. Use when King Kazuma asks 'when did the vacuum last run', 'is the vacuum cleaning', 'how often does it clean', or 'show vacuum history'. Ozzu polls the Dreame cloud every 10 min for the audit log.",
     parameters: {
       type: "OBJECT",
       properties: {
@@ -3115,6 +3115,21 @@ const GEMINI_BRIDGE_TOOLS = [
       },
       required: [],
     },
+  },
+  {
+    name: "vacuum_start",
+    description: "Start a cleaning task on Dusk Vader right now. Use when King Kazuma says 'vacuum', 'start the vacuum', 'clean the floor', etc. Ozzu owns the nightly 3 AM schedule via cron; this tool is for ad-hoc triggers outside the schedule.",
+    parameters: { type: "OBJECT", properties: {}, required: [] },
+  },
+  {
+    name: "vacuum_pause",
+    description: "Pause Dusk Vader if it's currently cleaning. Use when King Kazuma says 'stop the vacuum', 'pause cleaning', 'quiet down', etc. No-op if vacuum is already idle.",
+    parameters: { type: "OBJECT", properties: {}, required: [] },
+  },
+  {
+    name: "vacuum_dock",
+    description: "Send Dusk Vader back to its charging dock. Use when King Kazuma says 'send the vacuum home', 'go to dock', 'return to base'. No-op if already docked.",
+    parameters: { type: "OBJECT", properties: {}, required: [] },
   },
   {
     name: "show_content",
@@ -3994,6 +4009,27 @@ async function handleToolCall(name, args) {
         broadcastToAll({ type: "hideCamera" });
         log.bridge.info("Hiding camera overlay");
         return { success: true, message: "Camera overlay dismissed." };
+      }
+
+      if (name === "vacuum_start" || name === "vacuum_pause" || name === "vacuum_dock") {
+        const action = name.replace("vacuum_", "");
+        const { execFile } = require("child_process");
+        const result = await new Promise((resolve) => {
+          execFile(
+            "/home/gcp/ozzu/scripts/.venv-vacuum/bin/python",
+            ["/home/gcp/ozzu/scripts/vacuum-control.py", action],
+            { timeout: 20000 },
+            (err, stdout, stderr) => {
+              resolve({ code: err ? (err.code ?? 1) : 0, stdout: String(stdout).trim(), stderr: String(stderr).trim() });
+            }
+          );
+        });
+        if (result.code === 0) {
+          log.bridge.info(`vacuum_${action}: ${result.stdout}`);
+          return { success: true, message: `Dusk Vader: ${action} command sent (cloud accepted).` };
+        }
+        log.bridge.warn(`vacuum_${action} failed (exit=${result.code}): ${result.stderr || result.stdout}`);
+        return { success: false, message: `Vacuum ${action} failed: ${result.stderr || result.stdout || `exit ${result.code}`}` };
       }
 
       if (name === "vacuum_history") {
