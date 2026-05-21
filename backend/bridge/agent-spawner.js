@@ -432,30 +432,43 @@ function cleanupWorktree(directiveId, branch) {
   try {
     if (branch) execSync(`git branch -D "${branch}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" });
   } catch {}
-  // Delete remote branch too (prevents stale agent branches piling up)
-  try {
-    if (branch) execSync(`git push origin --delete "${branch}"`, { cwd: WORKDIR, timeout: 15000, stdio: "ignore" });
-  } catch {}
+  // Delete remote branch too (prevents stale branches piling up).
+  // stdio: "pipe" so we can log stderr — silent swallow here caused 28
+  // cipher/* branches to accumulate before the sweeper bug was found.
+  if (branch) {
+    try {
+      execSync(`git push origin --delete "${branch}"`, { cwd: WORKDIR, timeout: 15000, stdio: "pipe" });
+    } catch (err) {
+      log(`Worktree cleanup: remote delete FAILED for ${branch}: ${(err.stderr || err.message || "").toString().trim().slice(0, 200)}`);
+    }
+  }
   pruneWorktrees();
   log(`Worktree cleaned up: ${wtDir}`);
 }
 
-// Scan for orphaned agent branches not linked to any active directive
-// Called periodically and on startup to prevent stale branch accumulation
+// Scan for orphaned directive branches not linked to any active directive.
+// Sweeps both agent/* (autonomous worker branches) and cipher/* (Cipher-driven
+// branches mandated by CLAUDE.md). For cipher/*, only deletes branches whose
+// tip is already merged into main — never destroys unmerged work.
+// Called periodically and on startup to prevent stale branch accumulation.
+const STALE_BRANCH_PREFIXES = ["agent/", "cipher/"];
+
 function cleanupStaleBranches(getDirectives) {
   const { execSync } = require("child_process");
   try {
-    // Get all local agent branches
+    const hasManagedPrefix = (b) => STALE_BRANCH_PREFIXES.some(p => b.startsWith(p));
+
+    // Get all local managed branches
     const localBranches = execSync("git branch", { cwd: WORKDIR, encoding: "utf8", timeout: 10000 })
       .split("\n")
       .map(b => b.trim().replace(/^\* /, ""))
-      .filter(b => b.startsWith("agent/"));
+      .filter(hasManagedPrefix);
 
-    // Get all remote agent branches
+    // Get all remote managed branches
     const remoteBranches = execSync("git branch -r", { cwd: WORKDIR, encoding: "utf8", timeout: 10000 })
       .split("\n")
       .map(b => b.trim())
-      .filter(b => b.startsWith("origin/agent/"))
+      .filter(b => STALE_BRANCH_PREFIXES.some(p => b.startsWith("origin/" + p)))
       .map(b => b.replace("origin/", ""));
 
     const allBranches = [...new Set([...localBranches, ...remoteBranches])];
@@ -485,10 +498,14 @@ function cleanupStaleBranches(getDirectives) {
       activeDirectiveIds.add(directiveId);
     }
 
+    // Fetch origin/main once so the merged-into-main check sees fresh tips
+    try { execSync(`git fetch origin main`, { cwd: WORKDIR, timeout: 30000, stdio: "ignore" }); } catch {}
+
     let cleaned = 0;
+    let skippedUnmerged = 0;
     for (const branch of allBranches) {
-      // Extract directive ID from branch name: agent/dir_xxx or agent/dir_xxx-suffix
-      const match = branch.match(/^agent\/(dir_\d+)/);
+      // Extract directive ID from branch name: <prefix>dir_xxx or <prefix>dir_xxx-suffix
+      const match = branch.match(/^(?:agent|cipher)\/(dir_\d+)/);
       if (!match) continue;
       const directiveId = match[1];
 
@@ -497,15 +514,43 @@ function cleanupStaleBranches(getDirectives) {
       if (activeDirectiveIds.has(directiveId)) continue;
       if (pendingMerges.has(branch)) continue;
 
-      // This branch is orphaned — clean it up
+      // Safety net: never delete a branch whose tip isn't in main yet.
+      // The original agent/* sweep skipped this check; we keep it cheap and
+      // apply it uniformly so cipher/* WIP can't be lost to a regex glitch.
+      const ref = branch.startsWith("origin/") ? branch : (
+        localBranches.includes(branch) ? branch : `origin/${branch}`
+      );
+      let merged = false;
+      try {
+        const ahead = execSync(`git rev-list origin/main..${ref} --count`, {
+          cwd: WORKDIR, encoding: "utf8", timeout: 5000,
+        }).trim();
+        merged = ahead === "0";
+      } catch {
+        // If we can't compare, err on the side of safety — leave it.
+        log(`Stale branch cleanup: skipping ${branch} (could not compare to origin/main)`);
+        skippedUnmerged++;
+        continue;
+      }
+      if (!merged) {
+        log(`Stale branch cleanup: skipping ${branch} (unmerged commits, directive ${directiveId} terminal)`);
+        skippedUnmerged++;
+        continue;
+      }
+
+      // Merged + orphaned — safe to delete
       log(`Stale branch cleanup: ${branch} (directive ${directiveId} is terminal or missing)`);
       try { execSync(`git branch -D "${branch}"`, { cwd: WORKDIR, timeout: 5000, stdio: "ignore" }); } catch {}
-      try { execSync(`git push origin --delete "${branch}"`, { cwd: WORKDIR, timeout: 15000, stdio: "ignore" }); } catch {}
+      try {
+        execSync(`git push origin --delete "${branch}"`, { cwd: WORKDIR, timeout: 15000, stdio: "pipe" });
+      } catch (err) {
+        log(`Stale branch cleanup: remote delete FAILED for ${branch}: ${(err.stderr || err.message || "").toString().trim().slice(0, 200)}`);
+      }
       cleaned++;
     }
 
-    if (cleaned > 0) {
-      log(`Stale branch cleanup: removed ${cleaned} orphaned agent branch(es)`);
+    if (cleaned > 0 || skippedUnmerged > 0) {
+      log(`Stale branch cleanup: removed ${cleaned} orphaned branch(es), kept ${skippedUnmerged} with unmerged work`);
       pruneWorktrees();
     }
     return cleaned;
