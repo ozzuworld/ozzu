@@ -71,3 +71,7 @@ backend/Dockerfile.joko
 # Local docker-compose overrides
 docker-compose.override.yml
 backend/docker-compose.override.yml
+
+# Python venvs (scripts/.venv-vacuum/, etc. — pip-installed deps)
+scripts/.venv-*
+__pycache__/

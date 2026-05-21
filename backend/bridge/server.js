@@ -3105,6 +3105,18 @@ const GEMINI_BRIDGE_TOOLS = [
     parameters: { type: "OBJECT", properties: {}, required: [] },
   },
   {
+    name: "vacuum_history",
+    description: "Report Dusk Vader's recent cleaning runs (audit log). Returns when the vacuum cleaned, for how long, how much area, and whether it completed cleanly. Use when King Kazuma asks 'when did the vacuum last run', 'is the vacuum cleaning', 'how often does it clean', or 'show vacuum history'. The vacuum runs on its own schedule (Dreame app, daily 3 AM) — Ozzu polls the cloud every 10 min for the audit log.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        days: { type: "NUMBER", description: "How many days back to look (default 7, max 30)" },
+        limit: { type: "NUMBER", description: "Max rows to return (default 10, max 50)" },
+      },
+      required: [],
+    },
+  },
+  {
     name: "show_content",
     description: "Display rich content on King Kazuma's screen — use for tables, code, lists, long output, or anything too complex to speak aloud. Give a brief verbal summary and show the details here.",
     parameters: {
@@ -3983,6 +3995,31 @@ async function handleToolCall(name, args) {
         log.bridge.info("Hiding camera overlay");
         return { success: true, message: "Camera overlay dismissed." };
       }
+
+      if (name === "vacuum_history") {
+        const days = Math.min(Math.max(Number(args.days) || 7, 1), 30);
+        const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 50);
+        const rows = await db.query(
+          `SELECT started_at, cleaning_minutes, cleaned_area_m2, status_code, completed, task_interrupt
+             FROM vacuum_runs
+            WHERE started_at >= NOW() - INTERVAL '${days} days'
+            ORDER BY started_at DESC
+            LIMIT ${limit}`
+        );
+        if (!rows || rows.length === 0) {
+          return { success: true, message: `No vacuum runs in the last ${days} day(s). Check that the Dreame app schedule is enabled and the vacuum isn't blocked.` };
+        }
+        const lines = rows.map(r => {
+          const when = new Date(r.started_at).toISOString().replace("T", " ").slice(0, 16);
+          const mark = r.completed ? "✓" : (r.task_interrupt != null ? "⚠ interrupted" : "…");
+          return `${when}  ${String(r.cleaning_minutes).padStart(3)} min  ${String(r.cleaned_area_m2).padStart(3)} m²  ${mark}`;
+        });
+        const lastRun = new Date(rows[0].started_at);
+        const hoursAgo = Math.round((Date.now() - lastRun.getTime()) / 3600000);
+        const summary = `Last cleaned: ${hoursAgo}h ago. ${rows.length} run(s) in last ${days}d.`;
+        return { success: true, message: `${summary}\n\n${lines.join("\n")}` };
+      }
+
 
       if (name === "show_content") {
         broadcastToAll({ type: "showContent", title: args.title || "", content: args.content });

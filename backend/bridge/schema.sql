@@ -211,3 +211,23 @@ CREATE INDEX IF NOT EXISTS idx_soc_queue_engagement ON soc_queue_items(engagemen
 CREATE INDEX IF NOT EXISTS idx_soc_queue_status ON soc_queue_items(engagement_id, status);
 ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS pid INTEGER;
 ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS timeout_seconds INTEGER NOT NULL DEFAULT 300;
+
+-- Vacuum cleaning audit log. One row per completed cleaning run from the Dreame cloud.
+-- Polled by scripts/vacuum-status-poll.py. cloud_event_id is the Dreame cloud's record ID and is the dedup key.
+CREATE TABLE IF NOT EXISTS vacuum_runs (
+  id              SERIAL PRIMARY KEY,
+  cloud_event_id  VARCHAR(64) NOT NULL UNIQUE,  -- Dreame cloud's record ID, used to dedupe across polls
+  device_did      VARCHAR(32) NOT NULL,         -- e.g. '2078489697' for Dusk Vader
+  started_at      TIMESTAMPTZ NOT NULL,         -- piid 6 / CLEANING_START_TIME
+  cleaning_minutes INTEGER NOT NULL DEFAULT 0,  -- piid 2 / CLEANING_TIME
+  cleaned_area_m2 INTEGER NOT NULL DEFAULT 0,   -- piid 3 / CLEANED_AREA
+  status_code     INTEGER,                       -- piid 1 / STATUS (DreameVacuumStatus enum)
+  completed       BOOLEAN,                       -- derived from CLEAN_LOG_STATUS (piid 13)
+  cleanup_method  INTEGER,                       -- from CLEANING_PROPERTIES.cmc (cleanup method)
+  task_interrupt  INTEGER,                       -- from CLEANING_PROPERTIES.abnormal_end (NULL = normal)
+  map_object_name TEXT,                          -- piid 9 / cloud map artifact path
+  raw_attrs       JSONB NOT NULL,                -- full piid→value blob for forward-compat
+  recorded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_vacuum_runs_started ON vacuum_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vacuum_runs_device ON vacuum_runs(device_did, started_at DESC);
