@@ -1,3 +1,17 @@
 #!/bin/sh
-command -v git-lfs >/dev/null 2>&1 || exit 0
-git lfs post-commit "$@"
+# Git LFS — keep upstream behavior; was the only thing here before May 2026.
+if command -v git-lfs >/dev/null 2>&1; then
+    git lfs post-commit "$@"
+fi
+
+# Cipher post-commit hook — refresh Layer 1 + Layer 3 indexes in background.
+# git config core.hookspath=.githooks redirects git from .git/hooks/ to here,
+# so .git/hooks/post-commit (symlink to .cipher/bin/post-commit-hook.sh) is
+# ignored. Calling the cipher hook from here is the only way it actually fires.
+# See dir_1779612300438.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -n "$REPO_ROOT" ] && [ -x "$REPO_ROOT/.cipher/bin/post-commit-hook.sh" ]; then
+    "$REPO_ROOT/.cipher/bin/post-commit-hook.sh" "$@"
+fi
+
+exit 0

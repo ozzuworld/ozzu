@@ -1,0 +1,20 @@
+# Cipher layer auto-refresh — dir_1779612300438
+#
+# Layer 1 + Layer 3 auto-refresh on every git commit via .githooks/post-commit.
+# These cron lines cover the LLM-based layers that the commit hook skips
+# (too slow to block commits).
+#
+# To install:
+#   (crontab -l; cat scripts/cipher-crons.crontab) | sort -u | crontab -
+#
+# To verify:
+#   crontab -l | grep cipher
+
+# Layer 2 — per-file LLM intent index, incremental: every hour
+0 * * * * cd /home/gcp/ozzu && /home/gcp/ozzu/scripts/cipher-analyze.sh layer2 >> /home/gcp/ozzu/.cipher/.cron.log 2>&1
+
+# Layer 3.5 — LLM-judge semantic drift report: daily at 05:00 UTC (no overlap with backup at 04:00 or cert renew at 03:00)
+0 5 * * * cd /home/gcp/ozzu && /home/gcp/ozzu/scripts/cipher-analyze.sh layer3-llm >> /home/gcp/ozzu/.cipher/.cron.log 2>&1
+
+# Layer 4.5 — conversation-to-principle mining: weekly Monday 06:00 UTC
+0 6 * * 1 cd /home/gcp/ozzu && /usr/bin/node /home/gcp/ozzu/.cipher/bin/mine-conversations.js >> /home/gcp/ozzu/.cipher/.cron.log 2>&1
