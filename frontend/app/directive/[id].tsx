@@ -17,6 +17,7 @@ import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import {
   fetchDirective,
   fetchDirectiveHistory,
+  fetchDirectiveBuildStatus,
   cancelDirective,
   retryDirective,
   retryMergeDirective,
@@ -85,6 +86,27 @@ export default function DirectiveDetailScreen() {
 
   useEffect(() => { load(); }, [load]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Live-poll build run status while any run is non-terminal so the user sees
+  // queued → in_progress → completed transitions without pull-to-refresh.
+  // Stops as soon as every run is "completed" or there are no runs.
+  useEffect(() => {
+    if (!directive) return;
+    const runs = directive.buildRuns;
+    if (!runs || runs.length === 0) return;
+    const hasActive = runs.some(r => r.status !== "completed");
+    if (!hasActive) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const fresh = await fetchDirectiveBuildStatus(directive.id);
+        if (cancelled) return;
+        setDirective(prev => prev ? { ...prev, buildRuns: fresh } : prev);
+      } catch { /* keep polling */ }
+    };
+    const t = setInterval(tick, 10000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [directive?.id, directive?.buildRuns]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

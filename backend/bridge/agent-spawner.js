@@ -1503,6 +1503,21 @@ function detectNativeChanges() {
   }
 }
 
+function detectFrontendChanges() {
+  try {
+    const { execSync } = require("child_process");
+    const changed = execSync("git diff --name-only HEAD~1 HEAD", {
+      cwd: WORKDIR, encoding: "utf8", timeout: 10000,
+    }).trim();
+    if (!changed) return { any: false };
+    // Anything under frontend/ — JS, TSX, assets, config — counts as frontend.
+    // tv/ is its own product handled separately, NOT included here.
+    return { any: changed.split("\n").some(line => /^frontend\//.test(line)) };
+  } catch {
+    return { any: false };
+  }
+}
+
 function detectBridgeChanges() {
   try {
     const { execSync } = require("child_process");
@@ -1647,13 +1662,15 @@ function smartDeploy(directive) {
 
   const bridgeChanged = detectBridgeChanges();
   const native = detectNativeChanges();
+  const frontend = detectFrontendChanges();
   const tvChanges = detectTvChanges();
   const firmwareChanged = detectFirmwareChanges();
 
   // Log what was detected
   const detections = [];
   if (native.any) detections.push(`phone:native(android=${native.android},ios=${native.ios})`);
-  else detections.push("phone:js-only");
+  else if (frontend.any) detections.push("phone:js-only");
+  else detections.push("phone:none");
   if (tvChanges.any) detections.push(tvChanges.native ? "tv:native" : "tv:js-only");
   if (firmwareChanged) detections.push("firmware");
   if (bridgeChanged) detections.push("bridge");
@@ -1662,7 +1679,7 @@ function smartDeploy(directive) {
   // ── PHONE APP ──
 
   if (native.any) {
-    // WARM tier — native changes, full CI rebuild for both platforms
+    // WARM tier — native changes, full CI rebuild for the platforms that changed
     const platforms = [native.android && "Android", native.ios && "iOS"].filter(Boolean).join(" + ");
     log(`WARM deploy: ${platforms} native CI builds`);
     notify(`Native update — full rebuild for ${platforms}, ~10 minutes.`);
@@ -1688,11 +1705,13 @@ function smartDeploy(directive) {
       ].join(" && "));
     }
 
-    // iOS CI — only on native changes (WARM), never on JS-only (HOT)
-    spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
-  } else {
-    // HOT tier — JS-only. Android OTA (~25s) + iOS CI build (~10 min) in parallel.
-    // iPhone is King Kazuma's PRIMARY device — iOS is built every deploy. No manual /stage-ios.
+    // iOS WARM — only fire when iOS native files actually changed (was unconditional, fired even on android-only native changes)
+    if (native.ios) {
+      spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
+    }
+  } else if (frontend.any) {
+    // HOT tier — JS-only frontend changes. Android OTA (~25s) + iOS CI build (~10 min) in parallel.
+    // iPhone is King Kazuma's PRIMARY device — iOS is built every frontend deploy. No manual /stage-ios.
     log("HOT deploy: Android OTA + iOS CI build (parallel — iPhone is primary)");
     notify("Quick update going out — tablets ~25s, iPhone IPA ~10 min.");
 
@@ -1709,8 +1728,10 @@ function smartDeploy(directive) {
       }
     });
 
-    // iOS CI in parallel — iPhone is the primary device, always build
     spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
+  } else {
+    // Backend-only / TV-only / firmware-only / docs / cipher meta-work — no phone app build needed.
+    log("No frontend changes — skipping Android OTA + iOS CI");
   }
 
   // ── TV APP ──

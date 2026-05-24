@@ -207,6 +207,25 @@ export interface HistoryEntry {
   details?: any;
 }
 
+export interface DirectiveBuildRun {
+  platform: string;
+  runId: number;
+  triggeredAt: number;
+  status: string;
+  conclusion: string | null;
+  url: string;
+  lastChecked: number | null;
+}
+
+export async function fetchDirectiveBuildStatus(id: string): Promise<DirectiveBuildRun[]> {
+  const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}/build-status`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Bridge build-status error: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data.buildRuns) ? data.buildRuns : [];
+}
+
 export async function fetchDirectiveHistory(id: string): Promise<HistoryEntry[]> {
   const res = await fetchWithTimeout(`${BRIDGE_URL}/directives/${id}/history`, {
     headers: { "Content-Type": "application/json" },
