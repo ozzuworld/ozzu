@@ -20,8 +20,17 @@ RESTART=false
 echo "=== OTA Deploy (Android) ==="
 
 # Export Android JS bundle only — iOS is never OTA'd (sideloaded via AltStore)
-echo "[1/3] Exporting JS bundle (Android only)..."
 cd "$FRONTEND"
+
+# Ensure deps are installed before invoking expo. Without node_modules/expo,
+# `npx expo export` silently fails with "module expo is not installed".
+# Handles fresh clones, mounts that don't carry node_modules, post-cleanup state.
+if [ ! -d "$FRONTEND/node_modules/expo" ]; then
+  echo "[0/3] frontend/node_modules missing — running npm ci (one-time, ~40s)..."
+  npm ci --no-audit --no-fund 2>&1 | tail -3
+fi
+
+echo "[1/3] Exporting JS bundle (Android only)..."
 rm -rf /tmp/ota-export
 npx expo export --platform android --output-dir /tmp/ota-export 2>&1 | tail -5
 

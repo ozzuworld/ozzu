@@ -6949,7 +6949,16 @@ wss.on("connection", (ws, req) => {
 
 // Global error handlers — prevent silent crashes
 process.on("unhandledRejection", (reason, promise) => {
-  log.bridge.error("Unhandled Promise Rejection:", reason);
+  // Extract message + stack when reason is an Error. Without this, all that
+  // landed in the logs was the bare object (e.g. {code:"ERR_HTTP_HEADERS_SENT"})
+  // with no callsite, so a double-send bug ran undetected for days.
+  if (reason instanceof Error) {
+    log.bridge.error(
+      `Unhandled Promise Rejection: ${reason.message || reason.code || "no message"}\n${reason.stack || "(no stack)"}`
+    );
+  } else {
+    log.bridge.error("Unhandled Promise Rejection:", reason);
+  }
 });
 process.on("uncaughtException", (err) => {
   log.bridge.error("Uncaught Exception:", err.message, err.stack);
