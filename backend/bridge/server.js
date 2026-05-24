@@ -303,6 +303,39 @@ function routeDirective(directive, type) {
   log.directive.info(`Directive ${directive.id} "${directive.title}" → ${type} — awaiting Cipher (no worker spawn)`);
 }
 
+// Verify expected apt-installed binaries exist in the running container.
+// Catches stale-image drift: Dockerfile gets a new apt package, container gets
+// recreated against the old image, package silently missing until something breaks.
+// (2026-05-21 to 2026-05-24: prusa-slicer + ffmpeg missing for 3 days, /octoprint/print broken silently.)
+function checkContainerBinaries() {
+  const { execSync } = require("child_process");
+  const expected = {
+    "prusa-slicer": "/octoprint/print slicing",
+    "ffmpeg":       "print-camera recorder + media encode",
+    "adb":          "Android tablet OTA + control",
+    "gh":           "CI workflow dispatch",
+    "docker":       "smartDeploy + service management",
+  };
+  const missing = [];
+  for (const [bin, purpose] of Object.entries(expected)) {
+    try {
+      execSync(`which ${bin}`, { stdio: "ignore", timeout: 2000 });
+    } catch {
+      missing.push(`${bin} (${purpose})`);
+    }
+  }
+  if (missing.length === 0) {
+    log.bridge.info(`container binary check: ${Object.keys(expected).length}/${Object.keys(expected).length} present`);
+    return;
+  }
+  const msg = `🚨 BRIDGE IMAGE DRIFT — ${missing.length} expected binaries missing from container:\n` +
+              missing.map(m => `  • ${m}`).join("\n") +
+              `\n\nLikely cause: Dockerfile updated but image not rebuilt. ` +
+              `Fix: cd backend && docker compose -f docker-compose.yml -f docker-compose.override.yml build bridge && docker compose ... up -d bridge`;
+  log.bridge.error(msg);
+  try { sendNotification(msg); } catch (e) { log.bridge.error("binary-check notify failed:", e.message); }
+}
+
 // ── Auto-escalation for exhausted directives ──
 const ESCALATION_THRESHOLD = 2; // Worker retries before auto-escalation to Cipher
 
@@ -6873,6 +6906,7 @@ wss.on("connection", (ws, req) => {
   log.bridge.info("Orchestrator disabled — Cipher handles directives directly");
   server.listen(PORT, "0.0.0.0", () => {
     log.bridge.info(`listening on :${PORT}`);
+    checkContainerBinaries();
     log.bridge.info(`data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);
     log.bridge.info(`HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
