@@ -1,6 +1,8 @@
 ---
 paths:
   - "scripts/cipher-cad.py"
+  - "scripts/cipher-cad-inspect.py"
+  - "scripts/cipher-cad-measure.py"
   - "private/**/cad/**"
   - "**/*.scad"
   - "**/*.step"
@@ -39,13 +41,24 @@ bolt spacing are all `PARAMS`. "Resize for the de-eared body / move the holes / 
 **Edits = parameter/code changes → re-run → exact regenerate.** If you catch yourself typing a literal
 coordinate to place a cut, stop — parameterize it instead.
 
-## Roadmap — full SOTA CAD for Cipher
-- ✅ **P1 — parametric pipeline** (this file + `cipher-cad.py`).
-- **P2 — B-rep feature recognition** (BRepFormer / Hierarchical-CADNet class) to read semantics
-  ("this face group = a hole / pocket / tab") off imported STEPs instead of guessing.
-- **P3 — scan / photo → CAD** (CAD-Recode point-cloud→code, or photogrammetry) to measure real parts
-  without asking King Kazuma to caliper. A single casual photo can't give scale — need a scan or a
-  ruler in frame.
+## Tools — the SOTA CAD pipeline (all three live)
+- **`scripts/cipher-cad.py PART.py`** — author parametric build123d → STEP + STL + shaded render +
+  geometry report, one shot. *(P1)*
+- **`scripts/cipher-cad-inspect.py PART.step`** — read semantics off a STEP: bbox, every hole (Ø/axis/
+  center), detected hole-patterns (rectangle/pair + spacing + centroid), face census. **Run this
+  BEFORE designing against anyone's CAD** — it auto-finds bolt patterns instead of me eyeballing them.
+  *(P2 — validated: auto-found the MTF 24.3×12 Ø2.5 mount + the two lenses ~10 mm apart.)*
+- **`scripts/cipher-cad-measure.py PHOTO.jpg --marker-mm N`** (+ `--gen-marker M.png --mm N`) —
+  measure a real part from a photo via a printed ArUco marker. Print marker → lay flat & coplanar →
+  shoot top-down → get L×W in mm. ~1-2% on a square shot (validated 0.3% on a synthetic test); for
+  tight tolerances still caliper. *(P3 — kills the "go caliper it" loop for rough/medium sizing.)*
+
+## Roadmap
+- ✅ **P1 — parametric authoring** (`cipher-cad.py`).
+- ✅ **P2 — geometric feature recognition** (`cipher-cad-inspect.py`). Deep-net (BRepFormer /
+  Hierarchical-CADNet) for organic/messy features = future GPU step.
+- ✅ **P3 — reference-marker photo measurement** (`cipher-cad-measure.py`). Deep-net point-cloud
+  scan→CAD (CAD-Recode) = future GPU step.
 
 ## Kernel note
 `build123d` is installed (modern CadQuery successor, same OCP core). **CadQuery** — the kernel the
