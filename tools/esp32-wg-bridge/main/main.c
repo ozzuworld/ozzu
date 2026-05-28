@@ -7,6 +7,7 @@
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 #include <string.h>
+#include "driver/gpio.h"
 
 #include "wifi_sta.h"
 #include "wg_client.h"
@@ -30,6 +31,12 @@ static void wg_handshake_kick(void) {
 static const char *TAG = "esp32-wg-bridge";
 
 void app_main(void) {
+    // Stealth: drive on-board blue LED (GPIO 2 on most ESP32 dev boards) low.
+    // Red power LED is hardwired to 3V3 — cover physically if needed.
+    gpio_reset_pin(GPIO_NUM_2);
+    gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_NUM_2, 0);
+
     ESP_LOGI(TAG, "boot: esp32-wg-bridge");
 
     esp_err_t err = nvs_flash_init();
