@@ -2,7 +2,10 @@
 
 #include "esp_err.h"
 #include "esp_netif.h"
+#include "lwip/netif.h"
 
-// Enable SNAT on the STA netif. Packets arriving from another netif (the WG
-// tunnel) get masqueraded to the STA's IP on the way out to the target LAN.
-esp_err_t nat_forward_enable(esp_netif_t *sta_netif);
+// Flag the WG netif as the internal LAN side. In ESP-IDF's NAPT semantics,
+// napt=1 marks the LAN (clients) and the OPPOSITE netif (uplink, here STA)
+// then performs SNAT on outbound and reverse-NAT on inbound. STA's IP
+// becomes the externally-visible source for any traffic transiting from WG.
+esp_err_t nat_forward_enable(struct netif *wg_netif);

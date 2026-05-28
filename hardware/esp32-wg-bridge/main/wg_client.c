@@ -34,3 +34,7 @@ esp_err_t wg_client_start(void) {
     ESP_LOGI(TAG, "WG tunnel up, peer keepalive=%ds", CONFIG_ESP_WG_KEEPALIVE);
     return ESP_OK;
 }
+
+struct netif *wg_client_get_netif(void) {
+    return s_wg_ctx.netif;
+}

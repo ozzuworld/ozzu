@@ -31,7 +31,9 @@ void app_main(void) {
     // Give the tunnel a moment to come up before turning on forwarding
     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    ESP_ERROR_CHECK(nat_forward_enable(sta_netif));
+    // Diagnostic: temporarily skip NAT enable to confirm rest of stack is stable
+    ESP_LOGW(TAG, "DIAG: NAT enable skipped, forwarding-only test");
+    (void)sta_netif;
     ESP_LOGI(TAG, "bridge active — forwarding WG -> STA with SNAT");
 
     while (1) {
