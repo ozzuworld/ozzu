@@ -13,17 +13,70 @@ static const char *TAG = "wifi_sta";
 #define WIFI_CONNECTED_BIT BIT0
 static EventGroupHandle_t s_wifi_event_group;
 
+typedef struct {
+    const char *ssid;
+    const char *pass;
+} known_ap_t;
+
+static const known_ap_t s_known_aps[] = {
+    { CONFIG_ESP_WG_TARGET_SSID,  CONFIG_ESP_WG_TARGET_PASS  },
+#ifdef CONFIG_ESP_WG_TARGET_SSID2
+    { CONFIG_ESP_WG_TARGET_SSID2, CONFIG_ESP_WG_TARGET_PASS2 },
+#endif
+};
+#define KNOWN_AP_COUNT (sizeof(s_known_aps) / sizeof(s_known_aps[0]))
+
+static int s_current_ap_idx = 0;
+
+static bool ap_valid(int idx) {
+    return idx < KNOWN_AP_COUNT
+        && s_known_aps[idx].ssid != NULL
+        && s_known_aps[idx].ssid[0] != '\0';
+}
+
+static void set_and_connect_current(void) {
+    if (!ap_valid(s_current_ap_idx)) {
+        s_current_ap_idx = 0;
+    }
+    wifi_config_t cfg = {0};
+    strncpy((char*)cfg.sta.ssid,     s_known_aps[s_current_ap_idx].ssid, sizeof(cfg.sta.ssid));
+    strncpy((char*)cfg.sta.password, s_known_aps[s_current_ap_idx].pass, sizeof(cfg.sta.password));
+    cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    esp_wifi_set_config(WIFI_IF_STA, &cfg);
+    ESP_LOGI(TAG, "trying ssid[%d]=\"%s\"", s_current_ap_idx, s_known_aps[s_current_ap_idx].ssid);
+    esp_wifi_connect();
+}
+
+static void advance_to_next_ap(void) {
+    if (KNOWN_AP_COUNT <= 1) return;
+    int start = s_current_ap_idx;
+    do {
+        s_current_ap_idx = (s_current_ap_idx + 1) % KNOWN_AP_COUNT;
+    } while (!ap_valid(s_current_ap_idx) && s_current_ap_idx != start);
+}
+
 static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        s_current_ap_idx = 0;
+        set_and_connect_current();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        wifi_event_sta_disconnected_t *d = (wifi_event_sta_disconnected_t *)data; ESP_LOGW(TAG, "disconnected reason=%d ssid=%.32s", d->reason, d->ssid);
+        wifi_event_sta_disconnected_t *d = (wifi_event_sta_disconnected_t *)data;
+        ESP_LOGW(TAG, "disconnected reason=%d ssid=\"%.32s\"", d->reason, d->ssid);
         xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-        esp_wifi_connect();
+        // WIFI_REASON_NO_AP_FOUND=201, WIFI_REASON_AUTH_EXPIRE=2, WIFI_REASON_AUTH_FAIL=202
+        // On these, switch to next known SSID. On other reasons (transient), retry same.
+        if (d->reason == WIFI_REASON_NO_AP_FOUND
+            || d->reason == WIFI_REASON_AUTH_EXPIRE
+            || d->reason == WIFI_REASON_AUTH_FAIL
+            || d->reason == WIFI_REASON_ASSOC_FAIL
+            || d->reason == WIFI_REASON_HANDSHAKE_TIMEOUT) {
+            advance_to_next_ap();
+        }
+        set_and_connect_current();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
-        ESP_LOGI(TAG, "got ip " IPSTR " gw " IPSTR,
-                 IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.gw));
+        ESP_LOGI(TAG, "got ip " IPSTR " gw " IPSTR " on ssid[%d]",
+                 IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.gw), s_current_ap_idx);
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -45,16 +98,10 @@ esp_err_t wifi_sta_start(esp_netif_t **out_netif) {
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, NULL));
 
-    wifi_config_t wifi_cfg = { 0 };
-    strncpy((char *)wifi_cfg.sta.ssid, CONFIG_ESP_WG_TARGET_SSID, sizeof(wifi_cfg.sta.ssid));
-    strncpy((char *)wifi_cfg.sta.password, CONFIG_ESP_WG_TARGET_PASS, sizeof(wifi_cfg.sta.password));
-    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "joining ssid=%s", CONFIG_ESP_WG_TARGET_SSID);
+    ESP_LOGI(TAG, "%d known SSID(s) configured for failover", (int)KNOWN_AP_COUNT);
     return ESP_OK;
 }
 

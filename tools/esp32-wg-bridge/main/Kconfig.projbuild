@@ -12,6 +12,17 @@ menu "ESP32 WG Bridge"
         help
             WPA2 passphrase for the target SSID.
 
+    config ESP_WG_TARGET_SSID2
+        string "Fallback WiFi SSID (optional, empty to disable)"
+        default ""
+        help
+            Second SSID to try if the primary is not in range. Firmware scans on boot
+            and picks whichever known SSID has the strongest signal.
+
+    config ESP_WG_TARGET_PASS2
+        string "Fallback WiFi password"
+        default ""
+
     config ESP_WG_LOCAL_IP
         string "Local WG IP (CIDR-less)"
         default "10.9.0.20"
