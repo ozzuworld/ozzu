@@ -1,0 +1,43 @@
+menu "ESP32 WG Bridge"
+
+    config ESP_WG_TARGET_SSID
+        string "Target WiFi SSID"
+        default "CHANGE_ME_SSID"
+        help
+            The SSID this ESP32 will join as a station.
+
+    config ESP_WG_TARGET_PASS
+        string "Target WiFi password"
+        default "CHANGE_ME_PASS"
+        help
+            WPA2 passphrase for the target SSID.
+
+    config ESP_WG_LOCAL_IP
+        string "Local WG IP (CIDR-less)"
+        default "10.9.0.20"
+
+    config ESP_WG_LOCAL_NETMASK
+        string "Local WG netmask"
+        default "255.255.255.0"
+
+    config ESP_WG_LOCAL_PRIVKEY
+        string "ESP32 WG private key (base64)"
+        default "CHANGE_ME_PRIVKEY"
+
+    config ESP_WG_PEER_PUBKEY
+        string "WG hub public key (base64)"
+        default "CHANGE_ME_PUBKEY"
+
+    config ESP_WG_PEER_ENDPOINT
+        string "WG hub endpoint host/IP"
+        default "35.222.38.140"
+
+    config ESP_WG_PEER_PORT
+        int "WG hub endpoint port"
+        default 51820
+
+    config ESP_WG_KEEPALIVE
+        int "WG persistent keepalive (seconds)"
+        default 25
+
+endmenu

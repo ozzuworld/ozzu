@@ -1,0 +1,24 @@
+# Target chip
+CONFIG_IDF_TARGET="esp32"
+
+# Logging
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# Networking — enable IP forwarding + NAT in lwIP
+CONFIG_LWIP_IP_FORWARD=y
+CONFIG_LWIP_IPV4_NAPT=y
+CONFIG_LWIP_IPV4_NAPT_PORTMAP=y
+CONFIG_LWIP_L2_TO_L3_COPY=y
+
+# Larger TCP buffers help WG throughput
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
+CONFIG_LWIP_TCP_WND_DEFAULT=16384
+
+# More heap for connection tracking
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
+# Watchdog tolerant of NAT/forwarding bursts
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# WG client task stack
+CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
