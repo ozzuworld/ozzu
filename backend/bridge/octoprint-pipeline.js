@@ -19,6 +19,12 @@ const PRUSA_SLICER_BIN = process.env.PRUSA_SLICER_BIN || "prusa-slicer";
 
 // Default profile is Ender V3 SE-compatible (220x220x250 bed, Marlin2).
 // Override per-call via options.
+//
+// Adhesion-hardened defaults (dir_1779983897512, 2026-05-28): every PETG print
+// without these settings had bed-adhesion failures (parts popping off, no first-
+// layer stick). Confirmed by `your_top.stl` repeatedly failing on the bare
+// profile and succeeding once brim_width=8 + first_layer_bed_temperature=90 +
+// first_layer_speed=20 + first_layer_extrusion_width=0.5 were applied.
 const DEFAULT_PROFILE = {
   bed_shape: "0x0,220x0,220x220,0x220",
   layer_height: 0.2,
@@ -26,9 +32,13 @@ const DEFAULT_PROFILE = {
   nozzle_diameter: 0.4,
   filament_diameter: 1.75,
   temperature: 230,
-  bed_temperature: 80,
-  first_layer_temperature: 235,
-  first_layer_bed_temperature: 80,
+  bed_temperature: 85,
+  first_layer_temperature: 240,
+  first_layer_bed_temperature: 90,
+  first_layer_speed: 20,
+  first_layer_extrusion_width: 0.5,
+  brim_width: 8,
+  brim_type: "outer_only",
   fill_density: "99%",
   fill_pattern: "rectilinear",
   perimeters: 3,
