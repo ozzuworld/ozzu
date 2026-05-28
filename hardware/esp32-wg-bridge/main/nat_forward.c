@@ -6,15 +6,10 @@
 
 static const char *TAG = "nat_forward";
 
+// DIAGNOSTIC: skip NAPT entirely to confirm WG handshake works in isolation.
+// We'll re-enable NAPT once handshake is stable end-to-end again.
 esp_err_t nat_forward_enable(struct netif *wg_netif) {
-    if (!wg_netif) {
-        ESP_LOGE(TAG, "wg_netif is NULL");
-        return ESP_FAIL;
-    }
-
-    ip_napt_enable_netif(wg_netif, 1);
-    ESP_LOGI(TAG, "NAPT flag set on WG netif %c%c%d (internal/LAN side)",
-             wg_netif->name[0], wg_netif->name[1], wg_netif->num);
-
+    (void)wg_netif;
+    ESP_LOGW(TAG, "NAPT disabled (diagnostic) — handshake-only test");
     return ESP_OK;
 }
