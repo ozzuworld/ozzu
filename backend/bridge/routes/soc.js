@@ -431,7 +431,7 @@ module.exports = function socRoutes(ctx) {
         proc.stdin.write(String(item.command));
         proc.stdin.end();
         let fullOutput = '';
-        const entry = { proc, itemId: item.id, timeoutHandle: null, timedOut: false };
+        const entry = { proc, itemId: item.id, timeoutHandle: null, timedOut: false, flushTimer: null };
         runningProcs.set(sessionId, entry);
 
         entry.timeoutHandle = setTimeout(() => {
@@ -443,9 +443,31 @@ module.exports = function socRoutes(ctx) {
           await db.query(`UPDATE soc_queue_items SET pid = $1 WHERE id = $2`, [proc.pid, item.id]);
         } catch (_) { /* non-fatal */ }
 
-        proc.stdout.on('data', (d) => { fullOutput += d.toString(); });
-        proc.stderr.on('data', (d) => { fullOutput += d.toString(); });
+        // Incremental output streaming to DB: the frontend polls the queue every 2s and
+        // displays running output in the hero card. Without this, output column stays NULL
+        // until proc.on('close') fires, and the user sees a spinner with no feedback for
+        // anything that runs more than a few seconds. Debounced at 500ms so we don't
+        // hammer the DB on chatty scripts (nmap can emit thousands of lines/sec).
+        const scheduleFlush = () => {
+          if (entry.flushTimer) return;
+          entry.flushTimer = setTimeout(async () => {
+            entry.flushTimer = null;
+            if (!runningProcs.has(sessionId)) return; // proc closed — final write owns it
+            try {
+              await db.query(
+                `UPDATE soc_queue_items SET output = $1 WHERE id = $2 AND status = 'running'`,
+                [sanitizeOutput(fullOutput), item.id]
+              );
+            } catch (err) {
+              console.error(`[soc queue run] incremental flush failed for item ${item.id}:`, err.message);
+            }
+          }, 500);
+        };
+
+        proc.stdout.on('data', (d) => { fullOutput += d.toString(); scheduleFlush(); });
+        proc.stderr.on('data', (d) => { fullOutput += d.toString(); scheduleFlush(); });
         proc.on('close', async (code) => {
+          if (entry.flushTimer) { clearTimeout(entry.flushTimer); entry.flushTimer = null; }
           clearTimeout(entry.timeoutHandle);
           runningProcs.delete(sessionId);
           const timedOut = entry.timedOut;
