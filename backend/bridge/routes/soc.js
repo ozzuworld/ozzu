@@ -418,10 +418,16 @@ module.exports = function socRoutes(ctx) {
         const proc = spawn(
           'ssh',
           [
+            // Tighter for lossy remote-LAN links (EDIFICIO LAURA wifi ~40% loss).
+            // ConnectTimeout=20: TCP+banner can take >10s on lossy paths.
+            // ConnectionAttempts=3: retry the whole TCP cycle if first SYN cycle fails.
+            // ServerAlive 8s × 2 = give up at 16s of silence (was 90s).
             '-o', 'StrictHostKeyChecking=no',
-            '-o', 'ConnectTimeout=10',
-            '-o', 'ServerAliveInterval=30',
-            '-o', 'ServerAliveCountMax=3',
+            '-o', 'ConnectTimeout=20',
+            '-o', 'ConnectionAttempts=3',
+            '-o', 'ServerAliveInterval=8',
+            '-o', 'ServerAliveCountMax=2',
+            '-o', 'TCPKeepAlive=yes',
             '-o', 'BatchMode=yes',
             'dev-01',
             'bash', '-s',
