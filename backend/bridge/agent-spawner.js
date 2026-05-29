@@ -1525,8 +1525,13 @@ function detectBridgeChanges() {
       cwd: WORKDIR, encoding: "utf8", timeout: 10000,
     }).trim();
     if (!changed) return false;
-    const bridgePatterns = [/backend\/bridge\/server\.js/, /backend\/bridge\/cipher-pipeline\.js/, /backend\/bridge\/agent-spawner\.js/, /backend\/bridge\/orchestrator\.js/, /backend\/bridge\/db\.js/];
-    return changed.split("\n").some(line => bridgePatterns.some(p => p.test(line)));
+    // Any .js file under backend/bridge/ (except node_modules) affects the runtime
+    // and needs a restart. Previously this was a 5-file whitelist that silently
+    // missed everything in routes/, middleware/, lib/, etc. — deploys reported
+    // success but the bridge kept running stale code. Fixed 2026-05-29 after
+    // routes/soc.js streaming-fix didn't take effect on a "successful" deploy.
+    const bridgePattern = /^backend\/bridge\/(?!node_modules\/).+\.js$/;
+    return changed.split("\n").some(line => bridgePattern.test(line));
   } catch {
     return false;
   }
