@@ -225,6 +225,29 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "get_wg_state",
+      description: "Get LIVE WireGuard peer state (handshake age, endpoint, transfer, up/stale/never per peer). Source: wg-state-poller.sh refreshes every 60s. Use this to answer 'is device X on VPN right now / when did it last handshake / did its public IP change' — from data, NOT from memory or a single ad-hoc `wg show`. status: up (handshake <=180s), stale (>180s), never (no handshake yet).",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "get_device_states",
+      description: "Get LIVE per-device state pushed by device heartbeats: wifi_ssid, lan_ip, public_ip (detects CGNAT rotation), wg_ip, battery, status (online/stale/offline), last_seen. This is the self-updating source of truth that replaces hand-edited infra_registry.md. Use to answer 'where is device X / what wifi / what IP'.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "get_device_history",
+      description: "Get the transition timeline for one device (roam/drop/IP-change events) from device_state_log. Use to answer 'did the tablet roam networks / change public IP, and when'.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          device_id: { type: "string", description: "Device ID, e.g. 'tablet-p610', 'dev-01'" },
+          since: { type: "string", description: "Optional ISO timestamp or relative like '24h' — only events after this" },
+          limit: { type: "number", description: "Max rows (default 100)" },
+        },
+        required: ["device_id"],
+      },
+    },
+    {
       name: "gpu_status",
       description: "Get Vast.ai GPU instance status — running instances, SSH connection details, GPU utilization, cost. Use this to check if a GPU is available or to get SSH connection info.",
       inputSchema: {
@@ -964,6 +987,58 @@ module.exports = function mcpRoutes(ctx) {
         }
 
         return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }] };
+      }
+
+      case "get_wg_state": {
+        // Absolute path — the file is bind-mounted; __dirname-relative resolves wrong in /app.
+        try {
+          const raw = require("fs").readFileSync("/home/gcp/ozzu/data/infra/wg-state.json", "utf8");
+          const data = JSON.parse(raw);
+          const nowS = Math.floor(Date.now() / 1000);
+          const fileAgeS = data.generated_at ? nowS - data.generated_at : null;
+          const out = {
+            interface: data.interface || "wg0",
+            generated_at: data.generated_at || null,
+            file_age_s: fileAgeS,
+            poller_fresh: fileAgeS !== null && fileAgeS <= 150,
+            peer_count: (data.peers || []).length,
+            peers: data.peers || [],
+          };
+          return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `wg state not available yet (${e.code || e.message}). The wg-state-poller systemd timer writes it every 60s.` }], isError: true };
+        }
+      }
+
+      case "get_device_states": {
+        if (!db || !db.isConnected || !db.isConnected()) return { content: [{ type: "text", text: "Database not available" }], isError: true };
+        try {
+          const rows = await db.getDeviceStates();
+          return { content: [{ type: "text", text: JSON.stringify({ count: rows.length, devices: rows }, null, 2) }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `Query failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "get_device_history": {
+        if (!db || !db.isConnected || !db.isConnected()) return { content: [{ type: "text", text: "Database not available" }], isError: true };
+        if (!args.device_id) return { content: [{ type: "text", text: "device_id is required" }], isError: true };
+        try {
+          let since = null;
+          if (args.since) {
+            const m = /^(\d+)\s*([hd])$/.exec(String(args.since).trim());
+            if (m) {
+              const hrs = m[2] === "d" ? Number(m[1]) * 24 : Number(m[1]);
+              since = new Date(Date.now() - hrs * 3600 * 1000).toISOString();
+            } else {
+              since = args.since; // assume ISO
+            }
+          }
+          const rows = await db.getDeviceHistory(args.device_id, { since, limit: args.limit || 100 });
+          return { content: [{ type: "text", text: JSON.stringify({ device_id: args.device_id, since: since || null, count: rows.length, history: rows }, null, 2) }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `Query failed: ${e.message}` }], isError: true };
+        }
       }
 
       case "gpu_status": {
