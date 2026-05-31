@@ -1768,6 +1768,21 @@ async function handleRequest(req, res) {
     if (await handleMcpProxy(req, res, pathname)) return;
   }
 
+  // ── D3: central auth choke point (INERT until BRIDGE_API_KEY is set) ──
+  // requireAuth() internally allows LAN/WG/loopback and allows ALL requests when
+  // BRIDGE_API_KEY is empty (current state) — so this is a no-op until a key is
+  // provisioned (D1B). Once keyed, public requests without a valid Bearer get 401
+  // here, before any route runs. Allowlist = paths that must work unauthenticated
+  // even from the public internet (app manifest, icons, pairing, anisette).
+  const PUBLIC_ALLOWLIST = new Set([
+    "/ozzu.json", "/icon.png", "/ozzu-latest.ipa",
+    "/anisette-servers.json", "/anisette.json",
+    "/iphone-pairing", "/ios-setup",
+  ]);
+  if (!PUBLIC_ALLOWLIST.has(pathname) && !pathname.startsWith("/mcp-proxy/")) {
+    if (!requireAuth(req, res)) return; // requireAuth sends 401 on reject
+  }
+
   // ── Extracted route dispatch ──
   const r = getRouteHandlers();
   if (await r.directives(req, res, pathname, url)) return;
