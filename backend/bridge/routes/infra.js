@@ -51,7 +51,7 @@ module.exports = function infraRoutes(ctx) {
     // Source: scripts/wg-state-poller.sh writes data/infra/wg-state.json on the
     // HOST every 60s (the bridge container has no `wg` binary). We just read it.
     if (req.method === "GET" && pathname === "/infra/wg") {
-      const wgFile = path.join(__dirname, "..", "..", "..", "data", "infra", "wg-state.json");
+      const wgFile = "/home/gcp/ozzu/data/infra/wg-state.json";
       let data;
       try {
         data = JSON.parse(fs.readFileSync(wgFile, "utf8"));
