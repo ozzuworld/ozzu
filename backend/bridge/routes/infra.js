@@ -4,8 +4,21 @@ const fs = require("fs");
 const path = require("path");
 
 module.exports = function infraRoutes(ctx) {
-  const { sendJSON } = ctx;
+  const { sendJSON, db } = ctx;
   const infraMonitor = (() => { try { return require("../infra-monitor"); } catch { return null; } })();
+
+  // Parse ?since= as "24h" / "30m" / "7d" / ISO into a timestamptz string, like ops.js.
+  function parseSince(raw) {
+    if (!raw) return null;
+    const m = /^(\d+)\s*([hdm])$/i.exec(raw.trim());
+    if (m) {
+      const n = parseInt(m[1], 10);
+      const ms = m[2].toLowerCase() === "h" ? 3600e3 : m[2].toLowerCase() === "d" ? 86400e3 : 60e3;
+      return new Date(Date.now() - n * ms).toISOString();
+    }
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
 
   return async function handleInfraRoutes(req, res, pathname, url) {
 
@@ -56,6 +69,49 @@ module.exports = function infraRoutes(ctx) {
         peer_count: (data.peers || []).length,
         peers: data.peers || [],
       });
+      return true;
+    }
+
+    // GET /infra/devices/:id/history?since=24h — roam/drop/IP-change timeline (D7)
+    {
+      const m = /^\/infra\/devices\/([^/]+)\/history$/.exec(pathname);
+      if (req.method === "GET" && m) {
+        if (!db || !db.isConnected || !db.isConnected()) { sendJSON(res, 503, { error: "Database not available" }, req); return true; }
+        const deviceId = decodeURIComponent(m[1]);
+        const since = parseSince(url.searchParams.get("since"));
+        let limit = parseInt(url.searchParams.get("limit") || "100", 10);
+        if (isNaN(limit) || limit < 1) limit = 100;
+        if (limit > 500) limit = 500;
+        try {
+          const rows = await db.getDeviceHistory(deviceId, { since, limit });
+          sendJSON(res, 200, { device_id: deviceId, since: since || null, count: rows.length, history: rows }, req);
+        } catch (e) {
+          sendJSON(res, 500, { error: "history query failed", detail: e.message }, req);
+        }
+        return true;
+      }
+    }
+
+    // GET /infra/heartbeats — persisted per-device state from heartbeats (D7).
+    // Survives bridge restarts (unlike infra-monitor's in-memory probe state).
+    if (req.method === "GET" && pathname === "/infra/heartbeats") {
+      if (!db || !db.isConnected || !db.isConnected()) { sendJSON(res, 503, { error: "Database not available" }, req); return true; }
+      try {
+        const rows = await db.getDeviceStates();
+        const nowMs = Date.now();
+        const STALE_MS = 150_000; // 2.5× the 60s heartbeat interval
+        const devices = rows.map(r => {
+          const lastSeenMs = r.last_seen ? new Date(r.last_seen).getTime() : null;
+          const ageS = lastSeenMs ? Math.round((nowMs - lastSeenMs) / 1000) : null;
+          // Pull-side safety net: a device that stopped pushing is offline even if
+          // its last stored status says "online" (the lockdown-killswitch case).
+          const effectiveStatus = (lastSeenMs && nowMs - lastSeenMs > STALE_MS) ? "offline" : r.status;
+          return { ...r, last_seen_age_s: ageS, effective_status: effectiveStatus };
+        });
+        sendJSON(res, 200, { count: devices.length, devices }, req);
+      } catch (e) {
+        sendJSON(res, 500, { error: "device_state query failed", detail: e.message }, req);
+      }
       return true;
     }
 
