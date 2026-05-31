@@ -28,6 +28,7 @@ Each tool's directory MUST contain a `README.md` with these sections (in this or
 | Tool | Purpose | Status |
 |---|---|---|
 | [esp32-wg-bridge](esp32-wg-bridge/) | ESP32 L3 bridge — joins target wifi, opens WG to home hub, forwards LAN traffic for remote recon | working (2026-05-28) |
+| [android-pentest-bridge](android-pentest-bridge/) | Rooted Android tablet as L3 pentest bridge — same role as ESP32 but tablet form, full Linux kernel forwarding via Magisk root. SM-P610 procedure documented | working (2026-05-31) |
 
 ## Adding a new tool
 

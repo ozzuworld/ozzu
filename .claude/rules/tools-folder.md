@@ -26,6 +26,7 @@ Every tool gets its own `tools/<tool-name>/` directory with a `README.md` contai
 | Tool | Purpose |
 |---|---|
 | `tools/esp32-wg-bridge/` | ESP32 L3 bridge — drop inside a target WiFi to get remote LAN access from dev-01 via WireGuard |
+| `tools/android-pentest-bridge/` | Rooted Android tablet as L3 pentest bridge — same role as ESP32 but tablet form. Magisk root + iptables + Android-routing fixes. SM-P610-tested. |
 
 ## When adding a new tool
 
