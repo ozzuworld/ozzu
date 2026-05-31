@@ -1526,12 +1526,23 @@ function isPublicRequest(req) {
 
 // ── API key auth — only enforced for public requests ──
 // LAN/VPN devices work without auth (backward compatible). Public requests need Bearer token.
+// Constant-time string compare (D10) — avoids leaking secret length/prefix via
+// timing. Returns false on any length mismatch or non-string input without
+// throwing. Same boolean result as === for equal-length strings.
+function safeStrEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
 function requireAuth(req, res) {
   if (!BRIDGE_API_KEY) return true; // no key configured — skip auth
   if (!isPublicRequest(req)) return true; // LAN/VPN — no auth needed
   const authHeader = req.headers["authorization"] || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (token !== BRIDGE_API_KEY) {
+  if (!safeStrEqual(token, BRIDGE_API_KEY)) {
     sendJSON(res, 401, { error: "Unauthorized — invalid or missing API key" });
     return false;
   }
@@ -2442,7 +2453,7 @@ async function handleRequest(req, res) {
     const data = await parseBody(req);
 
     // Validate PIN
-    if (data.pin !== BRIDGE_PIN) {
+    if (!safeStrEqual(String(data.pin || ""), BRIDGE_PIN)) {
       sendJSON(res, 403, { error: "Invalid PIN" });
       return;
     }
@@ -6275,7 +6286,7 @@ wss.on("connection", (ws, req) => {
     if (!isTrusted) {
       const wsUrl = new URL(req.url, `http://localhost:${PORT}`);
       const token = wsUrl.searchParams.get("token");
-      if (token !== BRIDGE_API_KEY) {
+      if (!safeStrEqual(token || "", BRIDGE_API_KEY)) {
         log.ws.warn(`Rejected public WS connection from ${clientIp} — invalid token`);
         ws.close(4001, "Unauthorized");
         return;
@@ -6874,7 +6885,7 @@ wss.on("connection", (ws, req) => {
         }
 
         // Validate PIN
-        if (msg.pin !== BRIDGE_PIN) {
+        if (!safeStrEqual(String(msg.pin || ""), BRIDGE_PIN)) {
           broadcastToDeviceType("phone", { type: "pinResolved", approvalId: msg.approvalId });
           pending.resolve({ success: false, message: "Invalid PIN. Authorization denied." });
           return;
