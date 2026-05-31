@@ -1,0 +1,7 @@
+[Unit]
+Description=Snapshot WireGuard peer state to JSON for the Ozzu bridge
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/gcp/ozzu/scripts/wg-state-poller.sh
