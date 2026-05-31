@@ -1035,7 +1035,43 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_spawned ON agent_audit_log(spawned_by, started_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_directive ON agent_audit_log(directive_id)`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph + agent_audit_log)");
+    // ── Infra-state (dir_1780260211325 D4, dir_1780260211365 D5, dir_1780260211404 D6) ──
+    await pool.query(`CREATE TABLE IF NOT EXISTS device_credentials (
+      device_id    TEXT PRIMARY KEY,
+      token_hash   TEXT NOT NULL,
+      scopes       TEXT[] NOT NULL DEFAULT '{heartbeat:write}',
+      label        TEXT,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      last_used_at TIMESTAMPTZ,
+      revoked_at   TIMESTAMPTZ
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS device_state (
+      device_id          TEXT PRIMARY KEY,
+      status             TEXT,
+      source             TEXT,
+      wifi_ssid          TEXT,
+      lan_ip             TEXT,
+      public_ip          TEXT,
+      wg_ip              TEXT,
+      wg_handshake_age_s INTEGER,
+      battery_pct        INTEGER,
+      meta               JSONB DEFAULT '{}',
+      last_seen          TIMESTAMPTZ,
+      updated_at         TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS device_state_log (
+      id          SERIAL PRIMARY KEY,
+      device_id   TEXT,
+      from_status TEXT,
+      to_status   TEXT,
+      change      TEXT,
+      details     JSONB DEFAULT '{}',
+      ts          TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_device_state_log_device ON device_state_log(device_id, ts DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_device_state_log_ts ON device_state_log(ts DESC)`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph + agent_audit_log + infra_state)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -3832,10 +3868,132 @@ async function kgGetStats() {
   return res.rows[0] || {};
 }
 
+// ── Infra-state helpers (D4/D5/D6) ──
+
+// Issue a fresh per-device token. Returns the PLAINTEXT token once (caller must
+// store it); only the sha256 hash is persisted. Rotating re-issues + clears revoke.
+async function issueDeviceToken(deviceId, { scopes = ["heartbeat:write"], label = null } = {}) {
+  if (!_pgConnected) return null;
+  const token = crypto.randomBytes(32).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  await query(
+    `INSERT INTO device_credentials (device_id, token_hash, scopes, label, created_at, revoked_at)
+     VALUES ($1, $2, $3, $4, NOW(), NULL)
+     ON CONFLICT (device_id) DO UPDATE SET
+       token_hash = EXCLUDED.token_hash, scopes = EXCLUDED.scopes,
+       label = COALESCE(EXCLUDED.label, device_credentials.label),
+       created_at = NOW(), revoked_at = NULL, last_used_at = NULL`,
+    [deviceId, tokenHash, scopes, label]
+  );
+  return { device_id: deviceId, token, scopes };
+}
+
+// Verify a presented token. Returns {device_id, scopes} if valid + has scope, else null.
+// Constant-time hash compare; rejects revoked credentials.
+async function verifyDeviceToken(token, requiredScope = "heartbeat:write") {
+  if (!_pgConnected || !token || typeof token !== "string") return null;
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const res = await query(
+    `SELECT device_id, token_hash, scopes, revoked_at FROM device_credentials`
+  );
+  const want = Buffer.from(tokenHash, "hex");
+  for (const row of res.rows) {
+    if (row.revoked_at) continue;
+    let stored;
+    try { stored = Buffer.from(row.token_hash, "hex"); } catch { continue; }
+    if (stored.length !== want.length) continue;
+    if (crypto.timingSafeEqual(stored, want)) {
+      if (requiredScope && !(row.scopes || []).includes(requiredScope)) return null;
+      query(`UPDATE device_credentials SET last_used_at = NOW() WHERE device_id = $1`, [row.device_id]).catch(() => {});
+      return { device_id: row.device_id, scopes: row.scopes || [] };
+    }
+  }
+  return null;
+}
+
+async function revokeDeviceToken(deviceId) {
+  if (!_pgConnected) return false;
+  const res = await query(`UPDATE device_credentials SET revoked_at = NOW() WHERE device_id = $1 AND revoked_at IS NULL`, [deviceId]);
+  return res.rowCount > 0;
+}
+
+async function listDeviceCredentials() {
+  if (!_pgConnected) return [];
+  const res = await query(`SELECT device_id, scopes, label, created_at, last_used_at, revoked_at FROM device_credentials ORDER BY device_id`);
+  return res.rows;
+}
+
+// Upsert live device state. Logs a transition row when status changes (or on first
+// sight, or when public_ip / wifi_ssid roams). Returns {previous, current, changed}.
+async function upsertDeviceState(s) {
+  if (!_pgConnected || !s || !s.device_id) return null;
+  const prevRes = await query(`SELECT * FROM device_state WHERE device_id = $1`, [s.device_id]);
+  const prev = prevRes.rows[0] || null;
+  await query(
+    `INSERT INTO device_state (device_id, status, source, wifi_ssid, lan_ip, public_ip, wg_ip, wg_handshake_age_s, battery_pct, meta, last_seen, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, COALESCE($11, NOW()), NOW())
+     ON CONFLICT (device_id) DO UPDATE SET
+       status = EXCLUDED.status, source = EXCLUDED.source,
+       wifi_ssid = COALESCE(EXCLUDED.wifi_ssid, device_state.wifi_ssid),
+       lan_ip = COALESCE(EXCLUDED.lan_ip, device_state.lan_ip),
+       public_ip = COALESCE(EXCLUDED.public_ip, device_state.public_ip),
+       wg_ip = COALESCE(EXCLUDED.wg_ip, device_state.wg_ip),
+       wg_handshake_age_s = EXCLUDED.wg_handshake_age_s,
+       battery_pct = COALESCE(EXCLUDED.battery_pct, device_state.battery_pct),
+       meta = COALESCE(EXCLUDED.meta, device_state.meta),
+       last_seen = COALESCE(EXCLUDED.last_seen, NOW()), updated_at = NOW()`,
+    [s.device_id, s.status || null, s.source || null, s.wifi_ssid || null, s.lan_ip || null,
+     s.public_ip || null, s.wg_ip || null, s.wg_handshake_age_s ?? null, s.battery_pct ?? null,
+     s.meta ? JSON.stringify(s.meta) : null, s.last_seen || null]
+  );
+  // Detect noteworthy transitions
+  const changes = [];
+  if (!prev) changes.push("first_seen");
+  else {
+    if (prev.status !== (s.status || null)) changes.push(`status:${prev.status}→${s.status}`);
+    if (s.public_ip && prev.public_ip && prev.public_ip !== s.public_ip) changes.push(`public_ip:${prev.public_ip}→${s.public_ip}`);
+    if (s.wifi_ssid && prev.wifi_ssid && prev.wifi_ssid !== s.wifi_ssid) changes.push(`wifi:${prev.wifi_ssid}→${s.wifi_ssid}`);
+  }
+  if (changes.length) {
+    await query(
+      `INSERT INTO device_state_log (device_id, from_status, to_status, change, details)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [s.device_id, prev ? prev.status : null, s.status || null, changes.join(", "),
+       JSON.stringify({ lan_ip: s.lan_ip, public_ip: s.public_ip, wifi_ssid: s.wifi_ssid, source: s.source })]
+    );
+  }
+  return { previous: prev, changed: changes };
+}
+
+async function getDeviceStates() {
+  if (!_pgConnected) return [];
+  const res = await query(`SELECT * FROM device_state ORDER BY device_id`);
+  return res.rows;
+}
+
+async function getDeviceHistory(deviceId, { since = null, limit = 100 } = {}) {
+  if (!_pgConnected) return [];
+  const params = [deviceId];
+  let sql = `SELECT device_id, from_status, to_status, change, details, ts FROM device_state_log WHERE device_id = $1`;
+  if (since) { params.push(since); sql += ` AND ts >= $${params.length}::timestamptz`; }
+  params.push(limit);
+  sql += ` ORDER BY ts DESC LIMIT $${params.length}`;
+  const res = await query(sql, params);
+  return res.rows;
+}
+
 module.exports = {
   init,
   isConnected,
   query,
+  // Infra-state (D4/D5/D6)
+  issueDeviceToken,
+  verifyDeviceToken,
+  revokeDeviceToken,
+  listDeviceCredentials,
+  upsertDeviceState,
+  getDeviceStates,
+  getDeviceHistory,
   // Memories
   addMemory,
   getMemories,

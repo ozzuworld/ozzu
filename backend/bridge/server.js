@@ -132,6 +132,7 @@ const opsRoutes = require("./routes/ops");
 const positioningRoutes = require("./routes/positioning");
 const mcpRoutes = require("./routes/mcp");
 const infraRoutes = require("./routes/infra");
+const heartbeatRoutes = require("./routes/heartbeat");
 const businessEmailRoutes = require("./routes/business-email");
 const agrovisionRoutes = require("./routes/agrovision");
 const vaultRoutes = require("./routes/vault");
@@ -1660,6 +1661,7 @@ function getRouteHandlers() {
       positioning: positioningRoutes(routeCtx),
       mcp: mcpRoutes(routeCtx),
       infra: infraRoutes(routeCtx),
+      heartbeat: heartbeatRoutes(routeCtx),
       businessEmail: businessEmailRoutes(routeCtx),
       agrovision: agrovisionRoutes(routeCtx),
       vault: vaultRoutes(routeCtx),
@@ -1790,6 +1792,7 @@ async function handleRequest(req, res) {
   if (await r.positioning(req, res, pathname, url)) return;
   if (await r.mcp(req, res, pathname, url)) return;
   if (await r.infra(req, res, pathname, url)) return;
+  if (await r.heartbeat(req, res, pathname, url)) return;
   if (await r.businessEmail(req, res, pathname, url)) return;
   if (await r.agrovision(req, res, pathname, url)) return;
   if (await r.vault(req, res, pathname, url)) return;
