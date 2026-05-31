@@ -17,7 +17,7 @@ function sanitizeOutput(s) {
 }
 
 module.exports = function socRoutes(ctx) {
-  const { sendJSON, parseBody, db } = ctx;
+  const { sendJSON, parseBody, db, requireAuth } = ctx;
 
   // Lazy idempotent migration — docker-entrypoint-initdb.d only runs on fresh volumes.
   db.query(
@@ -172,6 +172,7 @@ module.exports = function socRoutes(ctx) {
 
     // POST /soc/execute - Execute script on dev-01 (background execution)
     if (req.method === "POST" && pathname === "/soc/execute") {
+      if (!requireAuth(req, res)) return true; // D2: ships commands to dev-01 over ssh
       try {
         const body = await parseBody(req);
         const { engagement_id, script_id, command } = body;
@@ -269,6 +270,7 @@ module.exports = function socRoutes(ctx) {
     // NOTE: This ONLY stores results. PA engineer manually notifies Cipher in active session.
     // DO NOT auto-trigger Cipher analysis - would lose conversation context.
     if (req.method === "POST" && pathname === "/soc/submit-results") {
+      if (!requireAuth(req, res)) return true; // D2
       const body = await parseBody(req);
       const { engagement_id, session_id, findings } = body;
 
@@ -331,6 +333,7 @@ module.exports = function socRoutes(ctx) {
     // Body: { items: [{title, description, command, expected_artifact}], replace_pending?: bool (default true) }
     // done/failed/running items are preserved; pending items are replaced unless replace_pending=false.
     if (req.method === "POST" && pathname.match(/^\/soc\/engagements\/[^\/]+\/queue$/)) {
+      if (!requireAuth(req, res)) return true; // D2
       try {
         const id = pathname.split("/")[3];
         const body = await parseBody(req);
@@ -376,6 +379,7 @@ module.exports = function socRoutes(ctx) {
 
     // POST /soc/queue/:itemId/run - Execute a queued item on dev-01 (background, same pattern as /soc/execute)
     if (req.method === "POST" && pathname.match(/^\/soc\/queue\/\d+\/run$/)) {
+      if (!requireAuth(req, res)) return true; // D2: runs queued command on dev-01 over ssh
       try {
         const itemId = parseInt(pathname.split("/")[3], 10);
         const itemRes = await db.query(`SELECT * FROM soc_queue_items WHERE id = $1`, [itemId]);
@@ -545,6 +549,7 @@ module.exports = function socRoutes(ctx) {
 
     // POST /soc/queue/:itemId/cancel - Kill a running queue item
     if (req.method === "POST" && pathname.match(/^\/soc\/queue\/\d+\/cancel$/)) {
+      if (!requireAuth(req, res)) return true; // D2
       try {
         const itemId = parseInt(pathname.split("/")[3], 10);
         const itemRes = await db.query(
@@ -593,6 +598,7 @@ module.exports = function socRoutes(ctx) {
 
     // POST /soc/queue/:itemId/skip - Mark queued item as skipped
     if (req.method === "POST" && pathname.match(/^\/soc\/queue\/\d+\/skip$/)) {
+      if (!requireAuth(req, res)) return true; // D2
       const itemId = parseInt(pathname.split("/")[3], 10);
       const r = await db.query(
         `UPDATE soc_queue_items SET status = 'skipped', completed_at = NOW()
