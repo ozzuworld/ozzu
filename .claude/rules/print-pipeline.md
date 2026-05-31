@@ -68,9 +68,9 @@ Default slicer profile (Ender V3 SE): PETG 230/80°C, 0.4mm nozzle, 0.2mm layer,
 
 | Need | Command |
 |---|---|
-| Print an STL | `curl -sX POST http://localhost:3333/octoprint/print -H "Content-Type: application/json" -H "x-bridge-token: $BRIDGE_TOKEN" -d '{"stl_path":"/path/to/foo.stl"}'` |
+| Print an STL | `curl -sX POST http://localhost:3333/octoprint/print -H "Content-Type: application/json" -H "Authorization: Bearer $BRIDGE_TOKEN" -d '{"stl_path":"/path/to/foo.stl"}'` |
 | Slice only (test if STL is printable, no print) | same as above with `"dry_run": true` |
-| Live status | `curl -sH "x-bridge-token: $BRIDGE_TOKEN" http://localhost:3333/octoprint/status` |
+| Live status | `curl -sH "Authorization: Bearer $BRIDGE_TOKEN" http://localhost:3333/octoprint/status` |
 | Cancel print | `POST /octoprint/cancel` |
 
 `BRIDGE_TOKEN` lives in `/home/gcp/ozzu/.env` as `BRIDGE_TOKEN=...`.

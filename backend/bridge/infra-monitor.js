@@ -9,7 +9,6 @@
 const { execSync } = require("child_process");
 const fs = require("fs");
 const { getDevice, getEsp32Nodes } = require("./lib/devices");
-const er605 = (() => { try { return require("./er605-client"); } catch { return null; } })();
 
 // ── Device & service definitions ──
 // Addresses + SSH paths come from infra/devices.json via getDevice().
@@ -427,15 +426,10 @@ function probeRockPiExtended() {
   return extended;
 }
 
-async function probeRouter() {
-  // ER606 decommissioned 2026-04-05 — no replacement
-  return {
-    decommissioned: true,
-    model: "ER606",
-    reason: "Decommissioned 2026-04-05",
-    replacedBy: null,
-  };
-}
+// probeRouter() + er605-client removed 2026-05-31 (D9): ER606 decommissioned
+// 2026-04-05, the probe only ever returned a static "decommissioned" object and
+// the client was never called. state.router is now null; the frontend RouterCard
+// already renders only when infra?.router is truthy (ops.tsx).
 
 // ── Main update ──
 
@@ -471,7 +465,7 @@ async function updateState() {
   }
 
   // Router probe (async — runs in parallel with nothing, but async by nature)
-  state.router = await probeRouter();
+  state.router = null; // ER606 decommissioned 2026-04-05 (D9: probeRouter removed)
 
   state.probeTimeMs = Date.now() - start;
   _state = state;

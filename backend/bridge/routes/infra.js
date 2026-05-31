@@ -1,7 +1,6 @@
 // routes/infra.js — HTTP endpoints for infrastructure state
 "use strict";
 const fs = require("fs");
-const path = require("path");
 
 module.exports = function infraRoutes(ctx) {
   const { sendJSON, db } = ctx;
