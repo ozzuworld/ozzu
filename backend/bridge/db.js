@@ -1,5 +1,6 @@
 // PostgreSQL connection pool and query helpers for ozzu-bridge
 const { Pool } = require("pg");
+const crypto = require("crypto");
 
 const pool = new Pool({
   host: "127.0.0.1",
