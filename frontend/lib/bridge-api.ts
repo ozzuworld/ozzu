@@ -38,9 +38,14 @@ export function getBridgeMode(): "lan" | "remote" {
   return BRIDGE_URL === LAN_URL ? "lan" : "remote";
 }
 
-/** Get auth headers when using public URL */
+/** Get auth headers. D1B: send the Bearer key whenever it is configured, NOT only
+ * in "remote" mode — the app treats home.ozzu.world (the public nginx path) as
+ * "lan", so the mode gate meant the key was never sent on the path that actually
+ * enforces auth. Sending it on LAN/WG too is harmless (the bridge only enforces
+ * for public requests). No-op while EXPO_PUBLIC_BRIDGE_API_KEY is unset (current
+ * default) → INERT until the key is provisioned in the coordinated rollout. */
 export function getAuthHeaders(): Record<string, string> {
-  if (getBridgeMode() === "remote" && BRIDGE_API_KEY) {
+  if (BRIDGE_API_KEY) {
     return { "Authorization": `Bearer ${BRIDGE_API_KEY}` };
   }
   return {};
