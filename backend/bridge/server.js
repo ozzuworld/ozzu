@@ -1489,11 +1489,38 @@ const TRUSTED_NETS = [
   { prefix: "10.128.0.", label: "GCP-internal" },
 ];
 
+// Normalize IPv4-mapped IPv6 (::ffff:1.2.3.4 -> 1.2.3.4)
+function normalizeIp(ip) {
+  if (!ip) return "";
+  return ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+}
+function isLoopback(ip) {
+  return ip === "::1" || ip.startsWith("127.");
+}
+// Resolve the REAL client IP. X-Forwarded-For is honored ONLY when the
+// immediate socket peer is the local nginx reverse proxy (loopback). We trust
+// exactly one proxy hop: nginx appends the real peer LAST (via
+// $proxy_add_x_forwarded_for / $remote_addr), so the RIGHTMOST entry is the
+// real client and everything to its left is client-supplied and forgeable.
+// Reading the last entry is spoof-proof whether nginx appends or replaces XFF.
+// For any direct (non-loopback) connection we use the socket address and ignore
+// client-supplied XFF entirely. (Prev. code read the LEFTMOST XFF on every
+// request, so a public client could prepend a WG/LAN IP and skip auth.)
+function realClientIp(req) {
+  const socketIp = normalizeIp(req.socket && req.socket.remoteAddress);
+  if (isLoopback(socketIp)) {
+    const xff = req.headers["x-forwarded-for"];
+    if (xff) {
+      const parts = String(xff).split(",").map(s => s.trim()).filter(Boolean);
+      if (parts.length) return normalizeIp(parts[parts.length - 1]);
+    }
+  }
+  return socketIp;
+}
 function isPublicRequest(req) {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (!forwarded) return false; // Direct connection — local/VPN
-  const clientIp = forwarded.split(",")[0].trim();
-  return !TRUSTED_NETS.some(net => clientIp.startsWith(net.prefix));
+  const ip = realClientIp(req);
+  if (isLoopback(ip)) return false; // local tooling on the box itself
+  return !TRUSTED_NETS.some(net => ip.startsWith(net.prefix));
 }
 
 // ── API key auth — only enforced for public requests ──
@@ -6224,9 +6251,9 @@ _intervals.push(setInterval(() => {
 
 wss.on("connection", (ws, req) => {
   // Auth gate: public WS connections (via nginx) need a valid token
-  if (BRIDGE_API_KEY && req.headers["x-forwarded-for"]) {
-    const clientIp = (req.headers["x-forwarded-for"] || "").split(",")[0].trim();
-    const isTrusted = TRUSTED_NETS.some(net => clientIp.startsWith(net.prefix));
+  if (BRIDGE_API_KEY) {
+    const clientIp = realClientIp(req);
+    const isTrusted = isLoopback(clientIp) || TRUSTED_NETS.some(net => clientIp.startsWith(net.prefix));
     if (!isTrusted) {
       const wsUrl = new URL(req.url, `http://localhost:${PORT}`);
       const token = wsUrl.searchParams.get("token");
