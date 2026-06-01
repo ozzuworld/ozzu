@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from model import detect_and_embed, cosine_similarity
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY") or None  # Phase 0.1: qdrant now requires a key
 COLLECTION = "faces"
 EMBEDDING_DIM = 512
 
@@ -32,7 +33,7 @@ def get_qdrant():
     global _qdrant
     if _qdrant is None:
         from qdrant_client import QdrantClient
-        _qdrant = QdrantClient(url=QDRANT_URL, timeout=10)
+        _qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=10)
         _ensure_collection()
     return _qdrant
 

@@ -493,7 +493,7 @@ const ALLOWED_ENTITY_IDS = new Set(
 
 // ── Redis connection ──
 
-const redis = new Redis({ host: "127.0.0.1", port: 6379, lazyConnect: true });
+const redis = new Redis({ host: "127.0.0.1", port: 6379, lazyConnect: true, password: process.env.REDIS_PASSWORD || undefined });
 
 // Redis runtime disconnect handling — update _redisConnected so JSON fallback kicks in
 redis.on("error", (err) => {
@@ -1949,7 +1949,7 @@ async function handleRequest(req, res) {
 
       // Parallel fetches: collection info + vast.ai (skip per-source counts — too slow under load)
       const [qdrant] = await Promise.all([
-        fetchJSON("http://localhost:6333/collections/faces"),
+        fetchJSON("http://localhost:6333/collections/faces", process.env.QDRANT_API_KEY ? { headers: { "api-key": process.env.QDRANT_API_KEY } } : {}),
       ]);
 
       let vastData = null;

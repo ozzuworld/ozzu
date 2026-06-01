@@ -175,7 +175,7 @@ async function buildSummary() {
   try {
     const http = require("http");
     const qdrant = await new Promise((resolve) => {
-      const req = http.get("http://127.0.0.1:6333/collections/faces", { timeout: 3000 }, (res) => {
+      const req = http.get("http://127.0.0.1:6333/collections/faces", { timeout: 3000, headers: process.env.QDRANT_API_KEY ? { "api-key": process.env.QDRANT_API_KEY } : {} }, (res) => {
         let body = ""; res.on("data", c => body += c);
         res.on("end", () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
       });
