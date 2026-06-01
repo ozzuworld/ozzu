@@ -91,7 +91,13 @@ module.exports = function createOzzuSourceRoutes(ctx) {
           category: "productivity",
           screenshotURLs: [],
           versions: [{
-            version: meta.version,
+            // AltStore/SideStore decides "is there an update?" by comparing this
+            // `version` STRING. CFBundleShortVersionString (meta.version) stays
+            // "1.0.0" across every CI build, so on its own it never signals an
+            // update even when the IPA is genuinely newer. Append the (monotonic)
+            // build number so each build advertises a strictly-greater version
+            // (e.g. 1.0.0.459). buildVersion still carries the raw build number.
+            version: `${meta.version}.${meta.buildNumber}`,
             buildVersion: meta.buildNumber,
             date: stat.mtime,
             size: stat.size,
