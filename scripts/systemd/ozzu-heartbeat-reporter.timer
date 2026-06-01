@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Ozzu heartbeat reporter every 60s
+
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=60
+AccuracySec=5s
+Unit=ozzu-heartbeat-reporter.service
+
+[Install]
+WantedBy=timers.target

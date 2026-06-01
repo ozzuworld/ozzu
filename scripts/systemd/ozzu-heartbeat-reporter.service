@@ -1,0 +1,8 @@
+[Unit]
+Description=Ozzu device heartbeat reporter (pushes this host's IP/SSID/WG state to the bridge)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/gcp/ozzu/scripts/heartbeat-reporter.sh
+# token + config via the script defaults (HB_TOKEN_FILE=/root/.ozzu-hb/token)
