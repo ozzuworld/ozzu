@@ -58,7 +58,10 @@ module.exports = function createOzzuSourceRoutes(ctx) {
   function readIpaStat() {
     try {
       const st = fs.statSync(IPA_PATH);
-      return { size: st.size, mtime: st.mtime.toISOString() };
+      // AltStore decodes dates with a strict ISO-8601 strategy that REJECTS
+      // fractional seconds — toISOString() emits ".757Z", which fails the whole
+      // source with "data isn't in the correct format". Strip the milliseconds.
+      return { size: st.size, mtime: st.mtime.toISOString().replace(/\.\d{3}Z$/, "Z") };
     } catch {
       return null;
     }
