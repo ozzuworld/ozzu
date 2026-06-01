@@ -4,7 +4,7 @@
 "use strict";
 
 module.exports = function positioningRoutes(ctx) {
-  const { sendJSON, parseBody, db, broadcastToAll } = ctx;
+  const { sendJSON, parseBody, db, broadcastToAll, requireAuth } = ctx;
 
   // In-memory current state
   let _currentLocation = null;
@@ -116,6 +116,7 @@ module.exports = function positioningRoutes(ctx) {
 
     // POST /positioning/pair — Trigger BLE pairing mode on an ESP32 node
     if (req.method === "POST" && pathname === "/positioning/pair") {
+      if (!requireAuth(req, res)) return true; // exec path: ssh→root@172.168.0.55 (inert until BRIDGE_API_KEY set)
       const body = await parseBody(req);
       if (!body || !body.nodeIp) {
         sendJSON(res, 400, { error: "nodeIp required" });
