@@ -67,7 +67,7 @@ module.exports = function createOzzuSourceRoutes(ctx) {
   return async function handleOzzuSourceRoutes(req, res, pathname /* , url */) {
 
     // GET /ozzu.json — AltStore Source manifest
-    if (req.method === "GET" && (pathname === "/ozzu.json" || pathname === "/ozzu-source.json")) {
+    if ((req.method === "GET" || req.method === "HEAD") && (pathname === "/ozzu.json" || pathname === "/ozzu-source.json")) {
       const meta = readAppMetadata();
       const stat = readIpaStat();
 
@@ -251,8 +251,10 @@ module.exports = function createOzzuSourceRoutes(ctx) {
       return true;
     }
 
-    // GET /ozzu-latest.ipa — Stream the IPA binary
-    if (req.method === "GET" && pathname === "/ozzu-latest.ipa") {
+    // GET/HEAD /ozzu-latest.ipa — Stream the IPA binary. HEAD must be handled:
+    // AltStore/SideStore issues a HEAD to validate size/availability before the
+    // GET download; a 404 on HEAD makes the store treat the update as unavailable.
+    if ((req.method === "GET" || req.method === "HEAD") && pathname === "/ozzu-latest.ipa") {
       if (!fs.existsSync(IPA_PATH)) {
         sendJSON(res, 404, { error: "Ozzu IPA not yet cached. Run a staging build via /stage-ios first." });
         return true;
@@ -264,6 +266,7 @@ module.exports = function createOzzuSourceRoutes(ctx) {
         "Content-Length": st.size,
         "Access-Control-Allow-Origin": "*",
       });
+      if (req.method === "HEAD") { res.end(); return true; }
       fs.createReadStream(IPA_PATH).pipe(res);
       log(`[ozzu-source] IPA download started (${st.size} bytes)`);
       return true;
