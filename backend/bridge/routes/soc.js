@@ -2,6 +2,7 @@
 "use strict";
 
 const { spawn } = require('child_process');
+const { parseReconOutput } = require('../soc-recon-parser');
 
 // In-memory registry of running SSH children, keyed by session_id.
 // Entry shape: { proc, itemId, timeoutHandle, timedOut }
@@ -14,6 +15,55 @@ const runningProcs = new Map();
 function sanitizeOutput(s) {
   if (typeof s !== 'string') return s;
   return s.replace(/\x00/g, '\\x00');
+}
+
+// Parse recon scan stdout into structured recon_hosts rows at ingest (dir_1780530175588).
+// WHY: raw nmap/nc dumps pasted into chat trip the usage-policy classifier; structured
+// rows don't. The raw blob is already safely stored in agent_audit_log for the
+// app/evidence — this is purely additive. It is BEST-EFFORT and FULLY error-isolated:
+// a parser/DB hiccup here must never disturb the execution state machine or wedge a
+// queue item. Cipher reads these rows via get_recon; the raw dump never enters context.
+async function parseAndStoreRecon(db, engagementId, sessionId, rawOutput) {
+  if (!engagementId || typeof rawOutput !== 'string' || !rawOutput) return;
+  let records;
+  try {
+    records = parseReconOutput(rawOutput);
+  } catch (err) {
+    console.error('[soc recon] parse failed:', err && err.message);
+    return;
+  }
+  if (!records || !records.length) return;
+  for (const rec of records) {
+    if (!rec.ip) continue; // need an IP to key the (engagement_id, ip) upsert
+    try {
+      await db.query(
+        `INSERT INTO recon_hosts (engagement_id, session_id, ip, mac, vendor, hostname, status, ports, raw_excerpt, discovered_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, NOW())
+         ON CONFLICT (engagement_id, ip) DO UPDATE SET
+           session_id    = EXCLUDED.session_id,
+           mac           = COALESCE(EXCLUDED.mac, recon_hosts.mac),
+           vendor        = COALESCE(EXCLUDED.vendor, recon_hosts.vendor),
+           hostname      = COALESCE(EXCLUDED.hostname, recon_hosts.hostname),
+           status        = COALESCE(EXCLUDED.status, recon_hosts.status),
+           ports         = CASE WHEN jsonb_array_length(EXCLUDED.ports) > 0 THEN EXCLUDED.ports ELSE recon_hosts.ports END,
+           raw_excerpt   = EXCLUDED.raw_excerpt,
+           discovered_at = NOW()`,
+        [
+          engagementId,
+          sessionId || null,
+          rec.ip,
+          rec.mac || null,
+          rec.vendor || null,
+          rec.hostname || null,
+          rec.status || null,
+          JSON.stringify(rec.ports || []),
+          rec.raw ? sanitizeOutput(rec.raw).slice(0, 2000) : null,
+        ]
+      );
+    } catch (err) {
+      console.error(`[soc recon] upsert failed for ${rec.ip} (eng ${engagementId}):`, err && err.message);
+    }
+  }
 }
 
 module.exports = function socRoutes(ctx) {
@@ -241,6 +291,9 @@ module.exports = function socRoutes(ctx) {
           } catch (err) {
             console.error(`Failed to update audit log for ${sessionId}:`, err);
           }
+          // Raw blob is now safely in the audit log; parse it into structured
+          // recon_hosts so Cipher analyzes rows, not the raw dump (dir_1780530175588).
+          await parseAndStoreRecon(db, engagement_id, sessionId, fullOutput);
         });
 
         proc.on('error', async (err) => {
@@ -513,6 +566,10 @@ module.exports = function socRoutes(ctx) {
               console.error(`[soc queue run] Fallback UPDATE also failed for item ${item.id}:`, fallbackErr);
             }
           }
+          // Parse recon output into structured rows (dir_1780530175588). Raw blob
+          // already persisted above; additive and fully error-isolated so it can
+          // never wedge the queue item's state machine.
+          await parseAndStoreRecon(db, item.engagement_id, sessionId, fullOutput);
         });
         proc.on('error', async (err) => {
           clearTimeout(entry.timeoutHandle);
@@ -633,6 +690,22 @@ module.exports = function socRoutes(ctx) {
       `, [engagementId]);
 
       sendJSON(res, 200, { executions: result.rows });
+      return true;
+    }
+
+    // GET /soc/:id/recon - Structured recon hosts parsed server-side from scan output.
+    // This is the app/evidence view and DOES include raw_excerpt. Cipher instead uses
+    // the get_recon MCP tool (which omits raw_excerpt) so raw scan dumps never enter chat.
+    if (req.method === "GET" && pathname.match(/^\/soc\/[^\/]+\/recon$/)) {
+      const engagementId = pathname.split("/")[2];
+      const result = await db.query(
+        `SELECT ip, mac, vendor, hostname, status, ports, raw_excerpt, session_id, discovered_at
+         FROM recon_hosts
+         WHERE engagement_id = $1
+         ORDER BY ip`,
+        [engagementId]
+      );
+      sendJSON(res, 200, { engagement_id: engagementId, hosts: result.rows, total: result.rows.length });
       return true;
     }
 

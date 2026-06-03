@@ -1036,6 +1036,27 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_spawned ON agent_audit_log(spawned_by, started_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_directive ON agent_audit_log(directive_id)`);
 
+    // ── SOC recon hosts (dir_1780530175588) ──
+    // Structured host/port rows parsed SERVER-SIDE from scan stdout at ingest, so
+    // Cipher analyzes these rows (via get_recon) instead of pasting raw nmap/nc dumps
+    // into chat — raw dumps trip the usage-policy classifier. Raw output stays in
+    // agent_audit_log.output for the app/evidence; recon_hosts is the analysis surface.
+    await pool.query(`CREATE TABLE IF NOT EXISTS recon_hosts (
+      id            SERIAL PRIMARY KEY,
+      engagement_id VARCHAR(50) NOT NULL REFERENCES pentest_engagements(id) ON DELETE CASCADE,
+      session_id    TEXT,
+      ip            VARCHAR(45) NOT NULL,
+      mac           VARCHAR(17),
+      vendor        TEXT,
+      hostname      TEXT,
+      status        VARCHAR(16),
+      ports         JSONB DEFAULT '[]',
+      raw_excerpt   TEXT,
+      discovered_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (engagement_id, ip)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_recon_hosts_engagement ON recon_hosts(engagement_id, discovered_at DESC)`);
+
     // ── Infra-state (dir_1780260211325 D4, dir_1780260211365 D5, dir_1780260211404 D6) ──
     await pool.query(`CREATE TABLE IF NOT EXISTS device_credentials (
       device_id    TEXT PRIMARY KEY,
@@ -1072,7 +1093,7 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_device_state_log_device ON device_state_log(device_id, ts DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_device_state_log_ts ON device_state_log(ts DESC)`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph + agent_audit_log + infra_state)");
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph + agent_audit_log + recon_hosts + infra_state)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;

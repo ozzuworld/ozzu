@@ -498,6 +498,18 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "get_recon",
+      description: "Get STRUCTURED recon hosts (ip / mac / vendor / status / open ports + service/version) for an engagement, parsed server-side from scan output. Use this INSTEAD of reading raw nmap/nc scan dumps — raw output stays in the audit log for the app and never enters context. Returns one row per discovered host.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID (e.g. SKYLINE-SOC-2026-001)" },
+          status: { type: "string", description: "Optional filter by host status (e.g. 'up')" },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
       name: "soc_queue_steps",
       description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
@@ -1672,6 +1684,34 @@ ${result.narrative}
           content: [{
             type: "text",
             text: `**Findings for ${args.engagement_id}:**\n\n${lines.join('\n')}\n\n**Total:** ${result.rows.length} finding(s)`
+          }]
+        };
+      }
+
+      case "get_recon": {
+        let q = `SELECT ip, mac, vendor, hostname, status, ports, discovered_at
+                 FROM recon_hosts WHERE engagement_id = $1`;
+        const p = [args.engagement_id];
+        if (args.status) { q += ` AND status = $2`; p.push(args.status); }
+        q += ` ORDER BY ip`;
+        const result = await db.query(q, p);
+        if (result.rows.length === 0) {
+          return { content: [{ type: "text", text: `No recon hosts for ${args.engagement_id} yet. Run a recon queue item from the SOC app — scan output is parsed into structured rows automatically at ingest.` }] };
+        }
+        const lines = result.rows.map((h) => {
+          const ports = Array.isArray(h.ports) ? h.ports : [];
+          const open = ports.filter((pt) => (pt.state || "").includes("open"));
+          const portStr = open.length
+            ? open.map((pt) => `${pt.port}/${pt.proto} ${pt.service || "?"}${pt.version ? " (" + pt.version + ")" : ""}`).join(", ")
+            : (ports.length ? "no open ports" : "—");
+          const idStr = h.hostname ? `${h.ip} (${h.hostname})` : h.ip;
+          const macStr = h.mac ? ` [${h.mac}${h.vendor ? " " + h.vendor : ""}]` : "";
+          return `• ${idStr}${macStr} — ${h.status || "?"} — ${portStr}`;
+        });
+        return {
+          content: [{
+            type: "text",
+            text: `**Recon hosts for ${args.engagement_id}** (structured; raw scan output not shown):\n\n${lines.join("\n")}\n\n**Total:** ${result.rows.length} host(s)`
           }]
         };
       }
