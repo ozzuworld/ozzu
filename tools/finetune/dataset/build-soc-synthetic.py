@@ -128,15 +128,140 @@ def gen_advance_phase(ctx):
     }
 
 
-SCENARIOS = [gen_recon_scan, gen_state_check, gen_wait_outcome, gen_advance_phase]
+def gen_failed_step_adapt(ctx):
+    """queue_step returns failed → model adapts strategy."""
+    queue_id = random.randint(100, 999)
+    return {
+        "system": random.choice(SYSTEM_PROMPT_TEMPLATES),
+        "user":   f"Check the outcome of step #{queue_id} on engagement {ctx['id']} and decide what to do next.",
+        "assistant_call": {
+            "name": "wait_for_outcome",
+            "arguments": {"queue_item_id": queue_id, "timeout_sec": 300},
+        },
+        "tool_result": {
+            "queue_item_id": queue_id,
+            "status": "failed",
+            "output_preview": "host unreachable: 192.168.50.10: no route to host. Network segment isolated?",
+        },
+        "assistant_followup": (
+            f"Step #{queue_id} failed — host unreachable. The target may be in an isolated segment. "
+            f"Adapting: I'll queue an ARP scan of the local subnet first to confirm reachability before retrying."
+        ),
+    }
+
+
+def gen_request_human(ctx):
+    """Model decides to defer to operator."""
+    return {
+        "system": random.choice(SYSTEM_PROMPT_TEMPLATES),
+        "user":   f"Engagement {ctx['id']}: recon found a credential dump that requires offline cracking. Do you want me to upload to a cracking rig?",
+        "assistant_call": {
+            "name": "request_human",
+            "arguments": {
+                "engagement_id": ctx["id"],
+                "question": "Found a 200-line NTLM hash dump on the SMB share. Cracking offline requires uploading to your cracking infrastructure. Authorize the upload, or shall I continue with the engagement assuming no creds?",
+            },
+        },
+        "tool_result": {"engagement_id": ctx["id"], "note": "operator question queued; agent pausing"},
+        "assistant_followup": (
+            f"Question surfaced to the operator. I'll pause this engagement until they respond. "
+            f"In the meantime, I won't queue any more steps for {ctx['id']}."
+        ),
+    }
+
+
+def gen_end_engagement(ctx):
+    """Model decides the engagement is complete."""
+    return {
+        "system": random.choice(SYSTEM_PROMPT_TEMPLATES),
+        "user":   f"Engagement {ctx['id']} has captured all flags listed in the ROE. Wrap it up.",
+        "assistant_call": {
+            "name": "end_engagement",
+            "arguments": {
+                "engagement_id": ctx["id"],
+                "reason": "All ROE objectives met: 4/4 flags captured, full kill-chain documented from recon → foothold → privesc → cleanup. Findings logged.",
+            },
+        },
+        "tool_result": {"engagement_id": ctx["id"], "status": "completed", "note": "engagement closed"},
+        "assistant_followup": (
+            f"Engagement {ctx['id']} closed. Final summary: all objectives met, findings persisted to pentest_findings, "
+            f"no agent_run_state left pending."
+        ),
+    }
+
+
+def gen_multi_step_adapt(ctx):
+    """queue → wait → adapt → queue follow-up based on result."""
+    queue_id_1 = random.randint(100, 999)
+    queue_id_2 = queue_id_1 + 1
+    return {
+        "system": random.choice(SYSTEM_PROMPT_TEMPLATES),
+        "user":   f"Engagement {ctx['id']}: I want you to enumerate SMB shares on 192.168.50.15 and decide your next step based on what you find.",
+        "_multi": True,
+        # Sequence: queue_step, tool result, wait_for_outcome, tool result, queue_step again, tool result, final
+        "messages_override": [
+            # System + user already added by build_messages logic
+            {"role": "assistant", "content": "<tool_call>\n" + json.dumps({
+                "name": "queue_step",
+                "arguments": {
+                    "engagement_id": ctx["id"],
+                    "title": f"SMB share enumeration on 192.168.50.15",
+                    "command": "smbclient -L //192.168.50.15 -N",
+                    "expected_artifact": "list of accessible shares and their ACLs",
+                    "references": [],
+                },
+            }) + "\n</tool_call>"},
+            {"role": "tool", "content": json.dumps({"queue_id": queue_id_1, "seq": ctx["hosts_known"] + 1, "title": "SMB share enumeration", "note": "queued"})},
+            {"role": "assistant", "content": "<tool_call>\n" + json.dumps({
+                "name": "wait_for_outcome",
+                "arguments": {"queue_item_id": queue_id_1, "timeout_sec": 120},
+            }) + "\n</tool_call>"},
+            {"role": "tool", "content": json.dumps({
+                "queue_item_id": queue_id_1,
+                "status": "done",
+                "output_preview": "Sharename Type Comment\\nADMIN$ Disk Remote Admin\\nIPC$ IPC IPC Service\\nbackups Disk World-readable backups directory\\nNETLOGON Disk Logon scripts",
+            })},
+            {"role": "assistant", "content": (
+                f"Found 'backups' share marked world-readable — that's a real foothold opportunity. "
+                f"Queueing a follow-up to list its contents."
+            )},
+            {"role": "assistant", "content": "<tool_call>\n" + json.dumps({
+                "name": "queue_step",
+                "arguments": {
+                    "engagement_id": ctx["id"],
+                    "title": "List world-readable 'backups' share contents",
+                    "command": "smbclient //192.168.50.15/backups -N -c 'recurse on; ls'",
+                    "expected_artifact": "directory tree of the backups share",
+                    "references": [],
+                },
+            }) + "\n</tool_call>"},
+            {"role": "tool", "content": json.dumps({"queue_id": queue_id_2, "seq": ctx["hosts_known"] + 2, "title": "List backups share contents", "note": "queued"})},
+            {"role": "assistant", "content": (
+                "Queued the recursive listing. If we find database dumps or credential files, "
+                "that becomes the foothold for the next phase."
+            )},
+        ],
+    }
+
+
+SCENARIOS = [
+    gen_recon_scan, gen_state_check, gen_wait_outcome, gen_advance_phase,
+    gen_failed_step_adapt, gen_request_human, gen_end_engagement, gen_multi_step_adapt,
+]
 
 
 def build_messages(scenario):
-    """Convert a scenario dict into Qwen3-native messages with <tool_call> wrap."""
+    """Convert a scenario dict into Qwen3-native messages with <tool_call> wrap.
+    Supports both single-tool-call scenarios and multi-step ones (via
+    `messages_override` key for scenarios that need 3+ tool_calls)."""
     msgs = [
         {"role": "system", "content": scenario["system"]},
         {"role": "user",   "content": scenario["user"]},
     ]
+    if scenario.get("_multi"):
+        # Multi-step scenario provides its own message list (post-user)
+        msgs.extend(scenario["messages_override"])
+        return msgs
     call_json = json.dumps(scenario["assistant_call"], ensure_ascii=False)
     msgs.append({"role": "assistant", "content": f"<tool_call>\n{call_json}\n</tool_call>"})
     msgs.append({"role": "tool",      "content": json.dumps(scenario["tool_result"], ensure_ascii=False)})
@@ -159,11 +284,13 @@ def main():
     examples = []
     for i in range(args.n):
         ctx = random.choice(ENGAGEMENT_CONTEXTS)
-        scenario = random.choice(SCENARIOS)(ctx)
+        scenario_fn = random.choice(SCENARIOS)
+        scenario = scenario_fn(ctx)
+        scenario_name = scenario.get("assistant_call", {}).get("name") or scenario_fn.__name__.replace("gen_", "")
         ex = {
             "messages": build_messages(scenario),
             "source": "ozzu-soc-synthetic",
-            "scenario": scenario["assistant_call"]["name"],
+            "scenario": scenario_name,
             "id": f"synth-{i}",
         }
         examples.append(ex)
