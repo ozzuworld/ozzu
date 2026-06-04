@@ -60,9 +60,10 @@ if ! docker ps --filter "name=^bridge$" --format '{{.Names}}' | grep -q '^bridge
   exit 2
 fi
 
-run_in_bridge "step-8-1-multiagent"      "$ROOT/agent-smoke.js"           || FAILED=$((FAILED + 1))
-run_in_bridge "step-8-2-legacy-toolcall" "$ROOT/agent-toolcall-smoke.js"  || FAILED=$((FAILED + 1))
+run_in_bridge "step-8-1-multiagent"      "$ROOT/agent-smoke.js"            || FAILED=$((FAILED + 1))
+run_in_bridge "step-8-2-legacy-toolcall" "$ROOT/agent-toolcall-smoke.js"   || FAILED=$((FAILED + 1))
 run_local     "step-9-14-dataset-pipeline" "$ROOT/finetune-dataset-smoke.sh" || FAILED=$((FAILED + 1))
+run_local     "step-6-1-api-routes"        "$ROOT/api-routes-smoke.sh"     || FAILED=$((FAILED + 1))
 
 ELAPSED=$(($(date +%s) - START))
 echo
