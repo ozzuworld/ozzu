@@ -154,6 +154,16 @@ async function cmdCreate(opts) {
     monitoring: true,
     tags: ["ozzu", "finetune", `max-hours-${maxHours}`],
   };
+  if (opts.dryRun) {
+    console.log("=== DRY RUN — request that WOULD be sent (no DO call, no spend) ===");
+    console.log(`POST https://api.digitalocean.com/v2/droplets`);
+    console.log(`Authorization: Bearer dop_v1_***redacted***`);
+    console.log(`Content-Type: application/json`);
+    console.log(`Body:`);
+    console.log(JSON.stringify(body, null, 2));
+    console.log(`(SSH key id ${sshKeyId} would be referenced — verify it exists with: curl -H "Authorization: Bearer $TOK" https://api.digitalocean.com/v2/account/keys | jq '.ssh_keys[] | {id, name}')`);
+    return { dryRun: true, body };
+  }
   console.log(`[do-gpu] creating droplet: size=${size} region=${region} image=${image} max_hours=${maxHours}`);
   const created = await doPost("/droplets", body);
   const dropletId = created.droplet && created.droplet.id;
@@ -193,10 +203,17 @@ async function cmdCreate(opts) {
   throw new Error(`droplet ${dropletId} did not reach active in 5 min — check DO console`);
 }
 
-async function cmdDestroy(dropletId) {
+async function cmdDestroy(dropletId, opts) {
   if (!dropletId) {
     console.error("[do-gpu] FATAL: destroy requires <droplet_id> arg");
     process.exit(2);
+  }
+  if (opts && opts.dryRun) {
+    console.log("=== DRY RUN — request that WOULD be sent (no DO call) ===");
+    console.log(`DELETE https://api.digitalocean.com/v2/droplets/${dropletId}`);
+    console.log(`Authorization: Bearer dop_v1_***redacted***`);
+    console.log(`(No request body)`);
+    return { dryRun: true, droplet_id: dropletId };
   }
   console.log(`[do-gpu] destroying droplet ${dropletId} …`);
   await doDelete(`/droplets/${dropletId}`);
@@ -233,15 +250,18 @@ async function main() {
       case "create":  await cmdCreate({
         size: args.size, region: args.region, image: args.image,
         sshKeyId: args["ssh-key-id"], maxHours: args["max-hours"],
+        dryRun: !!args["dry-run"],
       }); break;
-      case "destroy": await cmdDestroy(args._[0]); break;
+      case "destroy": await cmdDestroy(args._[0], { dryRun: !!args["dry-run"] }); break;
       default:
         console.log("Usage:");
         console.log("  do-gpu.js status                        — list our droplets");
         console.log("  do-gpu.js images                        — list GPU-tagged images");
         console.log("  do-gpu.js sizes                         — list GPU droplet sizes");
-        console.log("  do-gpu.js create --ssh-key-id <id> [--size SLUG] [--region SLUG] [--max-hours N]");
-        console.log("  do-gpu.js destroy <droplet_id>          — kill a droplet");
+        console.log("  do-gpu.js create --ssh-key-id <id> [--size SLUG] [--region SLUG] [--max-hours N] [--dry-run]");
+        console.log("  do-gpu.js destroy <droplet_id> [--dry-run]   — kill a droplet");
+        console.log("");
+        console.log("  --dry-run on create/destroy prints the exact API request without sending it (no spend).");
         process.exit(1);
     }
   } catch (e) {
