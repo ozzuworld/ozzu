@@ -115,6 +115,16 @@ fi
 
 # ─────────────────────────────── step 1-4: dataset ───────────────────────────────
 mkdir -p "$DATASET_DIR"
+# If the dataset is already built (train.jsonl + eval.jsonl present with content),
+# skip the rebuild. This lets the operator point at a pre-built mix such as
+# /home/gcp/ozzu/private/finetune/dataset-v1.1/ via --dataset-dir.
+if [[ -s "$DATASET_DIR/train.jsonl" && -s "$DATASET_DIR/eval.jsonl" ]]; then
+  TRAIN_LINES=$(wc -l < "$DATASET_DIR/train.jsonl")
+  EVAL_LINES=$(wc -l < "$DATASET_DIR/eval.jsonl")
+  log "=== STEPS 1-4/8: SKIPPED — found pre-built dataset at $DATASET_DIR ($TRAIN_LINES train + $EVAL_LINES eval rows) ==="
+  log "    (delete train.jsonl + eval.jsonl from there if you want to rebuild from corpus sources)"
+else
+
 log "=== STEP 1/8: build WhiteRabbitNeo corpus ==="
 python3 "$ROOT/finetune/dataset/build-wrn.py" --out "$DATASET_DIR/wrn.jsonl"
 
@@ -154,6 +164,8 @@ python3 "$ROOT/finetune/dataset/merge.py" \
 TRAIN_LINES=$(wc -l < "$DATASET_DIR/train.jsonl")
 EVAL_LINES=$(wc -l < "$DATASET_DIR/eval.jsonl")
 log "dataset assembled: $TRAIN_LINES training rows, $EVAL_LINES eval rows"
+
+fi   # close the skip-rebuild conditional opened in step 1
 
 # ─────────────────────────────── step 5: provision droplet ───────────────────────────────
 log "=== STEP 5/8: provision DO MI300X droplet (real spend starts now @ \$1.99/hr) ==="
