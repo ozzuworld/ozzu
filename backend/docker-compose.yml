@@ -64,6 +64,9 @@ services:
       - VAST_API_KEY=${VAST_API_KEY:-}
       - GMAIL_USER=${GMAIL_USER:-}
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
+      - OFFENSE_MODEL_URL=${OFFENSE_MODEL_URL:-}
+      - OFFENSE_MODEL_NAME=${OFFENSE_MODEL_NAME:-}
+      - OFFENSE_MODEL_KEY=${OFFENSE_MODEL_KEY:-}
     command: sh -c "npm install --omit=dev --prefer-offline 2>/dev/null; node server.js"
     depends_on:
       - redis
