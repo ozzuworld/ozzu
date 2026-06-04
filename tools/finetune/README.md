@@ -27,9 +27,36 @@ tools/finetune/
     └── run-autopenbench.sh            🚧 stub — implement after first trained adapter
 ```
 
-## First real training run — end-to-end runbook
+## TL;DR — the two-command training flow
 
-This is the concrete flow King Kazuma walks once we're ready to spend ~$30-40 of the DO credit. Each command is copy-pasteable.
+After one-time prerequisites (below), the entire training cycle is:
+
+```bash
+# 1. Kick off everything — dataset prep + provision + bootstrap + start training
+bash /home/gcp/ozzu/tools/finetune/run-finetune.sh --ssh-key-id <YOUR_DO_KEY_ID>
+
+# 2. (Watch progress in another shell)
+ssh root@<droplet-ip-from-step-1> 'tail -f /root/train.log'
+
+# 3. When training log shows "DONE — adapter at...", close the loop
+bash /home/gcp/ozzu/tools/finetune/pull-adapter.sh
+# scp's adapter back, registers in Ollama, prompts before destroy
+```
+
+That's it. Two commands + a wait. Cost: ~$30-40 of the DO MI300X credit per full training run.
+
+Optional flags to `run-finetune.sh`:
+- `--writeups-repo /path/to/0xdf` — include 0xdf HTB writeups in the dataset (otherwise skipped)
+- `--skip-transcripts` — skip our agent transcripts (use on first run before any engagement data exists)
+- `--max-hours N` — budget annotation (default 20 → ~$40)
+
+Run `bash run-finetune.sh --help` for the full arg list.
+
+---
+
+## Manual flow (advanced / debugging)
+
+This is the concrete flow if you want to run each script yourself (useful for debugging or partial reruns). Each command is copy-pasteable.
 
 ### 0. Prerequisites (one-time setup)
 
