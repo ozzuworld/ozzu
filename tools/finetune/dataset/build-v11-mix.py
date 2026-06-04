@@ -38,27 +38,78 @@ TARGETS = {
 
 # ─────────────────────────── Glaive parser ───────────────────────────
 
+# Glaive's actual format (verified 2026-06-04):
+#   USER: <user text>
+#   A: <assistant text>                       ← simple turn
+#   A: <functioncall> {"name":..., "arguments":...} <|endoftext|>   ← function call INLINE
+#   FUNCTION RESPONSE: <json result>
+#   A: <assistant follow-up>
+#
+# Some rows use ASSISTANT: instead of A:. The function call is NEVER its own
+# role marker — it's wrapped in <functioncall>...<|endoftext|> tokens inside
+# the assistant turn. Earlier parser missed this entirely → 0% of rows ended
+# up with tool_call content.
+
+FUNCTIONCALL_RE = re.compile(r"<functioncall>\s*(.+?)\s*<\|endoftext\|>", re.DOTALL)
+ENDOFTEXT_RE = re.compile(r"\s*<\|endoftext\|>\s*$")
+
+
 def parse_glaive_chat(chat: str):
-    """Convert Glaive's chat string into messages. Each ROLE: line is a
-    separate turn. FUNCTION CALL → assistant <tool_call> wrap.
-    FUNCTION RESPONSE → tool role."""
+    """Convert Glaive's chat string into messages. Detect inline
+    <functioncall> tokens and re-emit as Qwen3-native
+    <tool_call>{"name":...,"arguments":...}</tool_call>."""
     if not chat:
         return []
     msgs = []
+    # Glaive separates turns with \n\n\n. Both A: and ASSISTANT: appear as
+    # assistant markers depending on the row.
     turns = [t.strip() for t in chat.split("\n\n\n") if t.strip()]
     for t in turns:
-        m = re.match(r"^(USER|ASSISTANT|FUNCTION CALL|FUNCTION RESPONSE|A)\s*:\s*(.*)", t, re.DOTALL)
+        m = re.match(r"^(USER|ASSISTANT|FUNCTION RESPONSE|A)\s*:\s*(.*)", t, re.DOTALL)
         if not m:
             continue
         role_raw, content = m.group(1), m.group(2).strip()
+        # Strip trailing <|endoftext|> from EVERY turn (Glaive adds it everywhere)
+        content = ENDOFTEXT_RE.sub("", content).strip()
         if role_raw == "USER":
             msgs.append({"role": "user", "content": content})
-        elif role_raw in ("ASSISTANT", "A"):
-            msgs.append({"role": "assistant", "content": content})
-        elif role_raw == "FUNCTION CALL":
-            msgs.append({"role": "assistant", "content": f"<tool_call>{content}</tool_call>"})
         elif role_raw == "FUNCTION RESPONSE":
             msgs.append({"role": "tool", "content": content})
+        elif role_raw in ("ASSISTANT", "A"):
+            # Look for inline <functioncall>...<|endoftext|>
+            fc_match = FUNCTIONCALL_RE.search(t)   # search original turn (with the closing marker)
+            if fc_match:
+                fc_payload = fc_match.group(1).strip()
+                # Glaive's payload is Python-literal style:
+                #   {"name": "X", "arguments": '{"country": "US"}'}
+                # i.e. single-quoted JSON-as-string for arguments. Not valid JSON.
+                # Try json.loads first (works if dataset cleaned it), then
+                # ast.literal_eval (handles the single-quote Python literal),
+                # then inner-parse arguments if it's still a string.
+                import ast
+                parsed = None
+                try:
+                    parsed = json.loads(fc_payload)
+                except Exception:
+                    try:
+                        parsed = ast.literal_eval(fc_payload)
+                    except Exception:
+                        parsed = None
+                if isinstance(parsed, dict):
+                    if isinstance(parsed.get("arguments"), str):
+                        # Inner JSON-as-string → parse to dict
+                        try:
+                            parsed["arguments"] = json.loads(parsed["arguments"])
+                        except Exception:
+                            try:
+                                parsed["arguments"] = ast.literal_eval(parsed["arguments"])
+                            except Exception:
+                                pass
+                    fc_payload = json.dumps(parsed, ensure_ascii=False)
+                # else: keep raw payload (best effort)
+                msgs.append({"role": "assistant", "content": f"<tool_call>\n{fc_payload}\n</tool_call>"})
+            else:
+                msgs.append({"role": "assistant", "content": content})
     return msgs
 
 
