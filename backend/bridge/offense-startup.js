@@ -190,10 +190,26 @@ async function rentInstance(gpu, maxCost, diskGb) {
   const offers = await vastGet(`/bundles/?q=${q}`);
   const list = (offers.offers || []).slice().sort((a, b) => (a.dph_total || 0) - (b.dph_total || 0));
   if (list.length === 0) throw new Error(`no ${gpu} offers <= $${maxCost}/hr with >= ${diskGb}GB disk`);
-  const best = list[0];
-  const r = await vastPut(`/asks/${best.id}/`, { client_id: "me", image: "vastai/base-image:cuda-13.0.2-auto", disk: diskGb });
-  if (!r.new_contract) throw new Error(`vast.ai rent failed: ${JSON.stringify(r).slice(0, 200)}`);
-  return r.new_contract;
+
+  // Vast.ai's /bundles/ is a catalog snapshot — individual offers race
+  // ("Instance type by id X is not available" on PUT /asks/{id}/) when other
+  // tenants grab them first. Try the cheapest N until one sticks.
+  const attempts = list.slice(0, 8);
+  let lastErr = null;
+  for (const offer of attempts) {
+    try {
+      const r = await vastPut(`/asks/${offer.id}/`, {
+        client_id: "me",
+        image: "vastai/base-image:cuda-13.0.2-auto",
+        disk: diskGb,
+      });
+      if (r.new_contract) return r.new_contract;
+      lastErr = new Error(`rent failed (offer ${offer.id} @ $${offer.dph_total}/hr): ${JSON.stringify(r).slice(0, 200)}`);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error(`tried ${attempts.length} offers, none rentable`);
 }
 
 async function pollInstanceRunning(instanceId, maxSec = 240) {
