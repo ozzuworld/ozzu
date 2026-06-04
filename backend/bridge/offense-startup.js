@@ -183,7 +183,8 @@ async function rentInstance(gpu, maxCost, diskGb) {
     rentable: { eq: true },
     rented: { eq: false },
   }));
-  const offers = await vastGet(`/bundles?q=${q}&order=[[%22dph_total%22,%22asc%22]]&limit=5`);
+  // Note: trailing slash on /bundles/ — vast.ai now 301-redirects the no-slash form.
+  const offers = await vastGet(`/bundles/?q=${q}&order=[[%22dph_total%22,%22asc%22]]&limit=5`);
   const list = offers.offers || [];
   if (list.length === 0) throw new Error(`no ${gpu} offers <= $${maxCost}/hr with >= ${diskGb}GB disk`);
   const best = list[0];
