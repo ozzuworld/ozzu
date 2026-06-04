@@ -2,6 +2,8 @@
 
 **Status:** Design (dir_1780594657452). Pairs with `OFFENSE-AGENT-DESIGN.md` (the harness) and `OFFENSE-MODEL-RUNBOOK.md` (per-engagement rental). Implementation lands in a future directive AFTER Step 8 (multi-agent) is validated in live runs.
 
+**Compute lock-in (King Kazuma, 2026-06-04):** **training runs ONLY on DigitalOcean MI300X (AMD).** NOT vast.ai. The $100 DO credit at `/root/.config/digitalocean/access_token` is the sole training-spend source. Vast.ai is for *inference* per-engagement rental only (and may be retired entirely later in favor of DO inference too). Future Ciphers: do not propose vast.ai as the training infrastructure.
+
 **Goal:** climb from base Qwen3-32B's ~52% AutoPenBench baseline to xOffense's reported 72-79% by reproducing their fine-tune recipe with our own data, using King Kazuma's $100 DigitalOcean AMD GPU credit.
 
 **Authorship:** King Kazuma 2026-06-04 — "best shot is xOffense, do it ourself."
