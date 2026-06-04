@@ -615,6 +615,17 @@ module.exports = function mcpRoutes(ctx) {
       inputSchema: { type: "object", properties: {} },
     },
     {
+      name: "analyze_engagement_telemetry",
+      description: "Diagnose the health of a live L3 multi-agent engagement run. Reads offense_telemetry + engagement_tasks + soc_queue_items for the given engagement_id and surfaces actionable problems: orchestrator loops (same intent ≥3× consecutively), executor dead (consecutive empty queue outputs), low step_queued rate (model can't tool-use), membrane breach (sanitization failed — HARD error), stalled tasks (unblocked + pending too long). MEMBRANE-SAFE: returns issue kinds + counts + row IDs, never the offending text. Use during live runs to spot agent dysfunction immediately.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement to analyze (e.g. SKYLINE-SOC-2026-628)" },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
       name: "soc_queue_steps",
       description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
@@ -1949,6 +1960,17 @@ ${result.narrative}
           return { content: [{ type: "text", text: lines.join("\n") }] };
         } catch (e) {
           return { content: [{ type: "text", text: `probe_executor failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "analyze_engagement_telemetry": {
+        try {
+          const analyzer = require("/home/gcp/ozzu/tools/diagnostics/telemetry-analyze.js");
+          const r = await analyzer.analyzeEngagement(args.engagement_id);
+          if (!r.ok) return { content: [{ type: "text", text: r.error || "engagement not found" }], isError: true };
+          return { content: [{ type: "text", text: r.report_md }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `analyze_engagement_telemetry failed: ${e.message}` }], isError: true };
         }
       }
 

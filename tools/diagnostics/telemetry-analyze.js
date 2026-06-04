@@ -22,16 +22,7 @@
 
 const db = require("/app/db");
 
-// ───────────────────── arg parsing ─────────────────────
-const args = process.argv.slice(2);
-const ENGAGEMENT_ID = args.find((a) => !a.startsWith("--"));
-const AS_JSON = args.includes("--json");
-const QUIET = args.includes("--quiet");
-
-if (!ENGAGEMENT_ID) {
-  console.error("Usage: telemetry-analyze.js <engagement_id> [--json] [--quiet]");
-  process.exit(2);
-}
+// arg parsing — deferred into cliMain() so require() from MCP doesn't exit
 
 // ───────────────────── thresholds ─────────────────────
 const LOOP_RUN_THRESHOLD     = 3;      // same intent ≥3 in a row → loop
@@ -281,29 +272,77 @@ function renderMarkdown({ engagement, telemetry, queueItems, tasks, unblocked, i
   return lines.join("\n");
 }
 
-// ───────────────────── main ─────────────────────
+// ───────────────────── exported analyzer (used by MCP tool) ─────────────────────
 
-async function main() {
-  const data = await fetchAll();
+async function analyzeEngagement(engagementId) {
+  // Same logic as the CLI main(), but returns the result rather than printing.
+  // Module-level ENGAGEMENT_ID is bypassed; we use the arg.
+  const eng = await db.query(`SELECT id, engagement_phase, agent_status, created_at, updated_at FROM pentest_engagements WHERE id = $1`, [engagementId]);
+  if (eng.rows.length === 0) return { ok: false, error: `engagement ${engagementId} not found` };
+
+  const telemetry = (await db.query(
+    `SELECT id, intent_category, step_queued, n_hosts, n_findings, in_scope, latency_ms, outcome, outcome_notes, error_message, created_at
+       FROM offense_telemetry WHERE engagement_id = $1 ORDER BY created_at ASC, id ASC`, [engagementId])).rows;
+  const queueItems = (await db.query(
+    `SELECT id, seq, title, status, output, created_at, completed_at FROM soc_queue_items WHERE engagement_id = $1 ORDER BY id ASC`, [engagementId])).rows;
+  let tasks = [], unblocked = [];
+  try {
+    tasks = (await db.query(`SELECT id, parent_ids, status, directive, phase, created_at FROM engagement_tasks WHERE engagement_id = $1 ORDER BY id ASC`, [engagementId])).rows;
+    const byId = Object.create(null); for (const t of tasks) byId[t.id] = t;
+    const isResolved = (t) => t.status === "done" || t.status === "skipped";
+    for (const t of tasks) {
+      if (t.status !== "pending") continue;
+      if ((t.parent_ids || []).every((pid) => byId[pid] && isResolved(byId[pid]))) unblocked.push(t.id);
+    }
+  } catch { /* engagement_tasks may not exist on legacy engagements */ }
+
   const nowMs = Date.now();
   const issues = [
-    ...detectLoops(data.telemetry),
-    ...detectExecutorDead(data.queueItems),
-    ...detectStepQueueRate(data.telemetry),
-    ...detectMembraneBreach(data.telemetry),
-    ...detectStalledTasks(data.tasks, data.unblocked, nowMs),
+    ...detectLoops(telemetry),
+    ...detectExecutorDead(queueItems),
+    ...detectStepQueueRate(telemetry),
+    ...detectMembraneBreach(telemetry),
+    ...detectStalledTasks(tasks, unblocked, nowMs),
   ];
-  if (AS_JSON) {
-    process.stdout.write(JSON.stringify({ engagement: data.engagement.id, issues, counts: data.telemetry.length }) + "\n");
-  } else if (!QUIET) {
-    process.stdout.write(renderMarkdown({ ...data, issues }) + "\n");
-  }
-  try { db.pool && db.pool.end && await db.pool.end(); } catch {}
-  process.exit(issues.some((i) => i.severity === "error") ? 1 : 0);
+  const data = { engagement: eng.rows[0], telemetry, queueItems, tasks, unblocked };
+  const report_md = renderMarkdown({ ...data, issues });
+  const counts = { error: 0, warn: 0, info: 0 };
+  for (const i of issues) counts[i.severity] = (counts[i.severity] || 0) + 1;
+  return { ok: true, engagement_id: engagementId, issues, counts, report_md, n_telemetry: telemetry.length };
 }
 
-main().catch((e) => {
-  console.error("telemetry-analyze CRASH:", e.message);
-  console.error(e.stack);
-  process.exit(2);
-});
+module.exports = { analyzeEngagement };
+
+// ───────────────────── CLI main ─────────────────────
+
+async function cliMain() {
+  const args = process.argv.slice(2);
+  const ENGAGEMENT_ID = args.find((a) => !a.startsWith("--"));
+  const AS_JSON = args.includes("--json");
+  const QUIET = args.includes("--quiet");
+  if (!ENGAGEMENT_ID) {
+    console.error("Usage: telemetry-analyze.js <engagement_id> [--json] [--quiet]");
+    process.exit(2);
+  }
+  const result = await analyzeEngagement(ENGAGEMENT_ID);
+  if (!result.ok) {
+    console.error(result.error);
+    process.exit(3);
+  }
+  if (AS_JSON) {
+    process.stdout.write(JSON.stringify({ engagement: result.engagement_id, issues: result.issues, counts: result.n_telemetry }) + "\n");
+  } else if (!QUIET) {
+    process.stdout.write(result.report_md + "\n");
+  }
+  try { db.pool && db.pool.end && await db.pool.end(); } catch {}
+  process.exit(result.issues.some((i) => i.severity === "error") ? 1 : 0);
+}
+
+// Only run CLI if invoked directly (not when require()'d by the MCP handler)
+if (require.main === module) {
+  cliMain().catch((e) => {
+    console.error("telemetry-analyze CRASH:", e.message);
+    console.error(e.stack);
+    process.exit(2);
+  });
+}
