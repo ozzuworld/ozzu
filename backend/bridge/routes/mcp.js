@@ -610,6 +610,11 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "finetune_status",
+      description: "Read-only one-call view of the Qwen3-32B LoRA fine-tune pipeline state. Reports: dataset corpora at /tmp/finetune/ (existence + size + line count), active DigitalOcean droplets (ozzu-finetune-prefixed only), trained adapters under /home/gcp/ozzu/private/finetune/, and whether ozzu-soc-v1 is registered in the live Ollama. Use to figure out 'where am I in the training workflow' without re-deriving from tools/finetune/README.md.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
       name: "soc_queue_steps",
       description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
@@ -1944,6 +1949,46 @@ ${result.narrative}
           return { content: [{ type: "text", text: lines.join("\n") }] };
         } catch (e) {
           return { content: [{ type: "text", text: `probe_executor failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "finetune_status": {
+        const ft = require("../finetune-status");
+        try {
+          const s = await ft.status();
+          const lines = [
+            "# Fine-tune pipeline status",
+            "",
+            "## Summary",
+            ...s.summary.map((x) => "- " + x),
+            "",
+            "## Dataset corpora (" + s.dataset_dir + ")",
+          ];
+          for (const [name, info] of Object.entries(s.corpora)) {
+            if (info) lines.push(`- ${name}: ${info.lines ?? "?"} examples · ${info.size_mb} MB · mtime ${info.mtime}`);
+            else      lines.push(`- ${name}: _missing_`);
+          }
+          lines.push("", "## DigitalOcean droplets");
+          if (!s.do_droplets.available) lines.push("- _unavailable: " + (s.do_droplets.reason || "?") + "_");
+          else if ((s.do_droplets.ozzu_finetune_droplets || []).length === 0) lines.push("- (no ozzu-finetune droplets — $0/hr)");
+          else for (const d of s.do_droplets.ozzu_finetune_droplets) {
+            lines.push(`- id=${d.id} name=${d.name} status=${d.status} size=${d.size} ip=${d.ip || "—"} price=$${d.price_hourly}/hr created=${d.created_at}`);
+          }
+          lines.push("", "## Local adapters (" + "/home/gcp/ozzu/private/finetune/" + ")");
+          if (s.local_adapters.length === 0) lines.push("- (none)");
+          else for (const a of s.local_adapters) {
+            const v = a.manifest ? ` model=${a.manifest.base_model} rank=${a.manifest.rank}` : "";
+            lines.push(`- ${a.name} adapter_present=${a.adapter_present}${v}`);
+          }
+          lines.push("", "## Ollama");
+          if (!s.ollama.reachable) lines.push("- _unreachable: " + s.ollama.reason + "_");
+          else {
+            lines.push(`- reachable; models: ${s.ollama.models.join(", ") || "(none)"}`);
+            lines.push(`- ozzu-soc-v1 registered: ${s.ollama.ozzu_soc_v1_registered}`);
+          }
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `finetune_status failed: ${e.message}` }], isError: true };
         }
       }
 
