@@ -21,7 +21,26 @@ For the upcoming first real training run on `dataset-v1.1` against Qwen3-32B on 
 | `--eval-steps` | 500 | Run eval on holdout every 500 steps. Detects overfit. |
 | `--seed` | 42 | Deterministic shuffle. Same seed → same training order → identical artifacts. |
 
-## Effective math
+## Measured token-length distribution (dataset-v1.3, Qwen3-32B tokenizer)
+
+Measured 2026-06-04 by tokenizing every row in `train.jsonl` (18,424 rows) through Qwen3's actual chat template.
+
+| Corpus | Count | Median | p90 | Max |
+|---|---|---|---|---|
+| PJMixers/WhiteRabbitNeo | 13,295 | 1,292 | 1,703 | 3,169 |
+| Glaive function-calling | 2,209 | 351 | 526 | 1,516 |
+| Fenrir-v2.1 | 1,879 | 690 | 1,244 | 2,471 |
+| Dolly-15k | 948 | 120 | 378 | 3,994 |
+| ozzu-soc-synthetic | 93 | 243 | 264 | 268 |
+
+**Zero rows exceed `max_seq_length=4096`.** All examples fit fully — no mid-sequence truncation, no lost tool_call tokens.
+
+Implication: could lower `--max-seq-length` to 2048 for ~50% activation-memory savings + faster steps (cuts ~10-15% of WRN p90 rows at 2048, but those tail rows could be filtered). For v1.3 we keep 4096 because:
+- MI300X 192 GB has ample memory headroom
+- Safety margin against edge-case multi-turn rows
+- Dolly's max=3994 is uncomfortably close to a hypothetical 2048; some examples would lose their last assistant turn
+
+
 
 - **Total examples per epoch:** 18,471 (dataset-v1.1 train)
 - **Total update-steps per epoch:** 18,471 / 16 = 1,154 update-steps
