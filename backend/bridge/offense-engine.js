@@ -146,10 +146,34 @@ function categorizeIntent(intent) {
   return "other";
 }
 
+// Pre-insert membrane guard. error_message can capture raw model output on
+// failures — if it leaks offensive content, redact + warn the operator.
+// Patterns mirror membrane-audit.js (kept here so this catches at write time
+// even if the auditor patterns drift).
+const MEMBRANE_GUARD_PATTERNS = [
+  { kind: "cve_id",          regex: /\bCVE-\d{4}-\d{4,7}\b/i },
+  { kind: "exploit_keyword", regex: /\b(?:nmap|metasploit|sqlmap|hydra|hashcat|john|payload|exploit|reverse[\s_-]?shell)\b/i },
+  { kind: "raw_ip",          regex: /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/ },
+  { kind: "credential_file", regex: /\b(?:passwd|shadow|hashes?[\s_-]?dump)\b|\/etc\/(?:passwd|shadow)/i },
+];
+function sanitizeTelemetryField(value, fieldName, engagementId) {
+  if (!value || typeof value !== "string") return value;
+  for (const { kind, regex } of MEMBRANE_GUARD_PATTERNS) {
+    if (regex.test(value)) {
+      console.warn(`[membrane-guard] redacted ${fieldName} on engagement ${engagementId} (matched ${kind}, len=${value.length})`);
+      return `<<membrane-guard redacted ${kind} from ${fieldName}>>`;
+    }
+  }
+  return value;
+}
+
 // Append one row to offense_telemetry. NEVER throws — telemetry failure
 // must never break advance_offense.
 async function insertTelemetry(tel) {
   try {
+    // Pre-insert sanitization — primary risk is error_message which captures
+    // raw model output on failure paths.
+    const safeErrorMessage = sanitizeTelemetryField(tel.errorMessage, "error_message", tel.engagementId);
     await db.query(
       `INSERT INTO offense_telemetry
          (engagement_id, queue_item_id, model_used, intent_category,
@@ -158,7 +182,7 @@ async function insertTelemetry(tel) {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [tel.engagementId, tel.queueItemId, tel.model, tel.intentCategory,
        tel.nHosts, tel.nFindings, tel.stepQueued, tel.inScope, tel.nReferences,
-       tel.latencyMs, tel.errorMessage]);
+       tel.latencyMs, safeErrorMessage]);
   } catch (e) {
     console.error("[offense-engine] telemetry insert failed:", e.message);
   }
