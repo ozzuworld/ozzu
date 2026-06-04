@@ -525,6 +525,34 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "start_offense_model",
+      description: "One-click bring-up of the L3 offense model on vast.ai. Reuses any already-running instance, or rents one. Attaches the bridge SSH key, installs Ollama (loopback bind, 16K ctx), and kicks off the model pull on the remote in BACKGROUND. Returns IMMEDIATELY with provisioning status — does NOT block on the pull. Follow with wait_offense_model to block until the model is loaded and open the bridge tunnel. Returns only sanitized status — no offensive content.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          model: { type: "string", description: "Ollama model tag. Defaults to OFFENSE_MODEL_NAME env (deepseek-r1:32b is the 2026-06-04 validated pick)." },
+          gpu_model: { type: "string", description: "vast.ai GPU model name (default 'RTX_4090')." },
+          max_cost: { type: "number", description: "Max $/hr (default 0.50)." },
+          disk_gb: { type: "number", description: "Disk in GB (default 60 — enough for one 32B Q4 model plus headroom)." },
+        },
+      },
+    },
+    {
+      name: "wait_offense_model",
+      description: "Block until the L3 offense model is pulled and registers in ollama list on the remote, then open the SSH tunnel from bridge to instance:11434 and verify /api/tags is reachable. After this returns successfully, advance_offense calls work. Call this after start_offense_model. Default timeout 900s (15 min) — the pull is the long pole.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          timeout_sec: { type: "number", description: "Max seconds to wait for the model to register + tunnel to come up (default 900)." },
+        },
+      },
+    },
+    {
+      name: "stop_offense_model",
+      description: "Tear down the L3 offense model: close the bridge SSH tunnel and DESTROY all running vast.ai instances to stop billing. Call this at engagement end (or after a benchmark) — leaving the instance up burns money.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
       name: "soc_queue_steps",
       description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
@@ -1742,7 +1770,38 @@ ${result.narrative}
           }
           return { content: [{ type: "text", text: `✅ Offensive step #${r.seq} queued (queue id ${r.queue_id}) for ${r.engagement_id}.\n\n${r.note}\n\nNext: the PA runs queue item #${r.seq} in the SOC app; results come back as structured findings (get_recon / list_findings).` }] };
         } catch (e) {
-          return { content: [{ type: "text", text: `advance_offense failed: ${e.message}\n\n(If this is a connection error, the L3 model isn't up yet — rent + serve it via SOC-OFFENSE-MODEL-RUNBOOK.md first.)` }], isError: true };
+          return { content: [{ type: "text", text: `advance_offense failed: ${e.message}\n\n(If this is a connection error, the L3 model isn't up yet — call start_offense_model + wait_offense_model first.)` }], isError: true };
+        }
+      }
+
+      case "start_offense_model": {
+        const startup = require("../offense-startup");
+        try {
+          const r = await startup.startOffenseModel(args);
+          const head = r.reused ? `♻️  Reusing ${r.gpu}` : `🚀 Rented ${r.gpu}`;
+          return { content: [{ type: "text", text: `${head} (${r.cost_hr}, instance ${r.instance_id}). Model "${r.model}" — ${r.already_pulled ? "already present" : "pulling in remote-background"}.\n\n${r.note}` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `start_offense_model failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "wait_offense_model": {
+        const startup = require("../offense-startup");
+        try {
+          const r = await startup.waitOffenseModel(args);
+          return { content: [{ type: "text", text: `✅ L3 offense model "${r.model}" ready (instance ${r.instance_id}, ${r.elapsed_sec}s).\n\n${r.note}` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `wait_offense_model failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "stop_offense_model": {
+        const startup = require("../offense-startup");
+        try {
+          const r = await startup.stopOffenseModel();
+          return { content: [{ type: "text", text: `🔌 ${r.note}` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `stop_offense_model failed: ${e.message}` }], isError: true };
         }
       }
 
