@@ -481,6 +481,8 @@ module.exports = function mcpRoutes(ctx) {
           reproduction: { type: "object", description: "Reproduction steps" },
           remediation: { type: "string", description: "Recommended fix" },
           evidence_files: { type: "array", description: "Paths to evidence (screenshots, logs, pcaps)" },
+          refs: { type: "array", description: "Public references by ID/URL — CVE / ExploitDB / advisory (e.g. ['CVE-2024-12345','EDB-50123']). Reference only; never exploit source." },
+          affected_assets: { type: "array", description: "Structured multi-asset link: [{ip, ports:[...], note}], joinable to recon_hosts. Use for findings spanning multiple hosts/ports; affected_asset (string) remains for the single-asset case." },
         },
         required: ["engagement_id", "severity", "title", "description"],
       },
@@ -1630,8 +1632,8 @@ ${result.narrative}
         await db.query(`
           INSERT INTO pentest_findings (
             engagement_id, severity, title, description, cvss_score, cvss_vector,
-            affected_asset, mitre_attack, reproduction, remediation, evidence_files, discovered_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            affected_asset, affected_assets, refs, mitre_attack, reproduction, remediation, evidence_files, discovered_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         `, [
           args.engagement_id,
           args.severity,
@@ -1640,6 +1642,8 @@ ${result.narrative}
           args.cvss_score || null,
           args.cvss_vector || null,
           args.affected_asset || null,
+          JSON.stringify(args.affected_assets || []),
+          JSON.stringify(args.refs || []),
           JSON.stringify(args.mitre_attack || []),
           JSON.stringify(args.reproduction || {}),
           args.remediation || null,

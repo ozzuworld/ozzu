@@ -338,8 +338,8 @@ module.exports = function socRoutes(ctx) {
         const result = await db.query(`
           INSERT INTO pentest_findings (
             engagement_id, severity, title, description, cvss_score, cvss_vector,
-            affected_asset, mitre_attack, reproduction, remediation, evidence_files, discovered_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            affected_asset, affected_assets, refs, mitre_attack, reproduction, remediation, evidence_files, discovered_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
           RETURNING id
         `, [
           engagement_id,
@@ -349,6 +349,8 @@ module.exports = function socRoutes(ctx) {
           finding.cvss_score || null,
           finding.cvss_vector || null,
           finding.affected_asset || null,
+          JSON.stringify(finding.affected_assets || []),
+          JSON.stringify(finding.refs || []),
           JSON.stringify(finding.mitre_attack || []),
           JSON.stringify(finding.reproduction || {}),
           finding.remediation || null,

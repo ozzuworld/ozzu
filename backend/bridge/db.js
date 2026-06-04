@@ -1036,6 +1036,91 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_spawned ON agent_audit_log(spawned_by, started_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_agent_audit_directive ON agent_audit_log(directive_id)`);
 
+    // ── SOC core: engagements / findings / reports / disclosures (dir_1780543681043) ──
+    // These tables were created ad-hoc in the live DB and were NOT in schema-as-code, so
+    // a fresh rebuild/restore would throw on recon_hosts' FK to pentest_engagements below
+    // (latent data-loss bug on a box that's been wiped once). Codified here so a rebuild
+    // recreates the whole SOC platform. CREATE IF NOT EXISTS = no-op on the live DB; the
+    // CREATE bodies are the field-union target schema, and the ALTERs after reconcile the
+    // pre-existing live pentest_findings up to that target.
+    await pool.query(`CREATE TABLE IF NOT EXISTS pentest_engagements (
+      id              VARCHAR(50) PRIMARY KEY,
+      venture_id      INTEGER,
+      client_name     VARCHAR(200) NOT NULL,
+      engagement_type VARCHAR(50),
+      scope           JSONB NOT NULL,
+      roe             JSONB,
+      sow_url         TEXT,
+      status          VARCHAR(20) DEFAULT 'scoping',
+      start_date      DATE,
+      end_date        DATE,
+      lead_engineer   VARCHAR(100),
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW(),
+      metadata        JSONB DEFAULT '{}'
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS pentest_findings (
+      id              SERIAL PRIMARY KEY,
+      engagement_id   VARCHAR(50) REFERENCES pentest_engagements(id),
+      severity        VARCHAR(20) NOT NULL,
+      title           VARCHAR(200) NOT NULL,
+      description     TEXT,
+      cvss_score      NUMERIC(3,1),
+      cvss_vector     VARCHAR(255),
+      affected_asset  VARCHAR(200),
+      affected_assets JSONB DEFAULT '[]',
+      refs            JSONB DEFAULT '[]',
+      mitre_attack    JSONB DEFAULT '[]',
+      reproduction    JSONB,
+      remediation     TEXT,
+      evidence_files  JSONB DEFAULT '[]',
+      status          VARCHAR(20) DEFAULT 'open',
+      discovered_at   TIMESTAMPTZ DEFAULT NOW(),
+      discovered_by   VARCHAR(50)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_findings_engagement ON pentest_findings(engagement_id, severity)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_findings_severity ON pentest_findings(severity, status)`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS pentest_reports (
+      id            SERIAL PRIMARY KEY,
+      engagement_id VARCHAR(50) REFERENCES pentest_engagements(id),
+      report_type   VARCHAR(50),
+      format        VARCHAR(20),
+      file_path     TEXT,
+      generated_by  VARCHAR(50),
+      generated_at  TIMESTAMPTZ DEFAULT NOW(),
+      delivered_at  TIMESTAMPTZ,
+      metadata      JSONB DEFAULT '{}'
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS disclosures (
+      id                     VARCHAR(50) PRIMARY KEY,
+      finding_id             INTEGER REFERENCES pentest_findings(id),
+      engagement_id          VARCHAR(50),
+      target_vendor          VARCHAR(100),
+      target_psirt_email     VARCHAR(200),
+      cve_id                 VARCHAR(30),
+      severity               VARCHAR(20),
+      cvss_score             NUMERIC(3,1),
+      cvss_vector            VARCHAR(120),
+      status                 VARCHAR(30) DEFAULT 'draft',
+      initial_email_sent_at  TIMESTAMPTZ,
+      vendor_acknowledged_at TIMESTAMPTZ,
+      vendor_fix_eta         TIMESTAMPTZ,
+      patch_released_at      TIMESTAMPTZ,
+      public_disclosure_at   TIMESTAMPTZ,
+      deadline_90day         TIMESTAMPTZ,
+      advisory_path          TEXT,
+      notes                  TEXT,
+      created_at             TIMESTAMPTZ DEFAULT NOW(),
+      updated_at             TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    // Field-union alignment: bring the pre-existing live pentest_findings up to target —
+    // refs[] (CVE/ExploitDB/MSF/advisory references), affected_assets[] (multi-host links
+    // with per-finding port subsets, joinable to recon_hosts), and a wider cvss_vector for
+    // CVSS v4 strings. Idempotent; no-op once applied.
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS refs JSONB DEFAULT '[]'`);
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS affected_assets JSONB DEFAULT '[]'`);
+    await pool.query(`ALTER TABLE pentest_findings ALTER COLUMN cvss_vector TYPE VARCHAR(255)`);
+
     // ── SOC recon hosts (dir_1780530175588) ──
     // Structured host/port rows parsed SERVER-SIDE from scan stdout at ingest, so
     // Cipher analyzes these rows (via get_recon) instead of pasting raw nmap/nc dumps
