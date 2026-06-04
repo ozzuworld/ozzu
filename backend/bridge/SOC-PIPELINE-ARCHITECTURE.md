@@ -1,9 +1,28 @@
 # SOC Pipeline — Layered Reference Architecture
 
-**Status:** design + Layer L1/L2 in build (`dir_1780543681043`).
-**Source:** deep-research (105-agent, adversarially verified, 2026-06-04) validating
-the design against PTES, NIST SP 800-115, PentestGPT (USENIX Security 2024), and
-Pentest Copilot (arXiv 2409.09493).
+**Status (2026-06-04 end of build session):** entire pipeline code-complete, awaiting one operator-side action — DigitalOcean GPU droplet access approval — before the first real training run. See "Build state" section below.
+**Source:** deep-research (105-agent, adversarially verified, 2026-06-04) validating the design against PTES, NIST SP 800-115, PentestGPT (USENIX Security 2024), and Pentest Copilot (arXiv 2409.09493).
+
+## Build state
+
+| Layer / piece | State |
+|---|---|
+| L0 — PA Engineer via SOC app | live |
+| L1 — Postgres system-of-record | live (`pentest_engagements`, `recon_hosts`, `pentest_findings`, `engagement_tasks` DAG) |
+| L2 — membrane (soc-recon-parser.js) | live |
+| L3 — offense engine + advance_offense + multi-agent runAgent | live, mechanically smoke-tested |
+| L4 — Cipher strategist | live |
+| Fine-tune pipeline — code (Steps 9.1–9.17) | shipped, untested e2e (~$30-40/run) |
+| Fine-tune dataset v1.1 | built + persisted at `/home/gcp/ozzu/private/finetune/dataset-v1.1/` (4-corpus mix, 9.9% tool-call signal) |
+| AutoPenBench eval + compare.py | shipped |
+| Diagnostics (per-engagement + fleet + membrane-audit) | live |
+| Test suite (run-all.sh, 4 smokes) | green, ~85s |
+| Operator-side blocker | DO GPU droplet access not yet approved on King Kazuma's account |
+
+**Pre-launch reading for any new Cipher session:**
+1. `SOC-FIELD-SURVEY-2026-06-04.md` — why we made the choices we made (existing pentest LLMs, tool-use preservation findings)
+2. `SOC-DATASET-V11-CARD.md` — what's in dataset-v1.1 (per-corpus provenance, license, format, rebuild instructions)
+3. `tools/finetune/README.md` — how to run training when DO access lands
 
 ## Why this exists
 
