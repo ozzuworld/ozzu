@@ -178,6 +178,35 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // GET /soc/engagements/:id/task-graph — Step 6 (dir_1780597565542): expose the
+    // L3 agent's Task Coordination Graph to the SOC app. Returns engagement_tasks
+    // rows in DAG order. Includes outcome_summary (jsonb) so the UI can show key
+    // signals + error categories. Read-only.
+    if (req.method === "GET" && pathname.match(/^\/soc\/engagements\/[^\/]+\/task-graph$/)) {
+      const id = pathname.split("/")[3];
+      const r = await db.query(
+        `SELECT id, engagement_id, parent_ids, directive, phase, prerequisites,
+                status, queue_item_id, outcome_summary, iteration,
+                created_at, updated_at, completed_at
+           FROM engagement_tasks
+          WHERE engagement_id = $1
+          ORDER BY id ASC`,
+        [id]
+      );
+      // Compute unblocked-set: pending tasks whose parents are all done/skipped.
+      const byId = Object.create(null);
+      for (const t of r.rows) byId[t.id] = t;
+      const isResolved = (t) => t.status === "done" || t.status === "skipped";
+      const unblocked = [];
+      for (const t of r.rows) {
+        if (t.status !== "pending") continue;
+        const parents = t.parent_ids || [];
+        if (parents.every((pid) => byId[pid] && isResolved(byId[pid]))) unblocked.push(t.id);
+      }
+      sendJSON(res, 200, { tasks: r.rows, unblocked, total: r.rows.length });
+      return true;
+    }
+
     // GET /soc/engagements/:id/scripts - Get scripts for engagement
     if (req.method === "GET" && pathname.match(/^\/soc\/engagements\/[^\/]+\/scripts$/)) {
       const id = pathname.split("/")[3];

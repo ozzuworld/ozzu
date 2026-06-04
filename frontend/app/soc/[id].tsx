@@ -23,6 +23,40 @@ type EngagementDetail = {
   roe: any;
   start_date: string;
   end_date: string;
+  // Step 5+8 agent loop columns (dir_1780589262481 + dir_1780594102051)
+  engagement_phase?: "recon" | "enumeration" | "foothold" | "exploitation" | "post_exploit" | "reporting" | string;
+  agent_status?: "idle" | "running" | "completed" | "error" | string;
+};
+
+type TaskOutcomeSummary = {
+  success?: boolean;
+  key_signals?: string[];
+  new_findings?: any[];
+  new_hosts?: any[];
+  followup?: string[];
+  error_category?: string | null;
+};
+
+type EngagementTask = {
+  id: number;
+  engagement_id: string;
+  parent_ids: number[];
+  directive: string;
+  phase: string | null;
+  prerequisites: string | null;
+  status: "pending" | "in_flight" | "done" | "failed" | "skipped";
+  queue_item_id: number | null;
+  outcome_summary: TaskOutcomeSummary | null;
+  iteration: number | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+type TaskGraph = {
+  tasks: EngagementTask[];
+  unblocked: number[];
+  total: number;
 };
 
 type Script = {
@@ -73,6 +107,7 @@ export default function EngagementDetailScreen() {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [executions, setExecutions] = useState<Execution[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [taskGraph, setTaskGraph] = useState<TaskGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningQueueItem, setRunningQueueItem] = useState<number | null>(null);
   const [executing, setExecuting] = useState(false);
@@ -82,6 +117,7 @@ export default function EngagementDetailScreen() {
     failed: true,   // shown by default IF any failures (we hide section entirely if 0)
     scripts: false,
     history: false,
+    taskGraph: true,  // open by default — operator should see the agent's plan
   });
   const [showHeroOutput, setShowHeroOutput] = useState(true);
 
@@ -99,6 +135,20 @@ export default function EngagementDetailScreen() {
     }
   }, [id]);
 
+  // Step 6: pull the L3 agent's task graph (DAG). Cheap query; safe to include
+  // in the same poll interval as the queue.
+  const fetchTaskGraph = useCallback(async () => {
+    try {
+      const response = await fetch(`${getBridgeUrl()}/soc/engagements/${id}/task-graph`);
+      if (!response.ok) return;
+      const data = await response.json();
+      setTaskGraph(data as TaskGraph);
+    } catch (error) {
+      // Task graph is informational; don't surface fetch errors as alerts.
+      console.error("Error fetching task graph:", error);
+    }
+  }, [id]);
+
   const fetchExecutions = useCallback(async () => {
     try {
       const response = await fetch(`${getBridgeUrl()}/soc/audit-log/${id}`);
@@ -111,22 +161,25 @@ export default function EngagementDetailScreen() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [engRes, scriptsRes, execRes, queueRes] = await Promise.all([
+      const [engRes, scriptsRes, execRes, queueRes, taskGraphRes] = await Promise.all([
         fetch(`${getBridgeUrl()}/soc/engagements/${id}`),
         fetch(`${getBridgeUrl()}/soc/engagements/${id}/scripts`),
         fetch(`${getBridgeUrl()}/soc/audit-log/${id}`),
         fetch(`${getBridgeUrl()}/soc/engagements/${id}/queue`),
+        fetch(`${getBridgeUrl()}/soc/engagements/${id}/task-graph`),
       ]);
 
       const engData = await engRes.json();
       const scriptsData = await scriptsRes.json();
       const execData = await execRes.json();
       const queueData = await queueRes.json();
+      const taskGraphData = taskGraphRes.ok ? await taskGraphRes.json() : null;
 
       setEngagement(engData.engagement);
       setScripts(scriptsData.scripts || []);
       setExecutions(execData.executions || []);
       setQueue(queueData.queue || []);
+      setTaskGraph(taskGraphData);
       setLastSyncAt(Date.now());
     } catch (error) {
       console.error("Error fetching engagement:", error);
@@ -142,7 +195,7 @@ export default function EngagementDetailScreen() {
   // for Cipher-queued items and live output without manual refresh.
   // Native RN pauses setInterval when app backgrounded, so it's cheap when not in use.
   useEffect(() => {
-    const t = setInterval(() => { fetchQueue(); }, POLL_INTERVAL_MS);
+    const t = setInterval(() => { fetchQueue(); fetchTaskGraph(); }, POLL_INTERVAL_MS);
     return () => clearInterval(t);
   }, [fetchQueue]);
 
@@ -330,6 +383,46 @@ export default function EngagementDetailScreen() {
             </Text>
           </View>
         </View>
+
+        {/* Step 6: agent phase + status pills (only when the agent has run) */}
+        {(engagement.engagement_phase || engagement.agent_status) && (
+          <View style={{ flexDirection: "row", gap: spacing.xs, marginTop: spacing.xs, flexWrap: "wrap" }}>
+            {engagement.engagement_phase && (
+              <View style={{
+                paddingHorizontal: spacing.sm, paddingVertical: 2,
+                backgroundColor: withAlpha(colors.brand.purple, 0.15),
+                borderRadius: radius.sm,
+              }}>
+                <Text style={{ fontSize: 10, color: colors.brand.purple, fontWeight: fw.medium }}>
+                  phase: {engagement.engagement_phase}
+                </Text>
+              </View>
+            )}
+            {engagement.agent_status && (
+              <View style={{
+                paddingHorizontal: spacing.sm, paddingVertical: 2,
+                backgroundColor: withAlpha(
+                  engagement.agent_status === "running" ? colors.status.in_progress
+                  : engagement.agent_status === "completed" ? colors.status.completed
+                  : engagement.agent_status === "error" ? colors.status.failed
+                  : colors.text.disabled, 0.15
+                ),
+                borderRadius: radius.sm,
+              }}>
+                <Text style={{
+                  fontSize: 10,
+                  color: engagement.agent_status === "running" ? colors.status.in_progress
+                       : engagement.agent_status === "completed" ? colors.status.completed
+                       : engagement.agent_status === "error" ? colors.status.failed
+                       : colors.text.disabled,
+                  fontWeight: fw.medium,
+                }}>
+                  agent: {engagement.agent_status}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Live-sync indicator */}
         <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacing.xs }}>
@@ -533,6 +626,72 @@ export default function EngagementDetailScreen() {
           >
             <View style={{ gap: spacing.sm }}>
               {buckets.failed.map((item) => <ResultRow key={item.id} item={item} />)}
+            </View>
+          </CollapsibleSection>
+        )}
+
+        {/* === Agent Plan (Step 6) — Task Coordination Graph from the L3 multi-agent loop === */}
+        {taskGraph && taskGraph.tasks.length > 0 && (
+          <CollapsibleSection
+            label="Agent plan"
+            count={taskGraph.tasks.length}
+            accent={colors.brand.purple}
+            isOpen={openSections.taskGraph}
+            onToggle={() => toggleSection("taskGraph")}
+          >
+            <View style={{ gap: spacing.sm }}>
+              {taskGraph.tasks.map((task) => {
+                const statusColor =
+                  task.status === "done"     ? colors.status.completed
+                : task.status === "failed"   ? colors.status.failed
+                : task.status === "in_flight" ? colors.status.in_progress
+                : task.status === "skipped"  ? colors.text.disabled
+                : taskGraph.unblocked.includes(task.id) ? colors.brand.blue
+                : colors.text.disabled;
+                const signals = (task.outcome_summary && Array.isArray(task.outcome_summary.key_signals))
+                  ? task.outcome_summary.key_signals : [];
+                return (
+                  <View key={task.id} style={styles.executionCard}>
+                    <View style={{
+                      position: "absolute", left: 0, top: 0, bottom: 0, width: 3,
+                      backgroundColor: statusColor,
+                      borderTopLeftRadius: radius.md, borderBottomLeftRadius: radius.md,
+                    }} />
+                    <View style={{ paddingLeft: spacing.sm }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                        <Text style={{ fontSize: fs.xs, color: colors.text.secondary, fontFamily: "monospace" }}>
+                          task #{task.id}{task.phase ? ` · ${task.phase}` : ""}
+                        </Text>
+                        <Text style={{ fontSize: 10, color: statusColor, fontWeight: fw.medium }}>
+                          {task.status.toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: fs.sm, color: colors.text.primary, marginTop: 2 }}>
+                        {task.directive}
+                      </Text>
+                      {signals.length > 0 && (
+                        <View style={{ marginTop: spacing.xs, paddingTop: spacing.xs, borderTopWidth: 1, borderTopColor: colors.border.subtle }}>
+                          {signals.slice(0, 3).map((sig, i) => (
+                            <Text key={i} style={{ fontSize: 11, color: colors.text.secondary, marginTop: 2 }}>
+                              · {sig}
+                            </Text>
+                          ))}
+                        </View>
+                      )}
+                      {task.outcome_summary && task.outcome_summary.error_category && (
+                        <Text style={{ fontSize: 10, color: colors.status.failed, marginTop: 2, fontFamily: "monospace" }}>
+                          ⚠ {task.outcome_summary.error_category}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+              {taskGraph.unblocked.length > 0 && (
+                <Text style={{ fontSize: 10, color: colors.text.disabled, marginTop: spacing.xs, fontStyle: "italic" }}>
+                  Unblocked pending: {taskGraph.unblocked.join(", ")}
+                </Text>
+              )}
             </View>
           </CollapsibleSection>
         )}
