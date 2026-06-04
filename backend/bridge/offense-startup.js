@@ -215,7 +215,7 @@ async function rentInstance(gpu, maxCost, diskGb) {
 async function pollInstanceRunning(instanceId, maxSec = 240) {
   const start = Date.now();
   while ((Date.now() - start) / 1000 < maxSec) {
-    const info = await vastGet(`/instances/${instanceId}`);
+    const info = await vastGet(`/instances/${instanceId}/`);
     const inst = info.instances ? info.instances[0] : info;
     if (inst && inst.actual_status === "running" && inst.ssh_port) return instanceToConn(inst);
     await sleep(8000);
