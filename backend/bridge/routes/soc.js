@@ -75,6 +75,28 @@ module.exports = function socRoutes(ctx) {
      ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS timeout_seconds INTEGER NOT NULL DEFAULT 300;`
   ).catch((err) => console.error('[soc] schema migration failed:', err.message));
 
+  // Step 2 of OFFENSE-AGENT-DESIGN.md (dir_1780588442941) — when a queue item
+  // finalizes, sync the outcome onto the most recent offense_telemetry row
+  // pointing at that queue_item_id. Closes the audit loop and gives the next
+  // advance_offense prompt feedback about what actually happened. Wrapped in
+  // its own try — telemetry sync NEVER breaks the queue's state machine.
+  async function syncOffenseOutcome(itemId, outcome) {
+    try {
+      await db.query(
+        `UPDATE offense_telemetry
+            SET outcome = $1
+          WHERE id = (
+            SELECT id FROM offense_telemetry
+             WHERE queue_item_id = $2
+             ORDER BY id DESC LIMIT 1
+          )`,
+        [outcome, itemId]
+      );
+    } catch (telErr) {
+      console.error(`[soc] telemetry outcome sync failed for item ${itemId}:`, telErr.message);
+    }
+  }
+
   return async function handleSocRoutes(req, res, pathname, url) {
 
     // GET /soc/engagements - List all engagements
@@ -550,6 +572,7 @@ module.exports = function socRoutes(ctx) {
               `UPDATE agent_audit_log SET status = $1, completed_at = NOW(), output = $2 WHERE session_id = $3 AND status = 'running'`,
               [finalStatus === 'done' ? 'completed' : 'failed', safeOutput, sessionId]
             );
+            await syncOffenseOutcome(item.id, finalStatus === 'done' ? 'success' : 'failed');
           } catch (err) {
             console.error(`[soc queue run] DB update failed for item ${item.id}:`, err);
             // Fallback: row MUST leave 'running'. Write a diagnostic-only payload
@@ -564,6 +587,7 @@ module.exports = function socRoutes(ctx) {
                 `UPDATE agent_audit_log SET status = 'failed', completed_at = NOW(), output = $1 WHERE session_id = $2 AND status = 'running'`,
                 [diag, sessionId]
               );
+              await syncOffenseOutcome(item.id, 'failed');
             } catch (fallbackErr) {
               console.error(`[soc queue run] Fallback UPDATE also failed for item ${item.id}:`, fallbackErr);
             }
@@ -586,6 +610,7 @@ module.exports = function socRoutes(ctx) {
               `UPDATE agent_audit_log SET status = 'failed', completed_at = NOW(), output = $1 WHERE session_id = $2 AND status = 'running'`,
               [errMsg, sessionId]
             );
+            await syncOffenseOutcome(item.id, 'failed');
           } catch (dbErr) {
             console.error(`[soc queue run] Error logging failure for item ${item.id}:`, dbErr);
             // Last-ditch: ensure row leaves 'running' with a minimal diagnostic.
@@ -637,6 +662,7 @@ module.exports = function socRoutes(ctx) {
           `UPDATE agent_audit_log SET status = 'failed', completed_at = NOW(), output = COALESCE(output, '') || $1 WHERE session_id = $2`,
           [cancelMsg, row.session_id]
         );
+        await syncOffenseOutcome(itemId, 'cancelled');
 
         if (entry) {
           clearTimeout(entry.timeoutHandle);

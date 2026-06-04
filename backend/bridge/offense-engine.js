@@ -76,7 +76,25 @@ async function gatherContext(engagementId) {
   const findings = await db.query(
     `SELECT title, severity, status, affected_asset, affected_assets, refs
        FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]);
-  return { engagement: eng.rows[0] || null, hosts: hosts.rows, findings: findings.rows };
+  // Step 2 of OFFENSE-AGENT-DESIGN.md — last N finalized queue items with outcomes.
+  // Gives the model memory of what it tried, what worked, and what failed.
+  // Trim command + output to keep prompt size manageable. Most-recent first.
+  const queue = await db.query(
+    `SELECT seq, title, status,
+            LEFT(COALESCE(command, ''), 240) AS command_preview,
+            LEFT(COALESCE(output, ''), 600)  AS output_preview,
+            completed_at
+       FROM soc_queue_items
+      WHERE engagement_id = $1
+        AND status IN ('done', 'failed', 'cancelled')
+      ORDER BY seq DESC
+      LIMIT 10`, [engagementId]);
+  return {
+    engagement: eng.rows[0] || null,
+    hosts:    hosts.rows,
+    findings: findings.rows,
+    queue:    queue.rows,
+  };
 }
 
 // Wrap the model's logical command for the engagement's executor. For dev-01,
@@ -164,6 +182,17 @@ async function advanceOffense(engagementId, intent, modelOverride) {
     ? "(commands run on a kali toolhost; full network access is via dev-01's LAN/VPN)"
     : `(commands will run ON the executor itself — the executor is on the same LAN as the targets; do NOT prefix with adb / ssh, just write the command as if you were on a regular Linux shell on the target LAN)`;
 
+  // Queue history (most recent finalized attempts + outcomes). Gives the model
+  // memory of what it tried so it doesn't repeat itself and can pivot on failure.
+  const historyLines = (ctx.queue || []).map((q) => {
+    const cmd = (q.command_preview || "").replace(/\s+/g, " ").trim();
+    const out = (q.output_preview || "").replace(/\s+/g, " ").trim();
+    return `  - seq=${q.seq} [${q.status}] "${q.title || ""}"; command: ${cmd || "(none)"}; output: ${out || "(empty)"}`;
+  });
+  const historyBlock = historyLines.length
+    ? `Recent queue history (most recent first; learn from these — do NOT repeat failed approaches):\n${historyLines.join("\n")}`
+    : "Recent queue history: (none — this is the first attempt on this engagement)";
+
   const userMsg = [
     `Engagement: type=${ctx.engagement.engagement_type || "?"} status=${ctx.engagement.status || "?"}`,
     `Scope/ROE: ${JSON.stringify({ scope: ctx.engagement.scope, roe: ctx.engagement.roe })}`,
@@ -172,7 +201,8 @@ async function advanceOffense(engagementId, intent, modelOverride) {
     `Tools available on the executor: ${execTools.length ? execTools.join(", ") : "(unknown — pick from POSIX-portable shell tools only)"}`,
     `Structured recon (hosts/ports/services): ${JSON.stringify(ctx.hosts)}`,
     `Findings so far: ${JSON.stringify(ctx.findings)}`,
-    "Propose the single next in-scope offensive step as strict JSON. Pick commands ONLY from the listed tools — do not invent tool names.",
+    historyBlock,
+    "Propose the single next in-scope offensive step as strict JSON. Pick commands ONLY from the listed tools — do not invent tool names. If a similar approach already failed in the queue history, pivot to a different technique.",
   ].join("\n");
 
   let raw, step;
