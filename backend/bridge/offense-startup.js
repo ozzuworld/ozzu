@@ -158,8 +158,18 @@ async function findOurInstance() {
   return list.find((i) => i.actual_status === "running") || list[0];
 }
 
-async function instanceToConn(inst) {
-  return { id: inst.id, host: inst.ssh_host, port: Number(inst.ssh_port), gpu: inst.gpu_name, cost: Number(inst.dph_total), status: inst.actual_status };
+function instanceToConn(inst) {
+  // Prefer direct SSH (public_ipaddr + ports['22/tcp']) over the vast.ai proxy
+  // (ssh_host=ssh7.vast.ai etc.) — the proxy doesn't accept our keys reliably.
+  // Mirrors the gpu_status handler's picking logic in routes/mcp.js.
+  let host = inst.ssh_host;
+  let port = Number(inst.ssh_port);
+  const sshMapping = inst.ports && inst.ports["22/tcp"];
+  if (inst.public_ipaddr && sshMapping && sshMapping[0]) {
+    host = inst.public_ipaddr;
+    port = Number(sshMapping[0].HostPort);
+  }
+  return { id: inst.id, host, port, gpu: inst.gpu_name, cost: Number(inst.dph_total), status: inst.actual_status };
 }
 
 // ----- start -----
