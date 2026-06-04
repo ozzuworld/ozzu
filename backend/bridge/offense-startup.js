@@ -27,7 +27,7 @@ const execAsync = promisify(exec);
 const VAST_KEY_PATH = "/root/.config/vastai/vast_api_key";
 const BRIDGE_PUBKEY_PATH = "/root/.ssh/id_ed25519.pub";
 const DEFAULT_MODEL = process.env.OFFENSE_MODEL_NAME || "deepseek-r1:32b";
-const DEFAULT_GPU = "RTX_4090";
+const DEFAULT_GPU = "RTX 4090"; // vast.ai uses the space-form in gpu_name (not "RTX_4090")
 const DEFAULT_MAX_COST = 0.50;
 const DEFAULT_DISK_GB = 60;
 const OLLAMA_CTX = 16384;
@@ -179,9 +179,10 @@ async function rentInstance(gpu, maxCost, diskGb) {
     gpu_name: { eq: gpu },
     dph_total: { lte: maxCost },
     disk_space: { gte: diskGb },
-    verified: { eq: true },
-    rentable: { eq: true },
-    rented: { eq: false },
+    // Note: vast.ai's `verified`/`rentable`/`rented` semantics aren't what they
+    // sound like — base offers come back with verified:null and rentable:false
+    // even when they're available. Filtering on those zeros our match rate.
+    // We trust dph_total + disk_space + gpu_name and pick the cheapest result.
   }));
   // Note: trailing slash on /bundles/ — vast.ai now 301-redirects the no-slash form.
   const offers = await vastGet(`/bundles/?q=${q}&order=[[%22dph_total%22,%22asc%22]]&limit=5`);
