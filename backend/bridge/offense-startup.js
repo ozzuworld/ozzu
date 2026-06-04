@@ -184,9 +184,11 @@ async function rentInstance(gpu, maxCost, diskGb) {
     // even when they're available. Filtering on those zeros our match rate.
     // We trust dph_total + disk_space + gpu_name and pick the cheapest result.
   }));
-  // Note: trailing slash on /bundles/ — vast.ai now 301-redirects the no-slash form.
-  const offers = await vastGet(`/bundles/?q=${q}&order=[[%22dph_total%22,%22asc%22]]&limit=5`);
-  const list = offers.offers || [];
+  // Trailing slash on /bundles/ — vast.ai 301-redirects the no-slash form.
+  // No `order` param — vast.ai's server-side ordering returns 0 offers as of
+  // 2026-06; we sort by dph_total client-side after fetching.
+  const offers = await vastGet(`/bundles/?q=${q}`);
+  const list = (offers.offers || []).slice().sort((a, b) => (a.dph_total || 0) - (b.dph_total || 0));
   if (list.length === 0) throw new Error(`no ${gpu} offers <= $${maxCost}/hr with >= ${diskGb}GB disk`);
   const best = list[0];
   const r = await vastPut(`/asks/${best.id}/`, { client_id: "me", image: "vastai/base-image:cuda-13.0.2-auto", disk: diskGb });
