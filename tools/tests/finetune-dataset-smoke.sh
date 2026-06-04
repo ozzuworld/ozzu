@@ -23,6 +23,28 @@ log() { echo "[finetune-smoke] $*"; }
 fail() { echo "${RED}✗ FAIL${RESET}  $*"; exit 1; }
 pass() { echo "${GREEN}✓ PASS${RESET}  $*"; }
 
+# ─────────────────────────── py_compile sweep ───────────────────────────
+# Validate Python syntax of every .py file under tools/finetune/ — catches
+# typos / unbalanced-paren / missing-import-syntax bugs in train.py + the
+# dataset scripts BEFORE the operator burns DO compute discovering them.
+PY_FILES=$(find "$ROOT/finetune" -type f -name '*.py' 2>/dev/null | sort)
+if [[ -z "$PY_FILES" ]]; then
+  fail "py_compile sweep: no .py files found under $ROOT/finetune (path wrong?)"
+fi
+PY_COUNT=$(echo "$PY_FILES" | wc -l)
+log "py_compile sweep across $PY_COUNT files under tools/finetune/"
+PY_ERRORS=0
+while IFS= read -r f; do
+  if ! python3 -m py_compile "$f" 2>&1 | sed 's/^/    /'; then
+    PY_ERRORS=$((PY_ERRORS + 1))
+    echo "  ${RED}✗${RESET} $f"
+  fi
+done <<< "$PY_FILES"
+if [[ "$PY_ERRORS" -gt 0 ]]; then
+  fail "py_compile sweep: $PY_ERRORS file(s) have syntax errors"
+fi
+pass "py_compile sweep: $PY_COUNT files syntactically valid"
+
 # ─────────────────────────── synthesize tiny corpora ───────────────────────────
 # Each corpus matches the real format: _meta header (skipped by merge) + N rows.
 log "synthesizing tiny corpora under $WORK"
