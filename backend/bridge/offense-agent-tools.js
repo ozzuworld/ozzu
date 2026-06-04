@@ -147,26 +147,45 @@ async function probeExecutorTool(args) {
   return await executorProbe.probeExecutor(engagement_id, !!force);
 }
 
-// ───────────────────────────── stubs (later steps) ─────────────────────────────
+// ─────────────────────────────── activated (Step 5) ───────────────────────────────
+
+const VALID_PHASES = ["recon", "enumeration", "foothold", "exploitation", "post_exploit", "reporting"];
 
 async function advancePhase(args) {
-  return {
-    deferred: true,
-    reason: "advance_phase will land when engagement_phase column is provisioned (Step 5/7 of OFFENSE-AGENT-DESIGN.md). Treat the engagement as a single-phase run for now.",
-  };
+  const { engagement_id, new_phase } = args || {};
+  if (!engagement_id) return { error: "engagement_id required" };
+  if (!new_phase || !VALID_PHASES.includes(new_phase)) {
+    return { error: `new_phase must be one of: ${VALID_PHASES.join(", ")}` };
+  }
+  const r = await db.query(
+    `UPDATE pentest_engagements
+        SET engagement_phase = $1
+      WHERE id = $2
+      RETURNING engagement_phase`,
+    [new_phase, engagement_id]);
+  if (r.rows.length === 0) return { error: `engagement ${engagement_id} not found` };
+  return { engagement_id, phase: r.rows[0].engagement_phase, ok: true };
 }
+
+async function endEngagement(args) {
+  const { engagement_id, reason } = args || {};
+  if (!engagement_id) return { error: "engagement_id required" };
+  const r = await db.query(
+    `UPDATE pentest_engagements
+        SET agent_status = 'completed'
+      WHERE id = $1
+      RETURNING id, agent_status`,
+    [engagement_id]);
+  if (r.rows.length === 0) return { error: `engagement ${engagement_id} not found` };
+  return { engagement_id, agent_status: r.rows[0].agent_status, reason: reason || "(no reason given)", ok: true };
+}
+
+// ─────────────────────────────── still-stubbed (Step 6) ───────────────────────────────
 
 async function requestHuman(args) {
   return {
     deferred: true,
-    reason: "request_human will land when the operator-side modal lands (Step 6 of OFFENSE-AGENT-DESIGN.md). Agent should fall back to ending the engagement with a note describing the question.",
-  };
-}
-
-async function endEngagement(args) {
-  return {
-    deferred: true,
-    reason: "end_engagement will land with the agent-loop columns (Step 5). Manually mark the engagement done from the SOC app for now.",
+    reason: "request_human lands when the operator-side modal lands (Step 6 of OFFENSE-AGENT-DESIGN.md). For now, write the question into your reasoning before calling end_engagement — the operator will see it in the agent_run_state transcript.",
   };
 }
 

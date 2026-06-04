@@ -565,6 +565,29 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "start_engagement_run",
+      description: "Step 5 of OFFENSE-AGENT-DESIGN.md — kick off the autonomous L3 agent loop on an engagement. The agent on the GPU calls tools (get_engagement_state, queue_step, wait_for_outcome, probe_executor, advance_phase, end_engagement) via Ollama function-calling, queues steps for the PA, waits for outcomes, and iterates. Hard iteration cap so the call stays bounded (default 15 model invocations, ~10–25 min real time). Conversation transcript persists in pentest_engagements.agent_run_state so re-calling resumes from where it stopped. Returns only sanitized summary — raw commands stay server-side (membrane).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id:   { type: "string", description: "Engagement ID" },
+          max_iter:        { type: "number", description: "Max model invocations this run (default 15). Each is ~30–180s with thinking enabled." },
+          intent:          { type: "string", description: "Optional operator intent passed to the agent as guidance (e.g. 'enumerate IoT footprint first')." },
+          model_override:  { type: "string", description: "Optional model tag override for this run (e.g. 'qwen3:32b' to A/B vs deepseek)." },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
+      name: "reset_agent_run",
+      description: "Reset the L3 agent's conversation transcript for an engagement back to empty (agent_run_state = {}, agent_status = idle). Use when scope changed materially or the prior run derailed. Does NOT delete queue items or findings.",
+      inputSchema: {
+        type: "object",
+        properties: { engagement_id: { type: "string", description: "Engagement ID" } },
+        required: ["engagement_id"],
+      },
+    },
+    {
       name: "get_offense_telemetry",
       description: "Read-only audit surface for the L3 offense pipeline. Returns AGGREGATES over advance_offense calls (per-model latency / step-queued% / avg refs / in-scope%, per-intent stats, outcome distribution, latency percentiles) plus a flat list of recent rows. MEMBRANE-SAFE: never includes raw commands or rationales — only shape, timing, and outcome metadata. Use this to spot harness gaps and drive the harness-improvement loop.",
       inputSchema: {
@@ -1827,6 +1850,39 @@ ${result.narrative}
           return { content: [{ type: "text", text: `🔌 ${r.note}` }] };
         } catch (e) {
           return { content: [{ type: "text", text: `stop_offense_model failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "start_engagement_run": {
+        const agent = require("../offense-agent");
+        try {
+          const r = await agent.runAgent(args.engagement_id, {
+            max_iter: args.max_iter,
+            intent: args.intent,
+            model_override: args.model_override,
+          });
+          const head = r.ended_by_model
+            ? `🏁 Agent ended engagement after ${r.iter} iters`
+            : `⏸  Agent paused after ${r.iter} iters (${r.end_reason})`;
+          const lines = [
+            head,
+            `engagement: ${r.engagement_id}`,
+            `${r.resumed ? "resumed prior run" : "fresh run"} · steps queued this run: ${r.steps_queued} · elapsed: ${r.elapsed_sec}s`,
+            r.last_assistant_text ? `\nLast model reasoning (sanitized preview):\n${r.last_assistant_text}` : "",
+          ].filter(Boolean);
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `start_engagement_run failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "reset_agent_run": {
+        const agent = require("../offense-agent");
+        try {
+          await agent.resetAgent(args.engagement_id);
+          return { content: [{ type: "text", text: `🧹 Agent transcript reset for ${args.engagement_id}.` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `reset_agent_run failed: ${e.message}` }], isError: true };
         }
       }
 

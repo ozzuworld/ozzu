@@ -1138,6 +1138,16 @@ async function init() {
     // executor-probe.js sets this timestamp; probes older than 24h are re-run.
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS executor_tools_probed_at TIMESTAMPTZ`);
 
+    // dir_1780589262481 — Step 5 of OFFENSE-AGENT-DESIGN.md: agent loop state.
+    // engagement_phase: where the agent thinks it is in the kill chain.
+    // agent_run_state: full conversation transcript (system+user+assistant+tool messages)
+    //   so a bridge restart mid-run doesn't lose conversation history.
+    // agent_status: idle | running | completed | error — drives the SOC app's
+    //   "agent running" badge in Step 6.
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS engagement_phase VARCHAR(32) DEFAULT 'recon'`);
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS agent_run_state JSONB DEFAULT '{}'::jsonb`);
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS agent_status VARCHAR(16) DEFAULT 'idle'`);
+
     // Seed: SKYLINE-SOC-2026-628 (EDIFICIO LAURA) runs through tablet-p610 because
     // dev-01 can't reach the target LAN (subnet conflict). Idempotent — only sets
     // values if columns are still at their defaults.
