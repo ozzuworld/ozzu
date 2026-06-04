@@ -28,6 +28,7 @@ MAX_HOURS=20
 WRITEUPS_REPO=""
 SKIP_TRANSCRIPTS=0
 DATASET_DIR=/tmp/finetune
+RESUME_DROPLET=""
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 while [[ $# -gt 0 ]]; do
@@ -37,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --writeups-repo)     WRITEUPS_REPO="$2"; shift 2 ;;
     --skip-transcripts)  SKIP_TRANSCRIPTS=1; shift ;;
     --dataset-dir)       DATASET_DIR="$2"; shift 2 ;;
+    --resume)            RESUME_DROPLET="$2"; shift 2 ;;
     -h|--help)
       cat <<EOF
 Usage: run-finetune.sh --ssh-key-id <id> [opts]
@@ -49,7 +51,14 @@ Optional:
   --writeups-repo PATH       Local clone of 0xdf's gitlab repo; omit to skip writeups corpus
   --skip-transcripts         Skip the export-our-transcripts.py step
   --dataset-dir PATH         Where to assemble corpora (default ${DATASET_DIR})
+  --resume <droplet-id>      RESUME a crashed training run on the named existing droplet.
+                             Auto-finds the latest checkpoint-N dir under /root/output/
+                             and passes it to train.py --resume-from-checkpoint. SKIPS
+                             dataset rebuild + bootstrap + provision steps.
   -h, --help                 This message
+
+Resume example (training crashed at hour 8 of a 12-hour run):
+  bash run-finetune.sh --resume 12345678 --ssh-key-id <id>
 EOF
       exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 2 ;;
@@ -63,6 +72,46 @@ if [[ -z "$SSH_KEY_ID" ]]; then
 fi
 
 log() { echo "[run-finetune $(date +%H:%M:%S)] $*"; }
+
+# ─────────────────────────────── resume branch ───────────────────────────────
+# When --resume <droplet-id> is set, skip dataset rebuild + bootstrap + provision;
+# go directly to step 8 with --resume-from-checkpoint set to the latest checkpoint
+# dir found on the existing droplet.
+if [[ -n "$RESUME_DROPLET" ]]; then
+  log "=== RESUME MODE — reusing droplet $RESUME_DROPLET, skipping steps 1-7 ==="
+  DROPLET_ID="$RESUME_DROPLET"
+  TOK=$(sudo cat /root/.config/digitalocean/access_token 2>/dev/null || true)
+  if [[ -z "$TOK" ]]; then
+    log "FATAL: no DO token at /root/.config/digitalocean/access_token"
+    exit 3
+  fi
+  DROPLET_IP=$(curl -sH "Authorization: Bearer $TOK" "https://api.digitalocean.com/v2/droplets/$DROPLET_ID" \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((n['ip_address'] for n in d['droplet']['networks']['v4'] if n['type']=='public'), ''))")
+  [[ -z "$DROPLET_IP" ]] && { log "FATAL: could not resolve droplet $DROPLET_ID public ip"; exit 3; }
+  log "droplet $DROPLET_ID at $DROPLET_IP"
+  SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15)
+  # Find the latest checkpoint dir under /root/output/ozzu-soc-v1/
+  LATEST_CKPT=$(ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" \
+    "ls -d /root/output/ozzu-soc-v1/checkpoint-* 2>/dev/null | sort -t- -k2 -n | tail -1" || true)
+  if [[ -z "$LATEST_CKPT" ]]; then
+    log "FATAL: no checkpoint-N dir under /root/output/ozzu-soc-v1/ on droplet $DROPLET_ID"
+    log "       Either training never produced a checkpoint OR --output-dir was different."
+    exit 4
+  fi
+  log "resuming from $LATEST_CKPT"
+  TRAIN_CMD="cd /root && source /opt/ozzu-train/venv/bin/activate && python3 train.py \
+    --base-model Qwen/Qwen3-32B \
+    --dataset /root/dataset/train.jsonl \
+    --eval-dataset /root/dataset/eval.jsonl \
+    --output-dir /root/output/ozzu-soc-v1 \
+    --epochs 3 \
+    --resume-from-checkpoint $LATEST_CKPT 2>&1 | tee -a /root/train.log"
+  # Kill any existing train tmux session first
+  ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" "tmux kill-session -t train 2>/dev/null || true"
+  ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" "tmux new-session -d -s train \"$TRAIN_CMD\""
+  log "RESUME kicked off. Tail with: ssh root@$DROPLET_IP 'tail -f /root/train.log'"
+  exit 0
+fi
 
 # ─────────────────────────────── step 1-4: dataset ───────────────────────────────
 mkdir -p "$DATASET_DIR"

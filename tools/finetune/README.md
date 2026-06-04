@@ -52,6 +52,23 @@ Optional flags to `run-finetune.sh`:
 
 Run `bash run-finetune.sh --help` for the full arg list.
 
+### Resuming a crashed training run
+
+train.py checkpoints to `/root/output/ozzu-soc-v1/checkpoint-N/` every `--save-steps` (default 500). If a training run crashes at hour 8 of 12 (network blip, OOM, droplet glitch), don't lose the progress — resume:
+
+```bash
+# Find the droplet id (still alive — DO NOT destroy if you want to resume)
+sudo node tools/finetune/do-droplet/do-gpu.js status
+
+# Kick off resume — auto-discovers the latest checkpoint-N dir on the droplet
+bash /home/gcp/ozzu/tools/finetune/run-finetune.sh --resume <droplet-id> --ssh-key-id <id>
+
+# Watch
+ssh root@<droplet-ip> 'tail -f /root/train.log'
+```
+
+If you destroyed the droplet, checkpoints are gone — start fresh.
+
 ---
 
 ## Manual flow (advanced / debugging)
