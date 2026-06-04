@@ -631,6 +631,16 @@ module.exports = function mcpRoutes(ctx) {
       inputSchema: { type: "object", properties: {} },
     },
     {
+      name: "audit_membrane",
+      description: "Historical fleet-wide audit — scans the ENTIRE offense_telemetry table for any rows where text fields (intent_category, outcome_notes, error_message) contain membrane-breach patterns: raw CVE IDs, IPs, exploit keywords (nmap/sqlmap/etc), or credential file refs (passwd/shadow). Either confirms 'membrane intact' (the L3→L4 contract has held historically) OR pinpoints the leaking rows. Sample output shows row IDs + breach kind WITHOUT revealing the offending text — preserves the membrane even in the audit itself.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          since: { type: "string", description: "ISO timestamp — only audit rows from this date onward (default: all time)" },
+        },
+      },
+    },
+    {
       name: "soc_queue_steps",
       description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
@@ -1986,6 +1996,34 @@ ${result.narrative}
           return { content: [{ type: "text", text: r.report_md }] };
         } catch (e) {
           return { content: [{ type: "text", text: `diagnose_all_engagements failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "audit_membrane": {
+        try {
+          const auditor = require("/home/gcp/ozzu/tools/diagnostics/membrane-audit.js");
+          const r = await auditor.audit({ since: args.since || null });
+          const lines = [];
+          lines.push(`# Membrane audit — historical sweep`);
+          if (args.since) lines.push(`**Since:** ${args.since}`);
+          lines.push(`**Rows scanned:** ${r.total_rows}`);
+          lines.push(`**Total breaches:** ${r.total_breaches}`);
+          lines.push("");
+          if (r.total_breaches === 0) {
+            lines.push("✅ **MEMBRANE INTACT** — no rows in offense_telemetry contain CVE IDs, raw IPs, exploit keywords, or credential-file refs in their text fields. The L3→L4 contract has held historically.");
+          } else {
+            lines.push("🚨 **MEMBRANE BREACH DETECTED** — sanitization has leaked. Per-engagement counts:");
+            lines.push("| engagement | breaches |"); lines.push("|---|---|");
+            for (const [eng, arr] of Object.entries(r.by_engagement).sort((a, b) => b[1].length - a[1].length)) {
+              lines.push(`| ${eng} | ${arr.length} |`);
+            }
+            lines.push("\n## Sample (first 20, content redacted)");
+            lines.push("| row_id | engagement | field | kind | model |"); lines.push("|---|---|---|---|---|");
+            for (const b of r.breaches.slice(0, 20)) lines.push(`| ${b.row_id} | ${b.engagement_id} | ${b.field} | ${b.kind} | ${b.model_used} |`);
+          }
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `audit_membrane failed: ${e.message}` }], isError: true };
         }
       }
 
