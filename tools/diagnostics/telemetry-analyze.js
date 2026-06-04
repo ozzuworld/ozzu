@@ -43,6 +43,45 @@ const MEMBRANE_PATTERNS = [
 
 // ───────────────────── analyzers ─────────────────────
 
+// Percentile helper. arr can be unsorted; uses linear interpolation.
+function percentile(arr, p) {
+  if (!arr || arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const idx = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  const frac = idx - lo;
+  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+}
+
+// Latency thresholds (ms). p95 above SLOW_P95_MS → flag a warning;
+// above HUNG_P95_MS → error.
+const SLOW_P95_MS = 20000;   // 20 s — model is sluggish
+const HUNG_P95_MS = 60000;   // 60 s — likely a near-hang or timeout retry loop
+
+function detectSlowInference(telemetry) {
+  const lats = telemetry.map((t) => t.latency_ms).filter((x) => typeof x === "number" && x > 0);
+  if (lats.length < 3) return [];   // need a few samples for percentile to be meaningful
+  const p95 = percentile(lats, 95);
+  if (p95 >= HUNG_P95_MS) {
+    return [{
+      kind: "inference_hung",
+      severity: "error",
+      message: `latency p95 = ${(p95/1000).toFixed(1)}s across ${lats.length} calls — model is hanging or hitting internal timeouts`,
+      p95_ms: p95, n_samples: lats.length,
+    }];
+  }
+  if (p95 >= SLOW_P95_MS) {
+    return [{
+      kind: "slow_inference",
+      severity: "warn",
+      message: `latency p95 = ${(p95/1000).toFixed(1)}s across ${lats.length} calls — GPU under-provisioned or network tunnel slow`,
+      p95_ms: p95, n_samples: lats.length,
+    }];
+  }
+  return [];
+}
+
 function detectLoops(telemetry) {
   // Group consecutive rows by intent_category, flag runs ≥ threshold
   const issues = [];
@@ -257,11 +296,15 @@ function renderMarkdown({ engagement, telemetry, queueItems, tasks, unblocked, i
   if (telemetry.length > 0) {
     const queued = telemetry.filter((t) => t.step_queued).length;
     const inScope = telemetry.filter((t) => t.in_scope).length;
-    const avgLatency = Math.round(telemetry.reduce((s, t) => s + (t.latency_ms || 0), 0) / telemetry.length);
+    const lats = telemetry.map((t) => t.latency_ms).filter((x) => typeof x === "number" && x > 0);
+    const avgLatency = lats.length ? Math.round(lats.reduce((s, x) => s + x, 0) / lats.length) : 0;
+    const p50 = Math.round(percentile(lats, 50));
+    const p95 = Math.round(percentile(lats, 95));
+    const max = lats.length ? Math.max(...lats) : 0;
     lines.push("## Stats");
     lines.push(`- step_queued rate: ${queued}/${telemetry.length} (${(100*queued/telemetry.length).toFixed(0)}%)`);
     lines.push(`- in_scope rate:    ${inScope}/${telemetry.length} (${(100*inScope/telemetry.length).toFixed(0)}%)`);
-    lines.push(`- avg latency:      ${avgLatency} ms`);
+    lines.push(`- latency:          avg ${avgLatency} ms · p50 ${p50} ms · p95 ${p95} ms · max ${max} ms (n=${lats.length})`);
     const byIntent = {};
     for (const t of telemetry) byIntent[t.intent_category] = (byIntent[t.intent_category] || 0) + 1;
     lines.push("- intent distribution:");
@@ -303,6 +346,7 @@ async function analyzeEngagement(engagementId) {
     ...detectStepQueueRate(telemetry),
     ...detectMembraneBreach(telemetry),
     ...detectStalledTasks(tasks, unblocked, nowMs),
+    ...detectSlowInference(telemetry),
   ];
   const data = { engagement: eng.rows[0], telemetry, queueItems, tasks, unblocked };
   const report_md = renderMarkdown({ ...data, issues });
