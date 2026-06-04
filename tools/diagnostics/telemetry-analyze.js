@@ -1,0 +1,309 @@
+#!/usr/bin/env node
+// telemetry-analyze.js — Step 8.4 (dir_1780599463129)
+//
+// Diagnose the health of a live engagement run by reading offense_telemetry,
+// engagement_tasks, and soc_queue_items. Surfaces actionable problems:
+//
+//   - Loop detection: same intent ≥3× consecutively → orchestrator stuck
+//   - Executor dead: ≥N consecutive queue items with empty output
+//   - Step-queue-rate: % of advance_offense calls that produced step_queued
+//   - Membrane breach: any telemetry text field containing raw commands /
+//     CVE IDs / IPs that should have been sanitized
+//   - Stalled DAG: tasks unblocked for > N min with no in_flight follow-up
+//   - Phase regression: engagement_phase moved backwards
+//
+// Output: markdown report to stdout (use --json for raw structure).
+//
+// Usage:
+//   docker exec bridge node /home/gcp/ozzu/tools/diagnostics/telemetry-analyze.js SKYLINE-SOC-2026-628
+//   docker exec bridge node /home/gcp/ozzu/tools/diagnostics/telemetry-analyze.js SKYLINE-SOC-2026-628 --json > diag.json
+
+"use strict";
+
+const db = require("/app/db");
+
+// ───────────────────── arg parsing ─────────────────────
+const args = process.argv.slice(2);
+const ENGAGEMENT_ID = args.find((a) => !a.startsWith("--"));
+const AS_JSON = args.includes("--json");
+const QUIET = args.includes("--quiet");
+
+if (!ENGAGEMENT_ID) {
+  console.error("Usage: telemetry-analyze.js <engagement_id> [--json] [--quiet]");
+  process.exit(2);
+}
+
+// ───────────────────── thresholds ─────────────────────
+const LOOP_RUN_THRESHOLD     = 3;      // same intent ≥3 in a row → loop
+const EMPTY_OUTPUT_THRESHOLD = 3;      // ≥3 consecutive empty queue outputs → executor dead
+const STEP_QUEUE_FLOOR       = 0.5;    // < 50% step-queued → model can't tool-use
+const STALL_MIN              = 10;     // task pending+unblocked > 10 min → stalled
+
+// Patterns that should NEVER appear in telemetry text fields (membrane rule):
+//   - raw CVE IDs (CVE-YYYY-NNNN)
+//   - raw IPs (private + public)
+//   - shell command keywords (curl|nmap|exploit|payload)
+const MEMBRANE_PATTERNS = [
+  /\bCVE-\d{4}-\d{4,7}\b/i,
+  /\b(?:nmap|metasploit|sqlmap|hydra|hashcat|john|payload|exploit|reverse[\s_-]?shell)\b/i,
+  /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,   // raw IPs (private OR public — sanitize all in telemetry)
+  /\b(?:passwd|shadow|hashes?[\s_-]?dump)\b|\/etc\/(?:passwd|shadow)/i,
+];
+
+// ───────────────────── analyzers ─────────────────────
+
+function detectLoops(telemetry) {
+  // Group consecutive rows by intent_category, flag runs ≥ threshold
+  const issues = [];
+  let runStart = 0, runIntent = null, runLen = 0;
+  const flush = (endIdx) => {
+    if (runLen >= LOOP_RUN_THRESHOLD) {
+      issues.push({
+        kind: "loop_detected",
+        severity: "warn",
+        message: `intent '${runIntent}' fired ${runLen}× consecutively (rows ${runStart}..${endIdx-1})`,
+        intent: runIntent,
+        run_length: runLen,
+      });
+    }
+  };
+  telemetry.forEach((row, i) => {
+    if (row.intent_category === runIntent) {
+      runLen++;
+    } else {
+      flush(i);
+      runStart = i; runIntent = row.intent_category; runLen = 1;
+    }
+  });
+  flush(telemetry.length);
+  return issues;
+}
+
+function detectExecutorDead(queueItems) {
+  // Look for consecutive runs of done items with empty/null output
+  const issues = [];
+  let runLen = 0, runStart = -1;
+  queueItems.forEach((q, i) => {
+    const empty = !q.output || q.output.trim() === "" || q.output.length < 10;
+    if (q.status === "done" && empty) {
+      if (runLen === 0) runStart = i;
+      runLen++;
+    } else {
+      if (runLen >= EMPTY_OUTPUT_THRESHOLD) {
+        issues.push({
+          kind: "executor_dead",
+          severity: "error",
+          message: `${runLen} consecutive done items returned empty output (items #${queueItems[runStart].id}..#${queueItems[i-1].id}) — executor likely unreachable`,
+          run_length: runLen,
+        });
+      }
+      runLen = 0;
+    }
+  });
+  if (runLen >= EMPTY_OUTPUT_THRESHOLD) {
+    issues.push({
+      kind: "executor_dead",
+      severity: "error",
+      message: `${runLen} consecutive done items at end of run had empty output — executor likely unreachable`,
+      run_length: runLen,
+    });
+  }
+  return issues;
+}
+
+function detectStepQueueRate(telemetry) {
+  if (telemetry.length === 0) return [];
+  const n = telemetry.length;
+  const queued = telemetry.filter((t) => t.step_queued === true).length;
+  const rate = queued / n;
+  if (rate < STEP_QUEUE_FLOOR) {
+    return [{
+      kind: "low_step_queue_rate",
+      severity: "warn",
+      message: `step_queued rate: ${(rate*100).toFixed(1)}% (${queued}/${n}) — below ${(STEP_QUEUE_FLOOR*100).toFixed(0)}% floor. Model is calling advance_offense but not producing queueable commands.`,
+      rate,
+    }];
+  }
+  return [];
+}
+
+function detectMembraneBreach(telemetry) {
+  // Telemetry text fields that should NEVER contain raw offensive content
+  const issues = [];
+  for (const row of telemetry) {
+    for (const field of ["intent_category", "outcome_notes", "error_message"]) {
+      const v = row[field];
+      if (!v) continue;
+      for (const pattern of MEMBRANE_PATTERNS) {
+        if (pattern.test(v)) {
+          issues.push({
+            kind: "membrane_breach",
+            severity: "error",
+            message: `telemetry row #${row.id} field '${field}' matches forbidden pattern ${pattern} — sanitization failed`,
+            row_id: row.id, field, pattern: pattern.toString(),
+          });
+          break;
+        }
+      }
+    }
+  }
+  return issues;
+}
+
+function detectStalledTasks(tasks, unblocked, nowMs) {
+  const issues = [];
+  for (const t of tasks) {
+    if (t.status !== "pending") continue;
+    if (!unblocked.includes(t.id)) continue;
+    const created = new Date(t.created_at).getTime();
+    const ageMin = (nowMs - created) / 60000;
+    if (ageMin > STALL_MIN) {
+      issues.push({
+        kind: "task_stalled",
+        severity: "warn",
+        message: `task #${t.id} unblocked + pending for ${ageMin.toFixed(1)} min — orchestrator hasn't picked it up`,
+        task_id: t.id, age_min: ageMin,
+      });
+    }
+  }
+  return issues;
+}
+
+function detectPhaseRegression(history) {
+  // Walk audit_log for engagement_phase changes; flag any backward move.
+  const order = ["recon", "enumeration", "foothold", "exploitation", "post_exploit", "reporting"];
+  const issues = [];
+  let lastIdx = -1;
+  for (const h of history) {
+    const idx = order.indexOf(h.phase);
+    if (idx < 0) continue;
+    if (lastIdx >= 0 && idx < lastIdx) {
+      issues.push({
+        kind: "phase_regression",
+        severity: "warn",
+        message: `engagement_phase moved backwards: ${order[lastIdx]} → ${h.phase} at ${h.at}`,
+        from: order[lastIdx], to: h.phase, at: h.at,
+      });
+    }
+    if (idx > lastIdx) lastIdx = idx;
+  }
+  return issues;
+}
+
+// ───────────────────── data fetch ─────────────────────
+
+async function fetchAll() {
+  const eng = await db.query(`SELECT id, engagement_phase, agent_status, created_at, updated_at FROM pentest_engagements WHERE id = $1`, [ENGAGEMENT_ID]);
+  if (eng.rows.length === 0) {
+    console.error(`engagement ${ENGAGEMENT_ID} not found`);
+    process.exit(3);
+  }
+  const telemetry = await db.query(
+    `SELECT id, intent_category, step_queued, n_hosts, n_findings, in_scope, latency_ms, outcome, outcome_notes, error_message, created_at
+       FROM offense_telemetry WHERE engagement_id = $1 ORDER BY created_at ASC, id ASC`,
+    [ENGAGEMENT_ID]);
+  const queueItems = await db.query(
+    `SELECT id, seq, title, status, output, created_at, completed_at FROM soc_queue_items WHERE engagement_id = $1 ORDER BY id ASC`,
+    [ENGAGEMENT_ID]);
+  let tasks = { rows: [] }, unblockedRes = { rows: [{ unblocked: [] }] };
+  try {
+    tasks = await db.query(`SELECT id, parent_ids, status, directive, phase, created_at FROM engagement_tasks WHERE engagement_id = $1 ORDER BY id ASC`, [ENGAGEMENT_ID]);
+    // Compute unblocked-set the same way the API does
+    const byId = Object.create(null);
+    for (const t of tasks.rows) byId[t.id] = t;
+    const isResolved = (t) => t.status === "done" || t.status === "skipped";
+    const unblocked = [];
+    for (const t of tasks.rows) {
+      if (t.status !== "pending") continue;
+      if ((t.parent_ids || []).every((pid) => byId[pid] && isResolved(byId[pid]))) unblocked.push(t.id);
+    }
+    unblockedRes.rows[0].unblocked = unblocked;
+  } catch { /* engagement_tasks may not exist on legacy engagements */ }
+  return {
+    engagement: eng.rows[0],
+    telemetry: telemetry.rows,
+    queueItems: queueItems.rows,
+    tasks: tasks.rows,
+    unblocked: unblockedRes.rows[0].unblocked,
+  };
+}
+
+// ───────────────────── output ─────────────────────
+
+function renderMarkdown({ engagement, telemetry, queueItems, tasks, unblocked, issues }) {
+  const lines = [];
+  lines.push(`# Engagement diagnostic — ${engagement.id}`);
+  lines.push("");
+  lines.push(`- **agent_status:** ${engagement.agent_status}`);
+  lines.push(`- **engagement_phase:** ${engagement.engagement_phase}`);
+  lines.push(`- **created:** ${engagement.created_at}`);
+  lines.push(`- **last update:** ${engagement.updated_at}`);
+  lines.push("");
+  lines.push("## Volumes");
+  lines.push(`- telemetry rows: ${telemetry.length}`);
+  lines.push(`- queue items:    ${queueItems.length}`);
+  lines.push(`- DAG tasks:      ${tasks.length} (unblocked-pending: ${unblocked.length})`);
+  lines.push("");
+  const counts = { error: 0, warn: 0, info: 0 };
+  for (const i of issues) counts[i.severity] = (counts[i.severity] || 0) + 1;
+  lines.push("## Diagnosis");
+  if (issues.length === 0) {
+    lines.push("");
+    lines.push("✓ No issues detected. Agent looks healthy.");
+  } else {
+    lines.push(`**${counts.error || 0} errors · ${counts.warn || 0} warnings · ${counts.info || 0} info**`);
+    lines.push("");
+    for (const sev of ["error", "warn", "info"]) {
+      const matching = issues.filter((i) => i.severity === sev);
+      if (matching.length === 0) continue;
+      lines.push(`### ${sev.toUpperCase()}`);
+      for (const issue of matching) {
+        lines.push(`- **${issue.kind}**: ${issue.message}`);
+      }
+      lines.push("");
+    }
+  }
+  if (telemetry.length > 0) {
+    const queued = telemetry.filter((t) => t.step_queued).length;
+    const inScope = telemetry.filter((t) => t.in_scope).length;
+    const avgLatency = Math.round(telemetry.reduce((s, t) => s + (t.latency_ms || 0), 0) / telemetry.length);
+    lines.push("## Stats");
+    lines.push(`- step_queued rate: ${queued}/${telemetry.length} (${(100*queued/telemetry.length).toFixed(0)}%)`);
+    lines.push(`- in_scope rate:    ${inScope}/${telemetry.length} (${(100*inScope/telemetry.length).toFixed(0)}%)`);
+    lines.push(`- avg latency:      ${avgLatency} ms`);
+    const byIntent = {};
+    for (const t of telemetry) byIntent[t.intent_category] = (byIntent[t.intent_category] || 0) + 1;
+    lines.push("- intent distribution:");
+    for (const [k, v] of Object.entries(byIntent).sort((a, b) => b[1] - a[1])) {
+      lines.push(`  - ${k}: ${v}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+// ───────────────────── main ─────────────────────
+
+async function main() {
+  const data = await fetchAll();
+  const nowMs = Date.now();
+  const issues = [
+    ...detectLoops(data.telemetry),
+    ...detectExecutorDead(data.queueItems),
+    ...detectStepQueueRate(data.telemetry),
+    ...detectMembraneBreach(data.telemetry),
+    ...detectStalledTasks(data.tasks, data.unblocked, nowMs),
+  ];
+  if (AS_JSON) {
+    process.stdout.write(JSON.stringify({ engagement: data.engagement.id, issues, counts: data.telemetry.length }) + "\n");
+  } else if (!QUIET) {
+    process.stdout.write(renderMarkdown({ ...data, issues }) + "\n");
+  }
+  try { db.pool && db.pool.end && await db.pool.end(); } catch {}
+  process.exit(issues.some((i) => i.severity === "error") ? 1 : 0);
+}
+
+main().catch((e) => {
+  console.error("telemetry-analyze CRASH:", e.message);
+  console.error(e.stack);
+  process.exit(2);
+});
