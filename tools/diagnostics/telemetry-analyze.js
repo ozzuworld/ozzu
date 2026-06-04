@@ -429,11 +429,36 @@ module.exports = { analyzeEngagement, analyzeAllActive };
 
 async function cliMain() {
   const args = process.argv.slice(2);
-  const ENGAGEMENT_ID = args.find((a) => !a.startsWith("--"));
   const AS_JSON = args.includes("--json");
   const QUIET = args.includes("--quiet");
+  const FLEET = args.includes("--fleet");
+
+  if (FLEET) {
+    const result = await analyzeAllActive();
+    if (AS_JSON) {
+      process.stdout.write(JSON.stringify({
+        n_engagements: result.n_engagements,
+        total_issues: result.total_issues,
+        total_errors: result.total_errors,
+        total_warns: result.total_warns,
+        engagements: result.reports.map((r) => ({
+          id: r.engagement_id || (r.engagement && r.engagement.id),
+          ok: r.ok !== false,
+          issues_count: r.issues ? r.issues.length : 0,
+        })),
+      }) + "\n");
+    } else if (!QUIET) {
+      process.stdout.write(result.report_md + "\n");
+    }
+    try { db.pool && db.pool.end && await db.pool.end(); } catch {}
+    process.exit(result.total_errors > 0 ? 1 : 0);
+  }
+
+  const ENGAGEMENT_ID = args.find((a) => !a.startsWith("--"));
   if (!ENGAGEMENT_ID) {
-    console.error("Usage: telemetry-analyze.js <engagement_id> [--json] [--quiet]");
+    console.error("Usage:");
+    console.error("  telemetry-analyze.js <engagement_id> [--json] [--quiet]");
+    console.error("  telemetry-analyze.js --fleet [--json] [--quiet]   # all active engagements");
     process.exit(2);
   }
   const result = await analyzeEngagement(ENGAGEMENT_ID);
