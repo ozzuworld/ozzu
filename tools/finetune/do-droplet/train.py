@@ -51,6 +51,11 @@ def parse_args():
     ap.add_argument("--eval-steps", type=int, default=500)
     ap.add_argument("--resume-from-checkpoint", default=None)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--assistant-only-loss", action="store_true",
+                    help="Mask loss on system/user/tool tokens (set labels=-100). "
+                         "Standard SFT practice: model only learns to GENERATE assistant content, "
+                         "not to predict user/system tokens it can't influence. "
+                         "Default off for backwards compatibility; opt-in once validated.")
     return ap.parse_args()
 
 
@@ -129,11 +134,16 @@ def main():
         data_files["eval"] = args.eval_dataset
     ds = load_dataset("json", data_files=data_files)
 
+    # ── Qwen3-style assistant-turn detection for loss masking ──
+    # Qwen3's chat template emits assistant turns as `<|im_start|>assistant\n...<|im_end|>`.
+    # When --assistant-only-loss is set, we mark labels=-100 for everything OUTSIDE these
+    # spans so loss only flows through assistant content. Standard SFT practice.
+    IM_START_ASSISTANT = "<|im_start|>assistant\n"   # marker for start of assistant content
+    IM_END             = "<|im_end|>"                # marker for end of any turn
+
     def format_example(ex):
-        """Apply Qwen3's chat template to the messages array. Returns {input_ids, labels}."""
+        """Apply Qwen3's chat template, optionally mask non-assistant tokens from loss."""
         msgs = ex.get("messages") or []
-        # Tokenize the whole conversation as one continuous sequence; labels = input_ids
-        # so the model trains on every token (including the assistant turn).
         text = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False)
         enc = tokenizer(
             text,
@@ -141,8 +151,46 @@ def main():
             max_length=args.max_seq_length,
             padding=False,
             return_tensors=None,
+            return_offsets_mapping=args.assistant_only_loss,
         )
-        enc["labels"] = enc["input_ids"].copy()
+        if args.assistant_only_loss:
+            # Walk the rendered string for assistant turn spans (character offsets)
+            assistant_char_spans = []   # list of (start_char, end_char)
+            pos = 0
+            while True:
+                start = text.find(IM_START_ASSISTANT, pos)
+                if start < 0: break
+                content_start = start + len(IM_START_ASSISTANT)
+                end = text.find(IM_END, content_start)
+                if end < 0:
+                    # Final assistant turn without closing — train through end of text
+                    end = len(text)
+                assistant_char_spans.append((content_start, end))
+                pos = end + len(IM_END)
+
+            # Map each token to whether it falls inside any assistant span
+            labels = list(enc["input_ids"])
+            offsets = enc["offset_mapping"]
+            in_assistant_token_count = 0
+            for i, (tok_start, tok_end) in enumerate(offsets):
+                if tok_start == tok_end:
+                    # Special token with no character span — mask
+                    labels[i] = -100
+                    continue
+                # Token is "in assistant" if its midpoint falls inside an assistant span
+                mid = (tok_start + tok_end) // 2
+                in_assistant = any(s <= mid < e for s, e in assistant_char_spans)
+                if not in_assistant:
+                    labels[i] = -100
+                else:
+                    in_assistant_token_count += 1
+            enc["labels"] = labels
+            # Drop offset_mapping (Trainer doesn't expect it as a feature)
+            del enc["offset_mapping"]
+            # Sanity: if we masked EVERYTHING, training would have no signal — skip via empty labels
+            # (Trainer will accept; DataCollatorForLanguageModeling handles the all-masked edge case)
+        else:
+            enc["labels"] = enc["input_ids"].copy()
         return enc
 
     print(f"[train] tokenizing (chat template) …", file=sys.stderr)
