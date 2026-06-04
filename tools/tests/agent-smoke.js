@@ -153,7 +153,21 @@ function mockHandler(req, res) {
 
 const TEST_ENGAGEMENT_ID = `SMOKE-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
+// Sweep prior leaked SMOKE-* engagements at startup so a crashed earlier run
+// doesn't pollute the fleet diagnostic. Idempotent.
+async function sweepLeakedSmokeEngagements() {
+  const r = await db.query(`SELECT id FROM pentest_engagements WHERE id LIKE 'SMOKE-%' AND engagement_type = 'smoke_test'`);
+  for (const row of r.rows) {
+    await db.query(`DELETE FROM engagement_tasks   WHERE engagement_id = $1`, [row.id]);
+    await db.query(`DELETE FROM soc_queue_items    WHERE engagement_id = $1`, [row.id]);
+    await db.query(`DELETE FROM offense_telemetry  WHERE engagement_id = $1`, [row.id]);
+    await db.query(`DELETE FROM pentest_engagements WHERE id = $1`, [row.id]);
+  }
+  if (r.rows.length > 0) console.log(`[smoke] swept ${r.rows.length} leaked SMOKE-* engagements`);
+}
+
 async function createTestEngagement() {
+  await sweepLeakedSmokeEngagements();
   await db.query(
     `INSERT INTO pentest_engagements (id, client_name, engagement_type, status, scope, roe, executor_host, executor_tools, engagement_phase, agent_status, agent_run_state)
      VALUES ($1, 'smoke-test-client', 'smoke_test', 'in_progress', $2::jsonb, $3::jsonb, 'dev-01', $4::jsonb, 'recon', 'idle', '{}'::jsonb)

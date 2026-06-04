@@ -308,10 +308,78 @@ async function analyzeEngagement(engagementId) {
   const report_md = renderMarkdown({ ...data, issues });
   const counts = { error: 0, warn: 0, info: 0 };
   for (const i of issues) counts[i.severity] = (counts[i.severity] || 0) + 1;
-  return { ok: true, engagement_id: engagementId, issues, counts, report_md, n_telemetry: telemetry.length };
+  return {
+    ok: true,
+    engagement_id: engagementId,
+    engagement: eng.rows[0],   // {id, engagement_phase, agent_status, created_at, updated_at}
+    issues, counts, report_md,
+    n_telemetry: telemetry.length,
+  };
 }
 
-module.exports = { analyzeEngagement };
+// Fleet-wide: analyze every active engagement (in_progress OR agent_status
+// in {running, error}). Returns one summary plus per-engagement reports.
+async function analyzeAllActive() {
+  const r = await db.query(
+    `SELECT id FROM pentest_engagements
+      WHERE status = 'in_progress' OR agent_status IN ('running', 'error')
+      ORDER BY updated_at DESC NULLS LAST, id DESC`);
+  const ids = r.rows.map((row) => row.id);
+  const reports = [];
+  let totalIssues = 0, totalErrors = 0, totalWarns = 0;
+  for (const id of ids) {
+    const res = await analyzeEngagement(id);
+    if (!res.ok) {
+      reports.push({ engagement_id: id, ok: false, error: res.error });
+      continue;
+    }
+    totalIssues += res.issues.length;
+    totalErrors += res.counts.error;
+    totalWarns  += res.counts.warn;
+    reports.push(res);
+  }
+  // Render a fleet summary
+  const lines = [];
+  lines.push(`# Fleet diagnostic — ${ids.length} active engagements`);
+  lines.push("");
+  lines.push(`**Totals:** ${totalIssues} issues across the fleet (${totalErrors} errors, ${totalWarns} warnings)`);
+  lines.push("");
+  if (ids.length === 0) {
+    lines.push("_(no engagements with status='in_progress' or agent_status in {running, error})_");
+  } else {
+    lines.push("## Per-engagement summary");
+    lines.push("| engagement | agent_status | phase | issues | errors | warnings |");
+    lines.push("|---|---|---|---|---|---|");
+    for (const r of reports) {
+      if (!r.ok) { lines.push(`| ${r.engagement_id} | — | — | ERR: ${r.error} | — | — |`); continue; }
+      lines.push(`| ${r.engagement_id} | ${r.engagement.agent_status} | ${r.engagement.engagement_phase} | ${r.issues.length} | ${r.counts.error} | ${r.counts.warn} |`);
+    }
+    lines.push("");
+    // Surface only engagements with issues for detail
+    const flagged = reports.filter((r) => r.ok && r.issues.length > 0);
+    if (flagged.length > 0) {
+      lines.push("## Detail (only engagements with issues)");
+      for (const r of flagged) {
+        lines.push("");
+        lines.push(`### ${r.engagement_id}`);
+        for (const i of r.issues) {
+          const sev = i.severity === "error" ? "🔴" : i.severity === "warn" ? "🟡" : "🔵";
+          lines.push(`- ${sev} **${i.kind}**: ${i.message}`);
+        }
+      }
+    }
+  }
+  return {
+    n_engagements: ids.length,
+    total_issues: totalIssues,
+    total_errors: totalErrors,
+    total_warns: totalWarns,
+    report_md: lines.join("\n"),
+    reports,
+  };
+}
+
+module.exports = { analyzeEngagement, analyzeAllActive };
 
 // ───────────────────── CLI main ─────────────────────
 
