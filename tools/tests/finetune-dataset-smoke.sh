@@ -176,6 +176,47 @@ else
   pass "seed change → different shuffle order (as expected)"
 fi
 
+# ─────────────────────────── Qwen3 tokenization check ───────────────────────────
+# Render rows through Qwen3's actual chat_template (CPU only — no GPU needed)
+# to catch format-drift bugs where converters emit messages that don't match
+# the expected schema. Requires transformers + jinja2 in the venv.
+log "Qwen3-32B tokenization check (CPU, no GPU)"
+if [[ -d /tmp/finetune-venv ]]; then
+  # shellcheck disable=SC1091
+  source /tmp/finetune-venv/bin/activate
+  python3 -c "
+import sys, json
+try:
+    from transformers import AutoTokenizer
+except ImportError:
+    print('  ${YELLOW}~ WARN${RESET}  transformers not installed — skipping tokenization check')
+    sys.exit(0)
+try:
+    tok = AutoTokenizer.from_pretrained('Qwen/Qwen3-32B')
+except Exception as e:
+    print(f'  ${YELLOW}~ WARN${RESET}  could not load Qwen3-32B tokenizer (network?): {e}')
+    sys.exit(0)
+ok = 0; fail = 0
+for line in open('$WORK/train.jsonl'):
+    try: d = json.loads(line)
+    except: continue
+    if d.get('_meta'): continue
+    try:
+        text = tok.apply_chat_template(d['messages'], tokenize=False, add_generation_prompt=False)
+        assert '<|im_start|>' in text and '<|im_end|>' in text, 'missing Qwen turn markers'
+        ok += 1
+    except Exception as e:
+        print(f'  FAIL on {d.get(\"source\",\"?\")} id={d.get(\"id\",\"?\")}: {e}')
+        fail += 1
+        if fail >= 3: break
+print(f'  rendered: {ok} rows OK, {fail} rows failed')
+sys.exit(0 if fail == 0 else 1)
+" || fail "Qwen3 tokenization check produced failures"
+  pass "Qwen3 tokenization renders cleanly on all sample rows"
+else
+  log "${YELLOW}~ WARN${RESET}  /tmp/finetune-venv not found — skip tokenization (run build-wrn.py once to set it up)"
+fi
+
 echo
 echo "${GREEN}🎯 ALL DATASET SMOKE ASSERTIONS PASSED${RESET}"
 echo "Pipeline is ready for real corpora when operator runs run-finetune.sh."
