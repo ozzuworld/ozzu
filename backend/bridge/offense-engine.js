@@ -68,13 +68,28 @@ function chatCompletion(messages, modelOverride) {
 // model reasons over the same typed rows L4 would, plus scope/ROE.
 async function gatherContext(engagementId) {
   const eng = await db.query(
-    `SELECT id, engagement_type, scope, roe, status FROM pentest_engagements WHERE id = $1`, [engagementId]);
+    `SELECT id, engagement_type, scope, roe, status,
+            executor_host, executor_adb_target, executor_tools
+       FROM pentest_engagements WHERE id = $1`, [engagementId]);
   const hosts = await db.query(
     `SELECT ip, hostname, status, ports FROM recon_hosts WHERE engagement_id = $1 ORDER BY ip`, [engagementId]);
   const findings = await db.query(
     `SELECT title, severity, status, affected_asset, affected_assets, refs
        FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]);
   return { engagement: eng.rows[0] || null, hosts: hosts.rows, findings: findings.rows };
+}
+
+// Wrap the model's logical command for the engagement's executor. For dev-01,
+// the command runs as-is. For tablet/phone executors (adb-over-WG), we b64-encode
+// the command and route it through adb shell on the target — the SSH-to-dev-01
+// transport layer is unchanged; dev-01 hosts adb and reaches the tablet via WG.
+// The </dev/null is mandatory per the adb-shell-stdin discipline.
+function wrapForExecutor(command, engagement) {
+  if (!engagement) return command;
+  const host = engagement.executor_host || "dev-01";
+  if (host === "dev-01" || !engagement.executor_adb_target) return command;
+  const b64 = Buffer.from(String(command), "utf8").toString("base64");
+  return `adb -s ${engagement.executor_adb_target} shell "echo ${b64} | base64 -d | sh" </dev/null`;
 }
 
 function parseStep(raw) {
@@ -140,13 +155,24 @@ async function advanceOffense(engagementId, intent, modelOverride) {
     errorMessage: null,
   };
 
+  const execHost = ctx.engagement.executor_host || "dev-01";
+  const execTools = Array.isArray(ctx.engagement.executor_tools)
+    ? ctx.engagement.executor_tools
+    : (ctx.engagement.executor_tools && typeof ctx.engagement.executor_tools === "object"
+        ? Object.values(ctx.engagement.executor_tools) : []);
+  const execHint = (execHost === "dev-01")
+    ? "(commands run on a kali toolhost; full network access is via dev-01's LAN/VPN)"
+    : `(commands will run ON the executor itself — the executor is on the same LAN as the targets; do NOT prefix with adb / ssh, just write the command as if you were on a regular Linux shell on the target LAN)`;
+
   const userMsg = [
     `Engagement: type=${ctx.engagement.engagement_type || "?"} status=${ctx.engagement.status || "?"}`,
     `Scope/ROE: ${JSON.stringify({ scope: ctx.engagement.scope, roe: ctx.engagement.roe })}`,
     `Operator intent: ${intent || "advance the engagement toward its objective"}`,
+    `Executor: ${execHost} ${execHint}`,
+    `Tools available on the executor: ${execTools.length ? execTools.join(", ") : "(unknown — pick from POSIX-portable shell tools only)"}`,
     `Structured recon (hosts/ports/services): ${JSON.stringify(ctx.hosts)}`,
     `Findings so far: ${JSON.stringify(ctx.findings)}`,
-    "Propose the single next in-scope offensive step as strict JSON.",
+    "Propose the single next in-scope offensive step as strict JSON. Pick commands ONLY from the listed tools — do not invent tool names.",
   ].join("\n");
 
   let raw, step;
@@ -181,11 +207,12 @@ async function advanceOffense(engagementId, intent, modelOverride) {
   // They are deliberately NOT returned to the caller (L4).
   const titleBase = step.title || `Offensive step ${seq}`;
   const title = modelOverride ? `[${modelOverride}] ${titleBase}` : titleBase;
+  const wrappedCommand = wrapForExecutor(step.command, ctx.engagement);
   const ins = await db.query(
     `INSERT INTO soc_queue_items (engagement_id, seq, title, description, command, expected_artifact, status)
      VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id, seq`,
     [engagementId, seq, title,
-     step.rationale || null, step.command, step.expected_artifact || null]);
+     step.rationale || null, wrappedCommand, step.expected_artifact || null]);
 
   tel.queueItemId = ins.rows[0].id;
   tel.stepQueued = true;

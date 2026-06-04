@@ -1121,6 +1121,37 @@ async function init() {
     await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS affected_assets JSONB DEFAULT '[]'`);
     await pool.query(`ALTER TABLE pentest_findings ALTER COLUMN cvss_vector TYPE VARCHAR(255)`);
 
+    // ── Per-engagement executor routing (dir_1780586225013) ──
+    // executor_host: 'dev-01' (default, runs commands as-is on the kali toolhost) or
+    //   'tablet-p610' (or any android-pentest-bridge style executor — runs commands
+    //   ON the tablet via adb-over-WG so wlan0 reaches the target LAN directly,
+    //   avoiding the subnet conflict between dev-01's 192.168.1.0/24 and the
+    //   target's 192.168.1.0/24).
+    // executor_adb_target: e.g. '10.9.0.10:5555' — set when executor_host is a
+    //   tablet/phone we reach via adb. NULL for dev-01-direct executors.
+    // executor_tools: jsonb array of tool names available on the executor —
+    //   passed to the L3 prompt so the model picks commands appropriate to the runner.
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS executor_host VARCHAR(64) DEFAULT 'dev-01'`);
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS executor_adb_target VARCHAR(64)`);
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS executor_tools JSONB DEFAULT '[]'`);
+
+    // Seed: SKYLINE-SOC-2026-628 (EDIFICIO LAURA) runs through tablet-p610 because
+    // dev-01 can't reach the target LAN (subnet conflict). Idempotent — only sets
+    // values if columns are still at their defaults.
+    await pool.query(`UPDATE pentest_engagements
+      SET executor_host = 'tablet-p610',
+          executor_adb_target = '10.9.0.10:5555',
+          executor_tools = '["sh","busybox","curl","nc","base64","cat","grep","awk","ip","iptables","tcpdump"]'::jsonb
+      WHERE id = 'SKYLINE-SOC-2026-628'
+        AND executor_host = 'dev-01'`);
+
+    // Seed the default kali toolchain for all other engagements that are still at
+    // the empty executor_tools default. Idempotent.
+    await pool.query(`UPDATE pentest_engagements
+      SET executor_tools = '["nmap","masscan","msfconsole","hydra","sqlmap","curl","wget","ssh","python3","gobuster","nikto","searchsploit","tcpdump","ncat","openssl"]'::jsonb
+      WHERE executor_host = 'dev-01'
+        AND (executor_tools IS NULL OR executor_tools = '[]'::jsonb)`);
+
     // ── SOC recon hosts (dir_1780530175588) ──
     // Structured host/port rows parsed SERVER-SIDE from scan stdout at ingest, so
     // Cipher analyzes these rows (via get_recon) instead of pasting raw nmap/nc dumps
