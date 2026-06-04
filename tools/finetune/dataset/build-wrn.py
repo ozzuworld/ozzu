@@ -33,12 +33,17 @@ import os
 import sys
 from pathlib import Path
 
-# Default WhiteRabbitNeo HF dataset list. Add more chapters here as they release.
-# All are under Apache-2.0 / publicly downloadable as of mid-2026.
+# Default WhiteRabbitNeo HF dataset list. PJMixers/WhiteRabbitNeo is the
+# UNGATED public mirror — original WhiteRabbitNeo/WRN-Chapter-* require auth
+# + access approval and silently break the pipeline (discovered 2026-06-04).
+# Schema is essentially identical: {subject, system, instruction, response}
+# which the normalize_example function already handles via the
+# instruction/response generic mapper.
 DEFAULT_CHAPTERS = [
+    "PJMixers/WhiteRabbitNeo",                 # ungated mirror, 18,897 rows — try first
+    # Gated originals kept as a fallback for users with HF_TOKEN + access:
     "WhiteRabbitNeo/WRN-Chapter-1",
     "WhiteRabbitNeo/WRN-Chapter-2",
-    # Future chapters land here as they're released.
 ]
 
 
