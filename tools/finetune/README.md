@@ -39,7 +39,7 @@ tmux new-session -d -s gpu-poll \
 # 1. Kick off training — uses the pre-built v1.1 multi-corpus dataset
 bash /home/gcp/ozzu/tools/finetune/run-finetune.sh \
   --ssh-key-id <YOUR_DO_KEY_ID> \
-  --dataset-dir /home/gcp/ozzu/private/finetune/dataset-v1.1
+  --dataset-dir /home/gcp/ozzu/private/finetune/dataset-v1.3
 
 # 2. (Watch progress in another shell — see SOC-TRAINING-HYPERPARAMS.md
 #    for the first-30-min watch checklist + when-to-kill signals)
@@ -62,7 +62,15 @@ cd /home/gcp/ozzu/backend && docker compose up -d bridge
 
 That's it. Five commands + a wait. Cost: ~$30-40 of the DO MI300X credit per full training run + ~$5-10 for the eval-time AutoPenBench runs.
 
-**Why `--dataset-dir`:** the v1.1 corpus mix (73% WRN + 11% Glaive function-calling + 10% Fenrir + 5% Dolly, per `SOC-FIELD-SURVEY-2026-06-04.md`) is already built and persisted. `run-finetune.sh` detects the pre-built train.jsonl + eval.jsonl and skips the rebuild phase. Rebuild from scratch via `tools/finetune/dataset/build-v11-mix.py` if needed.
+**Why `--dataset-dir`:** v1.3 is the current canonical dataset:
+- 72% WRN + 12% Glaive function-calling + 10% Fenrir + 5% Dolly + 0.5% SOC-synthetic
+- Built from v1.1 (multi-corpus mix per `SOC-FIELD-SURVEY-2026-06-04.md`) →
+  v1.2 (quality-filtered, ~150 harmful-refusal rows + full-conv dups removed) →
+  v1.3 (+ 100 synthetic examples using our actual MCP tool schemas)
+- 18,424 train + 969 eval rows, 10.2% `<tool_call>` content, all rows ≤4096 tokens
+- `run-finetune.sh` detects pre-built train.jsonl + skips the rebuild phase. Rebuild from scratch via `tools/finetune/dataset/build-v11-mix.py` + `quality-filter.py` + `build-soc-synthetic.py`.
+
+**Optional: enable assistant-only loss masking.** Pass `--assistant-only-loss` to train.py to mask system/user/tool tokens from loss — standard SFT practice, may improve tool-call training efficiency. Default OFF; opt-in once validated.
 
 Optional flags to `run-finetune.sh`:
 - `--writeups-repo /path/to/0xdf` — include 0xdf HTB writeups in the dataset (otherwise skipped)
