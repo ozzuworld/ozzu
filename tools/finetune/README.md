@@ -27,25 +27,40 @@ tools/finetune/
     └── run-autopenbench.sh            🚧 stub — implement after first trained adapter
 ```
 
-## TL;DR — the two-command training flow
+## TL;DR — the five-command training cycle
 
-After one-time prerequisites (below), the entire training cycle is:
+After one-time prerequisites (below) AND DigitalOcean GPU access approval (separate request via the DO dashboard):
 
 ```bash
-# 1. Kick off — uses the pre-built v1.1 multi-corpus dataset (recommended)
+# 0. (OPTIONAL — only if access not yet granted) Watch for DO GPU approval
+tmux new-session -d -s gpu-poll \
+  'bash /home/gcp/ozzu/tools/finetune/do-droplet/poll-gpu-access.sh'
+
+# 1. Kick off training — uses the pre-built v1.1 multi-corpus dataset
 bash /home/gcp/ozzu/tools/finetune/run-finetune.sh \
   --ssh-key-id <YOUR_DO_KEY_ID> \
   --dataset-dir /home/gcp/ozzu/private/finetune/dataset-v1.1
 
-# 2. (Watch progress in another shell)
+# 2. (Watch progress in another shell — see SOC-TRAINING-HYPERPARAMS.md
+#    for the first-30-min watch checklist + when-to-kill signals)
 ssh root@<droplet-ip-from-step-1> 'tail -f /root/train.log'
 
 # 3. When training log shows "DONE — adapter at...", close the loop
 bash /home/gcp/ozzu/tools/finetune/pull-adapter.sh
 # scp's adapter back, registers in Ollama, prompts before destroy
+
+# 4. Validate the fine-tune before swapping the bridge default
+bash /home/gcp/ozzu/tools/finetune/post-train-validate.sh
+# Runs Step 8 smoke + AutoPenBench eval + compare.py verdict.
+# Exit 0 = SAFE TO SWAP. Exit 1 = don't swap.
+
+# 5. (If post-train-validate passed) Swap bridge default — exact command
+#    printed by post-train-validate; basically:
+sudo sed -i 's/^OFFENSE_MODEL_NAME=.*/OFFENSE_MODEL_NAME=ozzu-soc-v1/' /home/gcp/ozzu/backend/.env
+cd /home/gcp/ozzu/backend && docker compose up -d bridge
 ```
 
-That's it. Two commands + a wait. Cost: ~$30-40 of the DO MI300X credit per full training run.
+That's it. Five commands + a wait. Cost: ~$30-40 of the DO MI300X credit per full training run + ~$5-10 for the eval-time AutoPenBench runs.
 
 **Why `--dataset-dir`:** the v1.1 corpus mix (73% WRN + 11% Glaive function-calling + 10% Fenrir + 5% Dolly, per `SOC-FIELD-SURVEY-2026-06-04.md`) is already built and persisted. `run-finetune.sh` detects the pre-built train.jsonl + eval.jsonl and skips the rebuild phase. Rebuild from scratch via `tools/finetune/dataset/build-v11-mix.py` if needed.
 
