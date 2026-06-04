@@ -553,6 +553,19 @@ module.exports = function mcpRoutes(ctx) {
       inputSchema: { type: "object", properties: {} },
     },
     {
+      name: "get_offense_telemetry",
+      description: "Read-only audit surface for the L3 offense pipeline. Returns AGGREGATES over advance_offense calls (per-model latency / step-queued% / avg refs / in-scope%, per-intent stats, outcome distribution, latency percentiles) plus a flat list of recent rows. MEMBRANE-SAFE: never includes raw commands or rationales — only shape, timing, and outcome metadata. Use this to spot harness gaps and drive the harness-improvement loop.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Filter to a specific engagement (optional)" },
+          model: { type: "string", description: "Filter to a specific model_used (optional, e.g. 'deepseek-r1:32b')" },
+          since: { type: "string", description: "ISO timestamp filter (default: 30 days ago)" },
+          limit: { type: "number", description: "Max rows in the recent-rows table (default 50, max 500)" },
+        },
+      },
+    },
+    {
       name: "soc_queue_steps",
       description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
@@ -1803,6 +1816,78 @@ ${result.narrative}
         } catch (e) {
           return { content: [{ type: "text", text: `stop_offense_model failed: ${e.message}` }], isError: true };
         }
+      }
+
+      case "get_offense_telemetry": {
+        const since = args.since || new Date(Date.now() - 30 * 86400 * 1000).toISOString();
+        const limit = Math.min(Number(args.limit) || 50, 500);
+        const filters = [`created_at >= $1`];
+        const params = [since];
+        if (args.engagement_id) { filters.push(`engagement_id = $${params.length + 1}`); params.push(args.engagement_id); }
+        if (args.model)         { filters.push(`model_used = $${params.length + 1}`); params.push(args.model); }
+        const where = filters.join(" AND ");
+
+        const [total, byModel, byIntent, byOutcome, latency, recent] = await Promise.all([
+          db.query(`SELECT COUNT(*)::int AS n FROM offense_telemetry WHERE ${where}`, params),
+          db.query(`SELECT model_used, COUNT(*)::int AS calls,
+                           ROUND(AVG(latency_ms))::int AS avg_latency_ms,
+                           ROUND(100.0 * SUM(CASE WHEN step_queued THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(*),0), 1) AS step_queued_pct,
+                           ROUND(AVG(n_references)::numeric, 2) AS avg_n_refs,
+                           ROUND(100.0 * SUM(CASE WHEN in_scope THEN 1 ELSE 0 END)::numeric / NULLIF(SUM(CASE WHEN in_scope IS NOT NULL THEN 1 ELSE 0 END),0), 1) AS in_scope_pct
+                    FROM offense_telemetry WHERE ${where} GROUP BY model_used ORDER BY calls DESC`, params),
+          db.query(`SELECT intent_category, COUNT(*)::int AS calls,
+                           ROUND(100.0 * SUM(CASE WHEN step_queued THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(*),0), 1) AS step_queued_pct
+                    FROM offense_telemetry WHERE ${where} GROUP BY intent_category ORDER BY calls DESC`, params),
+          db.query(`SELECT outcome, COUNT(*)::int AS n FROM offense_telemetry WHERE ${where} GROUP BY outcome ORDER BY n DESC`, params),
+          db.query(`SELECT ROUND(PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY latency_ms))::int AS p50_ms,
+                           ROUND(PERCENTILE_CONT(0.9)  WITHIN GROUP (ORDER BY latency_ms))::int AS p90_ms,
+                           ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY latency_ms))::int AS p99_ms
+                    FROM offense_telemetry WHERE ${where}`, params),
+          db.query(`SELECT id, engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, error_message, created_at
+                    FROM offense_telemetry WHERE ${where} ORDER BY created_at DESC LIMIT $${params.length + 1}`, [...params, limit]),
+        ]);
+
+        const totalN = total.rows[0]?.n || 0;
+        const lat = latency.rows[0] || { p50_ms: 0, p90_ms: 0, p99_ms: 0 };
+        const lines = [
+          `# Offense telemetry (since ${since})`,
+          `**Total calls:** ${totalN}` + (args.engagement_id ? ` for ${args.engagement_id}` : "") + (args.model ? ` on ${args.model}` : ""),
+          "",
+          "## By model",
+        ];
+        if (byModel.rows.length === 0) lines.push("_(no rows)_");
+        else {
+          lines.push("| model | calls | avg latency | step queued% | avg refs | in-scope% |");
+          lines.push("|---|---|---|---|---|---|");
+          for (const r of byModel.rows) lines.push(`| ${r.model_used} | ${r.calls} | ${(r.avg_latency_ms / 1000).toFixed(1)}s | ${r.step_queued_pct ?? "-"}% | ${r.avg_n_refs ?? "-"} | ${r.in_scope_pct ?? "-"}% |`);
+        }
+        lines.push("", "## By intent");
+        if (byIntent.rows.length === 0) lines.push("_(no rows)_");
+        else {
+          lines.push("| intent | calls | step queued% |");
+          lines.push("|---|---|---|");
+          for (const r of byIntent.rows) lines.push(`| ${r.intent_category ?? "(null)"} | ${r.calls} | ${r.step_queued_pct ?? "-"}% |`);
+        }
+        lines.push("", "## Outcomes");
+        if (byOutcome.rows.length === 0) lines.push("_(no rows)_");
+        else {
+          lines.push("| outcome | n |");
+          lines.push("|---|---|");
+          for (const r of byOutcome.rows) lines.push(`| ${r.outcome ?? "(null)"} | ${r.n} |`);
+        }
+        lines.push("", `## Latency`, `p50=${(lat.p50_ms / 1000).toFixed(1)}s · p90=${(lat.p90_ms / 1000).toFixed(1)}s · p99=${(lat.p99_ms / 1000).toFixed(1)}s`);
+        lines.push("", `## Recent (${recent.rows.length} of ${totalN})`);
+        if (recent.rows.length === 0) lines.push("_(no rows)_");
+        else {
+          lines.push("| id | engagement | qi | model | intent | hosts | findings | queued | refs | latency | outcome | error | created |");
+          lines.push("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+          for (const r of recent.rows) {
+            const created = new Date(r.created_at).toISOString().slice(0, 16).replace("T", " ");
+            const err = r.error_message ? (r.error_message.length > 40 ? r.error_message.slice(0, 37) + "..." : r.error_message) : "";
+            lines.push(`| ${r.id} | ${r.engagement_id} | ${r.queue_item_id ?? "-"} | ${r.model_used} | ${r.intent_category ?? "-"} | ${r.n_hosts} | ${r.n_findings} | ${r.step_queued ? "✓" : "·"} | ${r.n_references} | ${(r.latency_ms / 1000).toFixed(1)}s | ${r.outcome ?? "-"} | ${err} | ${created} |`);
+          }
+        }
+        return { content: [{ type: "text", text: lines.join("\n") }] };
       }
 
       case "soc_queue_steps": {

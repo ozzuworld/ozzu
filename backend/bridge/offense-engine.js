@@ -83,6 +83,38 @@ function parseStep(raw) {
   return JSON.parse(m ? m[0] : raw);
 }
 
+// Coarse intent bucketing for the offense_telemetry table — keeps audit
+// queries readable without storing raw operator text. Cipher (L4) already
+// sees the raw intent (it's the caller), so categorization here exposes
+// nothing new.
+function categorizeIntent(intent) {
+  if (!intent) return "default";
+  const s = String(intent).toLowerCase();
+  if (/(enumerat|recon|discover|scan|enum|fingerprint)/.test(s)) return "enumeration";
+  if (/(access|exploit|gain|foothold|initial|rce|cve)/.test(s))   return "access";
+  if (/(lateral|pivot|move|escalat)/.test(s))                     return "lateral";
+  if (/(exfil|extract|loot|data|credential)/.test(s))             return "exfiltration";
+  return "other";
+}
+
+// Append one row to offense_telemetry. NEVER throws — telemetry failure
+// must never break advance_offense.
+async function insertTelemetry(tel) {
+  try {
+    await db.query(
+      `INSERT INTO offense_telemetry
+         (engagement_id, queue_item_id, model_used, intent_category,
+          n_hosts, n_findings, step_queued, in_scope, n_references,
+          latency_ms, error_message)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [tel.engagementId, tel.queueItemId, tel.model, tel.intentCategory,
+       tel.nHosts, tel.nFindings, tel.stepQueued, tel.inScope, tel.nReferences,
+       tel.latencyMs, tel.errorMessage]);
+  } catch (e) {
+    console.error("[offense-engine] telemetry insert failed:", e.message);
+  }
+}
+
 // Advance the engagement by one offensive step. Returns ONLY a sanitized label —
 // the command/rationale/references stay server-side in the PA queue.
 // modelOverride: optional model tag for in-harness benchmarking; queue title gets
@@ -91,6 +123,22 @@ async function advanceOffense(engagementId, intent, modelOverride) {
   if (!engagementId) throw new Error("engagement_id required");
   const ctx = await gatherContext(engagementId);
   if (!ctx.engagement) throw new Error(`engagement ${engagementId} not found`);
+
+  const effectiveModel = modelOverride || MODEL_NAME;
+  const startMs = Date.now();
+  const tel = {
+    engagementId,
+    queueItemId: null,
+    model: effectiveModel,
+    intentCategory: categorizeIntent(intent),
+    nHosts: ctx.hosts.length,
+    nFindings: ctx.findings.length,
+    stepQueued: false,
+    inScope: null,
+    nReferences: 0,
+    latencyMs: 0,
+    errorMessage: null,
+  };
 
   const userMsg = [
     `Engagement: type=${ctx.engagement.engagement_type || "?"} status=${ctx.engagement.status || "?"}`,
@@ -101,16 +149,26 @@ async function advanceOffense(engagementId, intent, modelOverride) {
     "Propose the single next in-scope offensive step as strict JSON.",
   ].join("\n");
 
-  const raw = await chatCompletion([
-    { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: userMsg },
-  ], modelOverride);
+  let raw, step;
+  try {
+    raw = await chatCompletion([
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userMsg },
+    ], modelOverride);
+    tel.latencyMs = Date.now() - startMs;
+    step = parseStep(raw);
+  } catch (e) {
+    tel.latencyMs = Date.now() - startMs;
+    tel.errorMessage = e.message;
+    await insertTelemetry(tel);
+    throw e instanceof Error ? e : new Error(`offense model error: ${String(e)}`);
+  }
 
-  let step;
-  try { step = parseStep(raw); }
-  catch (e) { throw new Error(`offense model returned non-JSON: ${e.message}`); }
+  tel.inScope = step && step.in_scope !== false;
+  tel.nReferences = step && Array.isArray(step.references) ? step.references.length : 0;
 
   if (!step || step.in_scope === false || !step.command) {
+    await insertTelemetry(tel);
     return { queued: false, engagement_id: engagementId,
              reason: "the offense model judged no in-scope step is available" };
   }
@@ -128,6 +186,10 @@ async function advanceOffense(engagementId, intent, modelOverride) {
      VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id, seq`,
     [engagementId, seq, title,
      step.rationale || null, step.command, step.expected_artifact || null]);
+
+  tel.queueItemId = ins.rows[0].id;
+  tel.stepQueued = true;
+  await insertTelemetry(tel);
 
   return {
     queued: true,

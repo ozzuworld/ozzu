@@ -1142,6 +1142,32 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_recon_hosts_engagement ON recon_hosts(engagement_id, discovered_at DESC)`);
 
+    // ── L3 telemetry / audit loop (dir_1780583452935) ──
+    // One row per advance_offense call. Holds SHAPE + TIMING + OUTCOME of the L3
+    // model's behavior — never raw commands or rationales (those live in
+    // soc_queue_items, joined via queue_item_id). Membrane-safe audit surface
+    // for L4: read aggregates, spot harness gaps, build harness upgrades.
+    await pool.query(`CREATE TABLE IF NOT EXISTS offense_telemetry (
+      id                    SERIAL PRIMARY KEY,
+      engagement_id         VARCHAR(50) NOT NULL REFERENCES pentest_engagements(id) ON DELETE CASCADE,
+      queue_item_id         INTEGER REFERENCES soc_queue_items(id) ON DELETE SET NULL,
+      model_used            VARCHAR(80) NOT NULL,
+      intent_category       VARCHAR(32),
+      n_hosts               INTEGER NOT NULL DEFAULT 0,
+      n_findings            INTEGER NOT NULL DEFAULT 0,
+      step_queued           BOOLEAN NOT NULL,
+      in_scope              BOOLEAN,
+      n_references          INTEGER DEFAULT 0,
+      references_validated  JSONB,
+      latency_ms            INTEGER NOT NULL,
+      outcome               VARCHAR(24) DEFAULT 'pending',
+      outcome_notes         TEXT,
+      error_message         TEXT,
+      created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_offense_telemetry_engagement ON offense_telemetry(engagement_id, created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_offense_telemetry_model ON offense_telemetry(model_used, created_at DESC)`);
+
     // ── Infra-state (dir_1780260211325 D4, dir_1780260211365 D5, dir_1780260211404 D6) ──
     await pool.query(`CREATE TABLE IF NOT EXISTS device_credentials (
       device_id    TEXT PRIMARY KEY,
