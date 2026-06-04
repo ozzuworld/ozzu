@@ -1165,6 +1165,30 @@ async function init() {
       WHERE executor_host = 'dev-01'
         AND (executor_tools IS NULL OR executor_tools = '[]'::jsonb)`);
 
+    // dir_1780594102051 — Step 8 of OFFENSE-AGENT-DESIGN.md: Task Coordination Graph.
+    // The xOffense multi-agent pattern's persistent backbone — a DAG of tasks per
+    // engagement. The Orchestrator agent reads this graph to pick the next unblocked
+    // task; the Aggregator agent writes outcome_summary after each task completes.
+    // parent_ids encodes DAG edges (a task can have multiple prerequisites).
+    await pool.query(`CREATE TABLE IF NOT EXISTS engagement_tasks (
+      id              SERIAL PRIMARY KEY,
+      engagement_id   VARCHAR(50) NOT NULL REFERENCES pentest_engagements(id) ON DELETE CASCADE,
+      parent_ids      INTEGER[] NOT NULL DEFAULT '{}',
+      directive       TEXT NOT NULL,
+      phase           VARCHAR(32),
+      prerequisites   TEXT,
+      status          VARCHAR(16) NOT NULL DEFAULT 'pending',
+                      -- pending | in_flight | done | failed | skipped
+      queue_item_id   INTEGER REFERENCES soc_queue_items(id) ON DELETE SET NULL,
+      outcome_summary JSONB,
+      iteration       INTEGER,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at    TIMESTAMPTZ
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_engagement_tasks_engagement ON engagement_tasks(engagement_id, status, created_at)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_engagement_tasks_queue_item ON engagement_tasks(queue_item_id)`);
+
     // ── SOC recon hosts (dir_1780530175588) ──
     // Structured host/port rows parsed SERVER-SIDE from scan stdout at ingest, so
     // Cipher analyzes these rows (via get_recon) instead of pasting raw nmap/nc dumps

@@ -580,7 +580,16 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "reset_agent_run",
-      description: "Reset the L3 agent's conversation transcript for an engagement back to empty (agent_run_state = {}, agent_status = idle). Use when scope changed materially or the prior run derailed. Does NOT delete queue items or findings.",
+      description: "Reset the L3 agent's conversation transcript AND task graph for an engagement back to empty (agent_run_state = {}, agent_status = idle, engagement_tasks rows deleted). Use when scope changed materially or the prior run derailed. Does NOT delete queue items or findings.",
+      inputSchema: {
+        type: "object",
+        properties: { engagement_id: { type: "string", description: "Engagement ID" } },
+        required: ["engagement_id"],
+      },
+    },
+    {
+      name: "get_task_graph",
+      description: "Read-only view of the L3 agent's current Task Coordination Graph for an engagement (Step 8 of OFFENSE-AGENT-DESIGN.md). Returns the DAG of engagement_tasks the Orchestrator built — each task's directive, phase, status, parent_ids, queue_item_id link, outcome_summary. Use this to see WHAT the agent is planning vs. what it has executed.",
       inputSchema: {
         type: "object",
         properties: { engagement_id: { type: "string", description: "Engagement ID" } },
@@ -1880,9 +1889,42 @@ ${result.narrative}
         const agent = require("../offense-agent");
         try {
           await agent.resetAgent(args.engagement_id);
-          return { content: [{ type: "text", text: `🧹 Agent transcript reset for ${args.engagement_id}.` }] };
+          return { content: [{ type: "text", text: `🧹 Agent transcript + task graph reset for ${args.engagement_id}.` }] };
         } catch (e) {
           return { content: [{ type: "text", text: `reset_agent_run failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "get_task_graph": {
+        const orch = require("../offense-orchestrator");
+        try {
+          const g = await orch.loadGraph(args.engagement_id);
+          const lines = [
+            `# Task Coordination Graph for ${args.engagement_id}`,
+            `Total tasks: ${g.tasks.length} · Unblocked pending: ${g.unblocked.length}`,
+            "",
+          ];
+          if (g.tasks.length === 0) lines.push("_(empty — no tasks yet)_");
+          else {
+            lines.push("| id | phase | status | parents | directive | outcome_signals |");
+            lines.push("|---|---|---|---|---|---|");
+            for (const t of g.tasks) {
+              const parents = (t.parent_ids || []).length ? (t.parent_ids).join(",") : "root";
+              const directive = (t.directive || "").replace(/\|/g, "\\|").slice(0, 80);
+              let outcome = "";
+              if (t.outcome_summary) {
+                try {
+                  const o = typeof t.outcome_summary === "string" ? JSON.parse(t.outcome_summary) : t.outcome_summary;
+                  outcome = Array.isArray(o.key_signals) ? o.key_signals.slice(0, 2).join("; ").slice(0, 80) : "";
+                } catch (_) {}
+              }
+              lines.push(`| ${t.id} | ${t.phase || "?"} | ${t.status} | ${parents} | ${directive} | ${outcome} |`);
+            }
+            if (g.unblocked.length) lines.push(`\n**Unblocked pending:** ${g.unblocked.join(", ")}`);
+          }
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `get_task_graph failed: ${e.message}` }], isError: true };
         }
       }
 
