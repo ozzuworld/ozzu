@@ -626,6 +626,11 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "diagnose_all_engagements",
+      description: "Fleet-wide health check — runs analyze_engagement_telemetry over every active engagement (status='in_progress' OR agent_status in {running, error}) and returns a summary table + detail for engagements with issues. Use to find which engagements need attention without per-id polling. Membrane-safe (same as per-engagement analyzer).",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
       name: "soc_queue_steps",
       description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
@@ -1971,6 +1976,16 @@ ${result.narrative}
           return { content: [{ type: "text", text: r.report_md }] };
         } catch (e) {
           return { content: [{ type: "text", text: `analyze_engagement_telemetry failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "diagnose_all_engagements": {
+        try {
+          const analyzer = require("/home/gcp/ozzu/tools/diagnostics/telemetry-analyze.js");
+          const r = await analyzer.analyzeAllActive();
+          return { content: [{ type: "text", text: r.report_md }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `diagnose_all_engagements failed: ${e.message}` }], isError: true };
         }
       }
 
