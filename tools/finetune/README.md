@@ -32,8 +32,10 @@ tools/finetune/
 After one-time prerequisites (below), the entire training cycle is:
 
 ```bash
-# 1. Kick off everything — dataset prep + provision + bootstrap + start training
-bash /home/gcp/ozzu/tools/finetune/run-finetune.sh --ssh-key-id <YOUR_DO_KEY_ID>
+# 1. Kick off — uses the pre-built v1.1 multi-corpus dataset (recommended)
+bash /home/gcp/ozzu/tools/finetune/run-finetune.sh \
+  --ssh-key-id <YOUR_DO_KEY_ID> \
+  --dataset-dir /home/gcp/ozzu/private/finetune/dataset-v1.1
 
 # 2. (Watch progress in another shell)
 ssh root@<droplet-ip-from-step-1> 'tail -f /root/train.log'
@@ -44,6 +46,8 @@ bash /home/gcp/ozzu/tools/finetune/pull-adapter.sh
 ```
 
 That's it. Two commands + a wait. Cost: ~$30-40 of the DO MI300X credit per full training run.
+
+**Why `--dataset-dir`:** the v1.1 corpus mix (73% WRN + 11% Glaive function-calling + 10% Fenrir + 5% Dolly, per `SOC-FIELD-SURVEY-2026-06-04.md`) is already built and persisted. `run-finetune.sh` detects the pre-built train.jsonl + eval.jsonl and skips the rebuild phase. Rebuild from scratch via `tools/finetune/dataset/build-v11-mix.py` if needed.
 
 Optional flags to `run-finetune.sh`:
 - `--writeups-repo /path/to/0xdf` — include 0xdf HTB writeups in the dataset (otherwise skipped)
