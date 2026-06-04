@@ -37,6 +37,7 @@ services:
       - /root/.local/share/claude:/root/.local/share/claude:ro
       - /root/.local/bin/claude:/usr/local/bin/claude:ro
       - /root/.config/gh:/root/.config/gh:ro
+      - /root/.config/vastai:/root/.config/vastai:ro
       - /root/.gitconfig:/root/.gitconfig:ro
       - /root/.ssh:/root/.ssh:ro
       - /usr/bin/gh:/usr/local/bin/gh:ro

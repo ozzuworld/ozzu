@@ -519,6 +519,7 @@ module.exports = function mcpRoutes(ctx) {
         properties: {
           engagement_id: { type: "string", description: "Engagement ID" },
           intent: { type: "string", description: "High-level objective for this step (optional, e.g. 'gain access to the target service')" },
+          model_override: { type: "string", description: "Optional ollama/vLLM model tag to use for THIS call only (e.g. 'qwen3:32b' or 'deepseek-r1:32b'). Used for in-harness benchmarking; the resulting queue item's title is prefixed with [<model_tag>] so the operator can attribute it. If omitted, OFFENSE_MODEL_NAME env is used." },
         },
         required: ["engagement_id"],
       },
@@ -1735,7 +1736,7 @@ ${result.narrative}
       case "advance_offense": {
         const offense = require("../offense-engine");
         try {
-          const r = await offense.advanceOffense(args.engagement_id, args.intent);
+          const r = await offense.advanceOffense(args.engagement_id, args.intent, args.model_override);
           if (!r.queued) {
             return { content: [{ type: "text", text: `No step queued for ${args.engagement_id} — ${r.reason}.` }] };
           }

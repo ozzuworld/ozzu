@@ -34,12 +34,12 @@ const SYSTEM_PROMPT = [
   'If no in-scope step exists, return {"in_scope":false,"command":""}.',
 ].join("\n");
 
-function chatCompletion(messages) {
+function chatCompletion(messages, modelOverride) {
   return new Promise((resolve, reject) => {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    const payload = JSON.stringify({ model: MODEL_NAME, messages, temperature: 0.2, stream: false });
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     const req = lib.request(url, { method: "POST", headers, timeout: 120000 }, (res) => {
@@ -85,7 +85,9 @@ function parseStep(raw) {
 
 // Advance the engagement by one offensive step. Returns ONLY a sanitized label —
 // the command/rationale/references stay server-side in the PA queue.
-async function advanceOffense(engagementId, intent) {
+// modelOverride: optional model tag for in-harness benchmarking; queue title gets
+// prefixed with [<model_tag>] so the operator can attribute the step in the SOC app.
+async function advanceOffense(engagementId, intent, modelOverride) {
   if (!engagementId) throw new Error("engagement_id required");
   const ctx = await gatherContext(engagementId);
   if (!ctx.engagement) throw new Error(`engagement ${engagementId} not found`);
@@ -102,7 +104,7 @@ async function advanceOffense(engagementId, intent) {
   const raw = await chatCompletion([
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: userMsg },
-  ]);
+  ], modelOverride);
 
   let step;
   try { step = parseStep(raw); }
@@ -119,10 +121,12 @@ async function advanceOffense(engagementId, intent) {
 
   // The offensive bytes (command / rationale / references) land in the queue for the PA.
   // They are deliberately NOT returned to the caller (L4).
+  const titleBase = step.title || `Offensive step ${seq}`;
+  const title = modelOverride ? `[${modelOverride}] ${titleBase}` : titleBase;
   const ins = await db.query(
     `INSERT INTO soc_queue_items (engagement_id, seq, title, description, command, expected_artifact, status)
      VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id, seq`,
-    [engagementId, seq, step.title || `Offensive step ${seq}`,
+    [engagementId, seq, title,
      step.rationale || null, step.command, step.expected_artifact || null]);
 
   return {
