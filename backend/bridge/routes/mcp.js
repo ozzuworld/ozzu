@@ -512,6 +512,18 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "advance_offense",
+      description: "Advance an AUTHORIZED engagement by ONE offensive step. The self-hosted offense model (L3) reads the structured findings server-side, synthesizes the next in-scope step, and queues it for the PA to execute. Returns ONLY a sanitized confirmation — the offensive command/rationale/refs stay server-side and are NOT surfaced to you (membrane). Use this INSTEAD of reasoning about specific creds/exploits yourself.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+          intent: { type: "string", description: "High-level objective for this step (optional, e.g. 'gain access to the target service')" },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
       name: "soc_queue_steps",
       description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
@@ -1718,6 +1730,19 @@ ${result.narrative}
             text: `**Recon hosts for ${args.engagement_id}** (structured; raw scan output not shown):\n\n${lines.join("\n")}\n\n**Total:** ${result.rows.length} host(s)`
           }]
         };
+      }
+
+      case "advance_offense": {
+        const offense = require("../offense-engine");
+        try {
+          const r = await offense.advanceOffense(args.engagement_id, args.intent);
+          if (!r.queued) {
+            return { content: [{ type: "text", text: `No step queued for ${args.engagement_id} — ${r.reason}.` }] };
+          }
+          return { content: [{ type: "text", text: `✅ Offensive step #${r.seq} queued (queue id ${r.queue_id}) for ${r.engagement_id}.\n\n${r.note}\n\nNext: the PA runs queue item #${r.seq} in the SOC app; results come back as structured findings (get_recon / list_findings).` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `advance_offense failed: ${e.message}\n\n(If this is a connection error, the L3 model isn't up yet — rent + serve it via SOC-OFFENSE-MODEL-RUNBOOK.md first.)` }], isError: true };
+        }
       }
 
       case "soc_queue_steps": {
