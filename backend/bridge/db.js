@@ -1134,6 +1134,9 @@ async function init() {
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS executor_host VARCHAR(64) DEFAULT 'dev-01'`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS executor_adb_target VARCHAR(64)`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS executor_tools JSONB DEFAULT '[]'`);
+    // dir_1780588077262 — Step 1 of OFFENSE-AGENT-DESIGN.md: live-probed tool list.
+    // executor-probe.js sets this timestamp; probes older than 24h are re-run.
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS executor_tools_probed_at TIMESTAMPTZ`);
 
     // Seed: SKYLINE-SOC-2026-628 (EDIFICIO LAURA) runs through tablet-p610 because
     // dev-01 can't reach the target LAN (subnet conflict). Idempotent — only sets

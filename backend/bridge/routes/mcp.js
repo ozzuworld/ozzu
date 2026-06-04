@@ -553,6 +553,18 @@ module.exports = function mcpRoutes(ctx) {
       inputSchema: { type: "object", properties: {} },
     },
     {
+      name: "probe_executor",
+      description: "Probe an engagement's executor for actually-installed tools (replaces the seeded executor_tools list with ground truth). Runs a non-offensive `command -v <tool>` discovery loop over ~40 candidates via the same SSH→dev-01 + adb-wrap path as queue items, then writes the installed list back to pentest_engagements.executor_tools so future advance_offense calls only see real tools. Idempotent: skips if probed_at is < 24h old unless force:true. Call once per engagement before the first advance_offense, or after installing new tools on the executor. Returns added/removed diff for visibility.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+          force: { type: "boolean", description: "Re-probe even if last probe is < 24h old (default false)" },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
       name: "get_offense_telemetry",
       description: "Read-only audit surface for the L3 offense pipeline. Returns AGGREGATES over advance_offense calls (per-model latency / step-queued% / avg refs / in-scope%, per-intent stats, outcome distribution, latency percentiles) plus a flat list of recent rows. MEMBRANE-SAFE: never includes raw commands or rationales — only shape, timing, and outcome metadata. Use this to spot harness gaps and drive the harness-improvement loop.",
       inputSchema: {
@@ -1815,6 +1827,25 @@ ${result.narrative}
           return { content: [{ type: "text", text: `🔌 ${r.note}` }] };
         } catch (e) {
           return { content: [{ type: "text", text: `stop_offense_model failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "probe_executor": {
+        const probe = require("../executor-probe");
+        try {
+          const r = await probe.probeExecutor(args.engagement_id, !!args.force);
+          if (!r.probed) {
+            return { content: [{ type: "text", text: `Skipped — last probe was ${r.cached_age_min} min ago (<24h). Pass force:true to override.\nCurrent tools on ${r.executor}: ${(r.current_tools || []).join(", ") || "(none declared)"}` }] };
+          }
+          const lines = [
+            `🔎 Probed ${r.executor} for ${r.engagement_id}`,
+            `${r.installed_count} tools actually installed: ${r.installed.join(", ")}`,
+          ];
+          if (r.added.length)   lines.push(`+ Added: ${r.added.join(", ")}`);
+          if (r.removed.length) lines.push(`- Removed (was declared, not installed): ${r.removed.join(", ")}`);
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `probe_executor failed: ${e.message}` }], isError: true };
         }
       }
 
