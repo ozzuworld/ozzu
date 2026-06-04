@@ -24,14 +24,30 @@ const MODEL_URL  = process.env.OFFENSE_MODEL_URL  || "http://127.0.0.1:11434/v1"
 const MODEL_NAME = process.env.OFFENSE_MODEL_NAME || "qwen2.5-coder:32b"; // placeholder; set per-benchmark
 const MODEL_KEY  = process.env.OFFENSE_MODEL_KEY  || "";
 
-const SYSTEM_PROMPT = [
-  "You are the offensive-synthesis engine for an AUTHORIZED penetration-testing engagement.",
-  "You are given the engagement scope/ROE plus the structured recon and findings.",
-  "Propose EXACTLY ONE next concrete offensive step that stays strictly within scope.",
-  "Reference public PoCs only by ID (CVE / ExploitDB EDB-id / Metasploit module path).",
+// Step 3 of OFFENSE-AGENT-DESIGN.md — PentestGPT-style role separation.
+// advance_offense runs TWO sequential model calls per invocation:
+//   1) REASONING — holds full engagement context, picks the next sub-task
+//   2) GENERATION — sees only the chosen sub-task + executor tool list, produces
+//      the exact command. Narrower context → less hallucinated commands.
+// Per the paper, this split delivered +228.6% sub-task completion vs single-LLM.
+
+const REASONING_SYSTEM_PROMPT = [
+  "You are the REASONING module of an offensive-synthesis engine for an AUTHORIZED penetration-testing engagement.",
+  "You receive the FULL engagement state: scope/ROE, executor capabilities, structured recon, current findings, and the queue history of prior attempts with their outcomes.",
+  "Your job is to pick the ONE next concrete sub-task that's the highest-leverage action right now — not the command itself, just what to do.",
+  "Pivot away from approaches the queue history shows already failed. Build on what succeeded.",
+  "Stay strictly within scope. If no in-scope sub-task remains, say so honestly.",
   "Respond as STRICT JSON, no prose, no code fences:",
-  '{"title":"short label","rationale":"why this step","command":"exact shell command for the operator","expected_artifact":"what success looks like","references":["CVE-... | EDB-... | exploit/..."],"in_scope":true}',
-  'If no in-scope step exists, return {"in_scope":false,"command":""}.',
+  '{"subtask":"one-sentence description of the next sub-task","rationale":"why this is the right move now given history + state","expected_payoff":"what this reveals or achieves","references":["CVE-... | EDB-... | exploit/..."],"in_scope":true}',
+  'If no in-scope sub-task exists, return {"in_scope":false}.',
+].join("\n");
+
+const GENERATION_SYSTEM_PROMPT = [
+  "You are the GENERATION module of an offensive-synthesis engine. The REASONING module has already decided WHAT sub-task to attempt — your job is to translate that one sub-task into the EXACT shell command for the engagement's executor.",
+  "Use ONLY tools from the provided tools list. Do not invent tool names or flags. Do not propose multi-step pipelines unless the tools list explicitly allows them.",
+  "Match the command to the executor's environment (e.g. a stock Android root with toybox is very different from a Kali host).",
+  "Respond as STRICT JSON, no prose, no code fences:",
+  '{"title":"short human label","command":"the exact shell command","expected_artifact":"what success looks like","references":["CVE-... | EDB-... | exploit/..."]}',
 ].join("\n");
 
 function chatCompletion(messages, modelOverride) {
@@ -193,40 +209,87 @@ async function advanceOffense(engagementId, intent, modelOverride) {
     ? `Recent queue history (most recent first; learn from these — do NOT repeat failed approaches):\n${historyLines.join("\n")}`
     : "Recent queue history: (none — this is the first attempt on this engagement)";
 
-  const userMsg = [
+  // ── REASONING stage: full engagement context → pick next sub-task (no command) ──
+  const reasoningUserMsg = [
     `Engagement: type=${ctx.engagement.engagement_type || "?"} status=${ctx.engagement.status || "?"}`,
     `Scope/ROE: ${JSON.stringify({ scope: ctx.engagement.scope, roe: ctx.engagement.roe })}`,
     `Operator intent: ${intent || "advance the engagement toward its objective"}`,
     `Executor: ${execHost} ${execHint}`,
-    `Tools available on the executor: ${execTools.length ? execTools.join(", ") : "(unknown — pick from POSIX-portable shell tools only)"}`,
+    `Tools available on the executor: ${execTools.length ? execTools.join(", ") : "(unknown — assume only POSIX-portable shell tools)"}`,
     `Structured recon (hosts/ports/services): ${JSON.stringify(ctx.hosts)}`,
     `Findings so far: ${JSON.stringify(ctx.findings)}`,
     historyBlock,
-    "Propose the single next in-scope offensive step as strict JSON. Pick commands ONLY from the listed tools — do not invent tool names. If a similar approach already failed in the queue history, pivot to a different technique.",
+    "Pick the next in-scope sub-task as strict JSON. If a similar approach already failed in the queue history, pivot to a different technique.",
   ].join("\n");
 
-  let raw, step;
+  let subtask;
   try {
-    raw = await chatCompletion([
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userMsg },
+    const reasoningRaw = await chatCompletion([
+      { role: "system", content: REASONING_SYSTEM_PROMPT },
+      { role: "user",   content: reasoningUserMsg },
     ], modelOverride);
-    tel.latencyMs = Date.now() - startMs;
-    step = parseStep(raw);
+    subtask = parseStep(reasoningRaw);
   } catch (e) {
     tel.latencyMs = Date.now() - startMs;
-    tel.errorMessage = e.message;
+    tel.errorMessage = `reasoning: ${e.message}`;
     await insertTelemetry(tel);
-    throw e instanceof Error ? e : new Error(`offense model error: ${String(e)}`);
+    throw e instanceof Error ? e : new Error(`offense model reasoning error: ${String(e)}`);
   }
 
-  tel.inScope = step && step.in_scope !== false;
-  tel.nReferences = step && Array.isArray(step.references) ? step.references.length : 0;
-
-  if (!step || step.in_scope === false || !step.command) {
+  tel.inScope = subtask && subtask.in_scope !== false;
+  if (!subtask || subtask.in_scope === false) {
+    tel.latencyMs = Date.now() - startMs;
     await insertTelemetry(tel);
     return { queued: false, engagement_id: engagementId,
-             reason: "the offense model judged no in-scope step is available" };
+             reason: "the offense model judged no in-scope sub-task is available" };
+  }
+
+  // ── GENERATION stage: just the chosen sub-task + tools → exact command ──
+  // Recent command shapes from history give Generation a feel for what's been
+  // tried at the command level (failed shapes are still useful — model avoids them).
+  const recentCmds = (ctx.queue || []).slice(0, 5).map((q) =>
+    `  - [${q.status}] ${(q.command_preview || "").replace(/\s+/g, " ").slice(0, 100)}`
+  ).join("\n");
+
+  const generationUserMsg = [
+    `Sub-task chosen by reasoning: ${subtask.subtask || "(empty)"}`,
+    `Rationale: ${subtask.rationale || "(none)"}`,
+    `Expected payoff: ${subtask.expected_payoff || "(unspecified)"}`,
+    subtask.references && subtask.references.length
+      ? `References from reasoning: ${subtask.references.join(", ")}`
+      : "References from reasoning: (none)",
+    `Executor: ${execHost} ${execHint}`,
+    `Tools available on the executor: ${execTools.length ? execTools.join(", ") : "(unknown — POSIX-portable only)"}`,
+    recentCmds
+      ? `Recent commands attempted on this engagement (do NOT propose a command identical or near-identical to a failed one):\n${recentCmds}`
+      : "Recent commands attempted: (none)",
+    "Translate the sub-task into the exact shell command, as strict JSON.",
+  ].join("\n");
+
+  let step;
+  try {
+    const generationRaw = await chatCompletion([
+      { role: "system", content: GENERATION_SYSTEM_PROMPT },
+      { role: "user",   content: generationUserMsg },
+    ], modelOverride);
+    step = parseStep(generationRaw);
+  } catch (e) {
+    tel.latencyMs = Date.now() - startMs;
+    tel.errorMessage = `generation: ${e.message}`;
+    await insertTelemetry(tel);
+    throw e instanceof Error ? e : new Error(`offense model generation error: ${String(e)}`);
+  }
+
+  tel.latencyMs = Date.now() - startMs;
+  // n_references — prefer Generation's (more specific); fall back to Reasoning's.
+  tel.nReferences =
+    (step && Array.isArray(step.references) ? step.references.length : 0) ||
+    (subtask && Array.isArray(subtask.references) ? subtask.references.length : 0);
+
+  if (!step || !step.command) {
+    await insertTelemetry(tel);
+    return { queued: false, engagement_id: engagementId,
+             reason: "the generation stage returned no executable command" };
   }
 
   const seqRow = await db.query(
@@ -235,14 +298,19 @@ async function advanceOffense(engagementId, intent, modelOverride) {
 
   // The offensive bytes (command / rationale / references) land in the queue for the PA.
   // They are deliberately NOT returned to the caller (L4).
-  const titleBase = step.title || `Offensive step ${seq}`;
+  // description = Reasoning's rationale (the WHY) — Generation focuses on the WHAT (command),
+  // so we join the two layers for full operator-side context in the SOC app.
+  const titleBase = step.title || subtask.subtask || `Offensive step ${seq}`;
   const title = modelOverride ? `[${modelOverride}] ${titleBase}` : titleBase;
+  const description = subtask.rationale
+    ? (subtask.expected_payoff ? `${subtask.rationale}\n\nExpected payoff: ${subtask.expected_payoff}` : subtask.rationale)
+    : (step.rationale || null);
   const wrappedCommand = wrapForExecutor(step.command, ctx.engagement);
   const ins = await db.query(
     `INSERT INTO soc_queue_items (engagement_id, seq, title, description, command, expected_artifact, status)
      VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id, seq`,
     [engagementId, seq, title,
-     step.rationale || null, wrappedCommand, step.expected_artifact || null]);
+     description, wrappedCommand, step.expected_artifact || null]);
 
   tel.queueItemId = ins.rows[0].id;
   tel.stepQueued = true;
