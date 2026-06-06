@@ -1,4 +1,7 @@
-// useDirectives — data hook for directive screen with WS push + HTTP polling fallback
+// useDirectives — data hook for directive screen.
+// Subscribes to "directiveUpdate" via the shared bridge WS bus (dir_1780760826635).
+// Replaced a per-hook WebSocket implementation with the singleton; polling
+// remains as adaptive fallback while builds are active.
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
@@ -9,18 +12,10 @@ import {
   type BuildStatus,
   type DirectiveSummary,
 } from "./bridge-api";
+import { useBridgeStream } from "./useBridgeStream";
 
-const BRIDGE_WS_URL =
-  (process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge").replace(
-    /^https/,
-    "wss"
-  ).replace(
-    /^http/,
-    "ws"
-  ) + "/ws";
-
-const POLL_INTERVAL_DEFAULT = 15000;
-const POLL_INTERVAL_ACTIVE_BUILD = 10000;
+const POLL_INTERVAL_DEFAULT = 30_000;
+const POLL_INTERVAL_ACTIVE_BUILD = 10_000;
 
 export interface UseDirectivesResult {
   directives: Directive[];
@@ -39,10 +34,7 @@ export function useDirectives(): UseDirectivesResult {
   const [error, setError] = useState<string | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
-  const wsReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wsReconnectAttempt = useRef(0);
 
   const loadData = useCallback(async () => {
     try {
@@ -69,71 +61,21 @@ export function useDirectives(): UseDirectivesResult {
     await loadData();
   }, [loadData]);
 
-  // WebSocket connection for real-time updates
-  const connectWs = useCallback(() => {
-    if (!mountedRef.current) return;
-    try {
-      const ws = new WebSocket(BRIDGE_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        wsReconnectAttempt.current = 0;
-        // Register as a lightweight observer (no audio role)
-        ws.send(JSON.stringify({
-          type: "register",
-          role: "observer",
-          deviceId: "directives-screen",
-          deviceType: "observer",
-        }));
-      };
-
-      ws.onmessage = (event: any) => {
-        try {
-          const data = typeof event.data === "string" ? event.data : event.data?.toString?.() || "";
-          const msg = JSON.parse(data);
-          if (msg.type === "directiveUpdate") {
-            // Re-fetch all data on any directive update
-            loadData();
-          }
-        } catch {
-          // ignore parse errors
-        }
-      };
-
-      ws.onerror = () => {
-        // Errors handled in onclose
-      };
-
-      ws.onclose = () => {
-        wsRef.current = null;
-        if (!mountedRef.current) return;
-        // Reconnect with backoff
-        const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempt.current), 30000);
-        wsReconnectAttempt.current++;
-        wsReconnectTimer.current = setTimeout(connectWs, delay);
-      };
-    } catch {
-      // WebSocket constructor can throw in some environments
-    }
-  }, [loadData]);
-
-  // Setup: initial fetch + WS + polling
+  // Initial fetch + cleanup flag
   useEffect(() => {
     mountedRef.current = true;
     loadData();
-    connectWs();
-
     return () => {
       mountedRef.current = false;
       if (pollRef.current) clearInterval(pollRef.current);
-      if (wsReconnectTimer.current) clearTimeout(wsReconnectTimer.current);
-      if (wsRef.current) {
-        wsRef.current.onclose = null; // prevent reconnect on unmount
-        wsRef.current.close();
-        wsRef.current = null;
-      }
     };
-  }, [loadData, connectWs]);
+  }, [loadData]);
+
+  // Live push for any directive mutation — list refreshes immediately.
+  useBridgeStream("directiveUpdate", () => { loadData(); });
+
+  // Narrow event when only a directive's build run flipped — same refresh.
+  useBridgeStream("directiveBuildUpdate", () => { loadData(); });
 
   // Compute whether any build is active (memoized to reduce poll interval churn)
   const hasActiveBuild = useMemo(() => {
@@ -147,7 +89,10 @@ export function useDirectives(): UseDirectivesResult {
     return !!(hasGlobalActive || hasDirectiveActive);
   }, [buildStatus, directives]);
 
-  // Adaptive polling: shorter interval when builds are active
+  // Fallback polling — slower than before because the WS handles live updates.
+  // We still poll during active builds because the GitHub status fetch is what
+  // surfaces "queued → in_progress → completed" transitions; the bridge has no
+  // independent signal it could broadcast without that fetch happening.
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
 

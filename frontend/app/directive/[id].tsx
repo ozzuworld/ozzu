@@ -46,6 +46,7 @@ import {
 import { PlanReviewModal } from "../../components/directives/PlanReviewModal";
 import { StatusChangeSheet } from "../../components/directives/StatusChangeSheet";
 import { BuildRunBadge } from "../../components/directives/BuildRunBadge";
+import { useBridgeStream } from "../../lib/useBridgeStream";
 
 type Tab = "overview" | "activity";
 
@@ -87,9 +88,20 @@ export default function DirectiveDetailScreen() {
   useEffect(() => { load(); }, [load]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Live-poll build run status while any run is non-terminal so the user sees
-  // queued → in_progress → completed transitions without pull-to-refresh.
-  // Stops as soon as every run is "completed" or there are no runs.
+  // Live updates via the bridge WS bus (dir_1780760826635). Any directive
+  // mutation OR a build-run status change for this id fans in here.
+  const isMyDirective = useCallback(
+    (msg: any) => msg && msg.directive_id === id,
+    [id],
+  );
+  useBridgeStream("directiveUpdate", () => { load(); }, { filter: isMyDirective });
+  useBridgeStream("directiveBuildUpdate", () => { load(); }, { filter: isMyDirective });
+
+  // GH build status is pull-not-push from our side: the bridge has no GH webhook
+  // so it only re-checks runs when a client hits /build-status. We keep a slow
+  // tick (30s) while any run is non-terminal — that's just enough to drive the
+  // bridge's GH refresh; the WS push above is what makes the UI react fast when
+  // a status actually changes. Drops away the moment everything's "completed".
   useEffect(() => {
     if (!directive) return;
     const runs = directive.buildRuns;
@@ -104,7 +116,7 @@ export default function DirectiveDetailScreen() {
         setDirective(prev => prev ? { ...prev, buildRuns: fresh } : prev);
       } catch { /* keep polling */ }
     };
-    const t = setInterval(tick, 10000);
+    const t = setInterval(tick, 30000);
     return () => { cancelled = true; clearInterval(t); };
   }, [directive?.id, directive?.buildRuns]);
 

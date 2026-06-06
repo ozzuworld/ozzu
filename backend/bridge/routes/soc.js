@@ -69,6 +69,18 @@ async function parseAndStoreRecon(db, engagementId, sessionId, rawOutput) {
 module.exports = function socRoutes(ctx) {
   const { sendJSON, parseBody, db, requireAuth } = ctx;
 
+  // dir_1780760826635 — push SOC state changes to the app via the existing WS bus
+  // so the engagement screen drops its 2s setInterval. Best-effort: a broadcast
+  // failure (no listeners, send error) must never disturb the SQL write path.
+  function broadcast(msg) {
+    try {
+      const fn = ctx.broadcastToAll;
+      if (typeof fn === 'function') fn(msg);
+    } catch (err) {
+      console.warn('[soc] broadcast failed:', err && err.message);
+    }
+  }
+
   // Lazy idempotent migration — docker-entrypoint-initdb.d only runs on fresh volumes.
   db.query(
     `ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS pid INTEGER;
@@ -410,7 +422,16 @@ module.exports = function socRoutes(ctx) {
           'pa_engineer'
         ]);
 
-        createdFindings.push(result.rows[0].id);
+        const findingId = result.rows[0].id;
+        createdFindings.push(findingId);
+        broadcast({
+          type: 'socFindingAdded',
+          engagement_id,
+          finding_id: findingId,
+          severity: finding.severity || 'info',
+          title: finding.title,
+          ts: Date.now(),
+        });
       }
 
       sendJSON(res, 200, {
@@ -473,6 +494,16 @@ module.exports = function socRoutes(ctx) {
             [id, seq, item.title, item.description || null, item.command, item.expected_artifact || null]
           );
           inserted.push(r.rows[0]);
+          broadcast({
+            type: 'socQueueChanged',
+            engagement_id: id,
+            item_id: r.rows[0].id,
+            change: 'added',
+            status: 'pending',
+            seq: r.rows[0].seq,
+            title: item.title,
+            ts: Date.now(),
+          });
         }
 
         sendJSON(res, 200, { inserted, total_pending: inserted.length });
@@ -520,6 +551,15 @@ module.exports = function socRoutes(ctx) {
            VALUES ($1, $2, $3, $4, 'running', NOW())`,
           [sessionId, item.engagement_id, 'pa_engineer', `[queue #${item.seq}] ${item.title}\n${item.command}`]
         );
+        broadcast({
+          type: 'socQueueChanged',
+          engagement_id: item.engagement_id,
+          item_id: item.id,
+          change: 'status',
+          status: 'running',
+          session_id: sessionId,
+          ts: Date.now(),
+        });
 
         sendJSON(res, 200, { session_id: sessionId, queue_item_id: item.id, timeout_seconds: timeoutSec });
 
@@ -582,6 +622,18 @@ module.exports = function socRoutes(ctx) {
             } catch (err) {
               console.error(`[soc queue run] incremental flush failed for item ${item.id}:`, err.message);
             }
+            // 500ms throttle on the DB write naturally throttles the broadcast too,
+            // and a client that misses one tick recovers on the next chunk or the
+            // terminal `socStepDone` event. We send the full buffer (not a delta)
+            // so handlers can do `setOutput(msg.output)` without splice logic.
+            broadcast({
+              type: 'socExecOutput',
+              engagement_id: item.engagement_id,
+              item_id: item.id,
+              session_id: sessionId,
+              output: fullOutput,
+              ts: Date.now(),
+            });
           }, 500);
         };
 
@@ -596,6 +648,7 @@ module.exports = function socRoutes(ctx) {
           const appendMsg = timedOut ? `\n\n[TIMEOUT after ${timeoutSec}s — process killed]` : '';
           const rawLen = fullOutput.length;
           const safeOutput = sanitizeOutput(fullOutput + appendMsg);
+          let broadcastStatus = finalStatus;
           try {
             // Conditional update — if /cancel already wrote 'failed', don't overwrite.
             await db.query(
@@ -622,10 +675,20 @@ module.exports = function socRoutes(ctx) {
                 [diag, sessionId]
               );
               await syncOffenseOutcome(item.id, 'failed');
+              broadcastStatus = 'failed';
             } catch (fallbackErr) {
               console.error(`[soc queue run] Fallback UPDATE also failed for item ${item.id}:`, fallbackErr);
             }
           }
+          broadcast({
+            type: 'socStepDone',
+            engagement_id: item.engagement_id,
+            item_id: item.id,
+            session_id: sessionId,
+            status: broadcastStatus,
+            timed_out: timedOut,
+            ts: Date.now(),
+          });
           // Parse recon output into structured rows (dir_1780530175588). Raw blob
           // already persisted above; additive and fully error-isolated so it can
           // never wedge the queue item's state machine.
@@ -655,6 +718,15 @@ module.exports = function socRoutes(ctx) {
               );
             } catch (_) { /* give up */ }
           }
+          broadcast({
+            type: 'socStepDone',
+            engagement_id: item.engagement_id,
+            item_id: item.id,
+            session_id: sessionId,
+            status: 'failed',
+            error: err && err.message,
+            ts: Date.now(),
+          });
         });
 
         return true;
@@ -671,7 +743,7 @@ module.exports = function socRoutes(ctx) {
       try {
         const itemId = parseInt(pathname.split("/")[3], 10);
         const itemRes = await db.query(
-          `SELECT id, session_id, status, output FROM soc_queue_items WHERE id = $1`,
+          `SELECT id, engagement_id, session_id, status, output FROM soc_queue_items WHERE id = $1`,
           [itemId]
         );
         if (itemRes.rows.length === 0) {
@@ -697,6 +769,14 @@ module.exports = function socRoutes(ctx) {
           [cancelMsg, row.session_id]
         );
         await syncOffenseOutcome(itemId, 'cancelled');
+        broadcast({
+          type: 'socStepDone',
+          engagement_id: row.engagement_id,
+          item_id: itemId,
+          session_id: row.session_id,
+          status: 'cancelled',
+          ts: Date.now(),
+        });
 
         if (entry) {
           clearTimeout(entry.timeoutHandle);
@@ -721,13 +801,20 @@ module.exports = function socRoutes(ctx) {
       const itemId = parseInt(pathname.split("/")[3], 10);
       const r = await db.query(
         `UPDATE soc_queue_items SET status = 'skipped', completed_at = NOW()
-         WHERE id = $1 AND status = 'pending' RETURNING id`,
+         WHERE id = $1 AND status = 'pending' RETURNING id, engagement_id`,
         [itemId]
       );
       if (r.rows.length === 0) {
         sendJSON(res, 404, { error: 'Queue item not found or not pending' });
         return true;
       }
+      broadcast({
+        type: 'socStepDone',
+        engagement_id: r.rows[0].engagement_id,
+        item_id: r.rows[0].id,
+        status: 'skipped',
+        ts: Date.now(),
+      });
       sendJSON(res, 200, { success: true, id: r.rows[0].id });
       return true;
     }

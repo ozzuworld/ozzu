@@ -895,6 +895,18 @@ module.exports = function directiveRoutes(ctx) {
       directive.activity_log.push({ timestamp: Date.now(), type: "ci_build", actor: "system", message: `CI build triggered: ${data.platform} (run #${data.runId})` });
       directive.updatedAt = Date.now();
       saveDirectives(directives, directive);
+      // dir_1780760826635 — narrow event so directive detail screens can refresh
+      // build runs without the broader directiveUpdate that touches the list.
+      try {
+        broadcastToAll({
+          type: "directiveBuildUpdate",
+          directive_id: id,
+          platform: data.platform,
+          run_id: data.runId,
+          change: "registered",
+          ts: Date.now(),
+        });
+      } catch (_) { /* best-effort */ }
       sendJSON(res, 200, { ok: true, buildRuns: directive.buildRuns });
       return true;
     }
@@ -919,11 +931,14 @@ module.exports = function directiveRoutes(ctx) {
       const execFileAsync = promisify(execFile);
       const TERMINAL_STATUSES = new Set(["completed"]);
 
+      const changedRuns = [];
       for (const run of directive.buildRuns) {
         // Skip terminal runs or recently checked runs (within 30s)
         if (TERMINAL_STATUSES.has(run.status) && run.conclusion) continue;
         if (run.lastChecked && (Date.now() - run.lastChecked) < 30000) continue;
 
+        const prevStatus = run.status;
+        const prevConclusion = run.conclusion;
         try {
           const result = await execFileAsync("gh", ["run", "view", String(run.runId), "--json", "status,conclusion,url", "-R", "ozzuworld/ozzu"], { timeout: 10000 });
           const ghData = JSON.parse(result.stdout);
@@ -935,8 +950,25 @@ module.exports = function directiveRoutes(ctx) {
           log.bridge.warn(`[build-status] Failed to fetch run ${run.runId}: ${err.message}`);
           run.lastChecked = Date.now();
         }
+        if (run.status !== prevStatus || run.conclusion !== prevConclusion) {
+          changedRuns.push({ platform: run.platform, runId: run.runId, status: run.status, conclusion: run.conclusion });
+        }
       }
       saveDirectives(directives, directive);
+      // dir_1780760826635 — broadcast only when a run actually changed, so the
+      // detail screen and list refresh exactly when state advances. Repeated
+      // /build-status polls that yield no diff stay silent.
+      if (changedRuns.length > 0) {
+        try {
+          broadcastToAll({
+            type: "directiveBuildUpdate",
+            directive_id: id,
+            change: "status",
+            runs: changedRuns,
+            ts: Date.now(),
+          });
+        } catch (_) { /* best-effort */ }
+      }
       sendJSON(res, 200, { buildRuns: directive.buildRuns });
       return true;
     }

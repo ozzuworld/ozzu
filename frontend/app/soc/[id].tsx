@@ -12,6 +12,7 @@ import { StatusBar } from "expo-status-bar";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { getBridgeUrl } from "../../lib/bridge-api";
+import { useBridgeStream } from "../../lib/useBridgeStream";
 import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha } from "../../lib/design-tokens";
 
 type EngagementDetail = {
@@ -94,9 +95,10 @@ type QueueItem = {
   completed_at: string | null;
 };
 
-// Polling interval while screen is mounted. Server side is cheap (<50ms per query)
-// and one engaged user generates ~30 req/min — well within bridge capacity.
-const POLL_INTERVAL_MS = 2000;
+// Live updates come from the bridge WS bus (dir_1780760826635). This interval is
+// a safety net: only fires when the WS has dropped and reconnect hasn't completed.
+// Steady-state cost is zero — useBridgeStream skips the call while connected.
+const FALLBACK_POLL_INTERVAL_MS = 60_000;
 
 export default function EngagementDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -191,13 +193,47 @@ export default function EngagementDetailScreen() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Always-on polling while screen is mounted — gives "webhook-like" auto-updates
-  // for Cipher-queued items and live output without manual refresh.
-  // Native RN pauses setInterval when app backgrounded, so it's cheap when not in use.
-  useEffect(() => {
-    const t = setInterval(() => { fetchQueue(); fetchTaskGraph(); }, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [fetchQueue]);
+  // Live push from the bridge WS bus. Each bridge write path that touches this
+  // engagement broadcasts a typed event; we react incrementally. Scope filter
+  // keeps cross-engagement chatter out of this screen's render path.
+  const isMyEngagement = useCallback(
+    (msg: any) => msg && msg.engagement_id === id,
+    [id],
+  );
+
+  // Queue added or status change → refetch queue + task graph (cheap, accurate).
+  useBridgeStream(
+    "socQueueChanged",
+    () => { fetchQueue(); fetchTaskGraph(); },
+    { filter: isMyEngagement, fallbackPollMs: FALLBACK_POLL_INTERVAL_MS, onFallback: () => { fetchQueue(); fetchTaskGraph(); } },
+  );
+
+  // Step terminal state → refetch queue + executions + task graph.
+  useBridgeStream(
+    "socStepDone",
+    () => { fetchQueue(); fetchTaskGraph(); fetchExecutions(); },
+    { filter: isMyEngagement },
+  );
+
+  // Streaming exec output. The message carries the FULL output buffer (server
+  // already coalesces at 500ms), so we splice it onto the matching queue row
+  // without a refetch. Updates per-item only — avoids re-rendering the rest of
+  // the queue while a long scan is running.
+  useBridgeStream(
+    "socExecOutput",
+    (msg: any) => {
+      setQueue((prev) => prev.map((q) => (q.id === msg.item_id ? { ...q, output: msg.output } : q)));
+      setLastSyncAt(Date.now());
+    },
+    { filter: isMyEngagement },
+  );
+
+  // New finding → executions audit log row may also have flipped, refresh both.
+  useBridgeStream(
+    "socFindingAdded",
+    () => { fetchExecutions(); },
+    { filter: isMyEngagement },
+  );
 
   // ===== Actions =====
   const runQueueItem = useCallback(async (item: QueueItem) => {

@@ -1,8 +1,12 @@
 // usePosition — Real-time indoor positioning from bridge
-// Polls HTTP endpoint every 2s + listens for WebSocket positionUpdate events
+//
+// Subscribes to "positionUpdate" via the shared bridge WS bus. Polls the HTTP
+// endpoint only as a fallback when the WS is disconnected. Replaces an ad-hoc
+// per-hook WebSocket with the singleton — see dir_1780760826635.
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getBridgeUrl } from "./bridge-api";
+import { useBridgeStream, useBridgeStreamConnected } from "./useBridgeStream";
 
 export interface PositionData {
   room: string;
@@ -21,16 +25,14 @@ interface PositionState {
   connected: boolean;
 }
 
+const FALLBACK_POLL_INTERVAL_MS = 10_000;
+
 export function usePosition(): PositionState {
   const [position, setPosition] = useState<PositionData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
+  const connected = useBridgeStreamConnected();
   const mountedRef = useRef(true);
-  const wsRef = useRef<WebSocket | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch position via HTTP
   const fetchState = useCallback(async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
@@ -53,65 +55,21 @@ export function usePosition(): PositionState {
     }
   }, []);
 
-  // WebSocket connection
-  const connectWs = useCallback(() => {
-    if (!mountedRef.current) return;
-    try {
-      const bridgeUrl = getBridgeUrl();
-      const wsUrl = bridgeUrl
-        .replace(/^https/, "wss")
-        .replace(/^http/, "ws");
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnected(true);
-        ws.send(JSON.stringify({ type: "register", role: "position-listener" }));
-      };
-
-      ws.onmessage = (evt) => {
-        if (!mountedRef.current) return;
-        try {
-          const msg = JSON.parse(evt.data);
-          if (msg.type === "positionUpdate" && msg.location) {
-            setPosition(msg.location);
-            setLastUpdate(msg.ts || new Date().toISOString());
-          }
-        } catch {}
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        if (mountedRef.current) {
-          reconnectTimer.current = setTimeout(connectWs, 5000);
-        }
-      };
-
-      ws.onerror = () => {
-        ws.close();
-      };
-    } catch {}
-  }, []);
-
   useEffect(() => {
     mountedRef.current = true;
-
-    // Initial fetch
     fetchState();
+    return () => { mountedRef.current = false; };
+  }, [fetchState]);
 
-    // Poll every 3 seconds as reliable fallback
-    pollRef.current = setInterval(fetchState, 3000);
-
-    // Also try WebSocket for real-time updates
-    connectWs();
-
-    return () => {
-      mountedRef.current = false;
-      if (wsRef.current) wsRef.current.close();
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-    };
-  }, [fetchState, connectWs]);
+  useBridgeStream(
+    "positionUpdate",
+    (msg: any) => {
+      if (!mountedRef.current || !msg.location) return;
+      setPosition(msg.location);
+      setLastUpdate(msg.ts || new Date().toISOString());
+    },
+    { fallbackPollMs: FALLBACK_POLL_INTERVAL_MS, onFallback: fetchState },
+  );
 
   return { position, lastUpdate, connected };
 }
