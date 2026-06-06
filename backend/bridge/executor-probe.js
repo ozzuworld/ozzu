@@ -22,11 +22,16 @@ const CANDIDATE_TOOLS = [
   // shells / multitool
   "sh", "bash", "busybox", "toybox",
   // posix basics
-  "cat", "echo", "grep", "awk", "sed", "head", "tail", "base64", "xxd",
+  "cat", "echo", "grep", "awk", "sed", "head", "tail", "base64", "xxd", "jq",
   // network basics
   "curl", "wget", "nc", "ncat", "ping", "traceroute", "dig", "host",
-  // recon / pentest (kali)
-  "nmap", "masscan", "rustscan", "gobuster", "nikto", "searchsploit",
+  // recon / pentest (kali web + dns + general)
+  "nmap", "masscan", "rustscan", "gobuster", "ffuf", "nikto", "whatweb",
+  "nuclei", "wpscan", "amass", "dnsenum", "dnsrecon", "fierce", "hping3",
+  "sslyze", "searchsploit",
+  // smb / windows enum
+  "smbclient", "smbmap", "enum4linux", "enum4linux-ng", "responder",
+  "crackmapexec", "netexec", "impacket-secretsdump",
   // exploitation
   "msfconsole", "msfvenom", "hydra", "sqlmap", "john", "hashcat",
   // shells / forwarding
@@ -37,23 +42,40 @@ const CANDIDATE_TOOLS = [
   "ip", "iptables", "ip6tables", "getprop", "logcat", "settings",
 ];
 
-// Build the probe shell command. One line per candidate; sentinel at the end so
-// we can detect a complete run (vs a truncated one).
+// Build the probe shell command. On tablet executors that ship the rooted-android
+// chroot wrapper at /data/local/nhsystem/nh, the probe runs in two passes:
+//   1. Outer (Android/toybox) pass — captures Android-side binaries (getprop,
+//      settings, logcat, iptables, …) and detects the `nh` sentinel via
+//      filesystem check (since /data/local/nhsystem/nh is NOT in PATH).
+//   2. Inner (Kali chroot) pass via `su -c "nh -s"` — captures Kali-only tools
+//      (nmap, sqlmap, nuclei, whatweb, …). Heredoc-fed so no quoting hell.
+// Parser dedupes; a tool present in both layers appears once in the merged set.
+// Sentinel echo at the end so the bridge can distinguish a complete run from
+// a truncated one.
 function buildProbeCommand() {
   const checks = CANDIDATE_TOOLS
     .map((t) => `command -v ${t} >/dev/null 2>&1 && echo +${t} || echo -${t}`)
     .join("; ");
-  return `${checks}; echo PROBE_DONE`;
+  return [
+    checks + ";",
+    `[ -x /data/local/nhsystem/nh ] && echo +nh || echo -nh;`,
+    `if [ -x /data/local/nhsystem/nh ]; then`,
+    `  su -c "/data/local/nhsystem/nh -s" 2>/dev/null <<'CHROOT_PROBE'`,
+    checks,
+    `CHROOT_PROBE`,
+    `fi`,
+    `echo PROBE_DONE`,
+  ].join("\n");
 }
 
 function parseProbeOutput(out) {
   const lines = String(out).split(/[\r\n]+/);
-  const installed = [];
+  const installed = new Set();
   for (const line of lines) {
     const m = line.match(/^\+([A-Za-z0-9_-]+)$/);
-    if (m) installed.push(m[1]);
+    if (m) installed.add(m[1]);
   }
-  return installed;
+  return [...installed];
 }
 
 // Same wrapping logic as offense-engine.wrapForExecutor — kept here so this

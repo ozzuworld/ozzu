@@ -230,6 +230,23 @@ async function advanceOffense(engagementId, intent, modelOverride) {
     ? "(commands run on a kali toolhost; full network access is via dev-01's LAN/VPN)"
     : `(commands will run ON the executor itself — the executor is on the same LAN as the targets; do NOT prefix with adb / ssh, just write the command as if you were on a regular Linux shell on the target LAN)`;
 
+  // Executor capability caveats — surfaced to BOTH reasoning + generation so the
+  // agent stops burning iterations rediscovering kernel/SELinux limits. Mirrors
+  // offense-agent-tools.js getEngagementState's executor_caps_note (keep in sync);
+  // that note only reaches Cipher via the MCP tool — the offense agent loop never
+  // saw it, which is why every nmap on the tablet failed on netlink permission
+  // denied even though the chroot, wrap, and tool list were all correct.
+  const executorCaps = execTools.includes("nh")
+    ? [
+        "Executor quirks (Kali ARM64 chroot via `nh -s` on rooted Samsung tablet):",
+        "  - Samsung kernel + SELinux BLOCK netlink (RTM_GETROUTE) and AF_PACKET even with CAP_NET_RAW.",
+        "  - nmap MUST use `-sT -Pn` (TCP-connect, skip host discovery). Without `-Pn`, nmap does a route lookup and fails with `route_dst_netlink: if_indextoname(2) failed: 13 Permission denied`.",
+        "  - NO SYN scans (`-sS`), NO ICMP discovery (`-PE` / `-sn -PE`), NO `-O` OS fingerprinting, NO `arp-scan` — all need raw sockets.",
+        "  - TCP-connect tools work fine: `curl`, `nc -z`, `bash /dev/tcp`, `nuclei`, `whatweb`, `ffuf`, `gobuster`, `smbclient`, `smbmap`, `crackmapexec`, `netexec`, `dig`, `host`, `wpscan`, `sqlmap`, `hydra`, `nikto`.",
+        "  - For host discovery use `nmap -sn -PS<port>` (TCP probe) against a known-likely-open port (22, 80, 443, 8080), NOT `-PE` (ICMP).",
+      ].join("\n")
+    : null;
+
   // Queue history (most recent finalized attempts + outcomes). Gives the model
   // memory of what it tried so it doesn't repeat itself and can pivot on failure.
   const historyLines = (ctx.queue || []).map((q) => {
@@ -247,6 +264,7 @@ async function advanceOffense(engagementId, intent, modelOverride) {
     `Scope/ROE: ${JSON.stringify({ scope: ctx.engagement.scope, roe: ctx.engagement.roe })}`,
     `Operator intent: ${intent || "advance the engagement toward its objective"}`,
     `Executor: ${execHost} ${execHint}`,
+    ...(executorCaps ? [executorCaps] : []),
     `Tools available on the executor: ${execTools.length ? execTools.join(", ") : "(unknown — assume only POSIX-portable shell tools)"}`,
     `Structured recon (hosts/ports/services): ${JSON.stringify(ctx.hosts)}`,
     `Findings so far: ${JSON.stringify(ctx.findings)}`,
@@ -291,6 +309,7 @@ async function advanceOffense(engagementId, intent, modelOverride) {
       ? `References from reasoning: ${subtask.references.join(", ")}`
       : "References from reasoning: (none)",
     `Executor: ${execHost} ${execHint}`,
+    ...(executorCaps ? [executorCaps] : []),
     `Tools available on the executor: ${execTools.length ? execTools.join(", ") : "(unknown — POSIX-portable only)"}`,
     recentCmds
       ? `Recent commands attempted on this engagement (do NOT propose a command identical or near-identical to a failed one):\n${recentCmds}`
