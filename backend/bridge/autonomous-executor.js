@@ -62,16 +62,46 @@ function loadIntentRules() {
   return _rulesCache.rules;
 }
 
+// Pre-process a command body for inference. Decodes any `echo <b64> | base64 -d`
+// chunks inline (wrapForExecutor wraps tablet/adb commands this way) so the
+// pattern dictionary can see the actual underlying command. Original wrapping
+// stays — we APPEND the decoded text rather than replace. Handles multiple
+// wrapping layers by iterating until stable (cap 4 passes to avoid loops).
+function unwrapCommand(command) {
+  let body = String(command || "");
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    body = body.replace(/echo\s+([A-Za-z0-9+/=]{12,})\s*\|\s*base64\s+(?:-d|--decode)\b/g, (m, b64) => {
+      try {
+        const decoded = Buffer.from(b64, "base64").toString("utf8");
+        // Only treat as a meaningful decode if it looks like text we'd lint
+        // — i.e. doesn't contain too many non-printable bytes.
+        const printable = (decoded.match(/[\x20-\x7E\n\t\r]/g) || []).length;
+        if (printable / Math.max(1, decoded.length) >= 0.85) {
+          changed = true;
+          return `${m}  ${decoded}`;
+        }
+      } catch (_) { /* fall through */ }
+      return m;
+    });
+    if (!changed) break;
+  }
+  return body;
+}
+
 // inferIntentFromCommand: scan the command string against the rules dictionary.
 // Returns the FIRST matching intent. The rules file ORDERS most-specific →
 // least-specific so e.g. `cred_test` regex wins over `enum` regex on a
-// `hydra` command. Returns null when nothing matches.
+// `hydra` command. Pre-processes the command via unwrapCommand so tablet
+// adb-wrapped + base64-encoded commands also classify correctly. Returns
+// null when nothing matches.
 function inferIntentFromCommand(command) {
   if (!command || typeof command !== "string") return null;
+  const body = unwrapCommand(command);
   const rules = loadIntentRules();
   for (const r of rules) {
     for (const re of r.patterns) {
-      if (re.test(command)) return r.intent;
+      if (re.test(body)) return r.intent;
     }
   }
   return null;
