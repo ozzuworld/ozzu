@@ -208,8 +208,29 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
 
     if (!claimed) {
       if (!inferred) {
-        return { autoExecuted: false, reason: "intent_class not declared and command not inferable — gated as safe default" };
-      }
+        // dir_1780788278335: in full-access mode, NULL+NULL doesn't gate —
+        // operator opted out of approval taxes. ROE block-list already ran.
+        if (item.autonomous_full_access) {
+          try {
+            await db.query(
+              `INSERT INTO offense_telemetry
+                 (engagement_id, queue_item_id, model_used, intent_category,
+                  n_hosts, n_findings, step_queued, in_scope, n_references,
+                  latency_ms, outcome, outcome_notes)
+               VALUES ($1, $2, 'lint', 'unclassified', 0, 0, true, true, 0, 0,
+                       'intent_unclassified_full_access',
+                       'model omitted intent_class; no rule inferred; full_access ON — running anyway')`,
+              [item.engagement_id, item.id]);
+          } catch (_) { /* telemetry never breaks gating */ }
+          await db.query(`UPDATE soc_queue_items SET intent_class='unclassified' WHERE id=$1`, [item.id]);
+          claimed = "unclassified";
+          // Fall through to auto-execute (won't hit AUTO_RUN_INTENTS check below
+          // because full_access bypasses it; mismatch lint can't fire either since
+          // inferred is null).
+        } else {
+          return { autoExecuted: false, reason: "intent_class not declared and command not inferable — gated as safe default" };
+        }
+      } else {
       // Inference fallback. Use the inferred intent as if model claimed it,
       // but log telemetry so v1.4 training picks up "model omitted required field".
       try {
@@ -226,8 +247,11 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       // Persist the inferred value on the row so downstream tools see it.
       await db.query(`UPDATE soc_queue_items SET intent_class=$1 WHERE id=$2`, [inferred, item.id]);
       claimed = inferred;
+      }  // close else (inferred-truthy fallback)
     }
-    if (!VALID_INTENTS.has(claimed)) {
+    // 'unclassified' is a synthetic marker for full-access unclassifiable rows;
+    // it isn't a real intent but is allowed past the VALID_INTENTS gate below.
+    if (claimed !== "unclassified" && !VALID_INTENTS.has(claimed)) {
       await recordIntentMismatch(item.engagement_id, item.id, claimed, inferred || "(none)", item.command);
       return { autoExecuted: false, reason: `intent_class=${claimed} not in enum — gated`, inferred };
     }
