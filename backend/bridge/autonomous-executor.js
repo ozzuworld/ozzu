@@ -165,18 +165,36 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       return { autoExecuted: false, reason: "ROE block-list hit", pattern: roeHit };
     }
 
-    // Step-level intent classifier (dir_1780784990563).
-    // 1) Model must declare intent_class. NULL = gated (safe default).
-    // 2) Harness infers an intent from the command content.
-    // 3) MISMATCH gates regardless. Mismatch is itself a training signal logged
-    //    to offense_telemetry as outcome='intent_mismatch'.
-    // 4) If declared+inferred agree AND intent is in AUTO_RUN_INTENTS → auto-run.
-    // 5) Otherwise gate. If gated intent → fire push (throttled).
-    const claimed = item.intent_class;
+    // Step-level intent classifier (dir_1780784990563 + dir_1780786024387 fallback).
+    // 1) Model SHOULD declare intent_class. If omitted, harness infers from
+    //    command content and proceeds. inferred-fallback is logged to
+    //    offense_telemetry as outcome='intent_inferred_fallback' — training signal.
+    // 2) MISMATCH gates regardless (claim vs infer disagrees + one is gated).
+    // 3) If claimed+inferred agree AND intent is in AUTO_RUN_INTENTS → auto-run.
+    // 4) Otherwise gate. If gated intent → fire push (throttled).
+    let claimed = item.intent_class;
     const inferred = inferIntentFromCommand(item.command);
 
     if (!claimed) {
-      return { autoExecuted: false, reason: "intent_class not declared by model — gated as safe default" };
+      if (!inferred) {
+        return { autoExecuted: false, reason: "intent_class not declared and command not inferable — gated as safe default" };
+      }
+      // Inference fallback. Use the inferred intent as if model claimed it,
+      // but log telemetry so v1.4 training picks up "model omitted required field".
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, $2, 'lint', $3, 0, 0, true, true, 0, 0,
+                   'intent_inferred_fallback', $4)`,
+          [item.engagement_id, item.id, inferred,
+           `model omitted intent_class; harness inferred ${inferred} from command`]);
+      } catch (_) { /* telemetry never breaks gating */ }
+      // Persist the inferred value on the row so downstream tools see it.
+      await db.query(`UPDATE soc_queue_items SET intent_class=$1 WHERE id=$2`, [inferred, item.id]);
+      claimed = inferred;
     }
     if (!VALID_INTENTS.has(claimed)) {
       await recordIntentMismatch(item.engagement_id, item.id, claimed, inferred || "(none)", item.command);
