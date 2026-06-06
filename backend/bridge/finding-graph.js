@@ -124,23 +124,21 @@ async function materializeFindingGraph(engagementId, opts = {}) {
   }
 
   // ── Open frontiers ──
-  // Hypothesis nodes with no child (no later finding refers to them via informed_by)
-  // + confirmed findings whose `enables[]` list has unfulfilled labels (no later finding
-  //   exists for that hypothesis_label).
+  // v1 rule (dir_1780783102989): everything is open unless explicitly closed.
+  //   - hypothesis nodes with no child
+  //   - pending probe nodes (awaiting PA outcome)
+  //   - every confirmed/refuted finding's `enables[]` entry is listed as open
+  //     until a later finding's `fulfills[]` array explicitly closes it.
+  //     Today nobody sets fulfills → all enables list as open. Correct: the
+  //     model gets a complete view of what's still on the table, not a buggy
+  //     heuristic that over-marks labels as fulfilled.
   const hasChild = new Set(edges.map(e => e.from));
-  const fulfilledLabels = new Set();
+  const explicitlyFulfilled = new Set();
   for (const f of fr.rows) {
-    if (f.kind === "confirmed" || f.kind === "refuted") {
-      // Heuristic: if a later finding's title mentions a hypothesis_label from an
-      // earlier finding's enables[], consider that label fulfilled. Cheap fuzzy
-      // match — the goal is to reduce noise in the frontier list, not be precise.
-      for (const f2 of fr.rows) {
-        if (f2.id <= f.id) continue;
-        const e2 = Array.isArray(f2.enables) ? f2.enables : [];
-        for (const en of e2) {
-          if (en && en.hypothesis_label) fulfilledLabels.add(en.hypothesis_label);
-        }
-      }
+    const ff = Array.isArray(f.fulfills) ? f.fulfills : [];
+    for (const lbl of ff) {
+      if (typeof lbl === "string") explicitlyFulfilled.add(lbl);
+      else if (lbl && lbl.hypothesis_label) explicitlyFulfilled.add(lbl.hypothesis_label);
     }
   }
   const openFrontiers = [];
@@ -151,10 +149,10 @@ async function materializeFindingGraph(engagementId, opts = {}) {
     if (n.kind === "pending_probe") {
       openFrontiers.push({ node_id: n.id, title: n.title, reason: `probe ${n.status} — awaiting result` });
     }
-    if (n.kind === "confirmed" && Array.isArray(n.enables)) {
+    if ((n.kind === "confirmed" || n.kind === "refuted") && Array.isArray(n.enables)) {
       for (const en of n.enables) {
         if (!en || !en.hypothesis_label) continue;
-        if (fulfilledLabels.has(en.hypothesis_label)) continue;
+        if (explicitlyFulfilled.has(en.hypothesis_label)) continue;
         openFrontiers.push({
           node_id: n.id,
           title: n.title,
