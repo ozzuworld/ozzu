@@ -4,6 +4,16 @@
   "_order": "First match wins. Order rules from most-specific to least-specific.",
   "rules": [
     {
+      "intent": "tool_setup",
+      "_note": "Must come before pattern-bearing intents (service_version mentions tool names that 'apt install <name>' would otherwise wrongly classify).",
+      "patterns": [
+        "(?i)^\\s*apt(-get)?\\s+install\\b",
+        "(?i)^\\s*pip(3)?\\s+install\\b",
+        "(?i)^\\s*git\\s+clone\\b",
+        "(?i)\\bwhich\\s+(nmap|nuclei|hydra|sqlmap|curl|adb|ssh|whatweb|gobuster)\\b"
+      ]
+    },
+    {
       "intent": "cred_test",
       "patterns": [
         "(?i)(curl|wget|httpie|http)[^\\n]{0,200}(-u\\s|--user[=\\s]|--password[=\\s])\\s*[A-Za-z0-9._-]+:[A-Za-z0-9._@!#%-]+",
@@ -59,15 +69,6 @@
       ]
     },
     {
-      "intent": "tool_setup",
-      "patterns": [
-        "(?i)^\\s*apt(-get)?\\s+install\\b",
-        "(?i)^\\s*pip(3)?\\s+install\\b",
-        "(?i)^\\s*git\\s+clone\\b",
-        "(?i)which\\s+(nmap|nuclei|hydra|sqlmap|curl|adb|ssh)"
-      ]
-    },
-    {
       "intent": "banner_grab",
       "patterns": [
         "(?i)^\\s*curl\\s+-[IsXv]+\\s+https?://",
@@ -79,6 +80,7 @@
     {
       "intent": "recon",
       "patterns": [
+        "(?i)\\bnmap\\b[^\\n]{0,80}-s[STUNAF]\\b",
         "(?i)\\bnmap\\b[^\\n]{0,80}-sn\\b",
         "(?i)\\bping\\b\\s+-c",
         "(?i)\\barping\\b",

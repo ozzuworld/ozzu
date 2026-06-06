@@ -38,7 +38,19 @@ function loadIntentRules() {
         rules: (Array.isArray(j.rules) ? j.rules : []).map(r => ({
           intent: r.intent,
           patterns: (Array.isArray(r.patterns) ? r.patterns : []).map(s => {
-            try { return new RegExp(s); } catch (_) { return null; }
+            // Strip PCRE-style inline flags `(?i)` / `(?m)` / `(?ims)` etc.
+            // JS RegExp doesn't accept inline flags — must be passed separately.
+            let body = s;
+            let flags = "";
+            const m = body.match(/^\(\?([imsxu]+)\)/);
+            if (m) {
+              flags = m[1].replace(/[xu]/g, ""); // JS supports i,m,s,u — drop x (extended); keep u optional
+              body = body.slice(m[0].length);
+            }
+            try { return new RegExp(body, flags); } catch (e) {
+              console.warn(`[autonomous-executor] dropped invalid pattern for intent=${r.intent}: ${s.slice(0, 80)} (${e.message})`);
+              return null;
+            }
           }).filter(Boolean),
         })),
       };
