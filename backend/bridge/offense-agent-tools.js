@@ -23,11 +23,18 @@ const executorProbe = require("./executor-probe");
 
 // Mirror of offense-engine.wrapForExecutor — copied here so this module is
 // self-contained and the agent loop doesn't pull all of offense-engine in.
+// Keep in sync with offense-engine.js (Kali chroot routing via `nh -s` when
+// the executor's tool list contains the `nh` sentinel — dir_1780759239313).
 function wrapForExecutor(command, engagement) {
   const host = engagement && engagement.executor_host;
   if (!host || host === "dev-01" || !engagement.executor_adb_target) return command;
+  const tools = Array.isArray(engagement.executor_tools) ? engagement.executor_tools : [];
+  const hasChroot = tools.includes("nh");
   const b64 = Buffer.from(String(command), "utf8").toString("base64");
-  return `adb -s ${engagement.executor_adb_target} shell "echo ${b64} | base64 -d | sh" </dev/null`;
+  const pipe = hasChroot
+    ? `echo ${b64} | base64 -d | su -c "/data/local/nhsystem/nh -s"`
+    : `echo ${b64} | base64 -d | sh`;
+  return `adb -s ${engagement.executor_adb_target} shell '${pipe}' </dev/null`;
 }
 
 // ────────────────────────────── tool implementations ──────────────────────────────
@@ -67,7 +74,7 @@ async function queueStep(args) {
   if (!engagement_id) return { error: "engagement_id required" };
   if (!command)       return { error: "command required" };
   const er = await db.query(
-    `SELECT id, executor_host, executor_adb_target FROM pentest_engagements WHERE id = $1`,
+    `SELECT id, executor_host, executor_adb_target, executor_tools FROM pentest_engagements WHERE id = $1`,
     [engagement_id]);
   if (er.rows.length === 0) return { error: `engagement ${engagement_id} not found` };
   const eng = er.rows[0];

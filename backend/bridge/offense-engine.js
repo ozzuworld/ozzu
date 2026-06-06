@@ -115,15 +115,23 @@ async function gatherContext(engagementId) {
 
 // Wrap the model's logical command for the engagement's executor. For dev-01,
 // the command runs as-is. For tablet/phone executors (adb-over-WG), we b64-encode
-// the command and route it through adb shell on the target — the SSH-to-dev-01
-// transport layer is unchanged; dev-01 hosts adb and reaches the tablet via WG.
+// the command and route it through adb shell on the target. When the executor's
+// tool list includes the `nh` sentinel (Kali chroot installed at
+// /data/local/nhsystem), the decoded command is piped into `nh -s` so it runs
+// inside the chroot where the real toolchain (nmap, sqlmap, hydra, ...) lives —
+// otherwise it runs in stock toybox shell where those binaries don't exist.
 // The </dev/null is mandatory per the adb-shell-stdin discipline.
 function wrapForExecutor(command, engagement) {
   if (!engagement) return command;
   const host = engagement.executor_host || "dev-01";
   if (host === "dev-01" || !engagement.executor_adb_target) return command;
+  const tools = Array.isArray(engagement.executor_tools) ? engagement.executor_tools : [];
+  const hasChroot = tools.includes("nh");
   const b64 = Buffer.from(String(command), "utf8").toString("base64");
-  return `adb -s ${engagement.executor_adb_target} shell "echo ${b64} | base64 -d | sh" </dev/null`;
+  const pipe = hasChroot
+    ? `echo ${b64} | base64 -d | su -c "/data/local/nhsystem/nh -s"`
+    : `echo ${b64} | base64 -d | sh`;
+  return `adb -s ${engagement.executor_adb_target} shell '${pipe}' </dev/null`;
 }
 
 function parseStep(raw) {
