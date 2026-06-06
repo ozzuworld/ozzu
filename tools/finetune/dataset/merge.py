@@ -87,6 +87,9 @@ def main():
     ap.add_argument("--eval-frac", type=float, default=0.05,
                     help="Fraction held out for eval (default 0.05). Only used if --eval-out set.")
     ap.add_argument("--seed", type=int, default=42, help="Shuffle seed for reproducibility.")
+    ap.add_argument("--drop-negative", action="store_true",
+                    help="Drop rows whose quality.polarity == 'negative' (set by export-our-transcripts.py "
+                         "from model_behavior_notes). Default off, back-compat.")
     args = ap.parse_args()
 
     all_rows = []
@@ -96,6 +99,19 @@ def main():
     if not all_rows:
         print("[merge] FATAL: no valid rows across all inputs", file=sys.stderr)
         sys.exit(1)
+
+    # dir_1780764144630 — filter by quality.polarity before split so train and
+    # eval stay reproducible (deterministic given --seed) regardless of mode.
+    dropped_quality = 0
+    if args.drop_negative:
+        filtered = []
+        for r in all_rows:
+            q = r.get("quality") if isinstance(r, dict) else None
+            if isinstance(q, dict) and q.get("polarity") == "negative":
+                dropped_quality += 1
+                continue
+            filtered.append(r)
+        all_rows = filtered
 
     rng = random.Random(args.seed)
     rng.shuffle(all_rows)
@@ -115,6 +131,7 @@ def main():
         for r in train_rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
+    drop_summary = f" dropped_negative={dropped_quality}" if args.drop_negative else ""
     if args.eval_out and eval_rows:
         eval_path = Path(args.eval_out)
         eval_path.parent.mkdir(parents=True, exist_ok=True)
@@ -122,12 +139,12 @@ def main():
             for r in eval_rows:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
         print(
-            f"[merge] DONE — train={len(train_rows)} eval={len(eval_rows)} "
+            f"[merge] DONE — train={len(train_rows)} eval={len(eval_rows)}{drop_summary} "
             f"-> {train_path} + {eval_path}",
             file=sys.stderr,
         )
     else:
-        print(f"[merge] DONE — train={len(train_rows)} -> {train_path}", file=sys.stderr)
+        print(f"[merge] DONE — train={len(train_rows)}{drop_summary} -> {train_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

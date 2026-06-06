@@ -237,6 +237,45 @@ def export_step8_transcript(eng_row, anon, cur):
     return msgs
 
 
+# --- behavior_notes (dir_1780764144630) ---------------------------------------
+# Per-row v1.4 quality labels. behavior_notes is the table dir_1780763057382
+# created; we load it here so each JSONL row gets a {quality: {polarity, tags,
+# notes_count}} field the trainer can filter/weight on. Polarity rule: ANY
+# matching negative → negative; else ANY positive → positive; else neutral.
+# Engagement-wide notes (iter IS NULL) attach to every row of that engagement.
+
+def load_behavior_notes(cur, engagement_id):
+    """Return {iter: [{polarity, tag}, ...]} for one engagement. iter=None bucket
+    holds engagement-wide notes that apply to every row."""
+    cur.execute(
+        "SELECT iter, polarity, tag FROM model_behavior_notes WHERE engagement_id = %s",
+        (engagement_id,),
+    )
+    notes_by_iter = {}
+    for it, pol, tag in cur.fetchall():
+        notes_by_iter.setdefault(it, []).append({"polarity": pol, "tag": tag})
+    return notes_by_iter
+
+
+def compute_quality(notes_by_iter, iter_count):
+    """Aggregate the notes that apply to one (engagement, iter) into a quality
+    dict. Engagement-wide notes (key=None) always apply."""
+    matched = list(notes_by_iter.get(None, []))
+    if iter_count is not None:
+        matched += list(notes_by_iter.get(iter_count, []))
+    if not matched:
+        return {"polarity": "neutral", "tags": [], "notes_count": 0}
+    polarities = {n["polarity"] for n in matched}
+    if "negative" in polarities:
+        polarity = "negative"
+    elif "positive" in polarities:
+        polarity = "positive"
+    else:
+        polarity = "neutral"
+    tags = sorted({n["tag"] for n in matched})
+    return {"polarity": polarity, "tags": tags, "notes_count": len(matched)}
+
+
 # --- main ----------------------------------------------------------------------
 
 def main():
@@ -300,6 +339,7 @@ def main():
 
             anon_id = hashlib.sha256(row["id"].encode()).hexdigest()[:12]
             anon = Anonymizer(row["id"])
+            notes_by_iter = load_behavior_notes(cur, row["id"])
 
             wrote_any = False
             if args.include_step5:
@@ -310,16 +350,20 @@ def main():
                         "source": "ozzu-step5",
                         "engagement_id_anon": anon_id,
                         "iteration": iter_count,
+                        "quality": compute_quality(notes_by_iter, iter_count),
                     }, ensure_ascii=False) + "\n")
                     kept += 1
                     wrote_any = True
             if args.include_step8:
                 msgs = export_step8_transcript(row, anon, cur)
                 if msgs and len(msgs) >= 2:
+                    # step8 rows don't carry a per-iter index — apply engagement-wide
+                    # notes only (iter=None bucket).
                     f.write(json.dumps({
                         "messages": msgs,
                         "source": "ozzu-step8",
                         "engagement_id_anon": anon_id,
+                        "quality": compute_quality(notes_by_iter, None),
                     }, ensure_ascii=False) + "\n")
                     kept += 1
                     wrote_any = True
