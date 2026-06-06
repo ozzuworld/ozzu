@@ -55,7 +55,11 @@ function chatCompletion(messages, modelOverride) {
     const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
-    const req = lib.request(url, { method: "POST", headers, timeout: 240000 }, (res) => {
+    // dir_1780786724856: 60s timeout + fresh socket per request. Tunnel death
+    // through bridge restart no longer hangs the agent forever — fails fast,
+    // bridge startup auto-reopens, next iter proceeds.
+    const reqAgent = new lib.Agent({ keepAlive: false });
+    const req = lib.request(url, { method: "POST", headers, timeout: 60000, agent: reqAgent }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => {

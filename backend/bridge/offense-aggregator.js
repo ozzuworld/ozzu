@@ -57,7 +57,9 @@ function chatCompletion(messages, modelOverride) {
     const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.1, stream: false });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
-    const req = lib.request(url, { method: "POST", headers, timeout: 240000 }, (res) => {
+    // dir_1780786724856: see note in offense-orchestrator.js
+    const reqAgent = new lib.Agent({ keepAlive: false });
+    const req = lib.request(url, { method: "POST", headers, timeout: 60000, agent: reqAgent }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => {

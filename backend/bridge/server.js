@@ -6963,6 +6963,22 @@ wss.on("connection", (ws, req) => {
   server.listen(PORT, "0.0.0.0", () => {
     log.bridge.info(`listening on :${PORT}`);
     checkContainerBinaries();
+    // dir_1780786724856: auto-reopen the offense SSH tunnel on bridge startup
+    // if any engagement is mid-run. Without this, every merge-and-deploy
+    // restart hangs every in-flight agent on a dead 127.0.0.1:11434 socket.
+    // Fire-and-forget — failures logged but never break startup.
+    (async () => {
+      try {
+        const r = await db.query(`SELECT id FROM pentest_engagements WHERE agent_status='running' LIMIT 1`);
+        if (r.rows.length === 0) return;
+        log.bridge.info(`offense tunnel: ${r.rows.length} engagement still running — reopening`);
+        const { waitOffenseModel } = require("./offense-startup");
+        const result = await waitOffenseModel({ timeout_sec: 120 });
+        log.bridge.info(`offense tunnel: reopened (${JSON.stringify(result).slice(0, 200)})`);
+      } catch (e) {
+        log.bridge.error(`offense tunnel auto-reopen failed: ${e.message} — call wait_offense_model manually if needed`);
+      }
+    })();
     log.bridge.info(`data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);
     log.bridge.info(`HA: ${HA_URL}, Gemini: ${GEMINI_API_KEY ? "configured" : "NOT SET"}`);
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
