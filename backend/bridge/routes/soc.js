@@ -112,6 +112,9 @@ module.exports = function socRoutes(ctx) {
   return async function handleSocRoutes(req, res, pathname, url) {
 
     // GET /soc/engagements - List all engagements
+    // dir_1780764341980 — added medium/low/info finding counts + queue totals so
+    // the list card can render severity buckets and a real progress bar without
+    // an N+1 per-card fetch. Strictly additive aggregate columns; no schema change.
     if (req.method === "GET" && pathname === "/soc/engagements") {
       const status = url.searchParams.get("status");
       let query = `
@@ -119,9 +122,19 @@ module.exports = function socRoutes(ctx) {
           e.*,
           COUNT(DISTINCT f.id) as findings_count,
           COUNT(DISTINCT CASE WHEN f.severity = 'critical' THEN f.id END) as critical_count,
-          COUNT(DISTINCT CASE WHEN f.severity = 'high' THEN f.id END) as high_count
+          COUNT(DISTINCT CASE WHEN f.severity = 'high' THEN f.id END) as high_count,
+          COUNT(DISTINCT CASE WHEN f.severity = 'medium' THEN f.id END) as medium_count,
+          COUNT(DISTINCT CASE WHEN f.severity = 'low' THEN f.id END) as low_count,
+          COUNT(DISTINCT CASE WHEN f.severity = 'info' THEN f.id END) as info_count,
+          COUNT(DISTINCT q.id) as queue_total,
+          COUNT(DISTINCT CASE WHEN q.status = 'done' THEN q.id END) as queue_done,
+          COUNT(DISTINCT CASE WHEN q.status = 'running' THEN q.id END) as queue_running,
+          COUNT(DISTINCT CASE WHEN q.status = 'pending' THEN q.id END) as queue_pending,
+          COUNT(DISTINCT CASE WHEN q.status = 'failed' THEN q.id END) as queue_failed,
+          MAX(q.started_at) as last_activity_at
         FROM pentest_engagements e
         LEFT JOIN pentest_findings f ON e.id = f.engagement_id
+        LEFT JOIN soc_queue_items q ON e.id = q.engagement_id
       `;
       const params = [];
 
@@ -816,6 +829,34 @@ module.exports = function socRoutes(ctx) {
         ts: Date.now(),
       });
       sendJSON(res, 200, { success: true, id: r.rows[0].id });
+      return true;
+    }
+
+    // GET /soc/engagements/:id/findings - flat list of all findings for an engagement.
+    // dir_1780764341980 — fed to the new FindingsTab + Now-tab recent-findings list.
+    // Existing engagement-detail endpoint returns these grouped by severity which is
+    // awkward to flatten; this endpoint is the canonical source for the redesigned UI.
+    if (req.method === "GET" && pathname.match(/^\/soc\/engagements\/[^\/]+\/findings$/)) {
+      const engagementId = pathname.split("/")[3];
+      const result = await db.query(
+        `SELECT id, severity, title, description, cvss_score, cvss_vector,
+                affected_asset, affected_assets, refs, mitre_attack,
+                reproduction, remediation, evidence_files, discovered_by, discovered_at
+           FROM pentest_findings
+          WHERE engagement_id = $1
+          ORDER BY
+            CASE severity
+              WHEN 'critical' THEN 1
+              WHEN 'high' THEN 2
+              WHEN 'medium' THEN 3
+              WHEN 'low' THEN 4
+              WHEN 'info' THEN 5
+              ELSE 6
+            END,
+            discovered_at DESC`,
+        [engagementId]
+      );
+      sendJSON(res, 200, { findings: result.rows });
       return true;
     }
 

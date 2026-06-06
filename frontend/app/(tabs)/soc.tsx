@@ -1,4 +1,8 @@
-import { useState, useCallback, useEffect } from "react";
+// SOC tab — list of pentest engagements.
+// dir_1780764341980: redesigned card via EngagementCard + status filter pills.
+// Lives at /soc inside the Work group.
+
+import { useState, useCallback, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -10,30 +14,37 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
-import HamburgerMenu from "../../components/HamburgerMenu";
 import { GroupNav } from "../../components/GroupNav";
 import { TopBar } from "../../components/TopBar";
 import { getBridgeUrl } from "../../lib/bridge-api";
-import { colors, spacing, radius, fontSize as fs, fontWeight as fw, withAlpha, layout } from "../../lib/design-tokens";
+import { useBridgeStream } from "../../lib/useBridgeStream";
+import {
+  colors,
+  spacing,
+  radius,
+  fontSize as fs,
+  fontWeight as fw,
+  withAlpha,
+} from "../../lib/design-tokens";
+import { EngagementCard, type EngagementSummary } from "../../components/soc/EngagementCard";
 
-type Engagement = {
-  id: string;
-  client_name: string;
-  engagement_type: string;
-  status: string;
-  findings_count: number;
-  critical_count: number;
-  high_count: number;
-  created_at: string;
-};
+type FilterKey = "active" | "scoping" | "done" | "all";
+
+const FILTERS: Array<{ key: FilterKey; label: string; match: (e: EngagementSummary) => boolean }> = [
+  { key: "active", label: "Active", match: (e) => e.status === "in_progress" || e.status === "approved" },
+  { key: "scoping", label: "Scoping", match: (e) => e.status === "scoping" || e.status === "planning" },
+  { key: "done", label: "Done", match: (e) => e.status === "completed" || e.status === "billed" || e.status === "reporting" },
+  { key: "all", label: "All", match: () => true },
+];
 
 export default function SOCScreen() {
   const router = useRouter();
-  const { insets, isPhone } = usePhoneLayout();
+  const { insets } = usePhoneLayout();
 
-  const [engagements, setEngagements] = useState<Engagement[]>([]);
+  const [engagements, setEngagements] = useState<EngagementSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<FilterKey>("active");
 
   const fetchEngagements = useCallback(async () => {
     try {
@@ -51,44 +62,78 @@ export default function SOCScreen() {
     fetchEngagements();
   }, [fetchEngagements]);
 
+  // Live refresh — any SOC-side mutation refetches the list so counters stay
+  // accurate without the screen needing its own poll. WS push already shipped.
+  useBridgeStream("socQueueChanged", () => { fetchEngagements(); });
+  useBridgeStream("socStepDone", () => { fetchEngagements(); });
+  useBridgeStream("socFindingAdded", () => { fetchEngagements(); });
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchEngagements();
     setRefreshing(false);
   }, [fetchEngagements]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "scoping": return colors.status.pending;
-      case "approved": return colors.status.approved;
-      case "in_progress": return colors.status.working;
-      case "reporting": return colors.accent.blue;
-      case "completed": return colors.status.success;
-      default: return colors.text.disabled;
-    }
-  };
+  const filtered = useMemo(() => {
+    const f = FILTERS.find((x) => x.key === filter) || FILTERS[3];
+    return engagements.filter(f.match);
+  }, [engagements, filter]);
 
-  const statusEmoji: Record<string, string> = {
-    scoping: "📋",
-    approved: "✅",
-    in_progress: "🔍",
-    reporting: "📝",
-    completed: "✓",
-    billed: "💰",
-  };
+  const counts = useMemo(() => {
+    const c: Record<FilterKey, number> = { active: 0, scoping: 0, done: 0, all: engagements.length };
+    for (const e of engagements) {
+      for (const f of FILTERS) {
+        if (f.key !== "all" && f.match(e)) c[f.key]++;
+      }
+    }
+    return c;
+  }, [engagements]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg.primary }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
       <StatusBar style="light" />
 
-      <TopBar title="🔐 SOC Engagements" background={colors.bg.secondary} borderBottom />
-
+      <TopBar title="🔐 SOC" background={colors.bg.elevated} borderBottom />
       <GroupNav group="work" />
 
-      {/* Content */}
+      {/* Filter pills */}
+      <View style={{ flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}>
+        {FILTERS.map((f) => {
+          const selected = filter === f.key;
+          const c = counts[f.key];
+          return (
+            <Pressable
+              key={f.key}
+              onPress={() => setFilter(f.key)}
+              style={({ pressed }) => [
+                styles.filterPill,
+                selected && styles.filterPillSelected,
+                pressed && { opacity: 0.8 },
+              ]}
+            >
+              <Text style={{
+                color: selected ? colors.bg.base : colors.text.secondary,
+                fontSize: fs.sm,
+                fontWeight: selected ? fw.semibold : fw.medium,
+              }}>
+                {f.label}
+              </Text>
+              <Text style={{
+                color: selected ? colors.bg.base : colors.text.tertiary,
+                fontSize: fs.xs,
+                fontFamily: "monospace",
+                marginLeft: 4,
+              }}>
+                {c}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: spacing.md }}
+        contentContainerStyle={{ paddingHorizontal: spacing.md, paddingBottom: spacing.xxl, gap: spacing.md }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text.disabled} />
         }
@@ -97,96 +142,26 @@ export default function SOCScreen() {
           <Text style={{ color: colors.text.disabled, textAlign: "center", marginTop: spacing.xl }}>
             Loading engagements...
           </Text>
-        ) : engagements.length === 0 ? (
-          <View style={{ alignItems: "center", marginTop: spacing.xl * 2 }}>
+        ) : filtered.length === 0 ? (
+          <View style={{ alignItems: "center", marginTop: spacing.xxxl }}>
             <Text style={{ fontSize: 48, marginBottom: spacing.md }}>🔐</Text>
             <Text style={{ color: colors.text.tertiary, fontSize: fs.md, textAlign: "center" }}>
-              No engagements yet
+              {engagements.length === 0 ? "No engagements yet" : `No ${filter} engagements`}
             </Text>
-            <Text style={{ color: colors.text.disabled, fontSize: fs.sm, textAlign: "center", marginTop: spacing.xs }}>
-              Create one via Cipher MCP tools
-            </Text>
+            {engagements.length === 0 ? (
+              <Text style={{ color: colors.text.disabled, fontSize: fs.sm, textAlign: "center", marginTop: spacing.xs }}>
+                Create one via Cipher MCP tools
+              </Text>
+            ) : null}
           </View>
         ) : (
-          <View style={{ gap: spacing.md }}>
-            {engagements.map((eng) => (
-              <Pressable
-                key={eng.id}
-                onPress={() => router.push(`/soc/${eng.id}`)}
-                style={({ pressed }) => [
-                  styles.engagementCard,
-                  pressed && { opacity: 0.9, transform: [{ scale: 0.99 }] },
-                ]}
-              >
-                {/* Status accent bar */}
-                <View
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: 4,
-                    backgroundColor: getStatusColor(eng.status),
-                    borderTopLeftRadius: radius.md,
-                    borderBottomLeftRadius: radius.md,
-                  }}
-                />
-
-                {/* Content */}
-                <View style={{ paddingLeft: spacing.md }}>
-                  {/* Header */}
-                  <View style={{ flexDirection: "row", alignItems: "center", marginBottom: spacing.xs }}>
-                    <Text style={{ fontSize: 18, marginRight: spacing.xs }}>
-                      {statusEmoji[eng.status] || "🔒"}
-                    </Text>
-                    <Text style={{ fontSize: fs.md, fontWeight: fw.semibold, color: colors.text.primary, flex: 1 }}>
-                      {eng.id}
-                    </Text>
-                  </View>
-
-                  {/* Client */}
-                  <Text style={{ fontSize: fs.sm, color: colors.text.secondary, marginBottom: spacing.sm }}>
-                    {eng.client_name} • {eng.engagement_type}
-                  </Text>
-
-                  {/* Findings summary */}
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                    <View
-                      style={{
-                        paddingHorizontal: spacing.sm,
-                        paddingVertical: 4,
-                        backgroundColor: withAlpha(getStatusColor(eng.status), 0.15),
-                        borderRadius: radius.sm,
-                      }}
-                    >
-                      <Text style={{ fontSize: fs.xs, color: getStatusColor(eng.status), fontWeight: fw.medium }}>
-                        {eng.status.toUpperCase().replace("_", " ")}
-                      </Text>
-                    </View>
-
-                    {eng.findings_count > 0 && (
-                      <View style={{ flexDirection: "row", gap: spacing.xs }}>
-                        {eng.critical_count > 0 && (
-                          <View style={[styles.findingBadge, { backgroundColor: withAlpha(colors.status.error, 0.15) }]}>
-                            <Text style={[styles.findingBadgeText, { color: colors.status.error }]}>
-                              {eng.critical_count} CRITICAL
-                            </Text>
-                          </View>
-                        )}
-                        {eng.high_count > 0 && (
-                          <View style={[styles.findingBadge, { backgroundColor: withAlpha(colors.accent.orange, 0.15) }]}>
-                            <Text style={[styles.findingBadgeText, { color: colors.accent.orange }]}>
-                              {eng.high_count} HIGH
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </Pressable>
-            ))}
-          </View>
+          filtered.map((eng) => (
+            <EngagementCard
+              key={eng.id}
+              engagement={eng}
+              onPress={() => router.push(`/soc/${eng.id}`)}
+            />
+          ))
         )}
       </ScrollView>
     </View>
@@ -194,21 +169,15 @@ export default function SOCScreen() {
 }
 
 const styles = StyleSheet.create({
-  engagementCard: {
-    backgroundColor: colors.bg.secondary,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    position: "relative",
+  filterPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.full,
+    backgroundColor: withAlpha(colors.text.secondary, 0.08),
   },
-  findingBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
-  },
-  findingBadgeText: {
-    fontSize: fs.xs,
-    fontWeight: fw.medium,
+  filterPillSelected: {
+    backgroundColor: colors.accent,
   },
 });
