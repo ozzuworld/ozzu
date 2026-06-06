@@ -37,10 +37,18 @@ function cveFromRefs(refs?: string[] | null): string | null {
   return null;
 }
 
+function fmtCvss(v: unknown): string | null {
+  if (v == null) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return null;
+  return n.toFixed(1);
+}
+
 export function FindingRow({ finding, onPress }: FindingRowProps) {
   const color = severityColor(finding.severity);
   const cve = cveFromRefs(finding.refs);
-  const techniques = (finding.mitre_attack || []).slice(0, 2);
+  const techniques = Array.isArray(finding.mitre_attack) ? finding.mitre_attack.slice(0, 2) : [];
+  const cvssLabel = fmtCvss(finding.cvss_score);
 
   return (
     <Pressable
@@ -62,9 +70,9 @@ export function FindingRow({ finding, onPress }: FindingRowProps) {
           style={{ flex: 1, color: colors.text.primary, fontSize: fontSize.md, fontWeight: fontWeight.semibold }}
           numberOfLines={2}
         >
-          {finding.title}
+          {finding.title || "(untitled)"}
         </Text>
-        {finding.cvss_score != null ? (
+        {cvssLabel != null ? (
           <View
             style={{
               backgroundColor: withAlpha(color, 0.18),
@@ -75,7 +83,7 @@ export function FindingRow({ finding, onPress }: FindingRowProps) {
             }}
           >
             <Text style={{ color, fontSize: fontSize.xs, fontWeight: fontWeight.bold, fontFamily: "monospace" }}>
-              CVSS {finding.cvss_score.toFixed(1)}
+              CVSS {cvssLabel}
             </Text>
           </View>
         ) : null}
