@@ -308,16 +308,17 @@ module.exports = function socRoutes(ctx) {
           message: 'Execution started in background. Check audit log for results.'
         });
 
-        // Execute command in background (after response sent).
-        // IMPORTANT: pipe the script via ssh stdin instead of inlining it in a
-        // double-quoted argument. Otherwise the LOCAL bash expands $VAR in the
-        // command string BEFORE ssh sends it to dev-01, which silently breaks
-        // any multi-statement script that uses variable assignments.
-        const proc = spawn(
-          'ssh',
-          ['-o', 'StrictHostKeyChecking=no', 'dev-01', 'bash', '-s'],
-          { detached: false, stdio: ['pipe', 'pipe', 'pipe'] }
-        );
+        // Execute command in background (after response sent). Honor engagement's
+        // executor_host (dir_1780756261315) — bridge-local for tablet-mediated
+        // engagements, ssh dev-01 otherwise. Pipe via stdin in both branches.
+        const execHost = engResult.rows[0].executor_host || 'dev-01';
+        const proc = execHost === 'dev-01'
+          ? spawn(
+              'ssh',
+              ['-o', 'StrictHostKeyChecking=no', 'dev-01', 'bash', '-s'],
+              { detached: false, stdio: ['pipe', 'pipe', 'pipe'] }
+            )
+          : spawn('bash', ['-s'], { detached: false, stdio: ['pipe', 'pipe', 'pipe'] });
         proc.stdin.write(command);
         proc.stdin.end();
 
@@ -488,7 +489,13 @@ module.exports = function socRoutes(ctx) {
       if (!requireAuth(req, res)) return true; // D2: runs queued command on dev-01 over ssh
       try {
         const itemId = parseInt(pathname.split("/")[3], 10);
-        const itemRes = await db.query(`SELECT * FROM soc_queue_items WHERE id = $1`, [itemId]);
+        const itemRes = await db.query(
+          `SELECT q.*, e.executor_host
+             FROM soc_queue_items q
+             JOIN pentest_engagements e ON q.engagement_id = e.id
+            WHERE q.id = $1`,
+          [itemId]
+        );
         if (itemRes.rows.length === 0) {
           sendJSON(res, 404, { error: 'Queue item not found' });
           return true;
@@ -516,34 +523,32 @@ module.exports = function socRoutes(ctx) {
 
         sendJSON(res, 200, { session_id: sessionId, queue_item_id: item.id, timeout_seconds: timeoutSec });
 
-        // Hardened SSH: short connect timeout + keepalives so a wedged nested SSH chain
-        // (bridge→dev-01→target) eventually drops instead of hanging forever.
-        // IMPORTANT: pipe the script via ssh stdin (`bash -s`) instead of inlining it
-        // in a double-quoted argument. Otherwise the LOCAL bash expands $VAR in the
-        // command string BEFORE ssh sends it to dev-01, silently breaking any
-        // multi-statement script that uses variable assignments. See
-        // .claude/rules/soc-command-execution.md for the full contract.
-        // detached:true gives the child its own process group, so we can kill the
-        // whole group (ssh + remote shell pipeline) with process.kill(-pid).
-        const proc = spawn(
-          'ssh',
-          [
-            // Tighter for lossy remote-LAN links (EDIFICIO LAURA wifi ~40% loss).
-            // ConnectTimeout=20: TCP+banner can take >10s on lossy paths.
-            // ConnectionAttempts=3: retry the whole TCP cycle if first SYN cycle fails.
-            // ServerAlive 8s × 2 = give up at 16s of silence (was 90s).
-            '-o', 'StrictHostKeyChecking=no',
-            '-o', 'ConnectTimeout=20',
-            '-o', 'ConnectionAttempts=3',
-            '-o', 'ServerAliveInterval=8',
-            '-o', 'ServerAliveCountMax=2',
-            '-o', 'TCPKeepAlive=yes',
-            '-o', 'BatchMode=yes',
-            'dev-01',
-            'bash', '-s',
-          ],
-          { detached: true, stdio: ['pipe', 'pipe', 'pipe'] }
-        );
+        // Executor selection (dir_1780756261315): bridge-local for tablet-mediated
+        // engagements (executor_host != 'dev-01'), ssh dev-01 otherwise. Bridge has
+        // adb in PATH and direct WG reach to tablet adb-target, so adb-wrapped
+        // commands run locally without the dev-01 hop poisoning v1.4 training data.
+        // Pipe script via stdin (`bash -s`) in both branches — see
+        // .claude/rules/soc-command-execution.md for why inlining breaks $VAR.
+        // detached:true → own process group, killable with process.kill(-pid).
+        const execHost = item.executor_host || 'dev-01';
+        const proc = execHost === 'dev-01'
+          ? spawn(
+              'ssh',
+              [
+                // Tighter for lossy remote-LAN links (EDIFICIO LAURA wifi ~40% loss).
+                '-o', 'StrictHostKeyChecking=no',
+                '-o', 'ConnectTimeout=20',
+                '-o', 'ConnectionAttempts=3',
+                '-o', 'ServerAliveInterval=8',
+                '-o', 'ServerAliveCountMax=2',
+                '-o', 'TCPKeepAlive=yes',
+                '-o', 'BatchMode=yes',
+                'dev-01',
+                'bash', '-s',
+              ],
+              { detached: true, stdio: ['pipe', 'pipe', 'pipe'] }
+            )
+          : spawn('bash', ['-s'], { detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
         proc.stdin.write(String(item.command));
         proc.stdin.end();
         let fullOutput = '';

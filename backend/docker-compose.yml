@@ -42,7 +42,10 @@ services:
       - /root/.ssh:/root/.ssh:ro
       - /usr/bin/gh:/usr/local/bin/gh:ro
       - /usr/bin/docker:/usr/local/bin/docker:ro
-      - /usr/bin/adb:/usr/local/bin/adb:ro
+      # adb removed: container installs its own platform-tools (dir_1780756261315);
+      # the host's android-sdk adb (Debian package, 685 KB / Mar 2024) was missing
+      # libbase.so.0 and other AOSP libs, and bind-mounting it through the
+      # /usr/local/bin/adb symlink also clobbered /opt/platform-tools/adb.
       - /tmp/osint-data:/tmp/osint-data
       # Infra secrets — bridge code reads via lib/devices.js bootstrap
       - /root/.ozzu-secrets:/root/.ozzu-secrets:ro

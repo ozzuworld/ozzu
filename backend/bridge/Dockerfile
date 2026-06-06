@@ -23,11 +23,15 @@ RUN ARCH=$(dpkg --print-architecture) && \
     | tar xz -C /usr/local/bin phoneinfoga && \
     chmod +x /usr/local/bin/phoneinfoga
 
-# ADB (Android Debug Bridge) for fleet device management
+# ADB (Android Debug Bridge) for fleet device management.
+# Install the full platform-tools dir to /opt so the bundled libc++.so in lib64/
+# resolves at runtime; the prior "copy adb only" recipe broke as soon as adb
+# started dynamically linking libc++.so from its own bundle (dir_1780756261315).
 RUN curl -sL https://dl.google.com/android/repository/platform-tools-latest-linux.zip -o /tmp/pt.zip && \
-    unzip -o /tmp/pt.zip -d /tmp/ && \
-    cp /tmp/platform-tools/adb /usr/local/bin/adb && \
-    chmod +x /usr/local/bin/adb && \
-    rm -rf /tmp/pt.zip /tmp/platform-tools
+    unzip -oq /tmp/pt.zip -d /opt/ && \
+    ln -sf /opt/platform-tools/adb /usr/local/bin/adb && \
+    echo "/opt/platform-tools/lib64" > /etc/ld.so.conf.d/platform-tools.conf && \
+    ldconfig && \
+    rm /tmp/pt.zip
 
 WORKDIR /app
