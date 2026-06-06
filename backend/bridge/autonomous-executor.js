@@ -175,6 +175,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
     const r = await db.query(
       `SELECT q.id, q.command, q.engagement_id, q.intent_class,
               e.autonomous_execution_enabled, e.autonomous_paused,
+              e.autonomous_full_access,
               e.engagement_phase, e.roe
          FROM soc_queue_items q
          JOIN pentest_engagements e ON q.engagement_id = e.id
@@ -246,9 +247,15 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       }
     }
     if (!AUTO_RUN_INTENTS.has(claimed)) {
-      // Honestly-declared gated intent — pending row + push.
-      await pushOnGatedIntent(item.engagement_id, item.id, claimed, item.command);
-      return { autoExecuted: false, reason: `intent=${claimed} is gated — pending human approval`, inferred };
+      // Gated intent. In full-access mode (dir_1780787660588) we proceed to
+      // auto-execute anyway — operator opted in to unattended observation.
+      // ROE block-list + mismatch lint above already ran; this is purely
+      // about removing the human-approval gate.
+      if (!item.autonomous_full_access) {
+        await pushOnGatedIntent(item.engagement_id, item.id, claimed, item.command);
+        return { autoExecuted: false, reason: `intent=${claimed} is gated — pending human approval`, inferred };
+      }
+      // Full-access — fall through to auto-run. No push (would spam).
     }
 
     // All checks passed — auto-execute.

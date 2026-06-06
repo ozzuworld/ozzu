@@ -1153,6 +1153,10 @@ async function init() {
     // soc_queue_items.auto_executed: marker so the SOC app can badge auto-runs.
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS autonomous_execution_enabled BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS autonomous_paused BOOLEAN DEFAULT false`);
+    // dir_1780787660588: opt-in unattended observation window — when true AND
+    // autonomous_execution_enabled=true, every claimed intent auto-runs (ROE
+    // block-list still applies). No push spam during the window.
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS autonomous_full_access BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS last_phase_advance_push_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS auto_executed BOOLEAN DEFAULT false`);
     // ── Step-level intent classifier (dir_1780784990563) ──
