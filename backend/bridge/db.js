@@ -1261,6 +1261,80 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_offense_telemetry_engagement ON offense_telemetry(engagement_id, created_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_offense_telemetry_model ON offense_telemetry(model_used, created_at DESC)`);
 
+    // ── Membrane write-guard (dir_1780773748369) ──
+    // Structural backstop preventing L4 (Cipher) from authoring exploit content
+    // into soc_queue_items.command / .output. Trip on 2026-06-06 (cfa3bf59) was
+    // a literal `-u admin:12345` curl string Cipher wrote into a queue cancellation
+    // output field — tripped the Anthropic cyber-use safeguard. Behavior is covered
+    // by memory feedback_soc_observer_role.md; this trigger is the structural backstop.
+    //
+    // Bypass: legitimate writes from offense-engine / offense-agent-tools (the L3
+    // model's own outputs, which the membrane handles) set session var
+    // `app.bypass_exploit_check` via db.withBypass(label, fn). PA executor capture
+    // doesn't need bypass — the patterns target Cipher's authoring fingerprint
+    // (curl -u user:pass, raw Basic auth, default-cred substrings), not natural
+    // scan output which contains things like `WWW-Authenticate: Basic realm=...`.
+    await pool.query(`CREATE TABLE IF NOT EXISTS cipher_exploit_write_attempts (
+      id              SERIAL PRIMARY KEY,
+      engagement_id   VARCHAR(50),
+      queue_item_id   INTEGER,
+      op              VARCHAR(10),
+      column_hit      VARCHAR(16),
+      pattern_matched VARCHAR(64),
+      body_excerpt    TEXT,
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cipher_exploit_attempts_eng ON cipher_exploit_write_attempts(engagement_id, created_at DESC)`);
+
+    await pool.query(`CREATE OR REPLACE FUNCTION check_cipher_exploit_write()
+    RETURNS TRIGGER AS $func$
+    DECLARE
+      bypass_label TEXT;
+      combined TEXT;
+      pattern_hit TEXT := NULL;
+      col_hit TEXT;
+    BEGIN
+      BEGIN
+        bypass_label := current_setting('app.bypass_exploit_check', true);
+      EXCEPTION WHEN OTHERS THEN
+        bypass_label := NULL;
+      END;
+      IF bypass_label IS NOT NULL AND bypass_label <> '' THEN
+        RETURN NEW;
+      END IF;
+
+      combined := COALESCE(NEW.command, '') || E'\n--SEP--\n' || COALESCE(NEW.output, '');
+
+      IF combined ~ E'\\\\m(curl|wget)\\\\M[^\\n]{0,200}(-u[[:space:]]|--user[=[:space:]]|--password[=[:space:]])[[:space:]]*[[:alnum:]._-]+:[[:alnum:]._@!#%-]+' THEN
+        pattern_hit := 'curl_wget_literal_creds';
+      ELSIF combined ~ E'Authorization[[:space:]]*:[[:space:]]*Basic[[:space:]]+[A-Za-z0-9+/=]{8,}' THEN
+        pattern_hit := 'raw_basic_auth_header';
+      ELSIF combined ~ E'\\\\m(admin:(12345|admin|password|1234|root)|root:(root|toor|password|admin)|guest:guest|user:user|administrator:administrator)\\\\M' THEN
+        pattern_hit := 'default_cred_substring';
+      END IF;
+
+      IF pattern_hit IS NOT NULL THEN
+        IF COALESCE(NEW.command, '') ~ E'(curl|wget|Authorization|admin:|root:|guest:|user:|administrator:)' THEN
+          col_hit := 'command';
+        ELSE
+          col_hit := 'output';
+        END IF;
+        RAISE WARNING 'CIPHER_EXPLOIT_WRITE_BLOCKED engagement=% queue_item=% column=% pattern=%',
+          NEW.engagement_id, NEW.id, col_hit, pattern_hit;
+        RAISE EXCEPTION 'CIPHER_EXPLOIT_WRITE_BLOCKED: pattern=% on soc_queue_items.%, see feedback_soc_observer_role.md', pattern_hit, col_hit
+          USING ERRCODE = 'P0001',
+                HINT = 'L4 should not author exploit commands. Use prompt/harness/ROE directives instead.';
+      END IF;
+
+      RETURN NEW;
+    END;
+    $func$ LANGUAGE plpgsql`);
+
+    await pool.query(`DROP TRIGGER IF EXISTS trg_check_cipher_exploit_write ON soc_queue_items`);
+    await pool.query(`CREATE TRIGGER trg_check_cipher_exploit_write
+      BEFORE INSERT OR UPDATE OF command, output ON soc_queue_items
+      FOR EACH ROW EXECUTE FUNCTION check_cipher_exploit_write()`);
+
     // ── Infra-state (dir_1780260211325 D4, dir_1780260211365 D5, dir_1780260211404 D6) ──
     await pool.query(`CREATE TABLE IF NOT EXISTS device_credentials (
       device_id    TEXT PRIMARY KEY,
@@ -1312,6 +1386,33 @@ function isConnected() {
 
 async function query(text, params) {
   return pool.query(text, params);
+}
+
+// Run fn inside a transaction with app.bypass_exploit_check set to label.
+// Use for legitimate writes to soc_queue_items.command/.output from internal
+// paths (offense-engine, offense-agent-tools) — the trigger sees the bypass
+// session var and skips the exploit-write check. fn receives the pg client
+// and MUST use it (not db.query) so the session var applies.
+//
+// Cipher (L4) MUST NOT use this helper. It exists for the membrane-handled
+// L3 model paths only. See feedback_soc_observer_role.md.
+async function withBypass(label, fn) {
+  if (!label || typeof label !== 'string') {
+    throw new Error('withBypass requires a non-empty label');
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.bypass_exploit_check', $1, true)`, [label]);
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ── Memories ──
@@ -4212,6 +4313,7 @@ module.exports = {
   init,
   isConnected,
   query,
+  withBypass,
   // Infra-state (D4/D5/D6)
   issueDeviceToken,
   verifyDeviceToken,

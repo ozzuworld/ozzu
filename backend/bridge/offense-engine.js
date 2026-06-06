@@ -357,11 +357,15 @@ async function advanceOffense(engagementId, intent, modelOverride) {
     ? (subtask.expected_payoff ? `${subtask.rationale}\n\nExpected payoff: ${subtask.expected_payoff}` : subtask.rationale)
     : (step.rationale || null);
   const wrappedCommand = wrapForExecutor(step.command, ctx.engagement);
-  const ins = await db.query(
+  // Membrane-handled origin: offense engine writes the L3 model's authored
+  // command into soc_queue_items.command. Bypass the cipher-exploit-write
+  // trigger — the model is the legitimate author here. See db.js withBypass +
+  // memory feedback_soc_observer_role.md.
+  const ins = await db.withBypass('offense_engine', (client) => client.query(
     `INSERT INTO soc_queue_items (engagement_id, seq, title, description, command, expected_artifact, status)
      VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id, seq`,
     [engagementId, seq, title,
-     description, wrappedCommand, step.expected_artifact || null]);
+     description, wrappedCommand, step.expected_artifact || null]));
 
   tel.queueItemId = ins.rows[0].id;
   tel.stepQueued = true;

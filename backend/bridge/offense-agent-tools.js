@@ -104,11 +104,13 @@ async function queueStep(args) {
   const finalTitle = model_override ? `[${model_override}] ${titleBase}` : titleBase;
   const wrappedCommand = wrapForExecutor(command, eng);
 
-  const ins = await db.query(
+  // Membrane-handled origin: agent tool used by the L3 model to queue its
+  // own step. Bypass the cipher-exploit-write trigger. See feedback_soc_observer_role.md.
+  const ins = await db.withBypass('offense_agent_tool', (client) => client.query(
     `INSERT INTO soc_queue_items
        (engagement_id, seq, title, description, command, expected_artifact, status)
      VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id, seq`,
-    [engagement_id, seq, finalTitle, null, wrappedCommand, expected_artifact || null]);
+    [engagement_id, seq, finalTitle, null, wrappedCommand, expected_artifact || null]));
 
   // Lightweight telemetry — Step 5 will write a richer per-iteration row that
   // ties reasoning/generation outputs together. For now record the queueing.
