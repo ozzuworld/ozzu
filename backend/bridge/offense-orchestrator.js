@@ -145,6 +145,11 @@ async function decide(engagementCtx, modelOverride) {
     "Current Task Coordination Graph:",
     graphText,
     "",
+    "DECISION RULE — read carefully:",
+    "  1) If unblocked_pending above is NON-EMPTY, you MUST return {\"select\": <one of those IDs>}. The selection executes that task this iteration; you can also add new tasks in the same response.",
+    "  2) Only return {\"end\": \"...\"} when the engagement is truly complete — ROE goals met OR every reachable attack surface is exhausted AND no unblocked task remains.",
+    "  3) Returning {\"select\": null, \"add\": [], \"end\": null} is INVALID — the agent loop will stall. If you have nothing to do, end with a reason instead.",
+    "",
     "Pick the next move as strict JSON per the schema above.",
   ].join("\n");
 
@@ -158,13 +163,26 @@ async function decide(engagementCtx, modelOverride) {
   catch (e) { throw new Error(`orchestrator JSON parse failed: ${e.message}`); }
 
   // Sanity defaults so callers don't crash on missing keys.
-  return {
+  const out = {
     select:         (typeof parsed.select === "number" || parsed.select === null) ? parsed.select : null,
     add:            Array.isArray(parsed.add) ? parsed.add : [],
     advance_phase:  (typeof parsed.advance_phase === "string") ? parsed.advance_phase : null,
     end:            (typeof parsed.end === "string") ? parsed.end : null,
     _graph:         graph, // for caller convenience
   };
+
+  // Fallback (dir_1780763267882): when the model returns a fully-empty decision
+  // but unblocked pending tasks exist, auto-select the oldest. qwen3:32b base
+  // reliably hits this failure mode — the system prompt + DECISION RULE above
+  // help but don't eliminate it. Tag the choice with _fallback so callers can
+  // measure how often we paper over model indecision; log via the
+  // note_model_behavior tag="empty_decision" polarity="negative" for v1.4
+  // corpus signal.
+  if (out.select == null && out.add.length === 0 && !out.end && graph.unblocked.length > 0) {
+    out.select = graph.unblocked[0];
+    out._fallback = "auto_selected_oldest_unblocked";
+  }
+  return out;
 }
 
 // Persist new tasks proposed by the Orchestrator. Returns the inserted rows.
