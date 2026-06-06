@@ -61,8 +61,24 @@ async function getEngagementState(args) {
           AND status IN ('done', 'failed', 'cancelled')
         ORDER BY seq DESC LIMIT 10`, [id]),
   ]);
+  // Surface known executor capability limits so the agent doesn't burn iterations
+  // rediscovering them (dir_1780759239313). When commands run inside the Kali
+  // chroot via `nh -s`, raw-socket syscalls (netlink RTM_GETROUTE, AF_PACKET) are
+  // blocked by Samsung's kernel + SELinux even with CAP_NET_RAW in CapEff —
+  // magiskpolicy live-patches don't help. TCP-connect works natively.
+  const engRow = eng.rows[0];
+  const tools = Array.isArray(engRow.executor_tools) ? engRow.executor_tools : [];
+  if (tools.includes("nh")) {
+    engRow.executor_caps_note =
+      "Executor: Kali ARM64 chroot on rooted Android tablet, reached via `nh -s` " +
+      "(stdin pipe into chroot bash). TCP-connect scans work natively. Raw sockets " +
+      "do NOT work (Samsung kernel/SELinux blocks netlink RTM_GETROUTE and AF_PACKET " +
+      "even with CAP_NET_RAW); use `nmap -sT -Pn` for port scans, `nmap -sn -PS<port>` " +
+      "with a TCP-connect target list for host discovery, and `nc -z`/`curl` over `nmap " +
+      "-sP`/`-sS`. Avoid ICMP-only host discovery — prefer TCP probes to known ports.";
+  }
   return {
-    engagement: eng.rows[0],
+    engagement: engRow,
     hosts: hosts.rows,
     findings: findings.rows,
     queue_history: queue.rows,
