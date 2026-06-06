@@ -1,0 +1,102 @@
+{
+  "_": "Heuristic rules for inferring intent_class from a command string. Used by autonomous-executor.inferIntentFromCommand() to verify the model's self-declared intent_class. Mismatches gate the step + log telemetry.",
+  "_dir": "dir_1780784990563",
+  "_order": "First match wins. Order rules from most-specific to least-specific.",
+  "rules": [
+    {
+      "intent": "cred_test",
+      "patterns": [
+        "(?i)(curl|wget|httpie|http)[^\\n]{0,200}(-u\\s|--user[=\\s]|--password[=\\s])\\s*[A-Za-z0-9._-]+:[A-Za-z0-9._@!#%-]+",
+        "(?i)\\bhydra\\b",
+        "(?i)\\bmedusa\\b",
+        "(?i)\\bpatator\\b",
+        "(?i)\\bcrackmapexec\\b",
+        "(?i)\\bnetexec\\b",
+        "(?i)\\bnxc\\b",
+        "(?i)Authorization\\s*:\\s*Basic\\s+[A-Za-z0-9+/=]{4,}",
+        "(?i)\\b(admin|root|guest|administrator):(12345|admin|password|root|toor|1234|user|guest)\\b"
+      ]
+    },
+    {
+      "intent": "exploit_probe",
+      "patterns": [
+        "(?i)\\bmsfconsole\\b",
+        "(?i)\\bmetasploit\\b",
+        "(?i)use\\s+exploit/",
+        "(?i)exploit/(linux|windows|multi|unix)/",
+        "(?i)\\bsqlmap\\b.{0,200}(--dump|--os-shell|--sql-shell)",
+        "(?i)\\bsearchsploit\\b",
+        "(?i)CVE-\\d{4}-\\d{4,7}.{0,80}(exploit|rce|payload)"
+      ]
+    },
+    {
+      "intent": "lateral",
+      "patterns": [
+        "(?i)\\bpsexec\\b",
+        "(?i)\\bwinrm\\b.{0,80}(invoke|exec)",
+        "(?i)evil-winrm\\b",
+        "(?i)\\bxfreerdp\\b.{0,80}/u:",
+        "(?i)\\bsmbexec\\b",
+        "(?i)secretsdump"
+      ]
+    },
+    {
+      "intent": "post_exploit",
+      "patterns": [
+        "(?i)/etc/(passwd|shadow|sudoers)",
+        "(?i)cat\\s+/etc/passwd",
+        "(?i)\\bmimikatz\\b",
+        "(?i)reverse[\\s_-]?shell"
+      ]
+    },
+    {
+      "intent": "service_version",
+      "patterns": [
+        "(?i)nmap[^\\n]{0,200}(-sV|--version-)",
+        "(?i)nmap[^\\n]{0,200}--script\\b",
+        "(?i)\\bwhatweb\\b",
+        "(?i)\\bnuclei\\b"
+      ]
+    },
+    {
+      "intent": "tool_setup",
+      "patterns": [
+        "(?i)^\\s*apt(-get)?\\s+install\\b",
+        "(?i)^\\s*pip(3)?\\s+install\\b",
+        "(?i)^\\s*git\\s+clone\\b",
+        "(?i)which\\s+(nmap|nuclei|hydra|sqlmap|curl|adb|ssh)"
+      ]
+    },
+    {
+      "intent": "banner_grab",
+      "patterns": [
+        "(?i)^\\s*curl\\s+-[IsXv]+\\s+https?://",
+        "(?i)\\bnc\\b\\s+-?[zvnw]+\\s",
+        "(?i)\\bopenssl\\s+s_client\\b",
+        "(?i)\\btelnet\\b\\s+\\S+\\s+\\d+"
+      ]
+    },
+    {
+      "intent": "recon",
+      "patterns": [
+        "(?i)\\bnmap\\b[^\\n]{0,80}-sn\\b",
+        "(?i)\\bping\\b\\s+-c",
+        "(?i)\\barping\\b",
+        "(?i)\\bnmap\\b\\s+\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}"
+      ]
+    },
+    {
+      "intent": "enum",
+      "patterns": [
+        "(?i)\\b(rtsp|smb|snmp|ldap|dns|kerberos)[-_]?(enum|info|client|brute)\\b",
+        "(?i)\\bdig\\b\\s+",
+        "(?i)\\bdnsenum\\b",
+        "(?i)\\benum4linux\\b",
+        "(?i)\\bsmbclient\\b\\s+-L\\b",
+        "(?i)\\bldapsearch\\b",
+        "(?i)\\bsnmpwalk\\b",
+        "(?i)\\brpcclient\\b\\s+-U"
+      ]
+    }
+  ]
+}

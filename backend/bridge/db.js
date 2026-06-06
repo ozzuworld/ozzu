@@ -1150,6 +1150,13 @@ async function init() {
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS autonomous_paused BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS last_phase_advance_push_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS auto_executed BOOLEAN DEFAULT false`);
+    // ── Step-level intent classifier (dir_1780784990563) ──
+    // intent_class: model-declared intent for THIS step. NULL = legacy / model omitted
+    //   → treated as gated by autonomous-executor.
+    // Auto-run set = {recon, enum, banner_grab, service_version, tool_setup}.
+    // Harness lints declared intent vs command content; mismatch gates regardless.
+    await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS intent_class VARCHAR(24)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_soc_queue_intent ON soc_queue_items(engagement_id, intent_class)`);
 
     // ── Per-engagement executor routing (dir_1780586225013) ──
     // executor_host: 'dev-01' (default, runs commands as-is on the kali toolhost) or

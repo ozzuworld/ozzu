@@ -86,9 +86,11 @@ async function getEngagementState(args) {
 }
 
 async function queueStep(args) {
-  const { engagement_id, title, command, references, expected_artifact, model_override } = args || {};
+  const { engagement_id, title, command, references, expected_artifact, model_override, intent_class } = args || {};
   if (!engagement_id) return { error: "engagement_id required" };
   if (!command)       return { error: "command required" };
+  // intent_class is required by the schema but tolerated as NULL on legacy calls
+  // — autonomous-executor treats NULL as gated (safe default).
   const er = await db.query(
     `SELECT id, executor_host, executor_adb_target, executor_tools FROM pentest_engagements WHERE id = $1`,
     [engagement_id]);
@@ -108,9 +110,10 @@ async function queueStep(args) {
   // own step. Bypass the cipher-exploit-write trigger. See feedback_soc_observer_role.md.
   const ins = await db.withBypass('offense_agent_tool', (client) => client.query(
     `INSERT INTO soc_queue_items
-       (engagement_id, seq, title, description, command, expected_artifact, status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id, seq`,
-    [engagement_id, seq, finalTitle, null, wrappedCommand, expected_artifact || null]));
+       (engagement_id, seq, title, description, command, expected_artifact, status, intent_class)
+     VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7) RETURNING id, seq`,
+    [engagement_id, seq, finalTitle, null, wrappedCommand, expected_artifact || null,
+     typeof intent_class === "string" ? intent_class : null]));
 
   // Lightweight telemetry — Step 5 will write a richer per-iteration row that
   // ties reasoning/generation outputs together. For now record the queueing.
@@ -296,17 +299,22 @@ const TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "queue_step",
-      description: "Insert a new step into the engagement's PA queue. The command is automatically wrapped for the engagement's executor (e.g. adb-wrapped for tablet executors). The PA executes the step from the SOC app; pair with wait_for_outcome to block until the result is available.",
+      description: "Insert a new step into the engagement's PA queue. You MUST tag intent_class so the harness knows whether to auto-run the step or gate it for human review. Auto-run intents (the harness ships them to the executor immediately): recon, enum, banner_grab, service_version, tool_setup. Gated intents (human approves in the SOC app): cred_test, exploit_probe, lateral, post_exploit. THE HARNESS VERIFIES YOUR INTENT against the command content — claiming intent_class=enum on a `curl -u admin:pass` will be flagged as intent_mismatch, gated regardless, AND logged as a model-behavior signal for v1.4 training. Be honest.",
       parameters: {
         type: "object",
         properties: {
           engagement_id:      { type: "string",  description: "Engagement ID" },
           title:              { type: "string",  description: "Short label shown in the SOC app" },
           command:            { type: "string",  description: "Exact shell command (logical — wrapping for the executor is automatic)" },
+          intent_class:       {
+            type: "string",
+            enum: ["recon", "enum", "banner_grab", "service_version", "tool_setup", "cred_test", "exploit_probe", "lateral", "post_exploit"],
+            description: "What KIND of action this step performs. Auto-run set = recon|enum|banner_grab|service_version|tool_setup. Gated set = cred_test|exploit_probe|lateral|post_exploit. Required.",
+          },
           references:         { type: "array",   items: { type: "string" }, description: "Public PoC IDs (CVE-..., EDB-..., metasploit module paths). Optional." },
           expected_artifact:  { type: "string",  description: "What a successful run looks like (file, output substring, etc.)" },
         },
-        required: ["engagement_id", "title", "command"],
+        required: ["engagement_id", "title", "command", "intent_class"],
       },
     },
   },
