@@ -141,12 +141,12 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
       // model author findings that already wire into the attack graph. Backward-
       // compatible — defaults are confirmed/empty when absent.
       const kind = ["confirmed", "hypothesis", "refuted"].includes(f.kind) ? f.kind : "confirmed";
-      await db.query(
+      const ins = await db.query(
         `INSERT INTO pentest_findings
            (engagement_id, title, severity, status, affected_asset, refs, evidence_summary,
             informed_by, enables, kind)
          VALUES ($1, $2, $3, 'open', $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9)
-         ON CONFLICT DO NOTHING`,
+         ON CONFLICT DO NOTHING RETURNING id`,
         [
           engagementId,
           String(f.title).slice(0, 240),
@@ -158,6 +158,18 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
           JSON.stringify(Array.isArray(f.enables) ? f.enables : []),
           kind,
         ]);
+      // dir_1780789196002: fire-and-forget claim verifier. Catches cred_test
+      // false positives like #34 (model interpreted 200 OK on root URL as
+      // auth success). Async — never blocks aggregator. v1 only handles
+      // cred_test claims; other patterns silently no-op.
+      if (ins.rows && ins.rows.length > 0) {
+        const newId = ins.rows[0].id;
+        try {
+          const { verifyFinding } = require("/app/claim-verifier");
+          setImmediate(() => verifyFinding(newId).catch(e =>
+            console.error(`[claim-verifier] verify ${newId} crashed: ${e.message}`)));
+        } catch (_) { /* module load failure — skip silently */ }
+      }
     } catch (e) {
       console.error(`[aggregator] add_finding swallowed: ${e.message}`);
     }
