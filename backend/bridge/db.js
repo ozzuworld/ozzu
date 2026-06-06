@@ -1189,6 +1189,31 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_engagement_tasks_engagement ON engagement_tasks(engagement_id, status, created_at)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_engagement_tasks_queue_item ON engagement_tasks(queue_item_id)`);
 
+    // ── model_behavior_notes (dir_1780763057382) ──
+    // Per-iteration tags surfacing what the L3 agent did well or badly during an
+    // engagement, so the v1.4 training corpus can be quality-labeled: gold-standard
+    // iterations marked positive, give-up-early / hallucination / false-end marked
+    // negative for filtering or down-weighting. Without this every transcript bakes
+    // every behavior — good and bad — into v1.4 equally. tag is a controlled
+    // vocabulary (see routes/mcp.js note_model_behavior). queue_item_id is optional
+    // because some observations are about decision-shape, not the queued command.
+    await pool.query(`CREATE TABLE IF NOT EXISTS model_behavior_notes (
+      id            SERIAL PRIMARY KEY,
+      engagement_id VARCHAR(50) NOT NULL REFERENCES pentest_engagements(id) ON DELETE CASCADE,
+      queue_item_id INTEGER REFERENCES soc_queue_items(id) ON DELETE SET NULL,
+      iter          INTEGER,
+      model_used    VARCHAR(64),
+      tag           VARCHAR(32) NOT NULL,
+      polarity      VARCHAR(8)  NOT NULL,
+                    -- positive | negative | neutral
+      observation   TEXT NOT NULL,
+      suggested_fix TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by    VARCHAR(50) DEFAULT 'cipher'
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mbn_engagement ON model_behavior_notes(engagement_id, created_at)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mbn_tag ON model_behavior_notes(tag, polarity)`);
+
     // ── SOC recon hosts (dir_1780530175588) ──
     // Structured host/port rows parsed SERVER-SIDE from scan stdout at ingest, so
     // Cipher analyzes these rows (via get_recon) instead of pasting raw nmap/nc dumps

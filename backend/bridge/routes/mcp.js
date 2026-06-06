@@ -500,6 +500,53 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "note_model_behavior",
+      description: "Record a v1.4-corpus quality signal observed during this engagement: what the L3 agent did well or badly at a specific iteration, with a controlled-vocab tag and polarity. When the corpus-v1.4 build runs, these notes attach to the iteration so the trainer can filter or down-weight bad behaviors and weight up good ones. Use whenever you see the agent (a) recover from a failure with a tool pivot, (b) end the engagement prematurely, (c) hallucinate a flag/path, (d) ignore the executor caps note, (e) make a great recon decision, etc. Without these notes the corpus bakes every behavior into v1.4 equally.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+          tag: {
+            type: "string",
+            description: "Controlled-vocab tag describing the behavior",
+            enum: [
+              "tool_pivot",            // agent switched to a different tool after a failure
+              "repair_flow",           // agent corrected itself reading queue history
+              "false_end",             // agent called end_engagement prematurely
+              "empty_decision",        // orchestrator returned no action while pending tasks existed
+              "phase_confusion",       // agent misread engagement_phase (e.g. read 'reporting' as 'done')
+              "tool_hallucination",    // agent used non-existent flag/path/script (e.g. nmap -e <wrong-iface>)
+              "wrong_lan_assumption",  // agent reasoned from polluted/wrong-LAN findings
+              "give_up_early",         // agent stopped after few attempts when more remained
+              "cap_respect",           // agent honored executor_caps_note / tool list
+              "good_recon",            // agent picked a tight, target-appropriate probe
+              "bad_recon",             // agent picked a weak/irrelevant probe
+            ],
+          },
+          polarity: { type: "string", enum: ["positive", "negative", "neutral"], description: "Is this behavior what v1.4 should learn (positive) or avoid (negative)?" },
+          observation: { type: "string", description: "What was observed, free text — e.g. 'NSE rtsp-info failed; agent pivoted to curl + HEAD; reached real banner.'" },
+          iter: { type: "number", description: "Optional: the agent iteration this was observed at" },
+          queue_item_id: { type: "number", description: "Optional: the soc_queue_items.id that surfaced the behavior" },
+          model_used: { type: "string", description: "Optional: model id (e.g. 'qwen3:32b', 'ozzu-soc-v1.3')" },
+          suggested_fix: { type: "string", description: "Optional: how v1.4 should handle this case (free text)" },
+        },
+        required: ["engagement_id", "tag", "polarity", "observation"],
+      },
+    },
+    {
+      name: "list_model_behavior_notes",
+      description: "List recorded model_behavior_notes for an engagement (or all engagements). Filterable by tag and polarity. Useful before training v1.4 to scan what was tagged as positive vs negative across the corpus.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Optional: filter to a specific engagement" },
+          tag: { type: "string", description: "Optional: filter by tag" },
+          polarity: { type: "string", enum: ["positive", "negative", "neutral"], description: "Optional: filter by polarity" },
+          limit: { type: "number", description: "Max rows (default 50)" },
+        },
+      },
+    },
+    {
       name: "get_recon",
       description: "Get STRUCTURED recon hosts (ip / mac / vendor / status / open ports + service/version) for an engagement, parsed server-side from scan output. Use this INSTEAD of reading raw nmap/nc scan dumps — raw output stays in the audit log for the app and never enters context. Returns one row per discovered host.",
       inputSchema: {
@@ -1819,6 +1866,60 @@ ${result.narrative}
             text: `**Findings for ${args.engagement_id}:**\n\n${lines.join('\n')}\n\n**Total:** ${result.rows.length} finding(s)`
           }]
         };
+      }
+
+      case "note_model_behavior": {
+        // dir_1780763057382 — log a v1.4 corpus quality signal.
+        const r = await db.query(
+          `INSERT INTO model_behavior_notes
+             (engagement_id, queue_item_id, iter, model_used, tag, polarity, observation, suggested_fix, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id, created_at`,
+          [
+            args.engagement_id,
+            Number.isInteger(args.queue_item_id) ? args.queue_item_id : null,
+            Number.isInteger(args.iter) ? args.iter : null,
+            args.model_used || null,
+            args.tag,
+            args.polarity,
+            args.observation,
+            args.suggested_fix || null,
+            'cipher',
+          ]
+        );
+        const row = r.rows[0];
+        return {
+          content: [{
+            type: "text",
+            text: `📊 model_behavior_notes#${row.id} recorded for ${args.engagement_id}\n` +
+                  `**${args.polarity.toUpperCase()} · ${args.tag}** ${args.iter != null ? `(iter ${args.iter})` : ''}\n` +
+                  `${args.observation}` +
+                  (args.suggested_fix ? `\n\n**suggested_fix:** ${args.suggested_fix}` : ''),
+          }],
+        };
+      }
+
+      case "list_model_behavior_notes": {
+        const conds = [];
+        const params = [];
+        if (args.engagement_id) { conds.push(`engagement_id = $${params.length+1}`); params.push(args.engagement_id); }
+        if (args.tag)           { conds.push(`tag = $${params.length+1}`);           params.push(args.tag); }
+        if (args.polarity)      { conds.push(`polarity = $${params.length+1}`);      params.push(args.polarity); }
+        const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+        const limit = Number.isInteger(args.limit) && args.limit > 0 ? args.limit : 50;
+        const result = await db.query(
+          `SELECT id, engagement_id, iter, model_used, tag, polarity, observation, suggested_fix, created_at
+             FROM model_behavior_notes ${where}
+            ORDER BY created_at DESC LIMIT ${limit}`, params);
+        if (result.rows.length === 0) {
+          return { content: [{ type: "text", text: `No model_behavior_notes match.` }] };
+        }
+        const lines = result.rows.map(n => {
+          const head = `• [${n.polarity}] **${n.tag}** ${n.iter != null ? `iter=${n.iter}` : ''} ${n.model_used ? `(${n.model_used})` : ''} — ${n.engagement_id}`;
+          const fix = n.suggested_fix ? `\n  → fix: ${n.suggested_fix}` : '';
+          return `${head}\n  ${n.observation}${fix}`;
+        });
+        return { content: [{ type: "text", text: `**${result.rows.length} model_behavior_notes:**\n\n${lines.join('\n\n')}` }] };
       }
 
       case "get_recon": {
