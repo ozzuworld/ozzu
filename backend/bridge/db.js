@@ -1139,6 +1139,18 @@ async function init() {
     // the new graph prompt is smoke-tested. Flip true on engagements that opt in.
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS graph_mode_enabled BOOLEAN DEFAULT false`);
 
+    // ── Phase-gated autonomous execution (dir_1780784224487) ──
+    // autonomous_execution_enabled: when true, queueStep auto-spawns SSH execution
+    //   for recon/enumeration phase steps via the existing /soc/queue/:id/run path.
+    //   Foothold + post_exploit + lateral + exploitation stay gated (pending queue).
+    // autonomous_paused: kill switch — disables auto-execution even on safe phases.
+    // last_phase_advance_push_at: throttle bookkeeping for push notifications.
+    // soc_queue_items.auto_executed: marker so the SOC app can badge auto-runs.
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS autonomous_execution_enabled BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS autonomous_paused BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS last_phase_advance_push_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS auto_executed BOOLEAN DEFAULT false`);
+
     // ── Per-engagement executor routing (dir_1780586225013) ──
     // executor_host: 'dev-01' (default, runs commands as-is on the kali toolhost) or
     //   'tablet-p610' (or any android-pentest-bridge style executor — runs commands

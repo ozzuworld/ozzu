@@ -124,11 +124,29 @@ async function queueStep(args) {
       [engagement_id, ins.rows[0].id, "agent-tool", Array.isArray(references) ? references.length : 0]);
   } catch (_) { /* telemetry NEVER breaks tool dispatch */ }
 
+  // Phase-gated autonomous execution (dir_1780784224487). If the engagement has
+  // autonomous_execution_enabled=true AND phase is in AUTO_RUN_PHASES, this kicks
+  // off the SSH execution path internally. wait_for_outcome will then return as
+  // soon as the run completes — no human approval step. ROE block-list lint
+  // runs inside maybeAutoExecute; on a hit the row is marked failed with a
+  // diagnostic the agent sees on its next poll.
+  let auto = null;
+  try {
+    const { maybeAutoExecute } = require("/app/autonomous-executor");
+    auto = await maybeAutoExecute(ins.rows[0].id);
+  } catch (e) {
+    console.error(`[queue_step] auto-execute hook failed:`, e.message);
+  }
+
   return {
     queue_id: ins.rows[0].id,
     seq:      ins.rows[0].seq,
     title:    finalTitle,
-    note:     "Step queued for PA. Use wait_for_outcome(queue_id) to block until it runs.",
+    auto_executed: !!(auto && auto.autoExecuted),
+    auto_reason:   auto ? auto.reason : null,
+    note: (auto && auto.autoExecuted)
+      ? "Step queued AND auto-executed (recon/enumeration phase). Use wait_for_outcome to block until SSH completes."
+      : "Step queued for PA. Use wait_for_outcome(queue_id) to block until it runs.",
   };
 }
 
@@ -182,6 +200,12 @@ async function advancePhase(args) {
   if (!new_phase || !VALID_PHASES.includes(new_phase)) {
     return { error: `new_phase must be one of: ${VALID_PHASES.join(", ")}` };
   }
+  // Capture old phase BEFORE the update so the push-notification hook can
+  // tell whether we're crossing the auto-run → gated boundary.
+  const prev = await db.query(
+    `SELECT engagement_phase FROM pentest_engagements WHERE id = $1`,
+    [engagement_id]);
+  const oldPhase = prev.rows[0] && prev.rows[0].engagement_phase;
   const r = await db.query(
     `UPDATE pentest_engagements
         SET engagement_phase = $1
@@ -189,7 +213,16 @@ async function advancePhase(args) {
       RETURNING engagement_phase`,
     [new_phase, engagement_id]);
   if (r.rows.length === 0) return { error: `engagement ${engagement_id} not found` };
-  return { engagement_id, phase: r.rows[0].engagement_phase, ok: true };
+  // Push-notification hook (dir_1780784224487). Fires iff old phase is auto-run
+  // AND new phase is gated AND throttle not active. Failures swallowed.
+  let pushResult = null;
+  try {
+    const { onPhaseAdvance } = require("/app/autonomous-executor");
+    pushResult = await onPhaseAdvance(engagement_id, oldPhase, new_phase);
+  } catch (e) {
+    console.error(`[advance_phase] push hook failed:`, e.message);
+  }
+  return { engagement_id, phase: r.rows[0].engagement_phase, ok: true, push: pushResult };
 }
 
 async function endEngagement(args) {
