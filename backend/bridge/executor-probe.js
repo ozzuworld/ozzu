@@ -42,28 +42,25 @@ const CANDIDATE_TOOLS = [
   "ip", "iptables", "ip6tables", "getprop", "logcat", "settings",
 ];
 
-// Build the probe shell command. On tablet executors that ship the rooted-android
-// chroot wrapper at /data/local/nhsystem/nh, the probe runs in two passes:
-//   1. Outer (Android/toybox) pass — captures Android-side binaries (getprop,
-//      settings, logcat, iptables, …) and detects the `nh` sentinel via
-//      filesystem check (since /data/local/nhsystem/nh is NOT in PATH).
-//   2. Inner (Kali chroot) pass via `su -c "nh -s"` — captures Kali-only tools
-//      (nmap, sqlmap, nuclei, whatweb, …). Heredoc-fed so no quoting hell.
-// Parser dedupes; a tool present in both layers appears once in the merged set.
-// Sentinel echo at the end so the bridge can distinguish a complete run from
-// a truncated one.
+// Build the probe shell command. The tablet wrap (see wrapForExecutor below)
+// auto-routes us INTO the Kali chroot via `su -c "nh -s"` when /data/local/nhsystem/nh
+// exists, otherwise into plain Android sh. So this script just:
+//   - Detects whether it's currently inside the Kali chroot via /etc/os-release
+//     (only present + Kali-tagged inside the chroot) and emits the +nh sentinel
+//     so offense-engine's wrap knows to route future queue commands the same way.
+//   - Runs the candidate `command -v` loop in whichever PATH it landed in.
+//
+// Why os-release vs filesystem `[ -x ... ]`: the v1 probe used the latter and
+// silently failed because SELinux blocks the ADB-shell-context caller of `[`
+// from exec-checking files under /data/local/nhsystem — even at mode 0755.
+// /etc/os-release is plain read-only file content, safe for any context.
 function buildProbeCommand() {
   const checks = CANDIDATE_TOOLS
     .map((t) => `command -v ${t} >/dev/null 2>&1 && echo +${t} || echo -${t}`)
     .join("; ");
   return [
-    checks + ";",
-    `[ -x /data/local/nhsystem/nh ] && echo +nh || echo -nh;`,
-    `if [ -x /data/local/nhsystem/nh ]; then`,
-    `  su -c "/data/local/nhsystem/nh -s" 2>/dev/null <<'CHROOT_PROBE'`,
+    `grep -qi 'Kali GNU/Linux' /etc/os-release 2>/dev/null && echo +nh`,
     checks,
-    `CHROOT_PROBE`,
-    `fi`,
     `echo PROBE_DONE`,
   ].join("\n");
 }
@@ -78,13 +75,26 @@ function parseProbeOutput(out) {
   return [...installed];
 }
 
-// Same wrapping logic as offense-engine.wrapForExecutor — kept here so this
-// module is self-contained (callable without loading offense-engine).
+// Bootstrap wrap for the probe. Diverges from offense-engine.wrapForExecutor
+// in ONE crucial way: this wrap auto-detects the chroot at runtime
+// (`[ -x /data/local/nhsystem/nh ]`) instead of consulting
+// `engagement.executor_tools` — because the probe IS what populates that
+// field, so on first run executor_tools is empty and offense-engine's
+// nh-gated routing would never fire.
+//
+// Runs `su -c` so the chroot check (and therefore the chroot probe) executes
+// as root, sidestepping the SELinux exec block that breaks the same check
+// from the default shell context. (UID 2000 / u:r:shell:s0 fails -x on
+// anything under /data/local/nhsystem even at mode 0755.)
 function wrapForExecutor(command, engagement) {
   const host = engagement && engagement.executor_host;
   if (!host || host === "dev-01" || !engagement.executor_adb_target) return command;
   const b64 = Buffer.from(String(command), "utf8").toString("base64");
-  return `adb -s ${engagement.executor_adb_target} shell "echo ${b64} | base64 -d | sh" </dev/null`;
+  const inner =
+    `if [ -x /data/local/nhsystem/nh ]; then ` +
+    `echo ${b64} | base64 -d | /data/local/nhsystem/nh -s; ` +
+    `else echo ${b64} | base64 -d | sh; fi`;
+  return `adb -s ${engagement.executor_adb_target} shell 'su -c "${inner}"' </dev/null`;
 }
 
 // Run the probe via dev-01 (matches the SOC executor contract — ssh stdin pipe
