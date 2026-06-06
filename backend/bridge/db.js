@@ -1121,6 +1121,24 @@ async function init() {
     await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS affected_assets JSONB DEFAULT '[]'`);
     await pool.query(`ALTER TABLE pentest_findings ALTER COLUMN cvss_vector TYPE VARCHAR(255)`);
 
+    // ── Attack-graph data model (dir_1780781999942) ──
+    // informed_by: [{finding_id, edge_kind in {'evidence','implies','refutes'}}, ...]
+    //   — DAG of inference: which prior finding(s) led the model to propose / discover this one
+    // enables: [{hypothesis_label, ttp_hint}, ...]
+    //   — which open attack paths this finding makes possible. Hypothesis nodes get linked back
+    //     when later findings confirm/refute them.
+    // kind: 'confirmed' (a real finding the PA ran a probe and we have evidence) | 'hypothesis'
+    //   (the model proposed a probe; no result yet) | 'refuted' (probe ran and disproved)
+    // See feedback_soc_observer_role.md + OFFENSE-AGENT-DESIGN.md.
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS informed_by JSONB DEFAULT '[]'`);
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS enables JSONB DEFAULT '[]'`);
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS kind VARCHAR(16) DEFAULT 'confirmed'`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_findings_informed_by ON pentest_findings USING GIN (informed_by)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_findings_kind ON pentest_findings(engagement_id, kind)`);
+    // Per-engagement feature flag — keep legacy free-intent path the default until
+    // the new graph prompt is smoke-tested. Flip true on engagements that opt in.
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS graph_mode_enabled BOOLEAN DEFAULT false`);
+
     // ── Per-engagement executor routing (dir_1780586225013) ──
     // executor_host: 'dev-01' (default, runs commands as-is on the kali toolhost) or
     //   'tablet-p610' (or any android-pentest-bridge style executor — runs commands

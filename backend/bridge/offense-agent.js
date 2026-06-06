@@ -189,22 +189,38 @@ async function loadEngagementContext(engagementId) {
   const eng = await db.query(
     `SELECT id, engagement_type, scope, roe, status,
             executor_host, executor_adb_target, executor_tools,
-            engagement_phase, agent_run_state, agent_status
+            engagement_phase, agent_run_state, agent_status,
+            graph_mode_enabled
        FROM pentest_engagements WHERE id = $1`, [engagementId]);
   if (eng.rows.length === 0) return { engagement: null };
   const [hosts, findings, queue] = await Promise.all([
     db.query(`SELECT ip, hostname, status, ports FROM recon_hosts WHERE engagement_id = $1 ORDER BY ip`, [engagementId]),
-    db.query(`SELECT title, severity, status, affected_asset, affected_assets, refs
+    db.query(`SELECT id, title, severity, status, affected_asset, affected_assets, refs, kind, informed_by, enables
                 FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]),
     db.query(`SELECT seq, title, status, LEFT(COALESCE(command,''),240) AS command_preview, LEFT(COALESCE(output,''),200) AS output_preview
                 FROM soc_queue_items WHERE engagement_id = $1 AND status IN ('done','failed','cancelled')
                 ORDER BY seq DESC LIMIT 10`, [engagementId]),
   ]);
+  // Materialize the attack graph rendering iff this engagement opted in.
+  // Otherwise the legacy flat-findings list is what the orchestrator sees
+  // (no behavior change for engagements that didn't flip the flag). See
+  // feedback_soc_observer_role.md + dir_1780781999942.
+  let findingGraphRendered = null;
+  if (eng.rows[0].graph_mode_enabled) {
+    try {
+      const { materializeFindingGraph, renderForPrompt } = require("/app/finding-graph");
+      const graph = await materializeFindingGraph(engagementId);
+      findingGraphRendered = renderForPrompt(graph);
+    } catch (e) {
+      console.error(`[offense-agent] finding-graph materialize failed:`, e.message);
+    }
+  }
   return {
     engagement: eng.rows[0],
     hosts:    hosts.rows,
     findings: findings.rows,
     queue:    queue.rows,
+    finding_graph_rendered: findingGraphRendered,
   };
 }
 

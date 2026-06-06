@@ -140,7 +140,13 @@ async function decide(engagementCtx, modelOverride) {
     `Executor: ${eng.executor_host || "dev-01"}`,
     `Tools available on executor: ${execTools.length ? execTools.join(", ") : "(unknown — POSIX-portable only)"}`,
     `Structured recon (hosts/ports/services): ${JSON.stringify(engagementCtx.hosts || []).slice(0, 4000)}`,
-    `Findings so far: ${JSON.stringify(engagementCtx.findings || []).slice(0, 4000)}`,
+    // Findings: graph rendering when engagement opted in to graph_mode (dir_1780781999942),
+    // otherwise legacy flat-list JSON. The graph encodes informed_by → enables relationships
+    // so the reasoning loop sees how findings build on each other — King Kazuma's
+    // SOC-app UI insight ported to the model's prompt.
+    engagementCtx.finding_graph_rendered
+      ? `Findings (attack graph):\n${engagementCtx.finding_graph_rendered}`
+      : `Findings so far: ${JSON.stringify(engagementCtx.findings || []).slice(0, 4000)}`,
     "",
     "Current Task Coordination Graph:",
     graphText,

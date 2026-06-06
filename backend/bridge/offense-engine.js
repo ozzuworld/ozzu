@@ -85,12 +85,13 @@ function chatCompletion(messages, modelOverride) {
 async function gatherContext(engagementId) {
   const eng = await db.query(
     `SELECT id, engagement_type, scope, roe, status,
-            executor_host, executor_adb_target, executor_tools
+            executor_host, executor_adb_target, executor_tools,
+            graph_mode_enabled
        FROM pentest_engagements WHERE id = $1`, [engagementId]);
   const hosts = await db.query(
     `SELECT ip, hostname, status, ports FROM recon_hosts WHERE engagement_id = $1 ORDER BY ip`, [engagementId]);
   const findings = await db.query(
-    `SELECT title, severity, status, affected_asset, affected_assets, refs
+    `SELECT id, title, severity, status, affected_asset, affected_assets, refs, kind, informed_by, enables
        FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]);
   // Step 2 of OFFENSE-AGENT-DESIGN.md — last N finalized queue items with outcomes.
   // Gives the model memory of what it tried, what worked, and what failed.
@@ -105,11 +106,23 @@ async function gatherContext(engagementId) {
         AND status IN ('done', 'failed', 'cancelled')
       ORDER BY seq DESC
       LIMIT 10`, [engagementId]);
+  // Attack-graph rendering iff this engagement opted in (dir_1780781999942).
+  let findingGraphRendered = null;
+  if (eng.rows[0] && eng.rows[0].graph_mode_enabled) {
+    try {
+      const { materializeFindingGraph, renderForPrompt } = require("/app/finding-graph");
+      const graph = await materializeFindingGraph(engagementId);
+      findingGraphRendered = renderForPrompt(graph);
+    } catch (e) {
+      console.error(`[offense-engine] finding-graph materialize failed:`, e.message);
+    }
+  }
   return {
     engagement: eng.rows[0] || null,
     hosts:    hosts.rows,
     findings: findings.rows,
     queue:    queue.rows,
+    finding_graph_rendered: findingGraphRendered,
   };
 }
 
@@ -267,7 +280,12 @@ async function advanceOffense(engagementId, intent, modelOverride) {
     ...(executorCaps ? [executorCaps] : []),
     `Tools available on the executor: ${execTools.length ? execTools.join(", ") : "(unknown — assume only POSIX-portable shell tools)"}`,
     `Structured recon (hosts/ports/services): ${JSON.stringify(ctx.hosts)}`,
-    `Findings so far: ${JSON.stringify(ctx.findings)}`,
+    // Findings: graph rendering when engagement opted in to graph_mode (dir_1780781999942),
+    // otherwise legacy flat-list JSON. The graph encodes informed_by → enables relationships
+    // so reasoning sees how findings build on each other.
+    ctx.finding_graph_rendered
+      ? `Findings (attack graph):\n${ctx.finding_graph_rendered}`
+      : `Findings so far: ${JSON.stringify(ctx.findings)}`,
     historyBlock,
     "Pick the next in-scope sub-task as strict JSON. If a similar approach already failed in the queue history, pivot to a different technique.",
   ].join("\n");

@@ -232,6 +232,23 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // GET /soc/engagements/:id/finding-graph — dir_1780781999942: attack-graph
+    // rendering of pentest_findings + pending probes, with informed_by edges and
+    // open-frontier hypotheses. Mirror of the data the offense agent sees on each
+    // iter when graph_mode_enabled=true. Membrane-safe (sanitized titles, no raw
+    // commands/payloads). Powers the SOC app's findings page.
+    if (req.method === "GET" && pathname.match(/^\/soc\/engagements\/[^\/]+\/finding-graph$/)) {
+      const id = pathname.split("/")[3];
+      try {
+        const { materializeFindingGraph } = require("../finding-graph");
+        const graph = await materializeFindingGraph(id);
+        sendJSON(res, 200, graph);
+      } catch (e) {
+        sendJSON(res, 500, { error: e.message });
+      }
+      return true;
+    }
+
     // GET /soc/engagements/:id/scripts - Get scripts for engagement
     if (req.method === "GET" && pathname.match(/^\/soc\/engagements\/[^\/]+\/scripts$/)) {
       const id = pathname.split("/")[3];

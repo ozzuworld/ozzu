@@ -483,8 +483,23 @@ module.exports = function mcpRoutes(ctx) {
           evidence_files: { type: "array", description: "Paths to evidence (screenshots, logs, pcaps)" },
           refs: { type: "array", description: "Public references by ID/URL — CVE / ExploitDB / advisory (e.g. ['CVE-2024-12345','EDB-50123']). Reference only; never exploit source." },
           affected_assets: { type: "array", description: "Structured multi-asset link: [{ip, ports:[...], note}], joinable to recon_hosts. Use for findings spanning multiple hosts/ports; affected_asset (string) remains for the single-asset case." },
+          informed_by: { type: "array", description: "Attack-graph edges TO this finding: array of {finding_id, edge_kind in ['evidence','implies','refutes']} or bare finding_ids. Encodes which prior findings led to this one. dir_1780781999942." },
+          enables: { type: "array", description: "Attack-graph FUTURE paths: array of {hypothesis_label, ttp_hint}. What attack-paths this finding makes possible. dir_1780781999942." },
+          kind: { type: "string", enum: ["confirmed", "hypothesis", "refuted"], description: "Node kind: 'confirmed' (evidence-backed finding) | 'hypothesis' (model-proposed probe, no result) | 'refuted' (probe ran, disproved). Defaults to 'confirmed'." },
         },
         required: ["engagement_id", "severity", "title", "description"],
+      },
+    },
+    {
+      name: "get_finding_graph",
+      description: "Get the attack-graph rendering of an engagement's findings (confirmed + hypothesis + pending probes, with informed_by edges + open frontiers). Membrane-safe: no raw commands, payloads, or credentials. Use to inspect what the offense model sees on each iter when graph_mode_enabled is on, or to audit graph density. dir_1780781999942.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+          format: { type: "string", enum: ["json", "ascii"], description: "json = full {nodes, edges, topo_order, open_frontiers}; ascii = compact tree rendering used in the agent prompt. Default ascii." },
+        },
+        required: ["engagement_id"],
       },
     },
     {
@@ -1805,11 +1820,15 @@ ${result.narrative}
       }
 
       case "add_finding": {
+        // Attack-graph fields (dir_1780781999942): informed_by/enables/kind are optional;
+        // backward-compatible for callers that don't pass them. kind defaults to 'confirmed'.
+        const kind = ["confirmed", "hypothesis", "refuted"].includes(args.kind) ? args.kind : "confirmed";
         await db.query(`
           INSERT INTO pentest_findings (
             engagement_id, severity, title, description, cvss_score, cvss_vector,
-            affected_asset, affected_assets, refs, mitre_attack, reproduction, remediation, evidence_files, discovered_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            affected_asset, affected_assets, refs, mitre_attack, reproduction, remediation, evidence_files, discovered_by,
+            informed_by, enables, kind
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         `, [
           args.engagement_id,
           args.severity,
@@ -1824,15 +1843,30 @@ ${result.narrative}
           JSON.stringify(args.reproduction || {}),
           args.remediation || null,
           JSON.stringify(args.evidence_files || []),
-          'cipher'
+          'cipher',
+          JSON.stringify(args.informed_by || []),
+          JSON.stringify(args.enables || []),
+          kind
         ]);
 
         return {
           content: [{
             type: "text",
-            text: `✅ Finding recorded\n\n**Severity:** ${args.severity.toUpperCase()}\n**Title:** ${args.title}\n**Asset:** ${args.affected_asset || 'N/A'}\n**Engagement:** ${args.engagement_id}\n\nFinding added to engagement report.`
+            text: `✅ Finding recorded\n\n**Severity:** ${args.severity.toUpperCase()}\n**Title:** ${args.title}\n**Asset:** ${args.affected_asset || 'N/A'}\n**Kind:** ${kind}\n**Engagement:** ${args.engagement_id}\n\nFinding added to engagement report.`
           }]
         };
+      }
+
+      case "get_finding_graph": {
+        const { materializeFindingGraph, renderForPrompt } = require("/app/finding-graph");
+        const graph = await materializeFindingGraph(args.engagement_id);
+        const format = args.format === "json" ? "json" : "ascii";
+        if (format === "json") {
+          return { content: [{ type: "text", text: JSON.stringify(graph, null, 2) }] };
+        }
+        const ascii = renderForPrompt(graph);
+        const summary = `**Attack graph for ${args.engagement_id}** — ${graph.nodes.length} nodes (${graph.nodes.filter(n => n.kind === "confirmed").length} confirmed, ${graph.nodes.filter(n => n.kind === "hypothesis").length} hypothesis, ${graph.nodes.filter(n => n.kind === "pending_probe").length} pending probes), ${graph.edges.length} edges, ${graph.open_frontiers.length} open frontiers.\n\n\`\`\`\n${ascii}\n\`\`\``;
+        return { content: [{ type: "text", text: summary }] };
       }
 
       case "list_findings": {

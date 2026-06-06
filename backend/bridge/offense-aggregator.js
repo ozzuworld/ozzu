@@ -135,10 +135,15 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
   for (const f of out.new_findings) {
     try {
       if (!f || !f.title) continue;
+      // dir_1780781999942: optional graph fields. informed_by/enables/kind let the
+      // model author findings that already wire into the attack graph. Backward-
+      // compatible — defaults are confirmed/empty when absent.
+      const kind = ["confirmed", "hypothesis", "refuted"].includes(f.kind) ? f.kind : "confirmed";
       await db.query(
         `INSERT INTO pentest_findings
-           (engagement_id, title, severity, status, affected_asset, refs, evidence_summary)
-         VALUES ($1, $2, $3, 'open', $4, $5::jsonb, $6)
+           (engagement_id, title, severity, status, affected_asset, refs, evidence_summary,
+            informed_by, enables, kind)
+         VALUES ($1, $2, $3, 'open', $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9)
          ON CONFLICT DO NOTHING`,
         [
           engagementId,
@@ -147,6 +152,9 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
           f.affected_asset ? String(f.affected_asset).slice(0, 240) : null,
           JSON.stringify(Array.isArray(f.refs) ? f.refs : []),
           f.evidence ? String(f.evidence).slice(0, 2000) : null,
+          JSON.stringify(Array.isArray(f.informed_by) ? f.informed_by : []),
+          JSON.stringify(Array.isArray(f.enables) ? f.enables : []),
+          kind,
         ]);
     } catch (e) {
       console.error(`[aggregator] add_finding swallowed: ${e.message}`);
