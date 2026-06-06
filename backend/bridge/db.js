@@ -1120,6 +1120,11 @@ async function init() {
     await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS refs JSONB DEFAULT '[]'`);
     await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS affected_assets JSONB DEFAULT '[]'`);
     await pool.query(`ALTER TABLE pentest_findings ALTER COLUMN cvss_vector TYPE VARCHAR(255)`);
+    // dir_1780785501461: offense-aggregator.js writes a short evidence_summary
+    // string (the model's distilled signal from the queue item's raw output).
+    // Without this column the INSERT throws and the aggregator's try/catch
+    // swallows every finding silently — agent runs produced zero findings.
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS evidence_summary TEXT`);
 
     // ── Attack-graph data model (dir_1780781999942) ──
     // informed_by: [{finding_id, edge_kind in {'evidence','implies','refutes'}}, ...]
