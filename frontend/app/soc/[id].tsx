@@ -31,6 +31,8 @@ import { QueueTab } from "../../components/soc/QueueTab";
 import { FindingsTab } from "../../components/soc/FindingsTab";
 import { DetailTab, type EngagementMeta, type ReconHostRow, type AuditLogRow, type TaskGraphNode } from "../../components/soc/DetailTab";
 import { LiveExecModal } from "../../components/soc/LiveExecModal";
+import { SocErrorBoundary } from "../../components/soc/SocErrorBoundary";
+import { safe } from "../../components/soc/safe";
 import type { QueueItemRow } from "../../components/soc/QueueRow";
 import type { FindingRowData } from "../../components/soc/FindingRow";
 import type { RunningItem } from "../../components/soc/LiveExecBanner";
@@ -56,6 +58,20 @@ interface QueueItem extends QueueItemRow {
 }
 
 export default function EngagementDetailScreen() {
+  const router = useRouter();
+  const [resetKey, setResetKey] = useState(0);
+  return (
+    <SocErrorBoundary
+      key={resetKey}
+      onReset={() => setResetKey((k) => k + 1)}
+      onBack={() => router.back()}
+    >
+      <EngagementDetailInner />
+    </SocErrorBoundary>
+  );
+}
+
+function EngagementDetailInner() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { insets } = usePhoneLayout();
@@ -283,11 +299,12 @@ export default function EngagementDetailScreen() {
           style={{ color: colors.text.primary, fontSize: fs.xxl, fontWeight: fw.bold }}
           numberOfLines={1}
         >
-          {engagement.id}
+          {safe(engagement.id, "—")}
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacing.xs, gap: spacing.sm }}>
           <Text style={{ color: colors.text.secondary, fontSize: fs.md, flex: 1 }} numberOfLines={1}>
-            {engagement.client_name} · {engagement.engagement_type}
+            {safe(engagement.client_name, "—")}
+            {engagement.engagement_type ? ` · ${engagement.engagement_type}` : ""}
           </Text>
           <PhasePill phase={engagement.engagement_phase} size="sm" />
         </View>

@@ -7,6 +7,7 @@ import { colors, fontSize, fontWeight, radius, spacing, withAlpha } from "../../
 import { ProgressBar } from "../business/ProgressBar";
 import { PhasePill } from "./PhasePill";
 import { phaseColor } from "./phaseColors";
+import { safe } from "./safe";
 
 export interface EngagementSummary {
   id: string;
@@ -100,7 +101,7 @@ export function EngagementCard({ engagement, onPress }: EngagementCardProps) {
             style={{ color: colors.gray[50], fontSize: fontSize.lg, fontWeight: fontWeight.semibold, flex: 1 }}
             numberOfLines={1}
           >
-            {engagement.id}
+            {safe(engagement.id, "—")}
           </Text>
           {isLive ? (
             <View
@@ -134,7 +135,8 @@ export function EngagementCard({ engagement, onPress }: EngagementCardProps) {
           }}
         >
           <Text style={{ color: colors.gray[300], fontSize: fontSize.md, flex: 1 }} numberOfLines={1}>
-            {engagement.client_name} · {engagement.engagement_type}
+            {safe(engagement.client_name, "—")}
+            {engagement.engagement_type ? ` · ${engagement.engagement_type}` : ""}
           </Text>
           <PhasePill phase={engagement.engagement_phase} size="sm" />
         </View>
