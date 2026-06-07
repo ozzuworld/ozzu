@@ -1,0 +1,39 @@
+services:
+  edge-gw:
+    build: ./edge-gw
+    container_name: ozzulab-edge-gw
+    hostname: edge-gw.skyline.local
+    networks:
+      ozzulab-net:
+        ipv4_address: 10.10.20.10
+    restart: unless-stopped
+
+  internal-web:
+    build: ./internal-web
+    container_name: ozzulab-internal-web
+    hostname: internal-web.skyline.local
+    networks:
+      ozzulab-net:
+        ipv4_address: 10.10.20.20
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    build: ./db
+    container_name: ozzulab-db
+    hostname: db.skyline.local
+    networks:
+      ozzulab-net:
+        ipv4_address: 10.10.20.30
+    environment:
+      MYSQL_ROOT_PASSWORD: r00t_DontUseThis_2026
+    restart: unless-stopped
+
+networks:
+  ozzulab-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.20.0/24
+          gateway: 10.10.20.1

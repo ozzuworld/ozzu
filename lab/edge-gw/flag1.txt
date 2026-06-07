@@ -1,0 +1,1 @@
+OZZULAB{flag1-edge-gw-ssh-foothold-via-weak-creds}
