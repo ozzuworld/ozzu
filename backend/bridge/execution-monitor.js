@@ -239,4 +239,70 @@ async function performReflector({ rawText, expectedFormat, schemaHint }) {
   ]);
 }
 
-module.exports = { ExecutionMonitor, performMentor, performPlanner, performReflector };
+// ── Refiner prompt (adapted from PentAGI subtasks_refiner.tmpl) ──
+// When the orchestrator is stuck adding tasks but never selecting one — or
+// when the pending pile is unmanageable — Refiner returns a pruned plan:
+// one task to focus on, IDs to cancel, and a filtered subset of the proposed
+// additions worth keeping.
+function renderRefinerPrompt({ objective, completed, pending, proposed }) {
+  const completedXml = (completed || []).slice(0, 5).map(t =>
+    `<completed_task>\n<id>${t.id}</id>\n<title>${(t.title || "").slice(0, 200)}</title>\n<result>${(t.result || "").slice(0, 300)}</result>\n</completed_task>`
+  ).join("\n");
+  const pendingXml = (pending || []).map(t =>
+    `<pending_task>\n<id>${t.id}</id>\n<title>${(t.title || "").slice(0, 200)}</title>\n<phase>${t.phase || ""}</phase>\n</pending_task>`
+  ).join("\n");
+  const proposedXml = (proposed || []).map((t, i) =>
+    `<proposed_task>\n<index>${i}</index>\n<directive>${(t.directive || "").slice(0, 300)}</directive>\n<phase>${t.phase || ""}</phase>\n</proposed_task>`
+  ).join("\n");
+  return [
+    "You are a pentest task plan refiner. The orchestrator is about to add new tasks but has not selected one to execute — or the pending pile is too large to make progress.",
+    "",
+    "Your job: produce a focused short plan. Pick ONE pending or proposed task that best advances the primary objective. Cancel duplicates. Filter the proposed additions down to only those that fill genuine gaps.",
+    "",
+    `<primary_objective>\n${objective || "(no explicit objective)"}\n</primary_objective>`,
+    "",
+    completedXml ? `<completed_tasks>\n${completedXml}\n</completed_tasks>` : "",
+    "",
+    pendingXml ? `<pending_tasks>\n${pendingXml}\n</pending_tasks>` : "<pending_tasks><status>empty</status></pending_tasks>",
+    "",
+    proposedXml ? `<orchestrator_proposed_new_tasks>\n${proposedXml}\n</orchestrator_proposed_new_tasks>` : "",
+    "",
+    "Return ONLY a JSON object with this exact shape (no markdown, no prose):",
+    '{',
+    '  "selected_task_id": <integer ID of the pending task to execute next, or null if the best next action is one of the proposed_new_tasks; in that case pick a NEW id by setting "select_proposed_index": <integer index into orchestrator_proposed_new_tasks>>,',
+    '  "select_proposed_index": <integer index into orchestrator_proposed_new_tasks if selected_task_id is null and a proposed task should be selected, otherwise null>,',
+    '  "prune_pending_ids":     [<array of pending task IDs to CANCEL because they are duplicates or no longer useful given completed results>],',
+    '  "filtered_add":          [<array of indices into orchestrator_proposed_new_tasks worth keeping; drop the rest>],',
+    '  "rationale":             "<one short sentence on why this pick advances the objective>"',
+    '}',
+    "",
+    "Rules:",
+    "- selected_task_id MUST be non-null UNLESS all pending tasks are redundant — in that case, pick from proposed via select_proposed_index.",
+    "- prune_pending_ids: any pending task whose intent is already covered by a completed task's result, or duplicated by another pending task, should be in this list.",
+    "- filtered_add: be aggressive. If 5 tasks were proposed and 2 are duplicates of pending, only the 3 unique indices belong here.",
+    "- rationale: name the specific finding/host/CVE that motivates the selected task.",
+  ].filter(Boolean).join("\n");
+}
+
+async function performRefiner(ctx) {
+  const prompt = renderRefinerPrompt(ctx);
+  const raw = await chatCompletion([
+    { role: "user", content: prompt },
+  ]);
+  let parsed;
+  try {
+    const m = raw.match(/\{[\s\S]*\}/);
+    parsed = JSON.parse(m ? m[0] : raw);
+  } catch (e) {
+    throw new Error(`refiner parse failed: ${e.message}; raw=${raw.slice(0, 200)}`);
+  }
+  return {
+    selected_task_id:        Number.isInteger(parsed.selected_task_id) ? parsed.selected_task_id : null,
+    select_proposed_index:   Number.isInteger(parsed.select_proposed_index) ? parsed.select_proposed_index : null,
+    prune_pending_ids:       Array.isArray(parsed.prune_pending_ids) ? parsed.prune_pending_ids.filter(Number.isInteger) : [],
+    filtered_add:            Array.isArray(parsed.filtered_add) ? parsed.filtered_add.filter(Number.isInteger) : [],
+    rationale:               typeof parsed.rationale === "string" ? parsed.rationale.slice(0, 400) : "",
+  };
+}
+
+module.exports = { ExecutionMonitor, performMentor, performPlanner, performReflector, performRefiner };

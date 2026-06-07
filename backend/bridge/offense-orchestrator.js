@@ -207,6 +207,80 @@ async function decide(engagementCtx, modelOverride) {
     _graph:         graph, // for caller convenience
   };
 
+  // dir_1780842283437: Refiner — break the `added_tasks_no_select` stall.
+  // Trigger when:
+  //   (a) model added tasks but selected none, OR
+  //   (b) the pending pile is overgrown (>5 unblocked)
+  // Refiner picks ONE task to focus on (existing pending OR one of the proposed)
+  // and prunes redundant pending IDs. Soft-cancel via prune_pending_ids.
+  const proposedNonEmpty = out.add.length > 0;
+  const stallShape = proposedNonEmpty && out.select == null && !out.end;
+  const overgrown = graph.unblocked.length > 5;
+  if (stallShape || overgrown) {
+    try {
+      const { performRefiner } = require("/app/execution-monitor");
+      const allTasks = graph.tasks || [];
+      const byIdLocal = Object.create(null);
+      for (const t of allTasks) byIdLocal[t.id] = t;
+      const completedTasks = allTasks
+        .filter(t => t && (t.status === "completed" || t.status === "done"))
+        .slice(-5)
+        .map(t => ({ id: t.id, title: (t.directive || "").slice(0, 200), result: (t.last_result || t.summary || "").slice(0, 300) }));
+      const pendingTasks = (graph.unblocked || []).map(id => {
+        const t = byIdLocal[id];
+        return t ? { id: t.id, title: (t.directive || "").slice(0, 200), phase: t.phase || null } : null;
+      }).filter(Boolean);
+      const proposedTasks = out.add.map(t => ({ directive: t.directive || "", phase: t.phase || null }));
+      const refOut = await performRefiner({
+        objective: (eng.objective || eng.engagement_objective || `Engagement ${eng.id} — ${eng.engagement_type || "pentest"}`).slice(0, 500),
+        completed: completedTasks,
+        pending:   pendingTasks,
+        proposed:  proposedTasks,
+      });
+
+      // Apply refiner decisions
+      const pendingIdSet = new Set(pendingTasks.map(t => t.id));
+      if (Array.isArray(refOut.prune_pending_ids) && refOut.prune_pending_ids.length) {
+        const pruneTargets = refOut.prune_pending_ids.filter(id => pendingIdSet.has(id));
+        if (pruneTargets.length) {
+          try {
+            await db.query(
+              `UPDATE engagement_tasks
+                  SET status='cancelled'
+                WHERE id = ANY($1::int[]) AND engagement_id=$2 AND status='pending'`,
+              [pruneTargets, eng.id]);
+          } catch (_) {}
+          out._refiner_pruned = pruneTargets;
+        }
+      }
+      if (Array.isArray(refOut.filtered_add) && refOut.filtered_add.length > 0 && refOut.filtered_add.length < out.add.length) {
+        out.add = refOut.filtered_add
+          .filter(i => Number.isInteger(i) && i >= 0 && i < out.add.length)
+          .map(i => out.add[i]);
+      }
+      if (Number.isInteger(refOut.selected_task_id) && pendingIdSet.has(refOut.selected_task_id)) {
+        out.select = refOut.selected_task_id;
+        out._refiner_selected = "pending";
+      } else if (Number.isInteger(refOut.select_proposed_index) && refOut.select_proposed_index >= 0 && refOut.select_proposed_index < out.add.length) {
+        // Trim add to just the chosen one; agent loop will detect _refiner_select_proposed
+        // and select the inserted task immediately after addTasks().
+        out.add = [out.add[refOut.select_proposed_index]];
+        out._refiner_select_proposed = true;
+        out._refiner_selected = "proposed";
+      }
+      out._refiner_rationale = refOut.rationale;
+
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'refiner', 'orchestrator', 0, 0, false, true, 0, 0, 'refiner_invoked', $2)`,
+          [eng.id, `trigger=${stallShape ? "stall" : "overgrown"}; selected=${out._refiner_selected || "none"}; pruned=${(out._refiner_pruned || []).length}; ${(refOut.rationale || "").slice(0, 200)}`]);
+      } catch (_) {}
+    } catch (e) {
+      console.error(`[orchestrator] refiner failed:`, e.message);
+    }
+  }
+
   // Fallback (dir_1780763267882): when the model returns a fully-empty decision
   // but unblocked pending tasks exist, auto-select the oldest. qwen3:32b base
   // reliably hits this failure mode — the system prompt + DECISION RULE above

@@ -403,9 +403,17 @@ async function runAgent(engagementId, opts = {}) {
     lastDecision = decision;
 
     // (2) Add any new tasks proposed
+    let insertedTaskRows = [];
     if (Array.isArray(decision.add) && decision.add.length) {
-      const inserted = await orchestrator.addTasks(engagementId, decision.add);
-      tasksAdded += inserted.length;
+      insertedTaskRows = await orchestrator.addTasks(engagementId, decision.add);
+      tasksAdded += insertedTaskRows.length;
+    }
+    // dir_1780842283437: Refiner picked one of the proposed adds — select the
+    // inserted row immediately so this iter actually executes work instead of
+    // looping back to decide() again ("added_tasks_no_select" stall).
+    // orchestrator.addTasks returns an array of inserted task IDs (numbers).
+    if (decision._refiner_select_proposed && insertedTaskRows.length > 0 && decision.select == null) {
+      decision.select = insertedTaskRows[0];
     }
 
     // (3) Phase advance?
