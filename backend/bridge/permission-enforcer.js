@@ -75,11 +75,39 @@ function enforcePermissionMode(engagement, intentClass) {
 const IP_RE = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
 const HOSTNAME_RE = /\b(?!-)[a-zA-Z0-9-]{1,63}(?:\.[a-zA-Z0-9-]{1,63})+\b/g;
 
+// dir_1780852509762: blocklist common file extensions so wordlist paths
+// (common.txt, rockyou.txt), config files (config.yml, app.conf), and asset
+// paths (style.css, script.js) don't get misread as hostnames by HOSTNAME_RE.
+const FILE_EXT_BLOCKLIST = new Set([
+  "txt", "lst", "list", "wordlist", "dic", "dict",
+  "json", "yml", "yaml", "toml", "ini", "conf", "cfg",
+  "sh", "bash", "zsh", "py", "pl", "rb", "lua", "js", "mjs", "ts", "php",
+  "html", "htm", "css", "scss", "xml", "csv", "tsv", "sql",
+  "log", "pcap", "pcapng", "out", "tmp", "bak", "old", "orig", "swp",
+  "gz", "bz2", "xz", "zip", "tar", "tgz", "7z",
+  "pem", "key", "crt", "cer", "p12", "pfx", "asc",
+  "md", "rst", "txt", "rtf", "pdf",
+  "png", "jpg", "jpeg", "gif", "svg", "ico", "webp",
+  "exe", "dll", "so", "dylib", "elf", "bin", "img", "iso", "deb", "rpm", "apk",
+]);
+
+function isLikelyFilePath(s) {
+  // Anything with a slash is a path, not a host.
+  if (s.includes("/") || s.includes("\\")) return true;
+  // Tail extension check.
+  const lastDot = s.lastIndexOf(".");
+  if (lastDot <= 0) return false;
+  const ext = s.slice(lastDot + 1).toLowerCase();
+  return FILE_EXT_BLOCKLIST.has(ext);
+}
+
 function extractTargetsFromCommand(command) {
   if (!command) return [];
   const ips = [...new Set(String(command).match(IP_RE) || [])];
   const hosts = [...new Set((String(command).match(HOSTNAME_RE) || [])
-    .filter(h => !ips.includes(h) && !/^[0-9.]+$/.test(h)))];
+    .filter(h => !ips.includes(h)
+              && !/^[0-9.]+$/.test(h)
+              && !isLikelyFilePath(h)))];
   return [...ips, ...hosts];
 }
 
