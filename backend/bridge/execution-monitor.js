@@ -18,14 +18,46 @@ const MODEL_NAME = process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
 const MODEL_KEY = process.env.OFFENSE_MODEL_KEY || "";
 
 // ── Execution monitor state machine ────────────────────────────────────────
+// dir_1780854966869: shape-normalizer. Reduces a queue command to its
+// canonical structure so different-target/different-port runs of the same
+// underlying command read as a single "shape".
+function normalizeCommandShape(cmd) {
+  if (!cmd) return "";
+  let s = String(cmd);
+  // Replace IPs first (long form before short)
+  s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?\b/g, "<IP>");
+  // Replace :PORT after host or IP
+  s = s.replace(/:(?:\d{1,5})\b/g, ":<PORT>");
+  // Replace stand-alone port numbers in nmap/hydra -p / -s contexts
+  s = s.replace(/(-(?:p|P|s)\s+)(\d{1,5})/g, "$1<PORT>");
+  // Replace absolute file paths with just the basename
+  s = s.replace(/(\/[A-Za-z0-9_.\-]+){2,}/g, "<PATH>");
+  // Replace URLs to <URL> when no specific structure left
+  s = s.replace(/https?:\/\/[^\s'"]+/g, "<URL>");
+  // Collapse whitespace + downcase
+  s = s.replace(/\s+/g, " ").trim().toLowerCase();
+  // Cap length
+  return s.slice(0, 120);
+}
+
 class ExecutionMonitor {
-  constructor({ sameThreshold = 3, totalThreshold = 10, enabled = true } = {}) {
+  constructor({
+    sameThreshold = 3,
+    totalThreshold = 10,
+    shapeThreshold = 3,           // dir_1780854966869
+    enabled = true,
+  } = {}) {
     this.sameThreshold = sameThreshold;
     this.totalThreshold = totalThreshold;
+    this.shapeThreshold = shapeThreshold;
     this.enabled = enabled;
     this.sameToolCount = 0;
     this.totalCallCount = 0;
     this.lastActionSig = "";
+    // dir_1780854966869: per-shape counters across all iters
+    this.shapeCounts = new Map();  // normalizedShape -> count
+    this.lastShape = "";
+    this.sameShapeCount = 0;
   }
 
   // actionSig: a short string fingerprint of the agent's last action — e.g.
@@ -40,13 +72,42 @@ class ExecutionMonitor {
       this.lastActionSig = actionSig;
     }
     return this.sameToolCount >= this.sameThreshold ||
-           this.totalCallCount >= this.totalThreshold;
+           this.totalCallCount >= this.totalThreshold ||
+           this.sameShapeCount >= this.shapeThreshold;
+  }
+
+  // dir_1780854966869: register a synthesized command's shape. Called after
+  // synthesizeCommand returns step.command, before the queue insert.
+  recordCommandShape(commandText) {
+    if (!this.enabled) return;
+    const shape = normalizeCommandShape(commandText);
+    if (!shape) return;
+    this.shapeCounts.set(shape, (this.shapeCounts.get(shape) || 0) + 1);
+    if (shape === this.lastShape) {
+      this.sameShapeCount += 1;
+    } else {
+      this.sameShapeCount = 1;
+      this.lastShape = shape;
+    }
+  }
+
+  // For prompting Mentor: which shape is currently looping?
+  topRepeatedShape() {
+    if (this.shapeCounts.size === 0) return null;
+    let best = null, bestN = 0;
+    for (const [shape, n] of this.shapeCounts.entries()) {
+      if (n > bestN) { best = shape; bestN = n; }
+    }
+    return { shape: best, count: bestN };
   }
 
   reset() {
     this.sameToolCount = 0;
     this.totalCallCount = 0;
     this.lastActionSig = "";
+    this.shapeCounts.clear();
+    this.lastShape = "";
+    this.sameShapeCount = 0;
   }
 
   snapshot() {
@@ -54,6 +115,9 @@ class ExecutionMonitor {
       sameToolCount: this.sameToolCount,
       totalCallCount: this.totalCallCount,
       lastActionSig: this.lastActionSig,
+      sameShapeCount: this.sameShapeCount,
+      lastShape: this.lastShape,
+      topRepeatedShape: this.topRepeatedShape(),
     };
   }
 }
@@ -362,4 +426,4 @@ function hashContent(s) {
   return h.toString(16);
 }
 
-module.exports = { ExecutionMonitor, performMentor, performPlanner, performReflector, performRefiner, performSummarizer, hashContent };
+module.exports = { ExecutionMonitor, performMentor, performPlanner, performReflector, performRefiner, performSummarizer, hashContent, normalizeCommandShape };

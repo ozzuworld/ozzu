@@ -607,6 +607,12 @@ async function runAgent(engagementId, opts = {}) {
       continue;
     }
 
+    // dir_1780854966869: register synthesized command's canonical shape so
+    // Mentor's shape-based loop detection catches synthesizer-level repetition.
+    if (monitor && typeof monitor.recordCommandShape === "function") {
+      try { monitor.recordCommandShape(step.command); } catch (_) {}
+    }
+
     // (8) Queue via the existing tool dispatcher (handles executor wrapping + telemetry)
     const queueResult = await dispatch("queue_step", {
       engagement_id: engagementId,
