@@ -144,7 +144,37 @@ async function verifyCredTestFinding(finding) {
   return { verdict: "skip", reason: `inconclusive probe response (code=${code || "(none)"})` };
 }
 
-// Main entry. Dispatches by claim type. Currently only cred_test.
+// dir_1780854805127: exposure-finding claims requiring HTTP 200 + content.
+// A finding titled "Sensitive File Exposure" / "Exposed X" with evidence
+// containing a 403/401/404 status is auto-refuted because those statuses
+// mean the file is HIDDEN, not exposed.
+const EXPOSURE_TITLE_PATTERNS = [
+  /sensitive\s+file\s+exposure/i,
+  /exposed\s+(file|directory|endpoint|configuration|credentials?|database|backup)/i,
+  /file\s+disclosure/i,
+  /information\s+disclosure(?!.*version)/i, // info-disclosure but NOT version banner disclosure
+  /directory\s+listing/i,
+];
+const HIDDEN_STATUS_RE = /(?:Status:\s*|HTTP[/ ]\d\.?\d?\s*|http_code[=:]?\s*)(40[1-4])\b/i;
+
+function isExposureClaim(finding) {
+  if (!finding || !finding.title) return false;
+  return EXPOSURE_TITLE_PATTERNS.some(re => re.test(String(finding.title)));
+}
+
+function refuteExposureBy403(finding) {
+  const haystack = `${finding.evidence_summary || ""} ${finding.affected_asset || ""}`;
+  const m = haystack.match(HIDDEN_STATUS_RE);
+  if (!m) return null;
+  return { verdict: "fail", code: m[1], notes:
+    `Title claims "${finding.title.slice(0, 80)}" but evidence shows HTTP ${m[1]}. ` +
+    `${m[1] === "403" ? "Apache returns 403 for hidden files (.htaccess/.htpasswd/.hta/server-status are standard hardening, not exposure)." :
+      m[1] === "401" ? "401 means auth required — file is protected, not exposed." :
+      m[1] === "404" ? "404 means not found — file does not exist." :
+      "Hidden, not exposed."}` };
+}
+
+// Main entry. Dispatches by claim type.
 async function verifyFinding(findingId) {
   try {
     const r = await db.query(
@@ -154,6 +184,32 @@ async function verifyFinding(findingId) {
     if (r.rows.length === 0) return;
     const finding = r.rows[0];
     if (finding.kind === "refuted") return; // already refuted, no point re-checking
+
+    // dir_1780854805127: exposure-with-403 auto-refute. No probe needed —
+    // the evidence already tells us the file is hidden.
+    if (isExposureClaim(finding)) {
+      const fast = refuteExposureBy403(finding);
+      if (fast) {
+        await db.query(
+          `UPDATE pentest_findings
+              SET kind = 'refuted',
+                  evidence_summary = COALESCE(evidence_summary, '') || $1
+            WHERE id = $2`,
+          [`\n\n[REFUTED by claim-verifier dir_1780854805127 at ${new Date().toISOString()}: ${fast.notes}]`, finding.id]);
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry
+               (engagement_id, queue_item_id, model_used, intent_category,
+                n_hosts, n_findings, step_queued, in_scope, n_references,
+                latency_ms, outcome, outcome_notes)
+             VALUES ($1, NULL, 'claim-verifier', 'exposure_with_403',
+                     0, 0, false, true, 0, 0, 'verify_fail', $2)`,
+            [finding.engagement_id, `finding ${finding.id} "${finding.title.slice(0, 80)}": ${fast.notes}`]);
+        } catch (_) {}
+        return;
+      }
+    }
+
     if (!isCredTestClaim(finding)) return;
 
     const result = await verifyCredTestFinding(finding);
@@ -197,4 +253,7 @@ async function verifyFinding(findingId) {
   }
 }
 
-module.exports = { verifyFinding, isCredTestClaim, detectVendor };
+module.exports = {
+  verifyFinding, isCredTestClaim, detectVendor,
+  isExposureClaim, refuteExposureBy403,
+};

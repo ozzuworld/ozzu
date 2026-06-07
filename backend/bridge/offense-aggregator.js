@@ -47,6 +47,16 @@ const AGGREGATOR_SYSTEM_PROMPT = [
   "Respond STRICT JSON, no prose, no code fences. Schema:",
   '{"success": <bool>, "key_signals": [<string>...], "new_findings": [{"title": "...", "severity": "info|low|medium|high|critical", "refs": [], "affected_asset": "...", "evidence": "..."}], "new_hosts": [{"ip": "...", "hostname": "...", "ports": [{"port": 80, "service": "http", "version": "..."}]}], "followup": [<string>...], "error_category": <string>|null}',
   "Do not invent data not present in the raw output. If a field has nothing, return [] or null.",
+  "",
+  "FINDING POLARITY RULES — dir_1780854805127 (do not violate these):",
+  "- HTTP 401/403/404 status on a path means the file is HIDDEN, NOT exposed. Do NOT emit 'Sensitive File Exposure' findings for paths returning 403/404.",
+  "- A 'Sensitive File Exposure' finding REQUIRES HTTP 200 OK on the path AND a snippet of the actual FILE CONTENT in the evidence field.",
+  "- .htaccess / .htpasswd / .hta returning 403 is Apache standard hardening — IGNORE these from gobuster/dirb output.",
+  "- server-status returning 403 is mod_status hardening — IGNORE.",
+  "- /admin/, /login/, /config/ returning 200 with a real login page IS a legitimate finding (severity info or low: 'Admin interface exposed'). The same paths returning 403 are HARDENED, not exposed.",
+  "- A directory listing finding (severity info) requires HTTP 200 + an HTML index showing real filenames (not a custom error page).",
+  "- DEFAULT credentials finding requires authentication SUCCESS evidence (200 OK on an authenticated endpoint, or the service returning a session token). A 401/403 to a cred-test means creds FAILED.",
+  "- When in doubt, emit severity='info' with the literal status code in evidence rather than inventing a severity from the path name.",
 ].join("\n");
 
 function chatCompletion(messages, modelOverride) {
