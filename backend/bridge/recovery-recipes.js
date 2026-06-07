@@ -20,6 +20,8 @@ const FAILURE_SCENARIOS = {
   PARSE_FAILURE_REPEAT:    "parse_failure_repeat",
   PERMISSION_STREAK:       "permission_streak",
   MODEL_LOOP:              "model_loop",
+  // dir_1780854495541: detect commands referencing non-existent files/binaries
+  MISSING_RESOURCE:        "missing_resource",
 };
 
 const ESCALATION = {
@@ -70,6 +72,23 @@ const RECIPES = {
     max_attempts: 5,
     escalation_policy: ESCALATION.ALERT_OPERATOR,
     reason_template: "Mentor fired 5+ times with no measurable progress. Likely gravity-locked on a dead lead.",
+  },
+  // dir_1780854495541
+  [FAILURE_SCENARIOS.MISSING_RESOURCE]: {
+    steps: ["inject_mentor_guidance"],
+    max_attempts: 3,
+    escalation_policy: ESCALATION.LOG_AND_CONTINUE,
+    reason_template:
+      "Recent commands referenced non-existent files or binaries on the executor (wordlist paths, tool binaries, or script files). The model is hallucinating paths. Pivot to ONE of: " +
+      "(a) Discover real wordlists first via `ls /usr/share/wordlists/ /usr/share/seclists/ 2>/dev/null`. " +
+      "(b) Use INLINE credentials with hydra instead of -L/-P wordlists: " +
+      "    `hydra -l admin -p admin ssh://10.10.20.10` or " +
+      "    `hydra -l admin -P /usr/share/wordlists/dirb/common.txt ssh://target`. " +
+      "(c) Try canonical wordlist paths that exist on Kali by default: " +
+      "    /usr/share/wordlists/dirb/common.txt (proven to exist on this executor), " +
+      "    /usr/share/wordlists/rockyou.txt, " +
+      "    /usr/share/seclists/Passwords/Common-Credentials/10-million-password-list-top-1000.txt. " +
+      "DO NOT retry the same hallucinated path — pick a different strategy.",
   },
 };
 
@@ -147,6 +166,43 @@ function detectFailureScenario({ telemetry = [], queueItems = [], mentorFires = 
     return {
       scenario: FAILURE_SCENARIOS.MODEL_LOOP,
       evidence: `mentor fired ${mentorFires} times this run`,
+    };
+  }
+
+  // 8. dir_1780854495541: Missing resource — 3+ recent queue items reference
+  //    files/binaries that don't exist. Catches the wordlist-hallucination loop.
+  const missingPatterns = [
+    /(?:No such file or directory:?\s+)([^\s'":,]+)/gi,
+    /(?:file does not exist:?\s+)([^\s'":,]+)/gi,
+    /(?:File for logins not found:?\s+)([^\s'":,]+)/gi,
+    /(?:File for passwords not found:?\s+)([^\s'":,]+)/gi,
+    /(?:wordlist file "([^"]+)" does not exist)/gi,
+    /([A-Za-z0-9_-]+):\s+command not found/gi,
+  ];
+  const missingItems = [];
+  const missingPaths = new Map(); // path -> count
+  for (const q of queueItems.slice(-5)) {
+    if (q.status !== "failed" && q.status !== "done") continue;
+    const out = String(q.output || "");
+    let hitInThisItem = false;
+    for (const re of missingPatterns) {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(out)) !== null) {
+        const path = (m[1] || "").trim();
+        if (!path) continue;
+        missingPaths.set(path, (missingPaths.get(path) || 0) + 1);
+        hitInThisItem = true;
+      }
+    }
+    if (hitInThisItem) missingItems.push(q.id);
+  }
+  if (missingItems.length >= 3) {
+    const topPath = [...missingPaths.entries()].sort((a, b) => b[1] - a[1])[0];
+    return {
+      scenario: FAILURE_SCENARIOS.MISSING_RESOURCE,
+      evidence: `${missingItems.length} of last 5 queue items reference non-existent paths` +
+                (topPath ? ` (most-repeated: ${topPath[0]} ×${topPath[1]})` : ""),
     };
   }
 
