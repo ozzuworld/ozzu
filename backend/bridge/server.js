@@ -6970,6 +6970,29 @@ wss.on("connection", (ws, req) => {
     // Fire-and-forget — failures logged but never break startup.
     (async () => {
       try {
+        // dir_1780835159445: (a) reap any soc_queue_items rows orphaned by
+        // the bridge restart — SSH spawn dies, close handler never fires,
+        // row stays status='running' forever. 5 min cutoff is past the 300s
+        // queue-item default timeout — anything still running >5 min after
+        // bridge start is gone.
+        try {
+          const reap = await db.query(
+            `UPDATE soc_queue_items
+                SET status='failed',
+                    output = COALESCE(output, '') || E'\n\n[ORPHANED — bridge restart at '
+                                              || NOW()::text
+                                              || '; SSH process killed, row never reaped.]',
+                    completed_at = NOW()
+              WHERE status='running'
+                AND started_at < NOW() - INTERVAL '5 minutes'
+              RETURNING id, seq`);
+          if (reap.rows.length > 0) {
+            log.bridge.info(`soc queue: reaped ${reap.rows.length} orphaned running row(s): ${reap.rows.map(r => `#${r.id}(seq=${r.seq})`).join(", ")}`);
+          }
+        } catch (e) {
+          log.bridge.error(`soc queue orphan-reap failed: ${e.message}`);
+        }
+
         const r = await db.query(
           `SELECT id, agent_run_state, autonomous_paused FROM pentest_engagements
             WHERE agent_status='running'
