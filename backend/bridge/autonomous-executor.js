@@ -89,6 +89,67 @@ function unwrapCommand(command) {
   return body;
 }
 
+// ── Pre-flight command linter (dir_1780794595572) ──
+// Catches MODEL command-syntax bugs before they hit the executor. The model
+// sees the rejection diagnostic via wait_for_outcome and self-corrects on
+// the next iter. Rules live in lint/cmd-preflight-rules.json.
+let _preflightCache = { mtime: 0, rules: [] };
+function loadPreflightRules() {
+  const p = "/app/lint/cmd-preflight-rules.json";
+  try {
+    const st = fs.statSync(p);
+    if (st.mtimeMs !== _preflightCache.mtime) {
+      const j = JSON.parse(fs.readFileSync(p, "utf8"));
+      _preflightCache = {
+        mtime: st.mtimeMs,
+        rules: (Array.isArray(j.rules) ? j.rules : []).map(r => ({
+          id: r.id,
+          pattern: (() => {
+            let body = String(r.pattern || "");
+            let flags = "";
+            const m = body.match(/^\(\?([imsxu]+)\)/);
+            if (m) {
+              flags = m[1].replace(/[xu]/g, "");
+              body = body.slice(m[0].length);
+            }
+            try { return new RegExp(body, flags); } catch (_) { return null; }
+          })(),
+          applies_when: r.applies_when || "any",
+          hint: r.hint || "",
+          allowlist: Array.isArray(r.allowlist) ? r.allowlist : null,
+        })).filter(r => r.pattern),
+      };
+    }
+  } catch (e) {
+    if (_preflightCache.rules.length === 0) _preflightCache = { mtime: 0, rules: [] };
+  }
+  return _preflightCache.rules;
+}
+
+// Returns null if pass, { rule, hint, match } if a rule rejects.
+function lintCommandPreflight(commandText, engagement) {
+  if (!commandText) return null;
+  const isTablet = engagement && engagement.executor_host && engagement.executor_host !== "dev-01";
+  const body = unwrapCommand(commandText);
+  const rules = loadPreflightRules();
+  for (const r of rules) {
+    if (r.applies_when === "tablet" && !isTablet) continue;
+    if (r.applies_when === "dev-01" && isTablet) continue;
+    const m = body.match(r.pattern);
+    if (!m) continue;
+    // Allowlist short-circuit (for --script <name> rule)
+    if (r.allowlist && m[1]) {
+      // Comma-separated multi-script: each must be in the allowlist
+      const names = String(m[1]).split(",").map(s => s.trim()).filter(Boolean);
+      const bad = names.filter(n => !r.allowlist.includes(n));
+      if (bad.length === 0) continue;
+      return { rule: r.id, hint: r.hint, match: bad.join(",") };
+    }
+    return { rule: r.id, hint: r.hint, match: m[0].slice(0, 100) };
+  }
+  return null;
+}
+
 // inferIntentFromCommand: scan the command string against the rules dictionary.
 // Returns the FIRST matching intent. The rules file ORDERS most-specific →
 // least-specific so e.g. `cred_test` regex wins over `enum` regex on a
@@ -176,7 +237,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       `SELECT q.id, q.command, q.engagement_id, q.intent_class,
               e.autonomous_execution_enabled, e.autonomous_paused,
               e.autonomous_full_access,
-              e.engagement_phase, e.roe
+              e.engagement_phase, e.roe, e.executor_host
          FROM soc_queue_items q
          JOIN pentest_engagements e ON q.engagement_id = e.id
         WHERE q.id = $1`,
@@ -194,6 +255,30 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
         `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
         [`[ROE-BLOCKED — prohibited pattern matched: ${roeHit}]\n[See engagement.roe.prohibited.]`, item.id]));
       return { autoExecuted: false, reason: "ROE block-list hit", pattern: roeHit };
+    }
+
+    // dir_1780794595572: pre-flight command linter. Catches model command-
+    // syntax bugs (quoted user@host, nmap without -Pn -sT on tablet, fake NSE
+    // scripts). Diagnostic lands in output column so wait_for_outcome surfaces
+    // the hint to the model on next iter — model self-corrects instead of
+    // accumulating "this avenue doesn't work" context.
+    const preflightCheck = lintCommandPreflight(item.command, { executor_host: item.executor_host });
+    if (preflightCheck) {
+      const diag = `[PREFLIGHT_LINT_BLOCKED — dir_1780794595572]\nrule=${preflightCheck.rule}\nmatched=${preflightCheck.match}\nhint=${preflightCheck.hint}`;
+      await db.withBypass("autonomous_preflight_block", (client) => client.query(
+        `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+        [diag, item.id]));
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, $2, 'lint', 'cmd_preflight', 0, 0, false, true, 0, 0,
+                   'preflight_lint_fail', $3)`,
+          [item.engagement_id, item.id, `rule=${preflightCheck.rule}; matched=${preflightCheck.match}`]);
+      } catch (_) { /* telemetry never breaks lint */ }
+      return { autoExecuted: false, reason: `preflight_lint:${preflightCheck.rule}`, hint: preflightCheck.hint };
     }
 
     // Step-level intent classifier (dir_1780784990563 + dir_1780786024387 fallback).
@@ -394,6 +479,7 @@ module.exports = {
   pushOnGatedIntent,
   roeLint,
   inferIntentFromCommand,
+  lintCommandPreflight,
   AUTO_RUN_PHASES,
   GATE_PHASES,
   AUTO_RUN_INTENTS,

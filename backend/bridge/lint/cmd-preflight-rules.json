@@ -1,0 +1,36 @@
+{
+  "_": "Pre-flight command linter rules. Catches MODEL command-syntax bugs BEFORE the row hits the executor — the model sees the rejection diagnostic via wait_for_outcome and self-corrects.",
+  "_dir": "dir_1780794595572",
+  "rules": [
+    {
+      "id": "ssh_quoted_empty_user",
+      "pattern": "ssh\\b[^\\n]{0,400}'[^']*@'\\s+\\S",
+      "applies_when": "any",
+      "hint": "ssh syntax bug: 'user@' (quoted) breaks because the quotes terminate before the host, so SSH sees an empty hostname after the @. Use `ssh user@host port_args` (no quotes around user@host), OR use `ssh -l user host port_args`."
+    },
+    {
+      "id": "nmap_missing_pn_st_on_tablet",
+      "pattern": "(^|\\n|;|\\|)\\s*nmap\\b(?![^\\n;|]*\\-Pn)(?![^\\n;|]*(\\-sT|--connect-scan))",
+      "applies_when": "tablet",
+      "hint": "Android executor denies raw sockets (executor_caps_note says this). nmap WITHOUT `-Pn -sT` will fail with 'route_dst_netlink: if_indextoname(2) failed: 13 Permission denied'. Always pass `-Pn -sT` when nmap targets the tablet's wlan0 LAN."
+    },
+    {
+      "id": "nse_script_not_in_allowlist",
+      "pattern": "--script[=\\s]+([A-Za-z0-9_,*-]+)",
+      "applies_when": "any",
+      "hint": "NSE script(s) not in known-good list for this executor. Real Nmap scripts include: rtsp-methods, rtsp-url-brute, ssh2-enum-algos, ssh-hostkey, ssh-auth-methods, ssh-brute, http-methods, http-headers, http-title, http-enum, http-vuln-*, ssl-enum-ciphers, ssl-cert, upnp-info, broadcast-upnp-info, snmp-info, snmp-sysdescr, snmp-brute, smb-os-discovery, smb-enum-shares, smb-vuln-ms17-010, dns-brute, vulners, vuln, banner. Or omit --script and write the probe with curl/openssl/etc.",
+      "allowlist": [
+        "rtsp-methods", "rtsp-url-brute", "rtsp-grandstream-creds",
+        "ssh2-enum-algos", "ssh-hostkey", "ssh-auth-methods", "ssh-brute", "ssh-publickey-acceptance",
+        "http-methods", "http-headers", "http-title", "http-enum", "http-server-header",
+        "http-vuln-cve2017-5638", "http-vuln-cve2020-0688",
+        "ssl-enum-ciphers", "ssl-cert", "ssl-heartbleed",
+        "upnp-info", "broadcast-upnp-info",
+        "snmp-info", "snmp-sysdescr", "snmp-brute", "snmp-interfaces",
+        "smb-os-discovery", "smb-enum-shares", "smb-vuln-ms17-010", "smb2-security-mode",
+        "dns-brute", "dns-recursion", "dns-cache-snoop",
+        "vulners", "vuln", "banner", "default", "discovery", "safe", "auth", "intrusive"
+      ]
+    }
+  ]
+}
