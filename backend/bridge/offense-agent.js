@@ -388,6 +388,70 @@ async function runAgent(engagementId, opts = {}) {
       await setAgentStatus(engagementId, "error", { iter, error: "engagement not found" });
       return { engagement_id: engagementId, ok: false, iter, reason: "engagement not found", elapsed_sec: Math.round((Date.now()-startMs)/1000) };
     }
+
+    // dir_1780845298918: recovery_recipes — detect known failure scenarios and
+    // apply structured recovery before this iter's model call. Saves a model
+    // call when executor is offline + auto-paces fabrication streaks.
+    try {
+      const recovery = require("/app/recovery-recipes");
+      const [tel, qi] = await Promise.all([
+        db.query(
+          `SELECT outcome, outcome_notes FROM offense_telemetry
+            WHERE engagement_id=$1 ORDER BY id DESC LIMIT 10`, [engagementId]),
+        db.query(
+          `SELECT id, command, output, status FROM soc_queue_items
+            WHERE engagement_id=$1 ORDER BY id DESC LIMIT 10`, [engagementId]),
+      ]);
+      const mentorFires = tel.rows.filter(t => t.outcome === "mentor_invoked").length;
+      const hit = recovery.detectFailureScenario({
+        telemetry: tel.rows.slice().reverse(),
+        queueItems: qi.rows.slice().reverse(),
+        mentorFires,
+      });
+      if (hit) {
+        console.log(`[offense-agent] recovery scenario detected: ${hit.scenario} — ${hit.evidence}`);
+        const result = await recovery.applyRecovery(db, ctx.engagement, hit);
+        if (result && result.escalated) {
+          await setAgentStatus(engagementId, "paused", {
+            iter,
+            recovery_scenario: hit.scenario,
+            recovery_attempts: result.attempts,
+            last_action: "recovery_escalated",
+          });
+          return {
+            engagement_id: engagementId,
+            ok: false,
+            iter,
+            reason: `recovery_escalated: ${hit.scenario} (${result.attempts}/${result.max_attempts} attempts) — engagement paused, operator must restart`,
+            recovery_scenario: hit.scenario,
+            tasks_added: tasksAdded,
+            steps_queued: stepsQueued,
+            elapsed_sec: Math.round((Date.now()-startMs)/1000),
+          };
+        }
+        if (result && result.mentor_hint) {
+          // Inject the recovery hint as the mentor guidance for THIS iter.
+          // Override any prior mentor guidance — recovery is the freshest signal.
+          mentorGuidance = result.mentor_hint;
+        }
+        if (result && result.skip_host) {
+          // Tag the host as deprioritized via engagement scope hint
+          try {
+            await db.query(
+              `UPDATE pentest_engagements
+                  SET agent_run_state = COALESCE(agent_run_state, '{}'::jsonb)
+                                      || jsonb_build_object('deprioritized_hosts',
+                                           COALESCE(agent_run_state->'deprioritized_hosts', '[]'::jsonb)
+                                           || $2::jsonb)
+                WHERE id = $1`,
+              [engagementId, JSON.stringify([result.skip_host])]);
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      console.error(`[offense-agent] recovery check failed:`, e.message);
+    }
+
     // dir_1780838519357: inject Planner plan + Mentor guidance into orchestrator context
     if (plannerPlan) ctx.planner_plan = plannerPlan;
     if (mentorGuidance) ctx.mentor_guidance = mentorGuidance;

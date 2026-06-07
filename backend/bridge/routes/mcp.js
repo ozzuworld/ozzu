@@ -574,6 +574,17 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "list_recovery_state",
+      description: "Read the engagement's recovery state — typed failure scenarios detected, per-scenario attempt counters, escalation status (dir_1780845298918). Use to diagnose WHY an engagement is paused or stalling. Returns {paused, recovery_state: {[scenario]: {attempts, last_attempt_at, last_evidence, escalated}}}. Scenarios: executor_offline, cve_fabrication_streak, nse_fabrication_streak, target_unreachable, parse_failure_repeat, permission_streak, model_loop.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
       name: "set_engagement_permission_mode",
       description: "Set the engagement's permission mode (claw-analog style, dir_1780844590951). Modes from least → most privileged: recon_only · enumeration · exploitation_auto · exploitation_prompt · full_engagement. The mode gates intent_class on every auto-executed queue item: recon_only blocks all enumeration+exploit, enumeration blocks all exploit, exploitation_auto allows exploit_test but blocks RCE/post-exploit, full_engagement allows everything. Use to escalate or de-escalate mid-engagement (e.g. after reviewing recon → enable exploitation_auto). Returns previous + new mode.",
       inputSchema: {
@@ -1995,6 +2006,36 @@ ${result.narrative}
             text: `**Recon hosts for ${args.engagement_id}** (structured; raw scan output not shown):\n\n${lines.join("\n")}\n\n**Total:** ${result.rows.length} host(s)`
           }]
         };
+      }
+
+      case "list_recovery_state": {
+        // dir_1780845298918
+        const recovery = require("../recovery-recipes");
+        try {
+          const r = await recovery.getRecoveryState(db, args.engagement_id);
+          if (!r) {
+            return { content: [{ type: "text", text: `Engagement ${args.engagement_id} not found.` }], isError: true };
+          }
+          if (r.error) {
+            return { content: [{ type: "text", text: `list_recovery_state failed: ${r.error}` }], isError: true };
+          }
+          const state = r.recovery_state || {};
+          const scenarios = Object.entries(state);
+          if (scenarios.length === 0) {
+            return { content: [{ type: "text", text: `Engagement ${r.id} — paused=${r.paused}. No recovery scenarios triggered yet (no failure patterns detected).` }] };
+          }
+          const lines = scenarios.map(([k, v]) =>
+            `- **${k}**: ${v.attempts} attempt(s) ${v.escalated ? "(ESCALATED — paused)" : ""} — last: ${v.last_attempt_at || "?"} — evidence: ${(v.last_evidence || "").slice(0, 200)}`
+          );
+          return {
+            content: [{
+              type: "text",
+              text: `**Recovery state for ${r.id}** (paused=${r.paused}):\n\n${lines.join("\n")}\n\n${r.paused ? "Operator must unpause to resume. Review the evidence above and either: (a) escalate permission_mode if it's a permission_streak, (b) fix the upstream condition (e.g. restore tablet for executor_offline), (c) manually unpause via SQL if false positive." : "Engagement still running — auto-recovery is in flight."}`,
+            }]
+          };
+        } catch (e) {
+          return { content: [{ type: "text", text: `list_recovery_state failed: ${e.message}` }], isError: true };
+        }
       }
 
       case "set_engagement_permission_mode": {
