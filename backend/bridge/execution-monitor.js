@@ -305,4 +305,61 @@ async function performRefiner(ctx) {
   };
 }
 
-module.exports = { ExecutionMonitor, performMentor, performPlanner, performReflector, performRefiner };
+// ── Summarizer prompt (adapted from PentAGI summarizer.tmpl) ──
+// Compress long context (findings, graph, queue history) while keeping the
+// technical anchors qwen3:32b needs to reason about the engagement:
+// CVE IDs, IPs, ports, versions, file paths, severity, status.
+function renderSummarizerPrompt({ content, instructions, contentType }) {
+  return [
+    "# PRECISION SUMMARIZATION ENGINE",
+    "",
+    "Your sole purpose: convert lengthy content into a concise summary that retains 100% of the essential information while eliminating redundancy.",
+    "",
+    "## CRITICAL: PRESERVE WITHOUT EXCEPTION",
+    "- All CVE IDs (CVE-YYYY-NNNN)",
+    "- All IP addresses, hostnames, ports",
+    "- All product names and version strings (e.g. 'Dropbear 2020.81', 'Hikvision V5.7.3')",
+    "- All file paths and URL endpoints",
+    "- All numeric IDs (finding #, queue item #, task #)",
+    "- All severity levels and statuses (CRIT/HIGH/MED/LOW/INFO, confirmed/refuted/pending)",
+    "- All cause-and-effect relationships ('finding X informed_by finding Y enables finding Z')",
+    "- All warnings, limitations, refutations",
+    "",
+    "## DO NOT",
+    "- Reproduce XML tags from the input in your output",
+    "- Add headers, markdown sections, or narrative framing",
+    "- Add disclaimers, caveats, or your own commentary",
+    "- Drop technical specs even if 'similar' — every distinct CVE/IP/version is unique",
+    "",
+    instructions ? `## SPECIFIC INSTRUCTIONS\n${instructions}` : "",
+    "",
+    `## CONTENT TYPE: ${contentType || "(unspecified)"}`,
+    "",
+    "## CONTENT TO SUMMARIZE",
+    "```",
+    String(content || "").slice(0, 30000),
+    "```",
+    "",
+    "Reply with ONLY the compressed summary. No prose, no headers, no explanation. Bullet form is fine if appropriate to the content type.",
+  ].filter(Boolean).join("\n");
+}
+
+async function performSummarizer({ content, instructions, contentType }) {
+  const prompt = renderSummarizerPrompt({ content, instructions, contentType });
+  return await chatCompletion([
+    { role: "user", content: prompt },
+  ]);
+}
+
+// Simple FNV-1a hash for content-keyed caching (no crypto dep).
+function hashContent(s) {
+  let h = 0x811c9dc5;
+  const str = String(s || "");
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h.toString(16);
+}
+
+module.exports = { ExecutionMonitor, performMentor, performPlanner, performReflector, performRefiner, performSummarizer, hashContent };

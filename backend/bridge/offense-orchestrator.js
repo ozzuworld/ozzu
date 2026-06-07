@@ -124,6 +124,67 @@ function serializeGraphForPrompt(graph) {
   return lines.join("\n");
 }
 
+// dir_1780842521084: Findings section builder with Summarizer + content-hash cache.
+// Threshold 6000 chars. When tripped, keep last 3 findings (or graph tail) verbatim
+// and summarize the rest. Cache the summary in agent_run_state.context_summaries.findings
+// keyed by hash so unchanged content doesn't re-summarize each iter.
+const FINDINGS_BUDGET = 6000;
+async function renderFindingsSection(eng, engagementCtx) {
+  if (engagementCtx.finding_graph_rendered) {
+    const text = engagementCtx.finding_graph_rendered;
+    if (text.length <= FINDINGS_BUDGET) return `Findings (attack graph):\n${text}`;
+    return await maybeSummarize(eng, text, "findings_graph", "Findings (attack graph)");
+  }
+  const flat = JSON.stringify(engagementCtx.findings || []);
+  if (flat.length <= FINDINGS_BUDGET) return `Findings so far: ${flat.slice(0, 4000)}`;
+  return await maybeSummarize(eng, flat, "findings_flat", "Findings so far");
+}
+
+async function maybeSummarize(eng, fullText, cacheKey, headerLabel) {
+  try {
+    const { performSummarizer, hashContent } = require("/app/execution-monitor");
+    const head = fullText.slice(0, fullText.length - 2000);   // older portion to summarize
+    const tail = fullText.slice(fullText.length - 2000);       // last 2KB verbatim
+    const hash = hashContent(head);
+    const cache = (eng.agent_run_state && eng.agent_run_state.context_summaries) || {};
+    let summary;
+    if (cache[cacheKey] && cache[cacheKey].hash === hash && typeof cache[cacheKey].summary === "string") {
+      summary = cache[cacheKey].summary;
+    } else {
+      summary = await performSummarizer({
+        content: head,
+        contentType: cacheKey,
+        instructions:
+          "This is the older portion of a pentest engagement's " + cacheKey + " log. " +
+          "Compress to under 2000 characters while preserving EVERY CVE ID, IP, port, " +
+          "product+version string, file path, finding ID, severity, and refutation note. " +
+          "If 5 findings cite CVE-2021-36260 with the same status, ONE bullet summarizes them. " +
+          "If 3 findings are refuted, one bullet per refutation reason. Bullet form preferred.",
+      });
+      summary = (summary || "").trim().slice(0, 3000);
+      try {
+        await db.query(
+          `UPDATE pentest_engagements
+              SET agent_run_state = COALESCE(agent_run_state, '{}'::jsonb)
+                                  || jsonb_build_object('context_summaries',
+                                       COALESCE(agent_run_state->'context_summaries', '{}'::jsonb)
+                                       || $2::jsonb)
+            WHERE id = $1`,
+          [eng.id, JSON.stringify({ [cacheKey]: { hash, summary, ts: new Date().toISOString() } })]);
+        await db.query(
+          `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'summarizer', 'orchestrator', 0, 0, false, true, 0, 0, 'summarizer_invoked', $2)`,
+          [eng.id, `key=${cacheKey}; in=${head.length}B; out=${summary.length}B`]);
+      } catch (_) {}
+    }
+    return `${headerLabel} (older portion summarized — newest verbatim):\n[SUMMARY of earlier ${head.length} chars]\n${summary}\n[end summary]\n\n[Latest ${tail.length} chars verbatim]\n${tail}`;
+  } catch (e) {
+    // Fall back to a hard slice on summarizer failure.
+    console.error(`[orchestrator] summarizer failed for ${cacheKey}:`, e.message);
+    return `${headerLabel}: ${fullText.slice(0, 4000)}`;
+  }
+}
+
 // Run the Orchestrator. Receives engagement context object that the agent loop
 // has already assembled (saves an extra DB round-trip). Returns the parsed
 // decision: {select, add, advance_phase, end}.
@@ -148,9 +209,9 @@ async function decide(engagementCtx, modelOverride) {
     // otherwise legacy flat-list JSON. The graph encodes informed_by → enables relationships
     // so the reasoning loop sees how findings build on each other — King Kazuma's
     // SOC-app UI insight ported to the model's prompt.
-    engagementCtx.finding_graph_rendered
-      ? `Findings (attack graph):\n${engagementCtx.finding_graph_rendered}`
-      : `Findings so far: ${JSON.stringify(engagementCtx.findings || []).slice(0, 4000)}`,
+    // dir_1780842521084: Summarizer — when the findings/graph section exceeds 6KB,
+    // compress older portion via PentAGI Summarizer instead of slicing.
+    await renderFindingsSection(eng, engagementCtx),
     "",
     "Current Task Coordination Graph:",
     graphText,
