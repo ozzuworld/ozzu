@@ -159,9 +159,28 @@ async function maybeSummarize(eng, fullText, cacheKey, headerLabel) {
           "Compress to under 2000 characters while preserving EVERY CVE ID, IP, port, " +
           "product+version string, file path, finding ID, severity, and refutation note. " +
           "If 5 findings cite CVE-2021-36260 with the same status, ONE bullet summarizes them. " +
-          "If 3 findings are refuted, one bullet per refutation reason. Bullet form preferred.",
+          "If 3 findings are refuted, one bullet per refutation reason. Bullet form preferred. " +
+          "Use lines starting with '- Host:', '- CVE:', '- Port:', '- Finding:', '- Refuted:', '- Confirmed:', '- Cred:', '- PoC:' so downstream post-processing can prioritize.",
       });
-      summary = (summary || "").trim().slice(0, 3000);
+      // dir_1780845071255: claw-style deterministic post-process — dedup duplicate
+      // bullets, truncate over-long lines, drop low-priority noise within a strict
+      // budget. Zero LLM cost. Reproducible.
+      const beforeCompressLen = (summary || "").length;
+      try {
+        const { compressSummary } = require("/app/summary-compress");
+        const r = compressSummary(summary || "", { max_chars: 2400, max_lines: 40, max_line_chars: 200 });
+        summary = r.summary;
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+             VALUES ($1, NULL, 'compress', 'orchestrator', 0, 0, false, true, 0, 0, 'compress_applied', $2)`,
+            [eng.id, `key=${cacheKey}; before=${beforeCompressLen}B; after=${r.compressed_chars}B; deduped=${r.removed_duplicate_lines}; omitted=${r.omitted_lines}`]);
+        } catch (_) {}
+      } catch (e) {
+        // Compress is best-effort. Fall back to the original LLM output capped.
+        summary = (summary || "").trim().slice(0, 3000);
+        console.error(`[orchestrator] summary-compress failed for ${cacheKey}:`, e.message);
+      }
       try {
         await db.query(
           `UPDATE pentest_engagements
