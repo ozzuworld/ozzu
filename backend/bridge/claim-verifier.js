@@ -22,11 +22,13 @@ const db = require("/app/db");
 const CRED_TEST_TITLE_PATTERNS = [
   /default\s+credentials?\s+accepted/i,
   /credentials?\s+accepted/i,
-  /valid\s+credentials?/i,
+  /(potential|valid)\s+(\w+\s+){0,3}credentials?/i,   // "Potential valid default credentials" — dir_1780836984634
+  /credentials?\s+(work|valid|accepted|successful)/i,
   /authentication\s+bypass/i,
-  /auth(entication)?\s+success/i,
-  /successful\s+login/i,
+  /auth(entication)?\s+(success|successful|bypass)/i,
+  /successful\s+(login|auth)/i,
   /admin\s+access(ed)?/i,
+  /logged?\s+in(\s+as)?/i,
 ];
 
 function isCredTestClaim(finding) {
