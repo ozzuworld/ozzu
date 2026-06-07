@@ -124,6 +124,20 @@ function serializeGraphForPrompt(graph) {
   return lines.join("\n");
 }
 
+// dir_1780848456715: Sub-agent inventory renderer for coordinator's prompt.
+function renderSubAgentsForPrompt(subAgents) {
+  if (!Array.isArray(subAgents) || subAgents.length === 0) {
+    return "Sub-agents: (none — you are running as a single agent, not a coordinator)";
+  }
+  const lines = subAgents.map((s) => {
+    const role = s.target_role ? ` [${s.target_role}]` : "";
+    const objective = (s.objective || "—").slice(0, 100);
+    const last = (s.last_action || "—").slice(0, 100);
+    return `  - sub#${s.id} ${s.target_host}${role} status=${s.status} iter=${s.iter}/${s.max_iter} findings=${s.total_findings} queue=${s.total_queue_items} objective="${objective}" last="${last}"`;
+  });
+  return ["Active sub-agents (you are the COORDINATOR over these):", ...lines].join("\n");
+}
+
 // dir_1780842521084: Findings section builder with Summarizer + content-hash cache.
 // Threshold 6000 chars. When tripped, keep last 3 findings (or graph tail) verbatim
 // and summarize the rest. Cache the summary in agent_run_state.context_summaries.findings
@@ -239,6 +253,10 @@ async function decide(engagementCtx, modelOverride) {
     "",
     "Current Task Coordination Graph:",
     graphText,
+    // dir_1780848456715: COORDINATOR view — list of sub-agents this coordinator
+    // can spawn / terminate / reprompt. Empty when no sub-agents exist (treat
+    // the coordinator as if it IS the agent).
+    renderSubAgentsForPrompt(engagementCtx.sub_agents),
     // dir_1780838519357: Mentor + Planner injection. When the Mentor fires
     // (loop detected) or Planner runs (start of run), the guidance lands here.
     // The orchestrator reads it as authoritative redirection from the adviser.
@@ -249,6 +267,18 @@ async function decide(engagementCtx, modelOverride) {
     "  1) If unblocked_pending above is NON-EMPTY, you MUST return {\"select\": <one of those IDs>}. The selection executes that task this iteration; you can also add new tasks in the same response.",
     "  2) Only return {\"end\": \"...\"} when the engagement is truly complete — ROE goals met OR every reachable attack surface is exhausted AND no unblocked task remains.",
     "  3) Returning {\"select\": null, \"add\": [], \"end\": null} is INVALID — the agent loop will stall. If you have nothing to do, end with a reason instead.",
+    "",
+    "COORDINATOR ACTIONS (dir_1780848456715 — OPTIONAL, in addition to select/add):",
+    "  You may also include a \"coordinator_actions\" array with any of these action shapes:",
+    '    {"kind":"spawn_sub_agent","target_host":"<ip>","target_role":"gateway|nvr|web|unknown","objective":"<what this sub-agent should accomplish>","permission_mode_override":"<optional>"}',
+    '    {"kind":"terminate_sub_agent","sub_agent_id":<n>,"reason":"<why>"}',
+    '    {"kind":"reprompt_sub_agent","sub_agent_id":<n>,"new_objective":"<text>"}',
+    '    {"kind":"await_sub_agents","min_count":<n>,"max_wait_sec":<n>}',
+    "  When to use coordinator_actions:",
+    "  - SPAWN when a new host appears in recon_hosts or a known host needs deeper focus",
+    "  - TERMINATE a sub-agent that's stuck (paused by recovery_recipes, or no findings after many iters)",
+    "  - REPROMPT when a sub-agent's objective should pivot based on what other sub-agents discovered",
+    "  - AWAIT when you want to pause your own task loop until N sub-agents complete",
     "",
     "Pick the next move as strict JSON per the schema above.",
   ].join("\n");
@@ -268,7 +298,7 @@ async function decide(engagementCtx, modelOverride) {
       const corrected = await performReflector({
         rawText: raw,
         expectedFormat: "JSON",
-        schemaHint: '{"select": <task_id_or_null>, "add": [{"directive": "...", "parent_ids": [], "phase": "recon|enumeration|foothold|exploitation|post_exploit|reporting", "prerequisites": "..."}], "advance_phase": "<phase>" | null, "end": "<reason>" | null}',
+        schemaHint: '{"select": <task_id_or_null>, "add": [{"directive": "...", "parent_ids": [], "phase": "recon|enumeration|foothold|exploitation|post_exploit|reporting", "prerequisites": "..."}], "advance_phase": "<phase>" | null, "end": "<reason>" | null, "coordinator_actions": [{"kind":"spawn_sub_agent","target_host":"...","target_role":"...","objective":"..."} | {"kind":"terminate_sub_agent","sub_agent_id":<n>,"reason":"..."} | {"kind":"reprompt_sub_agent","sub_agent_id":<n>,"new_objective":"..."} | {"kind":"await_sub_agents","min_count":<n>,"max_wait_sec":<n>}]}',
       });
       parsed = parseJSON(corrected);
       try {
@@ -289,6 +319,12 @@ async function decide(engagementCtx, modelOverride) {
     add:            Array.isArray(parsed.add) ? parsed.add : [],
     advance_phase:  (typeof parsed.advance_phase === "string") ? parsed.advance_phase : null,
     end:            (typeof parsed.end === "string") ? parsed.end : null,
+    // dir_1780848456715: coordinator can spawn / terminate / reprompt / await
+    // sub-agents in addition to selecting / adding tasks. Filter to known shapes.
+    coordinator_actions: Array.isArray(parsed.coordinator_actions)
+      ? parsed.coordinator_actions.filter(a => a && typeof a === "object" && typeof a.kind === "string"
+          && ["spawn_sub_agent","terminate_sub_agent","reprompt_sub_agent","await_sub_agents"].includes(a.kind))
+      : [],
     _graph:         graph, // for caller convenience
   };
 

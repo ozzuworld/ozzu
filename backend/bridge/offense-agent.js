@@ -201,16 +201,22 @@ async function loadEngagementContext(engagementId) {
     `SELECT id, engagement_type, scope, roe, status,
             executor_host, executor_adb_target, executor_tools,
             engagement_phase, agent_run_state, agent_status,
-            graph_mode_enabled
+            graph_mode_enabled, permission_mode
        FROM pentest_engagements WHERE id = $1`, [engagementId]);
   if (eng.rows.length === 0) return { engagement: null };
-  const [hosts, findings, queue] = await Promise.all([
+  const [hosts, findings, queue, subAgents] = await Promise.all([
     db.query(`SELECT ip, hostname, status, ports FROM recon_hosts WHERE engagement_id = $1 ORDER BY ip`, [engagementId]),
-    db.query(`SELECT id, title, severity, status, affected_asset, affected_assets, refs, kind, informed_by, enables
+    db.query(`SELECT id, title, severity, status, affected_asset, affected_assets, refs, kind, informed_by, enables, sub_agent_id
                 FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]),
     db.query(`SELECT seq, title, status, LEFT(COALESCE(command,''),240) AS command_preview, LEFT(COALESCE(output,''),200) AS output_preview
                 FROM soc_queue_items WHERE engagement_id = $1 AND status IN ('done','failed','cancelled')
                 ORDER BY seq DESC LIMIT 10`, [engagementId]),
+    // dir_1780848456715: sub-agent inventory for coordinator's global view
+    db.query(`SELECT id, target_host, target_role, status, iter, max_iter, objective,
+                     permission_mode_override, last_action,
+                     total_findings, total_queue_items,
+                     created_at, started_at, completed_at
+                FROM engagement_sub_agents WHERE engagement_id = $1 ORDER BY id ASC`, [engagementId]),
   ]);
   // Materialize the attack graph rendering iff this engagement opted in.
   // Otherwise the legacy flat-findings list is what the orchestrator sees
@@ -231,6 +237,7 @@ async function loadEngagementContext(engagementId) {
     hosts:    hosts.rows,
     findings: findings.rows,
     queue:    queue.rows,
+    sub_agents: subAgents.rows,
     finding_graph_rendered: findingGraphRendered,
   };
 }
@@ -471,6 +478,70 @@ async function runAgent(engagementId, opts = {}) {
     if (Array.isArray(decision.add) && decision.add.length) {
       insertedTaskRows = await orchestrator.addTasks(engagementId, decision.add);
       tasksAdded += insertedTaskRows.length;
+    }
+    // dir_1780848456715: process coordinator_actions[] — spawn/terminate/reprompt/await
+    if (Array.isArray(decision.coordinator_actions) && decision.coordinator_actions.length) {
+      try {
+        const sa = require("/app/offense-sub-agent");
+        for (const action of decision.coordinator_actions) {
+          try {
+            if (action.kind === "spawn_sub_agent" && typeof action.target_host === "string") {
+              const r = await sa.spawnSubAgent({
+                engagement_id: engagementId,
+                target_host: action.target_host,
+                target_role: action.target_role || null,
+                objective: action.objective || `Investigate ${action.target_host}`,
+                permission_mode_override: action.permission_mode_override || null,
+                spawned_by: "coordinator",
+                spawned_reason: `iter ${iter} coordinator decision`,
+              });
+              console.log(`[offense-agent] coordinator spawned sub-agent #${r && r.id} for ${action.target_host}`);
+              await db.query(
+                `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+                 VALUES ($1, NULL, 'coordinator', 'spawn_sub_agent', 0, 0, false, true, 0, 0, 'sub_agent_spawned', $2)`,
+                [engagementId, `sub#${r && r.id} target=${action.target_host} role=${action.target_role || "none"}`]);
+            } else if (action.kind === "terminate_sub_agent" && Number.isInteger(action.sub_agent_id)) {
+              const r = await sa.terminateSubAgent(action.sub_agent_id, action.reason || `coordinator iter ${iter}`);
+              await db.query(
+                `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+                 VALUES ($1, NULL, 'coordinator', 'terminate_sub_agent', 0, 0, false, true, 0, 0, 'sub_agent_terminated', $2)`,
+                [engagementId, `sub#${action.sub_agent_id} reason=${(action.reason || "").slice(0, 200)}`]);
+            } else if (action.kind === "reprompt_sub_agent" && Number.isInteger(action.sub_agent_id) && typeof action.new_objective === "string") {
+              await db.query(
+                `UPDATE engagement_sub_agents
+                    SET objective = $2,
+                        agent_run_state = COALESCE(agent_run_state, '{}'::jsonb)
+                                        || jsonb_build_object('coordinator_reprompt', $3::text,
+                                                              'coordinator_reprompt_iter', $4::int)
+                  WHERE id = $1 AND status IN ('running','paused','pending')`,
+                [action.sub_agent_id, action.new_objective.slice(0, 1000), action.new_objective.slice(0, 1000), iter]);
+              await db.query(
+                `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+                 VALUES ($1, NULL, 'coordinator', 'reprompt_sub_agent', 0, 0, false, true, 0, 0, 'sub_agent_reprompted', $2)`,
+                [engagementId, `sub#${action.sub_agent_id} new_objective="${action.new_objective.slice(0, 200)}"`]);
+            } else if (action.kind === "await_sub_agents" && Number.isInteger(action.min_count)) {
+              const waitSec = Math.min(900, Math.max(5, action.max_wait_sec || 60));
+              await setAgentStatus(engagementId, "awaiting_subagents", { iter, awaiting_min: action.min_count, max_wait_sec: waitSec });
+              const deadline = Date.now() + waitSec * 1000;
+              let completed = 0;
+              while (Date.now() < deadline) {
+                const c = await db.query(
+                  `SELECT COUNT(*)::int AS c FROM engagement_sub_agents
+                    WHERE engagement_id = $1 AND status IN ('completed','failed','terminated')`,
+                  [engagementId]);
+                completed = c.rows[0].c;
+                if (completed >= action.min_count) break;
+                await new Promise(rs => setTimeout(rs, 5000));
+              }
+              await db.query(
+                `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+                 VALUES ($1, NULL, 'coordinator', 'await_sub_agents', 0, 0, false, true, 0, 0, 'await_completed', $2)`,
+                [engagementId, `min=${action.min_count} actual=${completed} wait_sec=${waitSec}`]);
+              await setAgentStatus(engagementId, "running", { iter, last_action: `await_done(${completed}/${action.min_count})` });
+            }
+          } catch (e) { console.error(`[offense-agent] coordinator_action ${action.kind} failed:`, e.message); }
+        }
+      } catch (e) { console.error(`[offense-agent] coordinator_actions processing failed:`, e.message); }
     }
     // dir_1780842283437: Refiner picked one of the proposed adds — select the
     // inserted row immediately so this iter actually executes work instead of

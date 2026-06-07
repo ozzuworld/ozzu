@@ -214,6 +214,26 @@ async function runSubAgent(subAgentId, opts = {}) {
     ctx._sub_agent_objective = ctx.sub_agent_objective;
     ctx._sub_agent_target = ctx.sub_agent_target_host;
 
+    // dir_1780848456715: pick up coordinator reprompt if present
+    const subState = (ctx.sub_agent && ctx.sub_agent.agent_run_state) || {};
+    if (subState.coordinator_reprompt && subState.coordinator_reprompt_iter && subState.coordinator_reprompt_iter > (subState.last_reprompt_acked || 0)) {
+      ctx.mentor_guidance = [
+        `=== Coordinator reprompt (from engagement-level orchestrator at coordinator iter ${subState.coordinator_reprompt_iter}) ===`,
+        subState.coordinator_reprompt,
+        "=== end coordinator reprompt ===",
+        "Apply this new objective immediately. Override your prior plan if needed.",
+      ].join("\n");
+      // Mark as acked so we don't re-inject every iter
+      try {
+        await db.query(
+          `UPDATE engagement_sub_agents
+              SET agent_run_state = COALESCE(agent_run_state, '{}'::jsonb)
+                                  || jsonb_build_object('last_reprompt_acked', $2::int)
+            WHERE id = $1`,
+          [subAgentId, subState.coordinator_reprompt_iter]);
+      } catch (_) {}
+    }
+
     // (1) Orchestrator decides
     let decision;
     try {
