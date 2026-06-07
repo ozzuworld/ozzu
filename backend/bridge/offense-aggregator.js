@@ -105,21 +105,45 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
   ].join("\n");
 
   let summary;
+  let raw;
   try {
-    const raw = await chatCompletion([
+    raw = await chatCompletion([
       { role: "system", content: AGGREGATOR_SYSTEM_PROMPT },
       { role: "user", content: userMsg },
     ], modelOverride);
     summary = parseJSON(raw);
   } catch (e) {
-    return {
-      success: false,
-      key_signals: [`aggregator failed: ${e.message}`],
-      new_findings: [],
-      new_hosts: [],
-      followup: [],
-      error_category: "parse_error",
-    };
+    // dir_1780841672508: Reflector recovery for aggregator prose
+    let recovered = false;
+    if (raw) {
+      try {
+        const { performReflector } = require("/app/execution-monitor");
+        const corrected = await performReflector({
+          rawText: raw,
+          expectedFormat: "JSON",
+          schemaHint: '{"success": <bool>, "key_signals": [<string>], "new_findings": [{"title","severity","evidence_excerpt","cve"}], "new_hosts": [{"ip","ports","services"}], "followup": [<string>], "error_category": <string|null>}',
+        });
+        summary = parseJSON(corrected);
+        recovered = true;
+        try {
+          const dbMod = require("/app/db");
+          await dbMod.query(
+            `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+             VALUES ($1, NULL, 'reflector', 'aggregator', 0, 0, false, true, 0, 0, 'reflector_invoked', $2)`,
+            [engagementId || null, `parse_err=${(e.message||"").slice(0,80)}; recovered=true`]);
+        } catch (_) {}
+      } catch (_) { /* swallow → fall through to error path */ }
+    }
+    if (!recovered) {
+      return {
+        success: false,
+        key_signals: [`aggregator failed: ${e.message}`],
+        new_findings: [],
+        new_hosts: [],
+        followup: [],
+        error_category: "parse_error",
+      };
+    }
   }
 
   // Defensive defaults so downstream code doesn't crash on missing keys.

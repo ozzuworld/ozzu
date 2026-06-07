@@ -275,7 +275,29 @@ async function synthesizeCommand(task, ctx, modelOverride) {
     { role: "system", content: SYNTHESIZER_SYSTEM_PROMPT },
     { role: "user",   content: userMsg },
   ], modelOverride);
-  return parseJSON(raw);
+  try { return parseJSON(raw); }
+  catch (e) {
+    // dir_1780841672508: Reflector recovery for synthesizer prose
+    try {
+      const { performReflector } = require("/app/execution-monitor");
+      const corrected = await performReflector({
+        rawText: raw,
+        expectedFormat: "JSON",
+        schemaHint: '{"command": "<exact shell command>", "expected_artifact": "<optional>", "rationale": "<one-line WHY>"}',
+      });
+      const parsed = parseJSON(corrected);
+      try {
+        const dbMod = require("/app/db");
+        await dbMod.query(
+          `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'reflector', 'synthesizer', 0, 0, false, true, 0, 0, 'reflector_invoked', $2)`,
+          [ctx.engagement && ctx.engagement.id, `parse_err=${(e.message||"").slice(0,80)}; recovered=true`]);
+      } catch (_) {}
+      return parsed;
+    } catch (re) {
+      throw new Error(`synthesizer JSON parse failed: ${e.message} (reflector also failed: ${re.message})`);
+    }
+  }
 }
 
 async function runAgent(engagementId, opts = {}) {

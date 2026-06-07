@@ -175,7 +175,28 @@ async function decide(engagementCtx, modelOverride) {
 
   let parsed;
   try { parsed = parseJSON(raw); }
-  catch (e) { throw new Error(`orchestrator JSON parse failed: ${e.message}`); }
+  catch (e) {
+    // dir_1780841672508: Reflector recovery — model returned prose instead
+    // of JSON. Send the raw text back with a schema hint, retry once.
+    try {
+      const { performReflector } = require("/app/execution-monitor");
+      const corrected = await performReflector({
+        rawText: raw,
+        expectedFormat: "JSON",
+        schemaHint: '{"select": <task_id_or_null>, "add": [{"directive": "...", "parent_ids": [], "phase": "recon|enumeration|foothold|exploitation|post_exploit|reporting", "prerequisites": "..."}], "advance_phase": "<phase>" | null, "end": "<reason>" | null}',
+      });
+      parsed = parseJSON(corrected);
+      try {
+        const db = require("/app/db");
+        await db.query(
+          `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'reflector', 'orchestrator', 0, 0, false, true, 0, 0, 'reflector_invoked', $2)`,
+          [eng.id, `parse_err=${(e.message || "").slice(0, 80)}; recovered=true`]);
+      } catch (_) {}
+    } catch (re) {
+      throw new Error(`orchestrator JSON parse failed: ${e.message} (reflector also failed: ${re.message})`);
+    }
+  }
 
   // Sanity defaults so callers don't crash on missing keys.
   const out = {

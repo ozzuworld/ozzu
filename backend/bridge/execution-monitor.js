@@ -209,4 +209,34 @@ async function performPlanner({ agentType, taskQuestion, engagementContext }) {
   return { plan, wrappedIntent: wrapped };
 }
 
-module.exports = { ExecutionMonitor, performMentor, performPlanner };
+// ── Reflector prompt (adapted from PentAGI question_reflector.tmpl) ──
+// When the model returns plain text instead of a structured JSON response
+// the calling code expects, send the raw text back to the model with a
+// "you must respond as JSON per this schema" instruction. ONE retry.
+function renderReflectorPrompt({ rawText, expectedFormat, schemaHint }) {
+  return [
+    `You were asked for a structured ${expectedFormat || "JSON"} response and instead returned unstructured prose. The system can only process properly formatted responses.`,
+    "",
+    `<your_unstructured_response>`,
+    String(rawText || "").slice(0, 3000),
+    `</your_unstructured_response>`,
+    "",
+    `<required_schema>`,
+    schemaHint || "(unspecified — return the JSON object the caller asked for)",
+    `</required_schema>`,
+    "",
+    "Reply ONLY with the structured JSON matching the schema above. No prose, no markdown fences, no explanation — just the JSON object. If the schema requires specific fields, include them all. If your prose response indicated an intent (e.g. to add tasks, select a task, end the engagement, queue a step), translate that intent into the JSON now.",
+  ].join("\n");
+}
+
+// performReflector: returns the corrected response text. Caller still has to
+// parse it. Throws on its own LLM call failure — caller decides whether to
+// re-throw to the agent loop.
+async function performReflector({ rawText, expectedFormat, schemaHint }) {
+  const prompt = renderReflectorPrompt({ rawText, expectedFormat, schemaHint });
+  return await chatCompletion([
+    { role: "user", content: prompt },
+  ]);
+}
+
+module.exports = { ExecutionMonitor, performMentor, performPlanner, performReflector };
