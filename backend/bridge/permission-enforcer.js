@@ -147,13 +147,30 @@ function enforceWorkspaceJail(engagement, command) {
   };
 }
 
-// One-call check returning the FIRST denial (mode or scope), or {allowed:true}.
+// dir_1780845638033: command classifier — token-level intent inference that
+// can't be spoofed by mis-declared intent_class. If the actual command tokens
+// classify above the mode's ceiling, deny even when intent_class was lower.
+function enforceCommandTokens(engagement, command) {
+  try {
+    const classifier = require("./soc-command-classifier");
+    const mode = (engagement && isValidMode(engagement.permission_mode)) ? engagement.permission_mode : "enumeration";
+    const v = classifier.validateForMode(command, mode);
+    return v;
+  } catch (e) {
+    // Classifier failure → allow (don't block on infra bug)
+    return { allowed: true, classifier_error: e.message };
+  }
+}
+
+// One-call check returning the FIRST denial (mode → scope → tokens), or {allowed:true}.
 function enforceAll(engagement, intentClass, command) {
   const m = enforcePermissionMode(engagement, intentClass);
   if (!m.allowed) return { layer: "permission_mode", ...m };
   const s = enforceWorkspaceJail(engagement, command);
   if (!s.allowed) return { layer: "workspace_jail", ...s };
-  return { allowed: true, layer: null, current_mode: m.current_mode };
+  const t = enforceCommandTokens(engagement, command);
+  if (!t.allowed) return { layer: "command_tokens", ...t };
+  return { allowed: true, layer: null, current_mode: m.current_mode, command_intent: t.command_intent };
 }
 
 module.exports = {
@@ -163,6 +180,7 @@ module.exports = {
   isValidMode,
   enforcePermissionMode,
   enforceWorkspaceJail,
+  enforceCommandTokens,
   enforceAll,
   extractTargetsFromCommand,
 };
