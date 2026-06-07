@@ -236,6 +236,30 @@ async function applyRecovery(db, engagement, hit) {
       switch (step) {
         case "inject_mentor_guidance":
           mentorHint = recipe.reason_template + ` (recovery attempt ${attempts}/${recipe.max_attempts})`;
+          // dir_1780855118472: for MISSING_RESOURCE specifically, append the
+          // executor's actual wordlist inventory so the model has concrete
+          // paths to choose instead of hallucinating.
+          if (hit.scenario === FAILURE_SCENARIOS.MISSING_RESOURCE) {
+            try {
+              const mk = require("/app/model-knowledge-tools");
+              if (typeof mk.listExecutorWordlists === "function") {
+                const inv = await mk.listExecutorWordlists({ executor_host: engagement.executor_host || "dev-01" });
+                if (inv && Array.isArray(inv.wordlists) && inv.wordlists.length > 0) {
+                  const byCat = {};
+                  for (const w of inv.wordlists) (byCat[w.category] = byCat[w.category] || []).push(w);
+                  const sample = [];
+                  for (const cat of ["passwords", "usernames", "web_dir", "fuzzing", "generic"]) {
+                    if (byCat[cat]) {
+                      sample.push(`  ${cat}:`);
+                      for (const w of byCat[cat].slice(0, 3)) sample.push(`    - ${w.path} (${w.size_kb} KB)`);
+                    }
+                  }
+                  mentorHint += `\n\nACTUAL wordlists on ${inv.executor_host}:\n` + sample.join("\n") +
+                                `\n\nUse a path from THIS list, not invented paths.`;
+                }
+              }
+            } catch (_) { /* enrichment failure is non-fatal */ }
+          }
           appliedSteps.push({ step: "inject_mentor_guidance", hint: mentorHint });
           break;
         case "require_verify_cve":

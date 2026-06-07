@@ -342,4 +342,69 @@ async function searchSploitus(args) {
   });
 }
 
-module.exports = { verifyCve, listNseScripts, searchExploits, searchSploitus };
+// dir_1780855118472: list_executor_wordlists — surface what wordlists ACTUALLY
+// exist on the engagement executor so the model can stop hallucinating paths
+// like /usr/share/wordlists/common_users.txt.
+const _WORDLIST_CACHE = new Map();    // key=executor_host  → {result, ts}
+const _WORDLIST_TTL_MS = 60 * 60 * 1000;  // 1h
+
+function categorizeWordlistPath(p) {
+  const s = String(p).toLowerCase();
+  if (s.includes("/passwords/") || s.endsWith("rockyou.txt") || s.includes("/passwd")) return "passwords";
+  if (s.includes("/usernames/") || s.includes("/users/")) return "usernames";
+  if (s.includes("/discovery/web-content") || s.includes("/dirb/") || s.includes("/dirbuster/") || s.includes("common.txt") || s.includes("directories")) return "web_dir";
+  if (s.includes("/fuzzing/")) return "fuzzing";
+  if (s.includes("/snmp/")) return "snmp";
+  if (s.includes("/cgis/")) return "cgi";
+  return "generic";
+}
+
+async function listExecutorWordlists(args) {
+  const { executor_host = "dev-01", refresh = false } = args || {};
+  const cached = _WORDLIST_CACHE.get(executor_host);
+  if (!refresh && cached && (Date.now() - cached.ts) < _WORDLIST_TTL_MS) {
+    return { ...cached.result, cached: true, cached_at: new Date(cached.ts).toISOString() };
+  }
+  // Bounded find: 5 levels deep, .txt/.lst only, top 250 by size+ name ordering
+  const cmd =
+    "find /usr/share/wordlists /usr/share/seclists /opt/wordlists 2>/dev/null " +
+    "  -maxdepth 5 -type f \\( -name '*.txt' -o -name '*.lst' \\) " +
+    "  -printf '%s\\t%p\\n' 2>/dev/null " +
+    "| sort -n " +
+    "| head -250";
+  let raw;
+  try {
+    if (executor_host === "dev-01") {
+      raw = await runOnDev01(cmd, 30000);
+    } else {
+      // Future: per-executor SSH wrap. v1 only supports dev-01.
+      return { error: `executor_host '${executor_host}' not supported in v1 (dev-01 only)` };
+    }
+  } catch (e) {
+    return { error: `find failed: ${e.message}` };
+  }
+  const lines = String(raw || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const wordlists = lines.map(l => {
+    const [sizeStr, ...pathParts] = l.split("\t");
+    const path = pathParts.join("\t");
+    const sizeB = parseInt(sizeStr, 10);
+    if (!path || !Number.isInteger(sizeB)) return null;
+    return {
+      path,
+      size_kb: Math.round(sizeB / 1024),
+      category: categorizeWordlistPath(path),
+    };
+  }).filter(Boolean);
+  // Detect seclists root
+  const seclists = wordlists.find(w => /\/seclists\//i.test(w.path));
+  const result = {
+    executor_host,
+    wordlists,
+    seclists_root: seclists ? "/usr/share/seclists" : null,
+    total_found: wordlists.length,
+  };
+  _WORDLIST_CACHE.set(executor_host, { result, ts: Date.now() });
+  return { ...result, cached: false };
+}
+
+module.exports = { verifyCve, listNseScripts, searchExploits, searchSploitus, listExecutorWordlists };
