@@ -266,4 +266,80 @@ async function searchExploits(args) {
   };
 }
 
-module.exports = { verifyCve, listNseScripts, searchExploits };
+// ── Sploitus search (dir_1780841976173) ──────────────────────────────────
+// Sploitus aggregates ExploitDB + Packet Storm + Vulners + GitHub PoCs +
+// Metasploit modules. CVE→PoC mappings ExploitDB lacks. Cloudflare-fronted;
+// browser-like headers required (adapted from PentAGI sploitus.go).
+async function searchSploitus(args) {
+  const { query, type = "exploits", limit = 10 } = args || {};
+  if (!query || typeof query !== "string" || !query.trim()) {
+    return { error: "query required (e.g. 'CVE-2023-48795', 'Hikvision', 'Dropbear 2020.81')" };
+  }
+  const cleanQuery = query.trim().slice(0, 200);
+  const allowedTypes = new Set(["exploits", "tools", "cve"]);
+  const reqType = allowedTypes.has(type) ? type : "exploits";
+
+  // Node's https-module TLS fingerprint trips Cloudflare on sploitus.com. curl's
+  // fingerprint passes. Shell out instead of fighting the JA3 layer.
+  const { execFile } = require("child_process");
+  const body = JSON.stringify({ query: cleanQuery, type: reqType, sort: "default", title: false, offset: 0 });
+  const referer = `https://sploitus.com/?query=${encodeURIComponent(cleanQuery)}`;
+  const curlArgs = [
+    "-sS", "--max-time", "15", "-o", "-", "-w", "\nHTTP_STATUS:%{http_code}",
+    "-X", "POST", "https://sploitus.com/search",
+    "-H", "Accept: application/json",
+    "-H", "Accept-Language: en-US,en;q=0.9",
+    "-H", "Content-Type: application/json",
+    "-H", "Origin: https://sploitus.com",
+    "-H", `Referer: ${referer}`,
+    "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "-H", 'sec-ch-ua: "Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+    "-H", "sec-ch-ua-mobile: ?0",
+    "-H", 'sec-ch-ua-platform: "macOS"',
+    "-H", "sec-fetch-dest: empty",
+    "-H", "sec-fetch-mode: cors",
+    "-H", "sec-fetch-site: same-origin",
+    "-H", "DNT: 1",
+    "--data", body,
+  ];
+
+  return new Promise((resolve) => {
+    execFile("curl", curlArgs, { maxBuffer: 16 * 1024 * 1024, timeout: 20000 }, (err, stdout) => {
+      if (err) return resolve({ error: `Sploitus curl failed: ${err.message}` });
+      const m = String(stdout).match(/\nHTTP_STATUS:(\d{3})\s*$/);
+      const status = m ? parseInt(m[1], 10) : 0;
+      const buf = m ? stdout.slice(0, -m[0].length) : stdout;
+      if (status === 499 || status === 422) {
+        return resolve({ error: `Sploitus rate-limited (HTTP ${status}). Retry in 60s.`, retry_after: 60 });
+      }
+      if (status !== 200) {
+        return resolve({ error: `Sploitus HTTP ${status}: ${String(buf).slice(0, 200)}` });
+      }
+      let parsed;
+      try { parsed = JSON.parse(buf); }
+      catch (e) { return resolve({ error: `Sploitus non-JSON response: ${e.message}` }); }
+      const exploits = Array.isArray(parsed.exploits) ? parsed.exploits : [];
+      const trimmed = exploits.slice(0, Math.max(1, Math.min(50, parseInt(limit, 10) || 10)))
+        .map((x) => ({
+          id: x.id,
+          title: x.title,
+          type: x.type,
+          source_url: x.href,
+          cvss_score: x.score || null,
+          published: x.published || null,
+          language: x.language || null,
+          snippet: (x.source || "").replace(/\s+/g, " ").slice(0, 400),
+        }));
+      resolve({
+        query: cleanQuery,
+        type: reqType,
+        total_results: parsed.exploits_total || exploits.length,
+        returned: trimmed.length,
+        exploits: trimmed,
+        note: "Reference metadata only. To execute a PoC, queue a step via queue_step. Membrane + intent_class + ROE checks apply.",
+      });
+    });
+  });
+}
+
+module.exports = { verifyCve, listNseScripts, searchExploits, searchSploitus };

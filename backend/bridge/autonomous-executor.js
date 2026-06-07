@@ -224,6 +224,37 @@ function collectTargetTokens(engagement) {
   return [...new Set(tokens)].filter(w => !["the","and","for","via","with","over","local","internal","external","subnet","lan","wifi"].includes(w));
 }
 
+// ── Auto-enrich with Sploitus (dir_1780841976173) ──
+// When a CVE is mentioned in the command body, query Sploitus in parallel
+// for available PoCs. Returns null OR an informational note (non-blocking)
+// that gets appended to the queue item output so the aggregator/next iter
+// sees the real PoC IDs instead of letting the model fabricate them.
+async function autoEnrichSploitus(body) {
+  const ids = [...new Set([...body.matchAll(CVE_EXTRACT_RE)].map(m => m[0].toUpperCase()))];
+  if (ids.length === 0) return null;
+  let mk;
+  try { mk = require("/app/model-knowledge-tools"); }
+  catch (_) { return null; }
+  if (typeof mk.searchSploitus !== "function") return null;
+  const results = [];
+  for (const id of ids.slice(0, 3)) {
+    let r;
+    try { r = await mk.searchSploitus({ query: id, type: "exploits", limit: 5 }); }
+    catch (_) { continue; }
+    if (!r || r.error || !Array.isArray(r.exploits) || r.exploits.length === 0) continue;
+    const summary = r.exploits.slice(0, 5)
+      .map((e) => `  - [${e.type}] ${e.id} — ${(e.title || "").slice(0, 80)}${e.source_url ? ` (${e.source_url})` : ""}`)
+      .join("\n");
+    results.push(`${id}: ${r.exploits.length}/${r.total_results || r.exploits.length} PoCs available\n${summary}`);
+  }
+  if (results.length === 0) return null;
+  return {
+    rule: "sploitus_pocs_enriched",
+    hint: `Sploitus PoCs available for ${results.length} of the ${ids.length} CVE(s) cited`,
+    note: `[SPLOITUS_ENRICHMENT — dir_1780841976173]\n${results.join("\n\n")}\n[end enrichment]`,
+  };
+}
+
 async function autoCheckNseNames(body) {
   const matches = [...body.matchAll(NSE_SCRIPT_RE)];
   if (matches.length === 0) return null;
@@ -359,11 +390,31 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       const engRow = await db.query(
         `SELECT scope FROM pentest_engagements WHERE id = $1`, [item.engagement_id]);
       const engagement = engRow.rows[0] || null;
-      const [cveHit, nseHit] = await Promise.all([
+      const [cveHit, nseHit, sploitusEnrich] = await Promise.all([
         autoVerifyCves(fullText, engagement),
         autoCheckNseNames(fullText),
+        autoEnrichSploitus(fullText),
       ]);
       autoVerifyHit = cveHit || nseHit;
+      // Non-blocking enrichment: append Sploitus PoC list to queue item output
+      // (only when CVE wasn't auto-refuted — no point enriching a fabricated ID).
+      if (!autoVerifyHit && sploitusEnrich) {
+        try {
+          await db.withBypass("autonomous_sploitus_enrich", (client) => client.query(
+            `UPDATE soc_queue_items
+                SET output = COALESCE(output, '') || E'\n\n' || $1
+              WHERE id = $2`,
+            [sploitusEnrich.note, item.id]));
+          await db.query(
+            `INSERT INTO offense_telemetry
+               (engagement_id, queue_item_id, model_used, intent_category,
+                n_hosts, n_findings, step_queued, in_scope, n_references,
+                latency_ms, outcome, outcome_notes)
+             VALUES ($1, $2, 'sploitus', 'autoenrich', 0, 0, false, true, 0, 0,
+                     'sploitus_pocs_enriched', $3)`,
+            [item.engagement_id, item.id, sploitusEnrich.hint.slice(0, 200)]);
+        } catch (e) { console.error(`[autonomous-executor] sploitus enrich failed:`, e.message); }
+      }
     } catch (e) {
       console.error(`[autonomous-executor] auto-verify failed:`, e.message);
     }

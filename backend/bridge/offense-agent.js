@@ -54,6 +54,7 @@ const AGENT_SYSTEM_PROMPT_BASE = [
   "  - verify_cve(cve_id) BEFORE you cite a CVE. Fabricated CVE IDs get findings auto-refuted by the claim verifier.",
   "  - list_nse_scripts(category) BEFORE you write `nmap --script <name>`. Fake script names cause guaranteed failures.",
   "  - search_exploits(product, version) BEFORE claiming exploitation is possible. Fabricated EDB-IDs / module paths get findings refuted.",
+  "  - search_sploitus(query) for CVE→PoC and product→PoC mappings. Aggregates ExploitDB + Packet Storm + Vulners + GitHub PoCs + Metasploit — broader than search_exploits. Use when verify_cve confirms a CVE exists and you want a working PoC reference.",
   "  - When you don't recall a fact, CALL THE TOOL. Don't guess. Guessing wastes iters and pollutes the dataset.",
   "",
   "Output style: USE TOOLS. Don't narrate at length.",
