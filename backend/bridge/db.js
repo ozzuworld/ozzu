@@ -1196,6 +1196,26 @@ async function init() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_engagement_hooks_event_eng ON engagement_hooks(event, engagement_id) WHERE enabled = true`);
+    // dir_1780846234615: engagement_crons — operator-scheduled tasks per
+    // engagement. tickAllDue polls every minute and inserts queue items
+    // through the normal gate stack when a cron's schedule matches.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS engagement_crons (
+        id SERIAL PRIMARY KEY,
+        engagement_id TEXT NOT NULL,
+        schedule TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        intent_class TEXT DEFAULT 'recon',
+        enabled BOOLEAN DEFAULT true,
+        description TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        created_by TEXT,
+        last_run_at TIMESTAMPTZ,
+        next_run_at TIMESTAMPTZ,
+        run_count INTEGER DEFAULT 0
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_engagement_crons_enabled ON engagement_crons(enabled, engagement_id) WHERE enabled = true`);
     await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS auto_executed BOOLEAN DEFAULT false`);
     // ── Step-level intent classifier (dir_1780784990563) ──
     // intent_class: model-declared intent for THIS step. NULL = legacy / model omitted

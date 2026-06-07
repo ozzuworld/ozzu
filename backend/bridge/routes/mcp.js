@@ -574,6 +574,42 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "register_engagement_cron",
+      description: "Schedule a recurring task for an engagement (dir_1780846234615). Schedule is a 5-field cron expression (minute hour day month weekday — UTC). Examples: '*/15 * * * *' = every 15 minutes, '0 */2 * * *' = every 2 hours on the hour, '0 0 * * *' = daily at midnight. When the schedule matches, the prompt is queued as a SOC queue item with the declared intent_class, then runs through the full gate stack (ROE → permission_mode → workspace_jail → command_tokens → preflight → hooks → auto-verify) just like a model-generated step. Use for: hourly re-recon, daily cred re-verification, periodic finding staleness checks.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+          schedule: { type: "string", description: "5-field cron expression (UTC). E.g. '0 */2 * * *' = every 2 hours." },
+          prompt: { type: "string", description: "Shell command to queue when the schedule matches" },
+          intent_class: { type: "string", description: "Declared intent (recon | enumeration | exploit_test | exploit_rce | post_exploit). Default 'recon'.", enum: ["recon", "enumeration", "exploit_test", "exploit_rce", "post_exploit"] },
+          description: { type: "string", description: "Human-readable description of what this cron does" },
+        },
+        required: ["engagement_id", "schedule", "prompt"],
+      },
+    },
+    {
+      name: "list_engagement_crons",
+      description: "List all scheduled crons for an engagement (or all engagements if engagement_id is null). Shows id, schedule, prompt, intent_class, enabled, last_run_at, next_run_at, run_count.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID, or omit to list ALL crons across all engagements" },
+        },
+      },
+    },
+    {
+      name: "delete_engagement_cron",
+      description: "Permanently delete a scheduled cron by id. To temporarily disable, prefer toggling enabled flag via direct DB (or via future MCP tool).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          cron_id: { type: "number", description: "Cron id from list_engagement_crons" },
+        },
+        required: ["cron_id"],
+      },
+    },
+    {
       name: "register_engagement_hook",
       description: "Register an operator-configured shell hook on engagement queue events (dir_1780845861190). Hook command receives JSON event payload on stdin and may return JSON on stdout {allow, deny_reason, messages}. Events: pre_queue_dispatch (blocks dispatch if allow=false), post_queue_complete (advisory, e.g. push webhook on failure), pre_finding_write, post_phase_advance. Pass engagement_id=null for a GLOBAL hook that fires on every engagement. Hook receives env vars HOOK_EVENT and HOOK_ID. Timeout in milliseconds (default 10000) — on timeout, hook is treated as ALLOW (fail-open).",
       inputSchema: {
@@ -2031,6 +2067,73 @@ ${result.narrative}
             text: `**Recon hosts for ${args.engagement_id}** (structured; raw scan output not shown):\n\n${lines.join("\n")}\n\n**Total:** ${result.rows.length} host(s)`
           }]
         };
+      }
+
+      case "register_engagement_cron": {
+        // dir_1780846234615
+        const cron = require("../engagement-cron");
+        try {
+          const r = await cron.createCron({
+            engagement_id: args.engagement_id,
+            schedule: args.schedule,
+            prompt: args.prompt,
+            intent_class: args.intent_class,
+            description: args.description,
+            created_by: "operator",
+          });
+          if (r && r.error) {
+            return { content: [{ type: "text", text: `register_engagement_cron failed: ${r.error}` }], isError: true };
+          }
+          return {
+            content: [{
+              type: "text",
+              text: `⏰ Cron #${r.id} scheduled for ${r.engagement_id}\n\n` +
+                    `- **Schedule:** \`${r.schedule}\` (UTC)\n` +
+                    `- **Intent:** ${r.intent_class}\n` +
+                    `- **Next fire:** ${r.next_run_at || "(none — schedule may not match in 1y)"}\n` +
+                    `- **Prompt:** \`${(r.prompt || "").slice(0, 200)}\`\n` +
+                    `${r.description ? `- **Description:** ${r.description}\n` : ""}` +
+                    `\nWhen due, the prompt is queued as a soc_queue_items row with intent_class=${r.intent_class} and runs through the full gate stack.`,
+            }]
+          };
+        } catch (e) {
+          return { content: [{ type: "text", text: `register_engagement_cron failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "list_engagement_crons": {
+        // dir_1780846234615
+        const cron = require("../engagement-cron");
+        try {
+          const rows = await cron.listCrons(args.engagement_id || null);
+          if (rows.length === 0) {
+            return { content: [{ type: "text", text: args.engagement_id ? `No crons for engagement ${args.engagement_id}.` : `No crons registered.` }] };
+          }
+          const lines = rows.map(c =>
+            `- **#${c.id}** [${c.enabled ? "enabled" : "DISABLED"}] eng=${c.engagement_id} ` +
+            `schedule=\`${c.schedule}\` intent=${c.intent_class} runs=${c.run_count || 0}` +
+            `${c.last_run_at ? ` | last=${c.last_run_at}` : ""}` +
+            `${c.next_run_at ? ` | next=${c.next_run_at}` : ""}\n` +
+            `  prompt: \`${(c.prompt || "").slice(0, 180)}\`` +
+            `${c.description ? `\n  desc: ${c.description}` : ""}`);
+          return { content: [{ type: "text", text: `**Scheduled crons** (${rows.length}):\n\n${lines.join("\n\n")}` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `list_engagement_crons failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "delete_engagement_cron": {
+        // dir_1780846234615
+        const cron = require("../engagement-cron");
+        try {
+          const r = await cron.deleteCron(args.cron_id);
+          if (!r) {
+            return { content: [{ type: "text", text: `Cron ${args.cron_id} not found.` }], isError: true };
+          }
+          return { content: [{ type: "text", text: `🗑️ Deleted cron #${r.id}.` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `delete_engagement_cron failed: ${e.message}` }], isError: true };
+        }
       }
 
       case "register_engagement_hook": {

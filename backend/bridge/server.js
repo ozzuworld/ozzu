@@ -6963,6 +6963,12 @@ wss.on("connection", (ws, req) => {
   server.listen(PORT, "0.0.0.0", () => {
     log.bridge.info(`listening on :${PORT}`);
     checkContainerBinaries();
+    // dir_1780846234615: engagement cron poller — ticks every minute, fires
+    // due crons by inserting queue items through the normal gate stack.
+    try {
+      const cron = require("./engagement-cron");
+      cron.startPoller(60000);
+    } catch (e) { log.bridge.error(`engagement-cron poller failed to start: ${e.message}`); }
     // dir_1780786724856 + dir_1780832189054: auto-reopen the offense SSH tunnel
     // AND auto-resume the runAgent loop on bridge startup. Without the second
     // half, every merge-and-deploy left the agent state stuck at the iter it
