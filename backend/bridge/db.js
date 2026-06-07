@@ -1167,6 +1167,22 @@ async function init() {
     await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS intent_class VARCHAR(24)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_soc_queue_intent ON soc_queue_items(engagement_id, intent_class)`);
 
+    // ── Model knowledge tools (dir_1780827444328) ──
+    // cve_cache: NVD lookups for verify_cve. 7-day TTL.
+    // nse_script_catalog: parsed `nmap --script-help all` from dev-01 for list_nse_scripts.
+    await pool.query(`CREATE TABLE IF NOT EXISTS cve_cache (
+      cve_id      VARCHAR(20) PRIMARY KEY,
+      metadata    JSONB NOT NULL,
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS nse_script_catalog (
+      name         VARCHAR(80) PRIMARY KEY,
+      categories   JSONB NOT NULL DEFAULT '[]',
+      description  TEXT,
+      refreshed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_nse_categories ON nse_script_catalog USING GIN (categories)`);
+
     // ── Per-engagement executor routing (dir_1780586225013) ──
     // executor_host: 'dev-01' (default, runs commands as-is on the kali toolhost) or
     //   'tablet-p610' (or any android-pentest-bridge style executor — runs commands

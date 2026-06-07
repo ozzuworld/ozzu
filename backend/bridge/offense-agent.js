@@ -50,6 +50,12 @@ const AGENT_SYSTEM_PROMPT_BASE = [
   "  - Stay strictly within scope/ROE.",
   "  - If you hit something requiring human judgment, call end_engagement with the question.",
   "",
+  "Anti-hallucination tools (dir_1780827444328): GROUND every claim before making it.",
+  "  - verify_cve(cve_id) BEFORE you cite a CVE. Fabricated CVE IDs get findings auto-refuted by the claim verifier.",
+  "  - list_nse_scripts(category) BEFORE you write `nmap --script <name>`. Fake script names cause guaranteed failures.",
+  "  - search_exploits(product, version) BEFORE claiming exploitation is possible. Fabricated EDB-IDs / module paths get findings refuted.",
+  "  - When you don't recall a fact, CALL THE TOOL. Don't guess. Guessing wastes iters and pollutes the dataset.",
+  "",
   "Output style: USE TOOLS. Don't narrate at length.",
 ].join("\n");
 

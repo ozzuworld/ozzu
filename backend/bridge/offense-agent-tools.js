@@ -252,6 +252,9 @@ async function requestHuman(args) {
 
 // ────────────────────────────────── dispatcher ─────────────────────────────────
 
+// Model knowledge tools (dir_1780827444328) — anti-hallucination grounding
+const mkTools = require("/app/model-knowledge-tools");
+
 const TOOL_IMPLS = {
   get_engagement_state: getEngagementState,
   queue_step:           queueStep,
@@ -260,6 +263,9 @@ const TOOL_IMPLS = {
   advance_phase:        advancePhase,
   request_human:        requestHuman,
   end_engagement:       endEngagement,
+  verify_cve:           mkTools.verifyCve,
+  list_nse_scripts:     mkTools.listNseScripts,
+  search_exploits:      mkTools.searchExploits,
 };
 
 // Central router. Returns the tool's result as a JSON-serializable object the
@@ -390,6 +396,51 @@ const TOOL_SCHEMAS = [
           reason:        { type: "string", description: "Why the engagement is ending (scope exhausted, blocked, etc.)" },
         },
         required: ["engagement_id", "reason"],
+      },
+    },
+  },
+  // ─── Model knowledge tools (dir_1780827444328) — call BEFORE claiming ───
+  {
+    type: "function",
+    function: {
+      name: "verify_cve",
+      description: "Ground-truth lookup of a CVE ID via NVD. Returns {exists, summary, cvss_v3_score, cvss_v3_vector, published_date, affected_products[], references[]}. Use BEFORE claiming a CVE in a finding or queue_step — citing fake CVE IDs gets findings auto-refuted by the claim verifier. Cached for 7 days. Membrane-safe (metadata only).",
+      parameters: {
+        type: "object",
+        properties: {
+          cve_id: { type: "string", description: "CVE identifier in CVE-YYYY-NNNN format (e.g. 'CVE-2021-36260')" },
+        },
+        required: ["cve_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_nse_scripts",
+      description: "List REAL Nmap NSE scripts available on the SOC executor. Returns {scripts:[{name, categories[], description}]}. Use BEFORE writing `nmap --script <name>` — fake script names cause guaranteed failures. Filter by category (auth, broadcast, brute, default, discovery, dos, exploit, external, fuzzer, intrusive, malware, safe, version, vuln). Optional refresh:true to re-pull catalog from dev-01.",
+      parameters: {
+        type: "object",
+        properties: {
+          category: { type: "string", description: "Filter by Nmap script category (optional). One of: auth, broadcast, brute, default, discovery, dos, exploit, external, fuzzer, intrusive, malware, safe, version, vuln" },
+          refresh:  { type: "boolean", description: "Force a refresh of the catalog from dev-01 nmap --script-help all (optional, costly — only when investigating new scripts)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_exploits",
+      description: "Search ExploitDB via `searchsploit` for real public PoCs matching a product / version. Returns {exploits:[{edb_id, title, type, platform, port, date_published, author, codes (CVE refs), source_path}]}. Use BEFORE claiming exploitation is possible — fabricated exploit references get findings refuted. Membrane-safe: returns metadata + reference path, NOT the PoC body itself.",
+      parameters: {
+        type: "object",
+        properties: {
+          product: { type: "string", description: "Product / vendor name (e.g. 'Hikvision', 'Dropbear', 'OpenSSH')" },
+          version: { type: "string", description: "Version string (optional, narrows the search)" },
+          port:    { type: "string", description: "Service port to filter by (optional)" },
+        },
+        required: ["product"],
       },
     },
   },
