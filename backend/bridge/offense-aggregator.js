@@ -59,7 +59,7 @@ function chatCompletion(messages, modelOverride) {
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: see note in offense-orchestrator.js
     const reqAgent = new lib.Agent({ keepAlive: false });
-    const req = lib.request(url, { method: "POST", headers, timeout: 60000, agent: reqAgent }, (res) => {
+    const req = lib.request(url, { method: "POST", headers, timeout: 180000, agent: reqAgent }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => {
