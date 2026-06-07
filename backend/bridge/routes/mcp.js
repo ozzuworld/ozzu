@@ -574,6 +574,19 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "trace_dispatch",
+      description: "Dry-run a hypothetical command through every gate layer of the SOC pipeline WITHOUT executing it (dir_1780846511537). Returns a layered verdict report showing which gate would block (if any) and why. Layers in dispatch order: roe_blocklist → permission_mode → workspace_jail → command_tokens (anti-spoof) → preflight_lint → hooks_pre_queue (registered hooks listed but NOT executed) → auto_verify_cve (NVD lookup) → auto_verify_nse (catalog lookup) → sploitus_enrichment (informational). Use to debug why the model's queued commands keep getting denied, or to verify a new command shape is allowed before queueing it through the model.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+          command: { type: "string", description: "Shell command to trace (string, not executed)" },
+          intent_class: { type: "string", description: "Declared intent_class to assume (default 'recon'). One of: recon, enumeration, exploit_test, exploit_rce, post_exploit", enum: ["recon", "enumeration", "exploit_test", "exploit_rce", "post_exploit"] },
+        },
+        required: ["engagement_id", "command"],
+      },
+    },
+    {
       name: "register_engagement_cron",
       description: "Schedule a recurring task for an engagement (dir_1780846234615). Schedule is a 5-field cron expression (minute hour day month weekday — UTC). Examples: '*/15 * * * *' = every 15 minutes, '0 */2 * * *' = every 2 hours on the hour, '0 0 * * *' = daily at midnight. When the schedule matches, the prompt is queued as a SOC queue item with the declared intent_class, then runs through the full gate stack (ROE → permission_mode → workspace_jail → command_tokens → preflight → hooks → auto-verify) just like a model-generated step. Use for: hourly re-recon, daily cred re-verification, periodic finding staleness checks.",
       inputSchema: {
@@ -2067,6 +2080,20 @@ ${result.narrative}
             text: `**Recon hosts for ${args.engagement_id}** (structured; raw scan output not shown):\n\n${lines.join("\n")}\n\n**Total:** ${result.rows.length} host(s)`
           }]
         };
+      }
+
+      case "trace_dispatch": {
+        // dir_1780846511537
+        const tracer = require("../dispatch-tracer");
+        try {
+          const trace = await tracer.traceDispatch(args.engagement_id, args.command, args.intent_class);
+          if (trace.error) {
+            return { content: [{ type: "text", text: `trace_dispatch failed: ${trace.error}` }], isError: true };
+          }
+          return { content: [{ type: "text", text: tracer.renderTraceMarkdown(trace) }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `trace_dispatch failed: ${e.message}` }], isError: true };
+        }
       }
 
       case "register_engagement_cron": {
