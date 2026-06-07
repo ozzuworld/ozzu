@@ -168,6 +168,91 @@ function inferIntentFromCommand(command) {
   return null;
 }
 
+// ── Harness auto-verify (dir_1780831335787) ──
+// Multi-agent Step 8 flow doesn't use function-calling so the model never
+// invokes verify_cve / list_nse_scripts. Harness extracts the same signals
+// from the synthesizer's command + auto-checks them via the same code paths
+// the (unused-by-model) MCP tools use.
+
+const CVE_EXTRACT_RE = /CVE-\d{4}-\d{4,7}/gi;
+const NSE_SCRIPT_RE  = /--script[=\s]+([A-Za-z0-9_,*-]+)/gi;
+
+async function autoVerifyCves(body, engagement) {
+  const ids = [...new Set([...body.matchAll(CVE_EXTRACT_RE)].map(m => m[0].toUpperCase()))];
+  if (ids.length === 0) return null;
+  let mk;
+  try { mk = require("/app/model-knowledge-tools"); }
+  catch (_) { return null; } // model-knowledge-tools not loaded — skip silently
+  for (const id of ids) {
+    let result;
+    try { result = await mk.verifyCve({ cve_id: id }); }
+    catch (_) { continue; }
+    if (!result || result.error) continue;
+    if (result.exists === false) {
+      return {
+        rule: "auto_cve_not_found",
+        hint: `${id} not found in NVD. Real CVE IDs match a record. Either the ID is wrong (typo from CVE-2021-36260?) or fabricated. Call verify_cve before citing CVE IDs, or check ExploitDB via search_exploits for the real ID.`,
+        match: id,
+      };
+    }
+    // Affected-product mismatch check
+    const targetTokens = collectTargetTokens(engagement);
+    if (targetTokens.length === 0) continue;
+    const affected = Array.isArray(result.affected_products) ? result.affected_products.join(" ").toLowerCase() : "";
+    const summary = (result.summary || "").toLowerCase();
+    const matched = targetTokens.some(t => affected.includes(t) || summary.includes(t));
+    if (!matched) {
+      return {
+        rule: "auto_cve_affected_mismatch",
+        hint: `${id} exists but its affected_products do NOT include the engagement target. Sample affected CPE: ${(result.affected_products || []).slice(0,3).join(" | ") || "(none)"}. Summary: ${(result.summary || "").slice(0,180)}. Pick a CVE whose affected_products actually covers the target.`,
+        match: id,
+      };
+    }
+  }
+  return null;
+}
+
+function collectTargetTokens(engagement) {
+  const tokens = [];
+  if (!engagement) return tokens;
+  // scope.targets is a free-text array; pull alphabetic vendor/product tokens
+  try {
+    const scope = typeof engagement.scope === "object" ? engagement.scope : JSON.parse(engagement.scope || "{}");
+    const t = Array.isArray(scope.targets) ? scope.targets.join(" ").toLowerCase() : "";
+    for (const word of t.match(/\b[a-z][a-z0-9]{2,}\b/g) || []) tokens.push(word);
+  } catch (_) {}
+  return [...new Set(tokens)].filter(w => !["the","and","for","via","with","over","local","internal","external","subnet","lan","wifi"].includes(w));
+}
+
+async function autoCheckNseNames(body) {
+  const matches = [...body.matchAll(NSE_SCRIPT_RE)];
+  if (matches.length === 0) return null;
+  const names = new Set();
+  for (const m of matches) {
+    for (const n of String(m[1] || "").split(",")) {
+      const trimmed = n.trim();
+      if (trimmed && !["all", "default", "safe", "vuln", "discovery", "auth", "broadcast", "brute", "intrusive", "malware", "fuzzer", "external", "version", "dos", "exploit"].includes(trimmed)) {
+        names.add(trimmed);
+      }
+    }
+  }
+  if (names.size === 0) return null;
+  // Check against nse_script_catalog
+  for (const name of names) {
+    try {
+      const r = await db.query("SELECT 1 FROM nse_script_catalog WHERE name=$1 LIMIT 1", [name]);
+      if (r.rows.length === 0) {
+        return {
+          rule: "auto_nse_not_found",
+          hint: `--script "${name}" is not a real Nmap NSE script. Call list_nse_scripts({category:'...'}) to see what's available, or use a category alias like 'safe','vuln','discovery'. Common SSH scripts: ssh-hostkey, ssh-auth-methods, ssh2-enum-algos. Common RTSP: rtsp-methods, rtsp-url-brute.`,
+          match: name,
+        };
+      }
+    } catch (_) { /* catalog table missing — fall through */ }
+  }
+  return null;
+}
+
 // Throttle: max 1 push per engagement per N seconds (any cause).
 const PHASE_PUSH_THROTTLE_SEC = 300;
 
@@ -262,6 +347,44 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
     // scripts). Diagnostic lands in output column so wait_for_outcome surfaces
     // the hint to the model on next iter — model self-corrects instead of
     // accumulating "this avenue doesn't work" context.
+    // dir_1780831335787: harness auto-verify of CVE + NSE references.
+    // Runs in parallel with the regex preflight — first hit wins. Works on
+    // any model regardless of function-calling support (Step 8 multi-agent
+    // included).
+    let autoVerifyHit = null;
+    try {
+      const body = (() => { try { return require("/app/autonomous-executor").__bodyForLint?.(item.command); } catch (_) { return item.command; } })() || item.command;
+      const decoded = (typeof unwrapCommand === "function") ? unwrapCommand(body) : body;
+      const fullText = `${item.command || ""} ${decoded || ""}`;
+      const engRow = await db.query(
+        `SELECT scope FROM pentest_engagements WHERE id = $1`, [item.engagement_id]);
+      const engagement = engRow.rows[0] || null;
+      const [cveHit, nseHit] = await Promise.all([
+        autoVerifyCves(fullText, engagement),
+        autoCheckNseNames(fullText),
+      ]);
+      autoVerifyHit = cveHit || nseHit;
+    } catch (e) {
+      console.error(`[autonomous-executor] auto-verify failed:`, e.message);
+    }
+    if (autoVerifyHit) {
+      const diag = `[PREFLIGHT_LINT_BLOCKED — dir_1780831335787]\nrule=${autoVerifyHit.rule}\nmatched=${autoVerifyHit.match}\nhint=${autoVerifyHit.hint}`;
+      await db.withBypass("autonomous_autoverify_block", (client) => client.query(
+        `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+        [diag, item.id]));
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, $2, 'lint', 'autoverify', 0, 0, false, true, 0, 0,
+                   $3, $4)`,
+          [item.engagement_id, item.id, autoVerifyHit.rule.slice(0, 24), `${autoVerifyHit.rule}; matched=${autoVerifyHit.match}`]);
+      } catch (_) {}
+      return { autoExecuted: false, reason: `autoverify:${autoVerifyHit.rule}`, hint: autoVerifyHit.hint };
+    }
+
     const preflightCheck = lintCommandPreflight(item.command, { executor_host: item.executor_host });
     if (preflightCheck) {
       const diag = `[PREFLIGHT_LINT_BLOCKED — dir_1780794595572]\nrule=${preflightCheck.rule}\nmatched=${preflightCheck.match}\nhint=${preflightCheck.hint}`;
