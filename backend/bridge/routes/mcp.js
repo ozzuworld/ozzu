@@ -574,6 +574,17 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "validate_engagement_scope",
+      description: "Validate an engagement's scope.targets — classify each target as IPv4, CIDR, hostname, or free-text. Surfaces warnings when scope is free-text only (which makes workspace_jail block every dispatch). Use to debug 'why does every command get blocked' on an engagement (dir_1780846961338).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
       name: "trace_dispatch",
       description: "Dry-run a hypothetical command through every gate layer of the SOC pipeline WITHOUT executing it (dir_1780846511537). Returns a layered verdict report showing which gate would block (if any) and why. Layers in dispatch order: roe_blocklist → permission_mode → workspace_jail → command_tokens (anti-spoof) → preflight_lint → hooks_pre_queue (registered hooks listed but NOT executed) → auto_verify_cve (NVD lookup) → auto_verify_nse (catalog lookup) → sploitus_enrichment (informational). Use to debug why the model's queued commands keep getting denied, or to verify a new command shape is allowed before queueing it through the model.",
       inputSchema: {
@@ -1835,12 +1846,52 @@ ${result.narrative}
           'scoping'
         ]);
 
+        // dir_1780846961338: warn at creation if scope.targets is free-text only.
+        let scopeWarn = "";
+        try {
+          const sv = require("../scope-validator");
+          const v = sv.validateScope(args.scope || {});
+          if (!v.machine_readable) {
+            scopeWarn =
+              `\n\n⚠️ **Scope warning:** scope.targets has ${v.free_text_count} free-text entries and ` +
+              `${v.valid_count} machine-readable (IPv4/CIDR) entries. The workspace_jail layer ` +
+              `(dir_1780844590951) will REJECT every dispatched command until a real CIDR or IPv4 ` +
+              `lands in scope.targets. Use \`scope.targets_note\` for human context.\n\n` +
+              v.warnings.map(w => `- ${w}`).join("\n");
+          } else if (v.free_text_count > 0) {
+            scopeWarn =
+              `\n\nℹ️ Scope hint: ${v.free_text_count} free-text + ${v.valid_count} machine-readable. ` +
+              `Free-text entries are ignored by workspace_jail — they're just human notes.`;
+          }
+        } catch (_) {}
         return {
           content: [{
             type: "text",
-            text: `✅ Pentest engagement created\n\n**ID:** ${engagementId}\n**Client:** ${args.client_name}\n**Type:** ${args.engagement_type}\n**Status:** scoping\n\n**Scope:**\n\`\`\`json\n${JSON.stringify(args.scope, null, 2)}\n\`\`\`\n\n**Next:** Call \`invoke_joko\` to begin reconnaissance with this engagement_id.`
+            text: `✅ Pentest engagement created\n\n**ID:** ${engagementId}\n**Client:** ${args.client_name}\n**Type:** ${args.engagement_type}\n**Status:** scoping\n\n**Scope:**\n\`\`\`json\n${JSON.stringify(args.scope, null, 2)}\n\`\`\`${scopeWarn}\n\n**Next:** Call \`invoke_joko\` to begin reconnaissance with this engagement_id.`
           }]
         };
+      }
+
+      case "validate_engagement_scope": {
+        // dir_1780846961338
+        const sv = require("../scope-validator");
+        try {
+          const r = await db.query(`SELECT id, scope FROM pentest_engagements WHERE id = $1`, [args.engagement_id]);
+          if (r.rows.length === 0) {
+            return { content: [{ type: "text", text: `Engagement ${args.engagement_id} not found.` }], isError: true };
+          }
+          const v = sv.validateScope(r.rows[0].scope);
+          const icon = v.machine_readable ? "✅" : "🛑";
+          const head = `${icon} **Scope validation for ${r.rows[0].id}**\n\n` +
+            `- IPv4 entries: ${v.ipv4_count}\n- CIDR entries: ${v.cidr_count}\n` +
+            `- Hostname entries: ${v.hostname_count}\n- Free-text entries: ${v.free_text_count}\n` +
+            `- Machine-readable: **${v.machine_readable}**\n\n`;
+          const cls = v.classifications.map(c => `- [${c.kind}] \`${String(c.value).slice(0, 100)}\``).join("\n");
+          const wrn = v.warnings.length ? `\n\n**Warnings:**\n${v.warnings.map(w => `- ⚠️ ${w}`).join("\n")}` : "";
+          return { content: [{ type: "text", text: head + "**Classifications:**\n" + cls + wrn }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `validate_engagement_scope failed: ${e.message}` }], isError: true };
+        }
       }
 
       case "list_engagements": {
