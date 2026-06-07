@@ -574,6 +574,46 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "spawn_sub_agent",
+      description: "Spawn a per-target sub-agent for an engagement (dir_1780848098817). Coordinator (the engagement-level runAgent loop) OR operator can spawn these. Sub-agent gets isolated context: its own iter counter, mentor state, recovery state, scope override (defaults to [target_host]), and optional permission_mode override (defaults to engagement's). All queue items + findings produced by this sub-agent carry sub_agent_id. Runs the full gate stack (no bypass). Use to fan out per-target investigation: one sub-agent per IP, each focused on its target without polluting the others' context.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Parent engagement ID" },
+          target_host: { type: "string", description: "IP or hostname this sub-agent owns" },
+          target_role: { type: "string", description: "Semantic role: gateway | nvr | web | etc." },
+          objective: { type: "string", description: "What this sub-agent should accomplish (free text, fed to its orchestrator)" },
+          permission_mode_override: { type: "string", description: "Optional per-sub-agent permission_mode (default = engagement's). Valid: recon_only|enumeration|exploitation_auto|exploitation_prompt|full_engagement", enum: ["recon_only", "enumeration", "exploitation_auto", "exploitation_prompt", "full_engagement"] },
+          max_iter: { type: "number", description: "Max iterations (default 20)" },
+          spawned_reason: { type: "string", description: "Why this sub-agent was spawned (for audit)" },
+        },
+        required: ["engagement_id", "target_host"],
+      },
+    },
+    {
+      name: "list_sub_agents",
+      description: "List all sub-agents for an engagement (dir_1780848098817). Shows status, iter progress, target_host, target_role, total_findings, last_action.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
+      name: "terminate_sub_agent",
+      description: "Terminate a running sub-agent by id (dir_1780848098817). Sub-agent's next iter check exits early; queue items already in flight finish but no new ones are queued.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sub_agent_id: { type: "number", description: "Sub-agent id from list_sub_agents" },
+          reason: { type: "string", description: "Audit reason for termination" },
+        },
+        required: ["sub_agent_id"],
+      },
+    },
+    {
       name: "validate_engagement_scope",
       description: "Validate an engagement's scope.targets — classify each target as IPv4, CIDR, hostname, or free-text. Surfaces warnings when scope is free-text only (which makes workspace_jail block every dispatch). Use to debug 'why does every command get blocked' on an engagement (dir_1780846961338).",
       inputSchema: {
@@ -1870,6 +1910,83 @@ ${result.narrative}
             text: `✅ Pentest engagement created\n\n**ID:** ${engagementId}\n**Client:** ${args.client_name}\n**Type:** ${args.engagement_type}\n**Status:** scoping\n\n**Scope:**\n\`\`\`json\n${JSON.stringify(args.scope, null, 2)}\n\`\`\`${scopeWarn}\n\n**Next:** Call \`invoke_joko\` to begin reconnaissance with this engagement_id.`
           }]
         };
+      }
+
+      case "spawn_sub_agent": {
+        // dir_1780848098817
+        const sa = require("../offense-sub-agent");
+        try {
+          const r = await sa.spawnSubAgent({
+            engagement_id: args.engagement_id,
+            target_host: args.target_host,
+            target_role: args.target_role,
+            objective: args.objective,
+            permission_mode_override: args.permission_mode_override,
+            max_iter: args.max_iter,
+            spawned_by: "operator",
+            spawned_reason: args.spawned_reason || "operator MCP spawn",
+          });
+          if (r && r.error) {
+            return { content: [{ type: "text", text: `spawn_sub_agent failed: ${r.error}` }], isError: true };
+          }
+          return {
+            content: [{
+              type: "text",
+              text: `🪢 Sub-agent #${r.id} spawned\n\n` +
+                    `- **Engagement:** ${r.engagement_id}\n` +
+                    `- **Target:** ${r.target_host}${r.target_role ? ` (role: ${r.target_role})` : ""}\n` +
+                    `- **Objective:** ${r.objective || "(unspecified — defaults to investigate target)"}\n` +
+                    `- **Permission mode:** ${r.permission_mode_override || "(inherit from engagement)"}\n` +
+                    `- **Scope override:** ${(r.scope_targets_override || []).join(", ")}\n` +
+                    `- **Max iter:** ${r.max_iter}\n\n` +
+                    `Sub-agent runs in background. Use \`list_sub_agents\` to check status, \`terminate_sub_agent\` to stop it.`,
+            }]
+          };
+        } catch (e) {
+          return { content: [{ type: "text", text: `spawn_sub_agent failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "list_sub_agents": {
+        // dir_1780848098817
+        const sa = require("../offense-sub-agent");
+        try {
+          const rows = await sa.listSubAgents(args.engagement_id);
+          if (rows.length === 0) {
+            return { content: [{ type: "text", text: `No sub-agents for engagement ${args.engagement_id}.` }] };
+          }
+          const lines = rows.map(r => {
+            const icon =
+              r.status === "running"   ? "🟢" :
+              r.status === "pending"   ? "⏳" :
+              r.status === "completed" ? "✅" :
+              r.status === "paused"    ? "⏸️" :
+              r.status === "failed"    ? "❌" :
+              r.status === "terminated"? "🛑" : "❓";
+            return `${icon} **#${r.id}** ${r.target_host}${r.target_role ? ` (${r.target_role})` : ""}\n` +
+                   `  status=${r.status} iter=${r.iter}/${r.max_iter} findings=${r.total_findings} queue=${r.total_queue_items}\n` +
+                   `  objective: ${(r.objective || "—").slice(0, 120)}\n` +
+                   `  last: ${(r.last_action || "—").slice(0, 120)}` +
+                   `${r.permission_mode_override ? `\n  permission_mode_override: ${r.permission_mode_override}` : ""}`;
+          });
+          return { content: [{ type: "text", text: `**Sub-agents for ${args.engagement_id}** (${rows.length}):\n\n${lines.join("\n\n")}` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `list_sub_agents failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "terminate_sub_agent": {
+        // dir_1780848098817
+        const sa = require("../offense-sub-agent");
+        try {
+          const r = await sa.terminateSubAgent(args.sub_agent_id, args.reason);
+          if (!r) {
+            return { content: [{ type: "text", text: `Sub-agent ${args.sub_agent_id} not found or not running.` }], isError: true };
+          }
+          return { content: [{ type: "text", text: `🛑 Sub-agent #${r.id} (${r.target_host}) terminated. Reason: ${args.reason || "no reason given"}.` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `terminate_sub_agent failed: ${e.message}` }], isError: true };
+        }
       }
 
       case "validate_engagement_scope": {

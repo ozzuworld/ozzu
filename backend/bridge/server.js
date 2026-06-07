@@ -6969,6 +6969,26 @@ wss.on("connection", (ws, req) => {
       const cron = require("./engagement-cron");
       cron.startPoller(60000);
     } catch (e) { log.bridge.error(`engagement-cron poller failed to start: ${e.message}`); }
+    // dir_1780848098817: resume orphaned sub-agents on bridge restart. Any row
+    // still status='running' AND started_at < NOW() - 1min has lost its driver
+    // process (bridge died mid-iter). Re-fire runSubAgent for each.
+    (async () => {
+      try {
+        const r = await db.query(
+          `SELECT id FROM engagement_sub_agents
+            WHERE status = 'running'
+              AND (started_at IS NULL OR started_at < NOW() - INTERVAL '1 minute')`);
+        if (r.rows.length > 0) {
+          log.bridge.info(`auto-resuming ${r.rows.length} orphaned sub-agent(s)`);
+          const sa = require("./offense-sub-agent");
+          for (const row of r.rows) {
+            setImmediate(() => {
+              sa.runSubAgent(row.id).catch(e => log.bridge.error(`sub-agent ${row.id} resume crashed: ${e.message}`));
+            });
+          }
+        }
+      } catch (e) { log.bridge.error(`sub-agent auto-resume failed: ${e.message}`); }
+    })();
     // dir_1780786724856 + dir_1780832189054: auto-reopen the offense SSH tunnel
     // AND auto-resume the runAgent loop on bridge startup. Without the second
     // half, every merge-and-deploy left the agent state stuck at the iter it

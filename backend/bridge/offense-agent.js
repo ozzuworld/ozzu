@@ -765,4 +765,4 @@ async function resetAgent(engagementId) {
   return { engagement_id: engagementId, ok: true };
 }
 
-module.exports = { runAgent, runAgentToolCall, resetAgent };
+module.exports = { runAgent, runAgentToolCall, resetAgent, synthesizeCommand };

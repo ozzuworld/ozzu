@@ -1216,6 +1216,39 @@ async function init() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_engagement_crons_enabled ON engagement_crons(enabled, engagement_id) WHERE enabled = true`);
+    // dir_1780848098817: hierarchical sub-agents — per-target focused workers
+    // that the coordinator (current runAgent loop) can spawn, observe, and
+    // terminate. Each sub-agent has its own iter counter, mentor state,
+    // recovery state, scope override, and permission_mode override.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS engagement_sub_agents (
+        id SERIAL PRIMARY KEY,
+        engagement_id TEXT NOT NULL,
+        target_host TEXT NOT NULL,
+        target_role TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        iter INTEGER DEFAULT 0,
+        max_iter INTEGER DEFAULT 20,
+        agent_run_state JSONB DEFAULT '{}',
+        objective TEXT,
+        permission_mode_override TEXT,
+        scope_targets_override TEXT[],
+        spawned_by TEXT,
+        spawned_reason TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        last_action TEXT,
+        last_finding_id INTEGER,
+        total_findings INTEGER DEFAULT 0,
+        total_queue_items INTEGER DEFAULT 0
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sub_agents_eng_status ON engagement_sub_agents(engagement_id, status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sub_agents_running ON engagement_sub_agents(status) WHERE status = 'running'`);
+    await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS sub_agent_id INTEGER`);
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS sub_agent_id INTEGER`);
+    await pool.query(`ALTER TABLE recon_hosts ADD COLUMN IF NOT EXISTS sub_agent_id INTEGER`);
     await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS auto_executed BOOLEAN DEFAULT false`);
     // ── Step-level intent classifier (dir_1780784990563) ──
     // intent_class: model-declared intent for THIS step. NULL = legacy / model omitted
