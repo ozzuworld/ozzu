@@ -385,6 +385,40 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
         scope:           item.scope,
       };
       const verdict = enforcer.enforceAll(pEng, item.intent_class, item.command);
+      // dir_1780845861190: pre_queue_dispatch hooks fire AFTER enforcer.allowed
+      // (no point hooking blocked items) but BEFORE the SSH spawn. A hook can
+      // veto with allow:false → queue item failed with [HOOK_DENIED].
+      if (verdict.allowed) {
+        try {
+          const hooks = require("/app/hooks");
+          const hr = await hooks.runEvent({
+            engagementId: item.engagement_id,
+            event: hooks.HOOK_EVENTS.PRE_QUEUE_DISPATCH,
+            payload: {
+              queue_item_id: item.id,
+              command: item.command,
+              intent_class: item.intent_class,
+              command_intent: verdict.command_intent,
+              permission_mode: pEng.permission_mode,
+            },
+          });
+          if (!hr.allowed) {
+            const diag = `[HOOK_DENIED — dir_1780845861190]\n${hr.final_deny_reason}\nhooks_fired=${hr.hooks_fired}`;
+            await db.withBypass("autonomous_hook_deny", (client) => client.query(
+              `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+              [diag, item.id]));
+            try {
+              await db.query(
+                `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+                 VALUES ($1, $2, 'hooks', 'pre_dispatch', 0, 0, false, true, 0, 0, 'hook_denied', $3)`,
+                [item.engagement_id, item.id, (hr.final_deny_reason || "").slice(0, 200)]);
+            } catch (_) {}
+            return { autoExecuted: false, reason: "hook_denied", hint: hr.final_deny_reason };
+          }
+        } catch (e) {
+          console.error(`[autonomous-executor] pre_queue_dispatch hooks failed:`, e.message);
+        }
+      }
       if (!verdict.allowed) {
         const diag = `[PERMISSION_DENIED — dir_1780844590951]\nlayer=${verdict.layer}\nreason=${verdict.denied_reason}\ncurrent_mode=${verdict.current_mode || pEng.permission_mode || "enumeration"}${verdict.required_mode ? `\nrequired_mode=${verdict.required_mode}` : ""}${verdict.out_of_scope_targets ? `\nout_of_scope=${verdict.out_of_scope_targets.join(", ")}` : ""}`;
         await db.withBypass("autonomous_permission_deny", (client) => client.query(

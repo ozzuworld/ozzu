@@ -1177,6 +1177,25 @@ async function init() {
     //   exploitation_prompt — same as auto but each exploit needs explicit human dispatch
     //   full_engagement     — all above + exploit_rce + post_exploit (RCE + persistence)
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS permission_mode TEXT DEFAULT 'enumeration'`);
+    // dir_1780845861190: engagement_hooks — operator-configured shell hooks
+    // that fire on queue dispatch / completion. Hook receives JSON event data
+    // on stdin, may return JSON on stdout (allow/deny/messages).
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS engagement_hooks (
+        id SERIAL PRIMARY KEY,
+        engagement_id TEXT,
+        event TEXT NOT NULL,
+        command TEXT NOT NULL,
+        enabled BOOLEAN DEFAULT true,
+        timeout_ms INTEGER DEFAULT 10000,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        created_by TEXT,
+        last_fired_at TIMESTAMPTZ,
+        last_outcome TEXT,
+        fire_count INTEGER DEFAULT 0
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_engagement_hooks_event_eng ON engagement_hooks(event, engagement_id) WHERE enabled = true`);
     await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS auto_executed BOOLEAN DEFAULT false`);
     // ── Step-level intent classifier (dir_1780784990563) ──
     // intent_class: model-declared intent for THIS step. NULL = legacy / model omitted

@@ -719,6 +719,28 @@ module.exports = function socRoutes(ctx) {
             timed_out: timedOut,
             ts: Date.now(),
           });
+          // dir_1780845861190: post_queue_complete hooks fire here. Advisory —
+          // hook return value is logged but doesn't change the queue status.
+          try {
+            const hooks = require('../hooks');
+            await hooks.runEvent({
+              engagementId: item.engagement_id,
+              event: hooks.HOOK_EVENTS.POST_QUEUE_COMPLETE,
+              payload: {
+                queue_item_id: item.id,
+                session_id: sessionId,
+                final_status: finalStatus,
+                exit_code: code,
+                timed_out: timedOut,
+                output_bytes: safeOutput.length,
+                output_preview: safeOutput.slice(0, 800),
+                command_preview: (item.command || '').slice(0, 400),
+                intent_class: item.intent_class || null,
+              },
+            });
+          } catch (hookErr) {
+            console.error(`[soc queue run] post_queue_complete hook error for item ${item.id}:`, hookErr.message);
+          }
           // Parse recon output into structured rows (dir_1780530175588). Raw blob
           // already persisted above; additive and fully error-isolated so it can
           // never wedge the queue item's state machine.

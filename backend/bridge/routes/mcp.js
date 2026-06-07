@@ -574,6 +574,31 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "register_engagement_hook",
+      description: "Register an operator-configured shell hook on engagement queue events (dir_1780845861190). Hook command receives JSON event payload on stdin and may return JSON on stdout {allow, deny_reason, messages}. Events: pre_queue_dispatch (blocks dispatch if allow=false), post_queue_complete (advisory, e.g. push webhook on failure), pre_finding_write, post_phase_advance. Pass engagement_id=null for a GLOBAL hook that fires on every engagement. Hook receives env vars HOOK_EVENT and HOOK_ID. Timeout in milliseconds (default 10000) — on timeout, hook is treated as ALLOW (fail-open).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID to scope this hook to, or null/empty for global" },
+          event: { type: "string", description: "Hook event", enum: ["pre_queue_dispatch", "post_queue_complete", "pre_finding_write", "post_phase_advance"] },
+          command: { type: "string", description: "Shell command to run (passed to sh -c). Will receive JSON event data on stdin." },
+          timeout_ms: { type: "number", description: "Timeout in milliseconds (default 10000)" },
+        },
+        required: ["event", "command"],
+      },
+    },
+    {
+      name: "list_engagement_hooks",
+      description: "List all hooks registered for an engagement (plus global hooks). Returns id, event, command preview, enabled state, fire counter, last_fired_at, last_outcome.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID. Global hooks (engagement_id=null) are always included." },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
       name: "list_recovery_state",
       description: "Read the engagement's recovery state — typed failure scenarios detected, per-scenario attempt counters, escalation status (dir_1780845298918). Use to diagnose WHY an engagement is paused or stalling. Returns {paused, recovery_state: {[scenario]: {attempts, last_attempt_at, last_evidence, escalated}}}. Scenarios: executor_offline, cve_fabrication_streak, nse_fabrication_streak, target_unreachable, parse_failure_repeat, permission_streak, model_loop.",
       inputSchema: {
@@ -2006,6 +2031,56 @@ ${result.narrative}
             text: `**Recon hosts for ${args.engagement_id}** (structured; raw scan output not shown):\n\n${lines.join("\n")}\n\n**Total:** ${result.rows.length} host(s)`
           }]
         };
+      }
+
+      case "register_engagement_hook": {
+        // dir_1780845861190
+        const hooks = require("../hooks");
+        try {
+          const r = await hooks.registerHook({
+            engagement_id: args.engagement_id || null,
+            event: args.event,
+            command: args.command,
+            timeout_ms: args.timeout_ms,
+            created_by: "operator",
+          });
+          if (r && r.error) {
+            return { content: [{ type: "text", text: `register_engagement_hook failed: ${r.error}` }], isError: true };
+          }
+          const scope = r.engagement_id ? `engagement ${r.engagement_id}` : "GLOBAL (all engagements)";
+          return {
+            content: [{
+              type: "text",
+              text: `✅ Hook #${r.id} registered\n\n` +
+                    `- **Event:** ${r.event}\n` +
+                    `- **Scope:** ${scope}\n` +
+                    `- **Command:** \`${(r.command || "").slice(0, 200)}\`\n` +
+                    `- **Timeout:** ${r.timeout_ms}ms\n` +
+                    `- **Enabled:** ${r.enabled}\n\n` +
+                    `Hook will receive JSON event payload on stdin. To deny dispatch, return JSON with \`{"allow": false, "deny_reason": "..."}\`. Returning nothing (or non-JSON) = fail-open / allow.`,
+            }]
+          };
+        } catch (e) {
+          return { content: [{ type: "text", text: `register_engagement_hook failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "list_engagement_hooks": {
+        // dir_1780845861190
+        const hooks = require("../hooks");
+        try {
+          const rows = await hooks.listHooks(args.engagement_id);
+          if (rows.length === 0) {
+            return { content: [{ type: "text", text: `No hooks registered for engagement ${args.engagement_id} (or globally).` }] };
+          }
+          const lines = rows.map(h =>
+            `- **#${h.id}** [${h.enabled ? "enabled" : "DISABLED"}] event=\`${h.event}\` scope=${h.engagement_id || "GLOBAL"} ` +
+            `fires=${h.fire_count || 0}${h.last_fired_at ? ` last=${h.last_fired_at}(${h.last_outcome || "?"})` : ""} ` +
+            `timeout=${h.timeout_ms}ms\n  command: \`${(h.command || "").slice(0, 180)}\``);
+          return { content: [{ type: "text", text: `**Hooks for ${args.engagement_id}** (${rows.length}):\n\n${lines.join("\n\n")}` }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `list_engagement_hooks failed: ${e.message}` }], isError: true };
+        }
       }
 
       case "list_recovery_state": {
