@@ -81,13 +81,18 @@ const EXPLOIT_TEST_COMMANDS = new Set([
 ]);
 
 // EXPLOIT_RCE: shell delivery, RCE payloads, lateral establishment.
+// dir_1780854637935: nc/ncat/socat moved to CONTEXTUAL_COMMANDS — their
+// intent depends on flags (-z = recon, -l/-e = exploit_rce). See
+// classifyContextual() below.
 const EXPLOIT_RCE_COMMANDS = new Set([
-  "ncat", "nc",                                 // when bound as listener / reverse shell
-  "socat",
   "python", "python3", "perl", "ruby", "node",  // when used to spawn shells
   "powershell", "pwsh",
   "bash", "sh", "zsh",                          // remote shell invocation
 ]);
+
+// CONTEXTUAL: same binary, different intent depending on flags. The
+// classifyByFirstToken path delegates to classifyContextual() for these.
+const CONTEXTUAL_COMMANDS = new Set(["nc", "ncat", "socat"]);
 
 // POST_EXPLOIT: persistence, lateral movement, credential theft on host.
 const POST_EXPLOIT_COMMANDS = new Set([
@@ -134,8 +139,37 @@ function firstNonFlagToken(command) {
   return "";
 }
 
-function classifyByFirstToken(token) {
+// dir_1780854637935: flag-aware classification for nc/ncat/socat. Same
+// binary maps to different intents based on what flags follow it.
+function classifyContextual(token, fullCommand) {
+  const cmdStr = String(fullCommand || "");
+  if (token === "nc" || token === "ncat") {
+    // Match short-flag CLUSTERS: any -<chars> containing the flag letter we want.
+    // Pattern (^|\s)-[a-zA-Z]*X[a-zA-Z]*\b matches -X, -Xv, -vX, -zvn, etc.
+    const hasFlag = (letter) => new RegExp(`(^|\\s)-[a-zA-Z]*${letter}[a-zA-Z]*(\\b|\\s|$)`).test(cmdStr);
+    // exploit_rce signals first (most dangerous wins)
+    if (hasFlag("e") || /(^|\s)(--exec\b|--sh-exec\b|--ssl-cert\b)/.test(cmdStr) || /-c\s+\/bin/.test(cmdStr))
+      return { intent: "exploit_rce",  matched_rule: `${token}_with_exec_flag` };
+    if (hasFlag("l") || hasFlag("L") || /(^|\s)(--listen\b)/.test(cmdStr))
+      return { intent: "exploit_rce",  matched_rule: `${token}_listener_flag` };
+    if (hasFlag("z"))
+      return { intent: "recon",        matched_rule: `${token}_zero_io_port_check` };
+    // raw nc host port = banner grab → enumeration
+    return { intent: "enumeration",    matched_rule: `${token}_banner_grab_default` };
+  }
+  if (token === "socat") {
+    if (/(EXEC|SYSTEM|SHELL):/.test(cmdStr))
+      return { intent: "exploit_rce",  matched_rule: "socat_exec_or_shell_handler" };
+    if (/(TCP[46]?-LISTEN|UDP[46]?-LISTEN|OPENSSL-LISTEN|UNIX-LISTEN)/.test(cmdStr))
+      return { intent: "exploit_rce",  matched_rule: "socat_listener_handler" };
+    return { intent: "enumeration",    matched_rule: "socat_client_default" };
+  }
+  return { intent: "unknown", matched_rule: `contextual_unhandled:${token}` };
+}
+
+function classifyByFirstToken(token, fullCommand) {
   if (!token) return { intent: "unknown", matched_rule: "no_first_token" };
+  if (CONTEXTUAL_COMMANDS.has(token))   return classifyContextual(token, fullCommand);
   if (RECON_COMMANDS.has(token))       return { intent: "recon",        matched_rule: `recon_set:${token}` };
   if (ENUMERATION_COMMANDS.has(token)) return { intent: "enumeration",  matched_rule: `enum_set:${token}` };
   if (EXPLOIT_TEST_COMMANDS.has(token))return { intent: "exploit_test", matched_rule: `exploit_test_set:${token}` };
@@ -155,12 +189,15 @@ function classifyCommand(command) {
   // Pass 2: command-substitution + pipe expansions — if ANY piece looks
   // higher-intent than the leading command, escalate. This catches
   //   `echo hello | hydra ...` or `nc 1.2.3.4 22 < cmd.sh`
+  // dir_1780854637935: pass each PIECE through classifyByFirstToken so
+  // contextual classifiers (nc/ncat/socat) see only their own flags, not
+  // the whole pipeline (avoids `echo X | nc -z` being misclassified).
   const tokens = cmdStr.split(/[|;&]/);
   let highest = { intent: "unknown", matched_rule: null, first_token: "" };
   for (const piece of tokens) {
     const ft = firstNonFlagToken(piece);
     if (!ft) continue;
-    const c = classifyByFirstToken(ft);
+    const c = classifyByFirstToken(ft, piece);
     if (!highest.first_token) highest = { ...c, first_token: ft };
     if (INTENT_RANK[c.intent] > INTENT_RANK[highest.intent]) {
       highest = { ...c, first_token: ft };
@@ -226,9 +263,11 @@ module.exports = {
   EXPLOIT_TEST_COMMANDS,
   EXPLOIT_RCE_COMMANDS,
   POST_EXPLOIT_COMMANDS,
+  CONTEXTUAL_COMMANDS,
   ALWAYS_DESTRUCTIVE_PATTERNS,
   classifyCommand,
   classifyByFirstToken,
+  classifyContextual,
   firstNonFlagToken,
   validateForMode,
 };
