@@ -201,6 +201,11 @@ async function decide(engagementCtx, modelOverride) {
 
   const userMsg = [
     `Engagement: id=${eng.id} type=${eng.engagement_type || "?"} status=${eng.status || "?"} phase=${phase}`,
+    // dir_1780844590951: surface permission_mode so the orchestrator only
+    // proposes intent_class values the mode allows. recon_only blocks all
+    // exploit_test/exploit_rce/post_exploit proposals; enumeration blocks
+    // exploit_*. Mode escalation requires an explicit MCP call from operator.
+    `Permission mode: ${eng.permission_mode || "enumeration"} (allowed intent_class up to: ${({recon_only:"recon", enumeration:"enumeration", exploitation_auto:"exploit_test", exploitation_prompt:"exploit_test", full_engagement:"post_exploit"})[eng.permission_mode || "enumeration"]})`,
     `Scope/ROE: ${JSON.stringify({ scope: eng.scope, roe: eng.roe })}`,
     `Executor: ${eng.executor_host || "dev-01"}`,
     `Tools available on executor: ${execTools.length ? execTools.join(", ") : "(unknown — POSIX-portable only)"}`,

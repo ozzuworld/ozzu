@@ -1169,6 +1169,14 @@ async function init() {
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS mentor_same_threshold INTEGER DEFAULT 3`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS mentor_total_threshold INTEGER DEFAULT 10`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS last_phase_advance_push_at TIMESTAMPTZ`);
+    // dir_1780844590951: claw-analog permission modes — replaces scattered
+    // autonomous_full_access / membrane / intent_class guards with ONE declarative enum.
+    //   recon_only          — only intent_class IN (recon)
+    //   enumeration         — recon + enumeration (auth probing, version detection)
+    //   exploitation_auto   — all above + exploit_test (current default behavior)
+    //   exploitation_prompt — same as auto but each exploit needs explicit human dispatch
+    //   full_engagement     — all above + exploit_rce + post_exploit (RCE + persistence)
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS permission_mode TEXT DEFAULT 'enumeration'`);
     await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS auto_executed BOOLEAN DEFAULT false`);
     // ── Step-level intent classifier (dir_1780784990563) ──
     // intent_class: model-declared intent for THIS step. NULL = legacy / model omitted

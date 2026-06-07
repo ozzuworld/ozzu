@@ -574,6 +574,19 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "set_engagement_permission_mode",
+      description: "Set the engagement's permission mode (claw-analog style, dir_1780844590951). Modes from least → most privileged: recon_only · enumeration · exploitation_auto · exploitation_prompt · full_engagement. The mode gates intent_class on every auto-executed queue item: recon_only blocks all enumeration+exploit, enumeration blocks all exploit, exploitation_auto allows exploit_test but blocks RCE/post-exploit, full_engagement allows everything. Use to escalate or de-escalate mid-engagement (e.g. after reviewing recon → enable exploitation_auto). Returns previous + new mode.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "Engagement ID" },
+          mode: { type: "string", description: "One of: recon_only, enumeration, exploitation_auto, exploitation_prompt, full_engagement", enum: ["recon_only", "enumeration", "exploitation_auto", "exploitation_prompt", "full_engagement"] },
+          reason: { type: "string", description: "Audit reason for the mode change (logged as telemetry)" },
+        },
+        required: ["engagement_id", "mode"],
+      },
+    },
+    {
       name: "advance_offense",
       description: "Advance an AUTHORIZED engagement by ONE offensive step. The self-hosted offense model (L3) reads the structured findings server-side, synthesizes the next in-scope step, and queues it for the PA to execute. Returns ONLY a sanitized confirmation — the offensive command/rationale/refs stay server-side and are NOT surfaced to you (membrane). Use this INSTEAD of reasoning about specific creds/exploits yourself.",
       inputSchema: {
@@ -1982,6 +1995,46 @@ ${result.narrative}
             text: `**Recon hosts for ${args.engagement_id}** (structured; raw scan output not shown):\n\n${lines.join("\n")}\n\n**Total:** ${result.rows.length} host(s)`
           }]
         };
+      }
+
+      case "set_engagement_permission_mode": {
+        // dir_1780844590951
+        const enforcer = require("../permission-enforcer");
+        if (!enforcer.isValidMode(args.mode)) {
+          return { content: [{ type: "text", text: `Invalid mode '${args.mode}'. Valid: ${enforcer.ALL_MODES.join(", ")}` }], isError: true };
+        }
+        try {
+          const prev = await db.query(
+            `SELECT permission_mode FROM pentest_engagements WHERE id = $1`,
+            [args.engagement_id]);
+          if (prev.rows.length === 0) {
+            return { content: [{ type: "text", text: `Engagement ${args.engagement_id} not found.` }], isError: true };
+          }
+          const prevMode = prev.rows[0].permission_mode || "enumeration";
+          await db.query(
+            `UPDATE pentest_engagements SET permission_mode = $2 WHERE id = $1`,
+            [args.engagement_id, args.mode]);
+          try {
+            await db.query(
+              `INSERT INTO offense_telemetry
+                 (engagement_id, queue_item_id, model_used, intent_category,
+                  n_hosts, n_findings, step_queued, in_scope, n_references,
+                  latency_ms, outcome, outcome_notes)
+               VALUES ($1, NULL, 'operator', 'mode_change', 0, 0, false, true, 0, 0,
+                       'mode_changed', $2)`,
+              [args.engagement_id, `${prevMode} → ${args.mode}${args.reason ? ` | reason: ${args.reason.slice(0, 200)}` : ""}`]);
+          } catch (_) {}
+          const isEscalation = enforcer.MODE_RANK[args.mode] > enforcer.MODE_RANK[prevMode];
+          const arrow = isEscalation ? "↑" : (enforcer.MODE_RANK[args.mode] < enforcer.MODE_RANK[prevMode] ? "↓" : "→");
+          return {
+            content: [{
+              type: "text",
+              text: `Permission mode for ${args.engagement_id}: **${prevMode}** ${arrow} **${args.mode}**${args.reason ? `\n\nReason: ${args.reason}` : ""}\n\nNew allowed intent ceiling: ${({recon_only:"recon", enumeration:"enumeration", exploitation_auto:"exploit_test", exploitation_prompt:"exploit_test (with human dispatch)", full_engagement:"post_exploit (RCE + persistence)"})[args.mode]}`,
+            }]
+          };
+        } catch (e) {
+          return { content: [{ type: "text", text: `set_engagement_permission_mode failed: ${e.message}` }], isError: true };
+        }
       }
 
       case "advance_offense": {

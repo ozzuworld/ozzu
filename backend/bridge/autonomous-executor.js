@@ -353,7 +353,8 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       `SELECT q.id, q.command, q.engagement_id, q.intent_class,
               e.autonomous_execution_enabled, e.autonomous_paused,
               e.autonomous_full_access,
-              e.engagement_phase, e.roe, e.executor_host
+              e.engagement_phase, e.roe, e.executor_host,
+              e.permission_mode, e.scope
          FROM soc_queue_items q
          JOIN pentest_engagements e ON q.engagement_id = e.id
         WHERE q.id = $1`,
@@ -371,6 +372,39 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
         `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
         [`[ROE-BLOCKED — prohibited pattern matched: ${roeHit}]\n[See engagement.roe.prohibited.]`, item.id]));
       return { autoExecuted: false, reason: "ROE block-list hit", pattern: roeHit };
+    }
+
+    // dir_1780844590951: claw-analog permission modes + workspace jail.
+    // Runs AFTER ROE blocklist (which is absolute) but BEFORE the preflight
+    // linter and auto-verify. Declarative replacement for scattered
+    // autonomous_full_access / intent_class gating.
+    try {
+      const enforcer = require("/app/permission-enforcer");
+      const pEng = {
+        permission_mode: item.permission_mode,
+        scope:           item.scope,
+      };
+      const verdict = enforcer.enforceAll(pEng, item.intent_class, item.command);
+      if (!verdict.allowed) {
+        const diag = `[PERMISSION_DENIED — dir_1780844590951]\nlayer=${verdict.layer}\nreason=${verdict.denied_reason}\ncurrent_mode=${verdict.current_mode || pEng.permission_mode || "enumeration"}${verdict.required_mode ? `\nrequired_mode=${verdict.required_mode}` : ""}${verdict.out_of_scope_targets ? `\nout_of_scope=${verdict.out_of_scope_targets.join(", ")}` : ""}`;
+        await db.withBypass("autonomous_permission_deny", (client) => client.query(
+          `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+          [diag, item.id]));
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry
+               (engagement_id, queue_item_id, model_used, intent_category,
+                n_hosts, n_findings, step_queued, in_scope, n_references,
+                latency_ms, outcome, outcome_notes)
+             VALUES ($1, $2, 'permission_enforcer', $3, 0, 0, false, false, 0, 0,
+                     'permission_denied', $4)`,
+            [item.engagement_id, item.id, verdict.layer || "unknown",
+             `${verdict.layer}: ${(verdict.denied_reason || "").slice(0, 200)}`]);
+        } catch (_) {}
+        return { autoExecuted: false, reason: `permission:${verdict.layer}`, hint: verdict.denied_reason };
+      }
+    } catch (e) {
+      console.error(`[autonomous-executor] permission enforcer failed:`, e.message);
     }
 
     // dir_1780794595572: pre-flight command linter. Catches model command-
