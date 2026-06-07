@@ -6963,20 +6963,43 @@ wss.on("connection", (ws, req) => {
   server.listen(PORT, "0.0.0.0", () => {
     log.bridge.info(`listening on :${PORT}`);
     checkContainerBinaries();
-    // dir_1780786724856: auto-reopen the offense SSH tunnel on bridge startup
-    // if any engagement is mid-run. Without this, every merge-and-deploy
-    // restart hangs every in-flight agent on a dead 127.0.0.1:11434 socket.
+    // dir_1780786724856 + dir_1780832189054: auto-reopen the offense SSH tunnel
+    // AND auto-resume the runAgent loop on bridge startup. Without the second
+    // half, every merge-and-deploy left the agent state stuck at the iter it
+    // was on when bridge died — DB says running but no process is driving it.
     // Fire-and-forget — failures logged but never break startup.
     (async () => {
       try {
-        const r = await db.query(`SELECT id FROM pentest_engagements WHERE agent_status='running' LIMIT 1`);
+        const r = await db.query(
+          `SELECT id, agent_run_state, autonomous_paused FROM pentest_engagements
+            WHERE agent_status='running'
+              AND (agent_run_state->>'started_at')::timestamptz > NOW() - INTERVAL '1 hour'`);
         if (r.rows.length === 0) return;
         log.bridge.info(`offense tunnel: ${r.rows.length} engagement still running — reopening`);
         const { waitOffenseModel } = require("./offense-startup");
         const result = await waitOffenseModel({ timeout_sec: 120 });
         log.bridge.info(`offense tunnel: reopened (${JSON.stringify(result).slice(0, 200)})`);
+
+        // dir_1780832189054: ALSO resume the runAgent loop for each running
+        // engagement. Without this, the tunnel comes back but the previous
+        // agent process is dead — DB ghost state until manual restart.
+        const { runAgent } = require("./offense-agent");
+        for (const row of r.rows) {
+          if (row.autonomous_paused) {
+            log.bridge.info(`offense agent: skipping ${row.id} (autonomous_paused=true)`);
+            continue;
+          }
+          const state = row.agent_run_state || {};
+          const intent = state.last_intent || "Resume after bridge restart — continue toward the engagement goal.";
+          const maxIter = Number(state.max_iter) > 0 ? Number(state.max_iter) : 10;
+          log.bridge.info(`offense agent: resuming runAgent for ${row.id} (max_iter=${maxIter})`);
+          // Detach the promise — never await; never break server startup.
+          runAgent(row.id, { intent, max_iter: maxIter })
+            .then(rr => log.bridge.info(`offense agent: ${row.id} resumed run completed: ${JSON.stringify(rr).slice(0, 200)}`))
+            .catch(e => log.bridge.error(`offense agent: ${row.id} resume failed: ${e.message}`));
+        }
       } catch (e) {
-        log.bridge.error(`offense tunnel auto-reopen failed: ${e.message} — call wait_offense_model manually if needed`);
+        log.bridge.error(`offense tunnel + agent auto-resume failed: ${e.message} — call wait_offense_model + start_engagement_run manually if needed`);
       }
     })();
     log.bridge.info(`data dir: ${DATA_DIR}, redis: ${_redisConnected ? "connected" : "fallback to JSON"}`);

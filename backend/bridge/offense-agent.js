@@ -281,7 +281,14 @@ async function runAgent(engagementId, opts = {}) {
   const waitTimeoutSec = Number(opts.wait_timeout_sec) > 0 ? Number(opts.wait_timeout_sec) : 1800;
 
   // Initial state push so the operator sees status=running immediately
-  await setAgentStatus(engagementId, "running", { iter: 0, tasks_added: 0, steps_queued: 0, started_at: new Date().toISOString() });
+  // dir_1780832189054: persist intent + max_iter so the bridge-startup
+  // auto-resume can re-invoke with the same params after a restart.
+  await setAgentStatus(engagementId, "running", {
+    iter: 0, tasks_added: 0, steps_queued: 0,
+    started_at: new Date().toISOString(),
+    last_intent: intent || null,
+    max_iter: maxIter,
+  });
 
   const startMs = Date.now();
   let iter = 0;
