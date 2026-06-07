@@ -1157,6 +1157,17 @@ async function init() {
     // autonomous_execution_enabled=true, every claimed intent auto-runs (ROE
     // block-list still applies). No push spam during the window.
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS autonomous_full_access BOOLEAN DEFAULT false`);
+    // ── PentAGI-style Mentor + Planner (dir_1780838519357) ──
+    // mentor_enabled: after threshold consecutive same-action calls OR total calls,
+    //   a separate "mentor" LLM call analyses the execution history and injects
+    //   guidance into the next agent iter. Stops repeat-the-same-failing-thing loops.
+    // planner_enabled: ONCE at runAgent start, decompose the operator intent into a
+    //   3-7 step checklist; orchestrator sees both the original intent AND the plan.
+    //   Stops added_tasks_no_select churn.
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS mentor_enabled BOOLEAN DEFAULT true`);
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS planner_enabled BOOLEAN DEFAULT true`);
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS mentor_same_threshold INTEGER DEFAULT 3`);
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS mentor_total_threshold INTEGER DEFAULT 10`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS last_phase_advance_push_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS auto_executed BOOLEAN DEFAULT false`);
     // ── Step-level intent classifier (dir_1780784990563) ──

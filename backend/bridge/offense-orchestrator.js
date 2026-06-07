@@ -154,6 +154,11 @@ async function decide(engagementCtx, modelOverride) {
     "",
     "Current Task Coordination Graph:",
     graphText,
+    // dir_1780838519357: Mentor + Planner injection. When the Mentor fires
+    // (loop detected) or Planner runs (start of run), the guidance lands here.
+    // The orchestrator reads it as authoritative redirection from the adviser.
+    engagementCtx.planner_plan ? `\n\n=== Execution plan (from Planner at run start) ===\n${engagementCtx.planner_plan}\n=== end plan ===\n` : "",
+    engagementCtx.mentor_guidance ? `\n\n⚠️ === Mentor guidance (loop detected — pivot strategy) ===\n${engagementCtx.mentor_guidance}\n=== end mentor ===\n` : "",
     "",
     "DECISION RULE — read carefully:",
     "  1) If unblocked_pending above is NON-EMPTY, you MUST return {\"select\": <one of those IDs>}. The selection executes that task this iteration; you can also add new tasks in the same response.",

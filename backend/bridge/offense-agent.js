@@ -302,6 +302,60 @@ async function runAgent(engagementId, opts = {}) {
   let endReason = null;
   let lastDecision = null;
 
+  // dir_1780838519357: PentAGI-style Mentor + Planner.
+  let monitor = null;
+  let plannerPlan = null;
+  let mentorGuidance = null;
+  try {
+    const { ExecutionMonitor, performPlanner } = require("/app/execution-monitor");
+    // Pull engagement flags + thresholds once at start
+    const flagsRow = await db.query(
+      `SELECT mentor_enabled, planner_enabled, mentor_same_threshold, mentor_total_threshold
+         FROM pentest_engagements WHERE id=$1`, [engagementId]);
+    const flags = flagsRow.rows[0] || {};
+    monitor = new ExecutionMonitor({
+      sameThreshold: Number(flags.mentor_same_threshold) || 3,
+      totalThreshold: Number(flags.mentor_total_threshold) || 10,
+      enabled: flags.mentor_enabled !== false,
+    });
+    if (flags.planner_enabled !== false && intent) {
+      try {
+        // Brief engagement context for the planner (scope + recent findings)
+        const ctxPreview = await loadEngagementContext(engagementId);
+        const engPreview = ctxPreview && ctxPreview.engagement ? ctxPreview.engagement : null;
+        const findingsPreview = (ctxPreview && Array.isArray(ctxPreview.findings))
+          ? ctxPreview.findings.slice(0, 12).map(f => `[${f.severity}] ${f.title || ""}`).join("\n")
+          : "";
+        const hostsPreview = (ctxPreview && Array.isArray(ctxPreview.hosts))
+          ? ctxPreview.hosts.slice(0, 8).map(h => `${h.ip}${h.status ? " (" + h.status + ")" : ""}`).join(", ")
+          : "";
+        const engagementContext = [
+          engPreview ? `Engagement ${engPreview.id}, type=${engPreview.engagement_type}, phase=${engPreview.engagement_phase || "recon"}` : "",
+          engPreview && engPreview.scope ? `Scope: ${JSON.stringify(engPreview.scope).slice(0, 800)}` : "",
+          hostsPreview ? `Live hosts: ${hostsPreview}` : "",
+          findingsPreview ? `Recent findings:\n${findingsPreview}` : "",
+        ].filter(Boolean).join("\n");
+        const planResult = await performPlanner({
+          agentType: "offense orchestrator",
+          taskQuestion: intent,
+          engagementContext,
+        });
+        plannerPlan = planResult.plan;
+        console.log(`[offense-agent] Planner produced ${plannerPlan.length} char plan for engagement ${engagementId}`);
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+             VALUES ($1, NULL, 'planner', 'planning', 0, 0, false, true, 0, 0, 'planner_invoked', $2)`,
+            [engagementId, `plan length=${plannerPlan.length}`]);
+        } catch (_) {}
+      } catch (e) {
+        console.error(`[offense-agent] Planner failed:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error(`[offense-agent] Mentor/Planner module load failed:`, e.message);
+  }
+
   while (iter < maxIter) {
     iter++;
 
@@ -311,6 +365,9 @@ async function runAgent(engagementId, opts = {}) {
       await setAgentStatus(engagementId, "error", { iter, error: "engagement not found" });
       return { engagement_id: engagementId, ok: false, iter, reason: "engagement not found", elapsed_sec: Math.round((Date.now()-startMs)/1000) };
     }
+    // dir_1780838519357: inject Planner plan + Mentor guidance into orchestrator context
+    if (plannerPlan) ctx.planner_plan = plannerPlan;
+    if (mentorGuidance) ctx.mentor_guidance = mentorGuidance;
 
     // (1) Orchestrator decides
     let decision;
@@ -426,6 +483,51 @@ async function runAgent(engagementId, opts = {}) {
 
     // (11) Heartbeat status for live monitoring
     await setAgentStatus(engagementId, "running", { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, last_action: `completed task ${task.id} (${summary.success ? "done" : "failed"})` });
+
+    // (12) Mentor check — dir_1780838519357. The action signature is the
+    // directive shape. If the same shape repeats N times OR total calls hit
+    // threshold, fire the Mentor LLM call and inject its guidance into the
+    // next iter's orchestrator context.
+    if (monitor && monitor.enabled) {
+      const actionSig = (task.directive || "").slice(0, 80).toLowerCase();
+      if (monitor.shouldInvokeMentor(actionSig)) {
+        const snap = monitor.snapshot();
+        console.log(`[offense-agent] Mentor threshold hit (same=${snap.sameToolCount}, total=${snap.totalCallCount}) — invoking adviser`);
+        try {
+          const { performMentor } = require("/app/execution-monitor");
+          // Build mentor context from recent queue items (model's actual actions)
+          const queueRecent = await db.query(
+            `SELECT title, status, LEFT(COALESCE(command,''),300) AS cmd, LEFT(COALESCE(output,''),300) AS out
+               FROM soc_queue_items WHERE engagement_id=$1 AND status != 'pending'
+               ORDER BY id DESC LIMIT 20`, [engagementId]);
+          const executedToolCalls = queueRecent.rows.map(r => ({
+            name: "queue_step",
+            args: r.title,
+            result: `[${r.status}] ${(r.out || "").replace(/\s+/g, " ")}`,
+          })).reverse();
+          mentorGuidance = await performMentor({
+            agentType: "offense orchestrator",
+            subtaskDescription: task.directive,
+            agentPrompt: "I propose pentest steps for execution on a tablet-mediated Kali chroot executor. I should diversify avenues when one fails repeatedly.",
+            recentMessages: [],
+            executedToolCalls,
+            lastToolName: "queue_step",
+            lastToolArgs: task.directive,
+            lastToolResult: JSON.stringify(summary).slice(0, 800),
+          });
+          monitor.reset();
+          try {
+            await db.query(
+              `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+               VALUES ($1, $2, 'mentor', 'monitoring', 0, 0, false, true, 0, 0, 'mentor_invoked', $3)`,
+              [engagementId, queueResult.queue_id || null, `same=${snap.sameToolCount}, total=${snap.totalCallCount}, guidance_len=${(mentorGuidance || "").length}`]);
+          } catch (_) {}
+          console.log(`[offense-agent] Mentor returned ${(mentorGuidance || "").length} chars of guidance`);
+        } catch (e) {
+          console.error(`[offense-agent] Mentor failed:`, e.message);
+        }
+      }
+    }
   }
 
   // Final state
