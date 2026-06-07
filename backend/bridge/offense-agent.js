@@ -235,13 +235,17 @@ async function loadEngagementContext(engagementId) {
 }
 
 async function setAgentStatus(engagementId, status, extras) {
-  const payload = { ...(extras || {}) };
+  // dir_1780832189054: merge new fields into existing agent_run_state instead
+  // of replacing it. Lets `last_intent`/`max_iter`/`started_at` set on the
+  // initial run-start call survive per-iter updates that only carry iter/
+  // last_action — so the bridge-startup auto-resume IIFE can recover them.
+  const payload = JSON.stringify({ ...(extras || {}) });
   await db.query(
     `UPDATE pentest_engagements
         SET agent_status = $1,
-            agent_run_state = $2::jsonb
+            agent_run_state = COALESCE(agent_run_state, '{}'::jsonb) || $2::jsonb
       WHERE id = $3`,
-    [status, JSON.stringify(payload), engagementId]);
+    [status, payload, engagementId]);
 }
 
 // ───────────────────────────── Step 8 — multi-agent runAgent ─────────────────────────────
