@@ -180,6 +180,21 @@ function lintCommandPreflight(commandText, engagement) {
       };
     }
   }
+  // dir_1780957501726: LFI success-check via HTTP status code only.
+  // Run #12 #789: bruteforced LFI param names, then `grep -q '200' && echo
+  // "[+] LFI candidate"` — every test "succeeded" against any 200 page,
+  // including edge-gw's default index. Body-content match is required.
+  // Pattern: status-only grep right next to an LFI traversal payload.
+  const hasLfiPayload = /\.\.\/\.\.\/(?:\.\.\/)*(?:etc\/(?:passwd|shadow)|proc\/self\/environ|var\/www\/[a-z]+\.txt)/.test(body);
+  const hasStatusOnlyGrep = /\|\s*grep\s+-q\s+['"]?(?:200|HTTP\/[\d.]+\s+200)\b/.test(body);
+  const hasBodyContentGrep = /grep\s+(?:-[a-zA-Z]+\s+)*['"]?(?:root:|bin\/(?:bash|sh)|[a-z_]+:[x*!]:\d+:\d+|OZZULAB\{|FLAG\{|flag\{|<\?php|\bAPI_KEY\b|\bSECRET\b)/.test(body);
+  if (hasLfiPayload && hasStatusOnlyGrep && !hasBodyContentGrep) {
+    return {
+      rule: "lfi_status_only_check",
+      hint: "LFI exploit checks only HTTP status code (`grep -q '200'`). Any 200 page (homepage, /status, etc.) will false-positive. Add body content match: `grep -E 'root:|bin/bash|OZZULAB\\{|<\\?php'` so only real LFI leaks trigger the [+] echo.",
+      match: "grep -q '200' (status-only)",
+    };
+  }
   return null;
 }
 

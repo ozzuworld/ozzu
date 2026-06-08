@@ -116,6 +116,12 @@ const ALWAYS_DESTRUCTIVE_PATTERNS = [
   { re: /\b(mkfs|wipefs|shred)\b/,                     why: "filesystem-format / data-wipe utility" },
   { re: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/,    why: "fork bomb signature" },
   { re: /\bchmod\s+-R\s+(?:0|7)77\s+\//,               why: "recursive permission wipe at root" },
+  // dir_1780957501726: block mutations to executor's /etc/{hosts,resolv.conf,
+  // nsswitch.conf,passwd,shadow,sudoers}. Run #12 sub#-/echo + sudo tee
+  // /etc/hosts mapped internal-web.skyline.local to the wrong IP and
+  // misdirected ffuf/curl for the remaining iters. State leak from lab.
+  { re: /\btee\s+(?:-[a-zA-Z]+\s+)*\/etc\/(?:hosts|resolv\.conf|nsswitch\.conf|passwd|shadow|sudoers)(?:\s|$)/, why: "writes to executor's /etc/ would leak state across runs and misdirect subsequent commands" },
+  { re: />>?\s*\/etc\/(?:hosts|resolv\.conf|nsswitch\.conf|passwd|shadow|sudoers)(?:\s|$)/,                       why: "shell redirect to /etc/ would mutate executor host state" },
 ];
 
 // ── Classification ───────────────────────────────────────────────────────

@@ -46,6 +46,11 @@ function normalizeCommandShape(cmd) {
   s = s.replace(/(\/[A-Za-z0-9_.\-]+){2,}/g, "<PATH>");
   // Replace URLs to <URL> when no specific structure left
   s = s.replace(/https?:\/\/[^\s'"]+/g, "<URL>");
+  // dir_1780957501726: strip optional single/double quotes wrapping placeholder
+  // tokens so `curl ... <url>` and `curl ... '<url>'` collapse to the same shape.
+  // Run #12 had 4 same-meaning vhost-pivot curls split into 2 shapes because of
+  // quote presence; same-Mentor didn't fire as a result.
+  s = s.replace(/['"](<(?:IP|URL|PATH|PORT|HOSTNAME_LOOKUP)>)['"]/g, "$1");
   // Collapse whitespace + downcase
   s = s.replace(/\s+/g, " ").trim().toLowerCase();
   // Cap length

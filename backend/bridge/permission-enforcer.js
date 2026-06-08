@@ -81,7 +81,7 @@ const HOSTNAME_RE = /\b(?!-)[a-zA-Z0-9-]{1,63}(?:\.[a-zA-Z0-9-]{1,63})+\b/g;
 const FILE_EXT_BLOCKLIST = new Set([
   "txt", "lst", "list", "wordlist", "dic", "dict",
   "json", "yml", "yaml", "toml", "ini", "conf", "cfg",
-  "sh", "bash", "zsh", "py", "pl", "rb", "lua", "js", "mjs", "ts", "php",
+  "sh", "bash", "zsh", "py", "pl", "rb", "lua", "js", "mjs", "ts", "php", "cgi", "asp", "aspx", "jsp",
   "html", "htm", "css", "scss", "xml", "csv", "tsv", "sql",
   "log", "pcap", "pcapng", "out", "tmp", "bak", "old", "orig", "swp",
   "gz", "bz2", "xz", "zip", "tar", "tgz", "7z",

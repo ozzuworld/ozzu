@@ -224,6 +224,31 @@ function renderSubAgentsForPrompt(subAgents) {
   return ["Active sub-agents (you are the COORDINATOR over these):", ...lines].join("\n");
 }
 
+// dir_1780957501726: surface the most recent permission_denied reasons to the
+// coordinator's prompt. Run #12: coord retried `sudo tee /etc/hosts` 6 iters
+// after the same command was workspace_jail-denied — the WHY of the denial
+// never reached the next decide() call, so retries were blind. Inject the
+// last 2 denial reasons so the model can read and pivot.
+async function renderLastDenials(engagementId) {
+  try {
+    const db = require("./db");
+    const r = await db.query(
+      `SELECT queue_item_id, outcome_notes
+         FROM offense_telemetry
+        WHERE engagement_id = $1 AND outcome = 'permission_denied'
+        ORDER BY id DESC
+        LIMIT 2`,
+      [engagementId]);
+    if (!r.rows.length) return "";
+    const lines = r.rows.map((x, i) =>
+      `  ${i + 1}. q#${x.queue_item_id}: ${(x.outcome_notes || "").slice(0, 220)}`);
+    return [
+      "Recent gate denials (DO NOT re-queue commands that were denied for the same reason — pivot instead):",
+      ...lines,
+    ].join("\n");
+  } catch (_) { return ""; }
+}
+
 // dir_1780842521084: Findings section builder with Summarizer + content-hash cache.
 // Threshold 6000 chars. When tripped, keep last 3 findings (or graph tail) verbatim
 // and summarize the rest. Cache the summary in agent_run_state.context_summaries.findings
@@ -354,6 +379,9 @@ async function decide(engagementCtx, modelOverride) {
     // can spawn / terminate / reprompt. Empty when no sub-agents exist (treat
     // the coordinator as if it IS the agent).
     renderSubAgentsForPrompt(engagementCtx.sub_agents),
+    // dir_1780957501726: recent permission_denied reasons — coord must see WHY
+    // the last commands were blocked so it pivots instead of blind-retrying.
+    await renderLastDenials(eng.id),
     // dir_1780838519357: Mentor + Planner injection. When the Mentor fires
     // (loop detected) or Planner runs (start of run), the guidance lands here.
     // The orchestrator reads it as authoritative redirection from the adviser.
