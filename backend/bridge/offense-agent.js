@@ -521,7 +521,7 @@ async function runAgent(engagementId, opts = {}) {
                 [engagementId, `sub#${action.sub_agent_id} new_objective="${action.new_objective.slice(0, 200)}"`]);
             } else if (action.kind === "await_sub_agents" && Number.isInteger(action.min_count)) {
               const waitSec = Math.min(900, Math.max(5, action.max_wait_sec || 60));
-              await setAgentStatus(engagementId, "awaiting_subagents", { iter, awaiting_min: action.min_count, max_wait_sec: waitSec });
+              await setAgentStatus(engagementId, "awaiting_subs", { iter, awaiting_min: action.min_count, max_wait_sec: waitSec });
               const deadline = Date.now() + waitSec * 1000;
               let completed = 0;
               while (Date.now() < deadline) {
