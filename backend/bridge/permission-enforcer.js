@@ -103,6 +103,9 @@ const PY_MODULE_BLOCKLIST = new Set([
   "typing", "enum", "dataclasses", "ast", "inspect", "glob", "fnmatch",
   // Common JS / shell namespace fragments
   "process", "console", "document", "window", "JSON", "Math",
+  // dir_1780926990535: PHP filter wrapper module names
+  // (e.g. php://filter/convert.base64-encode/resource=...)
+  "convert", "iconv", "zlib", "bzip2", "mcrypt", "mdecrypt",
 ]);
 
 function isLikelyFilePath(s) {
