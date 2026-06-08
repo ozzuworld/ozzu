@@ -48,6 +48,13 @@ const AGGREGATOR_SYSTEM_PROMPT = [
   '{"success": <bool>, "key_signals": [<string>...], "new_findings": [{"title": "...", "severity": "info|low|medium|high|critical", "refs": [], "affected_asset": "...", "evidence": "..."}], "new_hosts": [{"ip": "...", "hostname": "...", "ports": [{"port": 80, "service": "http", "version": "..."}]}], "followup": [<string>...], "error_category": <string>|null}',
   "Do not invent data not present in the raw output. If a field has nothing, return [] or null.",
   "",
+  "RECON_HOSTS POLICY — dir_1780926990535 (do not violate):",
+  "- new_hosts ONLY includes IPs with CONFIRMED port detail or service banner.",
+  "- An nmap CIDR sweep that scans 254 IPs and reports 3 hosts up + 251 silent: new_hosts is the 3 hosts WITH the port table, NOT all 254 probed IPs.",
+  "- Skip any IP that appears only in 'Skipping host X', 'No response', or 'Nmap scan report for X' with NO subsequent PORT/STATE/SERVICE table.",
+  "- Do not invent IPs from CIDR notation expansion. The /24 doesn't mean 254 hosts exist.",
+  "- A host with 0 ports detected is NOT a recon win unless nmap explicitly says 'Host is up' AND you saw service activity (NSE script output, ICMP reply with timing).",
+  "",
   "FINDING POLARITY RULES — dir_1780854805127 (do not violate these):",
   "- HTTP 401/403/404 status on a path means the file is HIDDEN, NOT exposed. Do NOT emit 'Sensitive File Exposure' findings for paths returning 403/404.",
   "- A 'Sensitive File Exposure' finding REQUIRES HTTP 200 OK on the path AND a snippet of the actual FILE CONTENT in the evidence field.",
@@ -211,6 +218,18 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
   for (const h of out.new_hosts) {
     try {
       if (!h || !h.ip) continue;
+      const portList = Array.isArray(h.ports) ? h.ports : [];
+      const hasPorts = portList.length > 0;
+      // dir_1780926990535: skip "bare host with no port detail" entries unless
+      // an existing row exists (allow updates that add ports to known hosts).
+      if (!hasPorts) {
+        const existing = await db.query(
+          `SELECT 1 FROM recon_hosts WHERE engagement_id = $1 AND ip = $2 LIMIT 1`,
+          [engagementId, String(h.ip).slice(0, 45)]);
+        if (existing.rows.length === 0) {
+          continue; // no prior recon row + no ports → likely a CIDR-sweep false positive
+        }
+      }
       await db.query(
         `INSERT INTO recon_hosts (engagement_id, ip, hostname, status, ports)
          VALUES ($1, $2, $3, 'up', $4::jsonb)
@@ -222,7 +241,7 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
           engagementId,
           String(h.ip).slice(0, 45),
           h.hostname ? String(h.hostname).slice(0, 240) : null,
-          JSON.stringify(Array.isArray(h.ports) ? h.ports : []),
+          JSON.stringify(portList),
         ]);
     } catch (e) {
       console.error(`[aggregator] recon_hosts upsert swallowed: ${e.message}`);
