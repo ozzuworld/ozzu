@@ -446,4 +446,4 @@ const TOOL_SCHEMAS = [
   },
 ];
 
-module.exports = { dispatch, TOOL_SCHEMAS, TOOL_IMPLS };
+module.exports = { dispatch, TOOL_SCHEMAS, TOOL_IMPLS, wrapForExecutor };

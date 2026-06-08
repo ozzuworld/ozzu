@@ -309,19 +309,29 @@ async function runSubAgent(subAgentId, opts = {}) {
       continue;
     }
 
-    // (8) Insert queue item with sub_agent_id tag
+    // (8) Insert queue item with sub_agent_id tag — dir_1780946011445: match the
+    // main agent's pattern (offense-agent-tools.js:100-116). Sub-agent's prior
+    // minimal insert was missing seq (NOT NULL) → ran 20 iters/sub w/ 0 commands
+    // queued, coordinator had no signal → re-spawned redundant batches.
     let queueId;
     try {
-      const qr = await db.query(
+      const { wrapForExecutor } = require("/app/offense-agent-tools");
+      const seqRow = await db.query(
+        `SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM soc_queue_items WHERE engagement_id = $1`,
+        [ctx.engagement.id]);
+      const seq = seqRow.rows[0].next;
+      const wrappedCommand = wrapForExecutor(step.command, ctx.engagement);
+      const title = `[sub${subAgentId}/${ctx.sub_agent_target_host}] ${(task.directive || "").slice(0, 80)}`;
+      const ins = await db.withBypass("offense_agent_tool", (client) => client.query(
         `INSERT INTO soc_queue_items
-           (engagement_id, sub_agent_id, title, command, intent_class, status, created_at)
-         VALUES ($1, $2, $3, $4, $5, 'pending', NOW())
+           (engagement_id, sub_agent_id, seq, title, description, command, expected_artifact,
+            status, intent_class, created_at)
+         VALUES ($1, $2, $3, $4, NULL, $5, $6, 'pending', $7, NOW())
          RETURNING id`,
-        [ctx.engagement.id, subAgentId,
-         `[sub${subAgentId}/${ctx.sub_agent_target_host}] ${(task.directive || "").slice(0, 80)}`,
-         step.command,
-         step.intent_class || "recon"]);
-      queueId = qr.rows[0].id;
+        [ctx.engagement.id, subAgentId, seq, title, wrappedCommand,
+         step.expected_artifact || null,
+         step.intent_class || "recon"]));
+      queueId = ins.rows[0].id;
       stepsQueued++;
     } catch (e) {
       await orchestrator.completeTask(task.id, "failed", `queue insert failed: ${e.message}`);
