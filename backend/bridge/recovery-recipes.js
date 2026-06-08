@@ -127,11 +127,21 @@ function detectFailureScenario({ telemetry = [], queueItems = [], mentorFires = 
   }
 
   // 4. Target unreachable: 3+ queue items targeting same host all failed with timeout/no-route
-  const unreachRe = /(no route to host|Network is unreachable|host is down|connect timed out|timeout)/i;
+  // dir_1780960650243: tightened. Bare /timeout/i matched ffuf's help text
+  // (`-timeout HTTP request timeout in seconds`) causing run #14 to false-pause.
+  // Must match network-level error context, not the word "timeout" anywhere.
+  const unreachRe = /(?:no route to host|Network is unreachable|host is down|host unreachable|Connection timed out|connection timed out|Operation timed out|i\/o timeout|Timeout reached|destination host unreachable)/i;
+  // dir_1780960650243: skip items whose output is clearly a tool help/usage dump
+  // (model passed bad flags; not a network failure).
+  const isHelpDump = (out) =>
+    /^(?:\s*Fuzz Faster U Fool|\s*Usage:|\s*usage:|\s*Options:)/m.test(out) ||
+    /\s-[a-zA-Z]+\s{2,}.{8,}\n\s*-[a-zA-Z]+\s{2,}.{8,}/.test(out);
   const hostMap = {};
   for (const q of queueItems.slice(-10)) {
     if (q.status !== "failed") continue;
-    if (!unreachRe.test(String(q.output || ""))) continue;
+    const out = String(q.output || "");
+    if (isHelpDump(out)) continue;
+    if (!unreachRe.test(out)) continue;
     const ipMatch = String(q.command || "").match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
     if (!ipMatch) continue;
     hostMap[ipMatch[0]] = (hostMap[ipMatch[0]] || 0) + 1;
