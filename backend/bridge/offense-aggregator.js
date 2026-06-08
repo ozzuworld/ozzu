@@ -98,6 +98,29 @@ function chatCompletion(messages, modelOverride) {
   });
 }
 
+// dir_1780930740964: tech-stack tags from port version strings. Used by the
+// orchestrator prompt to remind the model which attack techniques apply.
+function inferTechStack(portList) {
+  const tags = new Set();
+  for (const p of portList || []) {
+    const v = String(p && p.version || "").toLowerCase();
+    const svc = String(p && p.service || "").toLowerCase();
+    if (v.includes("nginx") || svc === "nginx") tags.add("nginx-static");
+    if (v.includes("apache") || svc === "apache") tags.add("apache-php");
+    if (v.includes("php") || /php/i.test(v)) { tags.add("apache-php"); tags.delete("nginx-static"); }
+    if (v.includes("openssh") || svc === "ssh") tags.add("ssh");
+    if (v.includes("mysql") || svc === "mysql") tags.add("mysql");
+    if (v.includes("mariadb")) tags.add("mariadb");
+    if (v.includes("postgres") || svc === "postgresql") tags.add("postgres");
+    if (v.includes("microsoft-iis") || svc === "iis") tags.add("iis-aspnet");
+    if (v.includes("tomcat") || /^.*tomcat/i.test(v)) tags.add("tomcat");
+    if (v.includes("jetty")) tags.add("jetty");
+    if (v.includes("wordpress")) tags.add("wordpress");
+    if (v.includes("joomla")) tags.add("joomla");
+  }
+  return [...tags];
+}
+
 function parseJSON(raw) {
   const m = raw.match(/\{[\s\S]*\}/);
   return JSON.parse(m ? m[0] : raw);
@@ -220,6 +243,13 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
       if (!h || !h.ip) continue;
       const portList = Array.isArray(h.ports) ? h.ports : [];
       const hasPorts = portList.length > 0;
+      // dir_1780930740964: infer tech stack from port version strings.
+      // Apache → apache-php (Apache typically serves PHP), nginx → nginx-static (LFI/SSTI not applicable unless explicit PHP-FPM seen).
+      const techStack = inferTechStack(portList);
+      if (techStack.length > 0) {
+        h.tech_stack = techStack;
+        for (const p of portList) p.tech_stack = techStack;
+      }
       // dir_1780926990535: skip "bare host with no port detail" entries unless
       // an existing row exists (allow updates that add ports to known hosts).
       if (!hasPorts) {

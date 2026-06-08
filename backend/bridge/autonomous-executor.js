@@ -147,6 +147,39 @@ function lintCommandPreflight(commandText, engagement) {
     }
     return { rule: r.id, hint: r.hint, match: m[0].slice(0, 100) };
   }
+  // dir_1780930740964: msfconsole module hallucination preflight.
+  // Catches xxx/XXX/NNN placeholder substrings + bare cve_YYYY_NNN-style
+  // unverifiable paths. Real MSF modules don't contain placeholder substrings.
+  const msfMatch = body.match(/(?:msfconsole[^"]*"|use\s+)(exploit|auxiliary|payload|encoder|post|nop)\/([\w./-]+)/i);
+  if (msfMatch) {
+    const modulePath = msfMatch[2];
+    // Placeholder detection: contains "xx", "XXX", "NNN", "YYYY" in path
+    if (/(?:xx|XXX|NNN|YYYY)(?:\b|$|\/)/.test(modulePath) || /(?:^|_)nginx_cve_\d+_\d+xx\b/i.test(modulePath)) {
+      return {
+        rule: "msf_module_hallucination",
+        hint: `MSF module path '${modulePath}' contains placeholder substring (xx/XXX/NNN). Real module paths are concrete. Verify with 'msfconsole -q -x "search <keyword>; exit"' or 'searchsploit <product> <version>' first.`,
+        match: modulePath.slice(0, 100),
+      };
+    }
+  }
+  // dir_1780930740964: unsubstituted placeholder preflight.
+  // <attacker_ip>, /path/to/X, YOUR_PASSWORD, CHANGEME, TODO, FIXME literals.
+  const placeholderPatterns = [
+    { re: /<(?:attacker|target|your|listener|local)_(?:ip|host|url|port|password|user|key|domain)>/i, label: "angle-bracket placeholder" },
+    { re: /\/path\/to\/[\w.-]+/i, label: "/path/to/X placeholder" },
+    { re: /\bYOUR_[A-Z_]{3,}\b/, label: "YOUR_X placeholder" },
+    { re: /\b(?:CHANGEME|TODO|FIXME|PLACEHOLDER|XXXXXX+|YYYYYY+)\b/, label: "CHANGEME/TODO/FIXME placeholder" },
+  ];
+  for (const p of placeholderPatterns) {
+    const m = body.match(p.re);
+    if (m) {
+      return {
+        rule: "placeholder_unsubstituted",
+        hint: `Command contains literal ${p.label}: "${m[0]}". Replace with the actual value (e.g. LHOST → bridge tunnel IP, /path/to/X → real path on executor).`,
+        match: m[0].slice(0, 100),
+      };
+    }
+  }
   return null;
 }
 

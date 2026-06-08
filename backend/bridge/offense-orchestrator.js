@@ -124,6 +124,39 @@ function serializeGraphForPrompt(graph) {
   return lines.join("\n");
 }
 
+// dir_1780930740964: tech-stack hints renderer. Surfaces "which attack
+// techniques apply to this host" based on the inferred tech_stack tags so
+// the model doesn't try LFI/SSTI on an nginx static target etc.
+const TECH_HINTS = {
+  "nginx-static":  "NO PHP, NO PHP filters, NO SSTI, NO PHP LFI. Try: SSH cred-test on this host, known nginx CVEs (verify_cve first), gobuster for hidden paths.",
+  "apache-php":    "PHP LFI viable (php://filter/convert.base64-encode/resource=...), PHP wrappers, SSTI possible. Look for view.php/index.php/include patterns. Check for config files in /var/www/html/.",
+  "ssh":           "SSH cred-test viable. Try common defaults (admin, root, sysadmin) with inline -l flag + small password lists. Avoid rockyou (too slow). Check banner for OS hints.",
+  "mysql":         "MySQL connect with default creds (root/root, root/'', mysql/mysql). Check for SQL injection on web frontends. Look for config files exposing creds.",
+  "mariadb":       "Same as mysql. Common defaults: root/root, mariadb/mariadb.",
+  "postgres":      "PostgreSQL connect with postgres/postgres, admin/admin. Check pg_hba.conf for trust auth.",
+  "iis-aspnet":    "IIS/ASP.NET: try /aspnet_client/, /web.config disclosure, ViewState abuse, no SSTI.",
+  "tomcat":        "Tomcat: try /manager/, /host-manager/, /admin/ with default creds tomcat/tomcat. Possible WAR file upload to RCE.",
+  "jetty":         "Jetty: check /shutdown handler, JNDI exposures, web.xml.",
+  "wordpress":     "WordPress: wpscan for plugin vulns, /wp-login.php cred-test, /wp-admin/ enumeration.",
+  "joomla":        "Joomla: joomscan, /administrator login, components enumeration.",
+};
+function renderTechStackHints(hosts) {
+  if (!Array.isArray(hosts) || hosts.length === 0) return "";
+  const lines = [];
+  for (const h of hosts) {
+    const tags = new Set();
+    if (Array.isArray(h.tech_stack)) for (const t of h.tech_stack) tags.add(t);
+    if (Array.isArray(h.ports)) for (const p of h.ports) {
+      if (Array.isArray(p.tech_stack)) for (const t of p.tech_stack) tags.add(t);
+    }
+    if (tags.size === 0) continue;
+    const hint = [...tags].map(t => TECH_HINTS[t]).filter(Boolean).join(" | ");
+    if (hint) lines.push(`  ${h.ip} [${[...tags].join(",")}] → ${hint}`);
+  }
+  if (lines.length === 0) return "";
+  return `Stack hints (use to avoid wrong-class techniques):\n${lines.join("\n")}`;
+}
+
 // dir_1780848456715: Sub-agent inventory renderer for coordinator's prompt.
 function renderSubAgentsForPrompt(subAgents) {
   if (!Array.isArray(subAgents) || subAgents.length === 0) {
@@ -243,6 +276,8 @@ async function decide(engagementCtx, modelOverride) {
     `Executor: ${eng.executor_host || "dev-01"}`,
     `Tools available on executor: ${execTools.length ? execTools.join(", ") : "(unknown — POSIX-portable only)"}`,
     `Structured recon (hosts/ports/services): ${JSON.stringify(engagementCtx.hosts || []).slice(0, 4000)}`,
+    // dir_1780930740964: tech_stack hints — surface what techniques apply per host
+    renderTechStackHints(engagementCtx.hosts),
     // Findings: graph rendering when engagement opted in to graph_mode (dir_1780781999942),
     // otherwise legacy flat-list JSON. The graph encodes informed_by → enables relationships
     // so the reasoning loop sees how findings build on each other — King Kazuma's
