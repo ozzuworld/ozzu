@@ -108,6 +108,34 @@ class ExecutionMonitor {
     }
   }
 
+  // dir_1780959393553: rebuild shape counters from this engagement's queue
+  // history. Bridge restarts (every deploy) wipe ExecutionMonitor state, so
+  // Mentor couldn't catch loops that spanned a restart. Call this once on
+  // first dispatch into a fresh ExecutionMonitor for an engagement.
+  async hydrateFromQueue(engagementId, db) {
+    if (!this.enabled || !engagementId || !db) return;
+    if (this._hydrated) return;
+    this._hydrated = true;
+    try {
+      const r = await db.query(
+        `SELECT command FROM soc_queue_items
+          WHERE engagement_id = $1 AND command IS NOT NULL
+          ORDER BY seq ASC`, [engagementId]);
+      let lastShape = "";
+      let sameShapeCount = 0;
+      for (const row of r.rows) {
+        const shape = normalizeCommandShape(row.command || "");
+        if (!shape) continue;
+        this.shapeCounts.set(shape, (this.shapeCounts.get(shape) || 0) + 1);
+        if (shape === lastShape) sameShapeCount += 1;
+        else { sameShapeCount = 1; lastShape = shape; }
+        this.totalCallCount += 1;
+      }
+      this.lastShape = lastShape;
+      this.sameShapeCount = sameShapeCount;
+    } catch (_) { /* on hydration failure proceed with fresh counters */ }
+  }
+
   // For prompting Mentor: which shape is currently looping?
   topRepeatedShape() {
     if (this.shapeCounts.size === 0) return null;

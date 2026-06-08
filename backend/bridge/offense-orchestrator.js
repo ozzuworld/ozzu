@@ -185,13 +185,39 @@ function renderDiscoveredEndpoints(queue) {
     }
   }
   if (findings.size === 0) return "";
+  // dir_1780959393553: tag endpoints as "no yield" when N≥5 subsequent queue
+  // items targeted them with no exploitation success (no OZZULAB{, root:,
+  // <?php, password, secret in output). Run #13: coord burned 15+ iters on
+  // /status because discovered_endpoints kept surfacing it as a fresh target.
+  const SUCCESS_RE = /OZZULAB\{|FLAG\{|root:[x*!]:\d+:|<\?php|API[_-]KEY|\bpassword\b\s*[=:]|\bsecret\b\s*[=:]/i;
+  const YIELD_THRESHOLD = 5;
+  const yieldMap = new Map();  // path -> {attempts, success}
+  for (const path of findings.keys()) {
+    yieldMap.set(path, { attempts: 0, success: false });
+  }
+  for (const q of queue) {
+    if (!q || !q.command_preview) continue;
+    const cmd = String(q.command_preview);
+    const out = String(q.output_preview || "");
+    for (const path of findings.keys()) {
+      if (!cmd.includes(path)) continue;
+      const y = yieldMap.get(path);
+      y.attempts += 1;
+      if (SUCCESS_RE.test(out)) y.success = true;
+    }
+  }
   const lines = [...findings.entries()]
     .sort((a, b) => (a[1].status === "200" ? -1 : 1))
     .slice(0, 25)
-    .map(([path, info]) =>
-      `  - ${info.host_hint ? info.host_hint + "/" : ""}${path}  (HTTP ${info.status}, seq#${info.evidence_seq})`);
+    .map(([path, info]) => {
+      const y = yieldMap.get(path) || { attempts: 0, success: false };
+      const dead = y.attempts >= YIELD_THRESHOLD && !y.success;
+      const tag = dead ? `  ⚠️ NO YIELD after ${y.attempts} attempts — PIVOT ELSEWHERE` :
+                  y.success ? "  ✓ yielded sensitive content" : "";
+      return `  - ${info.host_hint ? info.host_hint + "/" : ""}${path}  (HTTP ${info.status}, seq#${info.evidence_seq})${tag}`;
+    });
   return [
-    "Discovered web endpoints (from prior queue outputs — USE THESE EXACT PATHS in exploit commands, do not invent new ones):",
+    "Discovered web endpoints (from prior queue outputs — USE THESE EXACT PATHS in exploit commands, do not invent new ones; AVOID endpoints marked NO YIELD):",
     ...lines,
   ].join("\n");
 }
@@ -353,6 +379,17 @@ async function decide(engagementCtx, modelOverride) {
     `Scope/ROE: ${JSON.stringify({ scope: eng.scope, roe: eng.roe })}`,
     `Executor: ${eng.executor_host || "dev-01"}`,
     `Tools available on executor: ${execTools.length ? execTools.join(", ") : "(unknown — POSIX-portable only)"}`,
+    // dir_1780959393553: stateless-executor reminder. Runs #11 + #13 burned
+    // iters on `cat *.nmap`, `cat task_NNN_ffuf.out` — model assumed previous
+    // command output was saved as a file on disk. Each queue command runs in a
+    // FRESH shell on the executor; outputs flow back via the queue's `output`
+    // field shown in queue_history above, NOT as files.
+    "EXECUTOR STATELESSNESS — read carefully:",
+    "  Each queue command runs in a FRESH shell on the executor. There is NO persistent",
+    "  filesystem between commands. Output from a prior command is shown in queue_history",
+    "  as `output_preview`; you DO NOT have files like /tmp/scan.txt, /tmp/ffuf_results_N.txt,",
+    "  or *.nmap saved from previous runs. If you need scan output, RE-RUN the scan or read",
+    "  from the queue_history. Never `cat` files you didn't create THIS command.",
     `Structured recon (hosts/ports/services): ${JSON.stringify(engagementCtx.hosts || []).slice(0, 4000)}`,
     // dir_1780930740964: tech_stack hints — surface what techniques apply per host
     renderTechStackHints(engagementCtx.hosts),

@@ -348,6 +348,9 @@ async function runAgent(engagementId, opts = {}) {
       totalThreshold: Number(flags.mentor_total_threshold) || 10,
       enabled: flags.mentor_enabled !== false,
     });
+    // dir_1780959393553: rebuild shape counters from queue history so a
+    // bridge restart mid-engagement doesn't reset loop detection.
+    try { await monitor.hydrateFromQueue(engagementId, db); } catch (_) {}
     if (flags.planner_enabled !== false && intent) {
       try {
         // Brief engagement context for the planner (scope + recent findings)
