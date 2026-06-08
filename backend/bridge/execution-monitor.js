@@ -24,6 +24,18 @@ const MODEL_KEY = process.env.OFFENSE_MODEL_KEY || "";
 function normalizeCommandShape(cmd) {
   if (!cmd) return "";
   let s = String(cmd);
+  // dir_1780937867797: coalesce hostname-resolution attempts. Run #7 burned
+  // ~50% of iters cycling through dig/nslookup/getent/grep-hosts/host/drill
+  // because each tool reads as a unique shape — same=3 never tripped, Mentor
+  // only fired at total=10 (after 10 wasted commands). Collapsing all variants
+  // to one canonical shape so 3 consecutive lookups trip Mentor fast.
+  const lookupTool =
+    /^\s*(?:sudo\s+)?(?:dig|nslookup|host|drill|getent\s+hosts|resolvectl\s+query|systemd-resolve)\b/i;
+  const hostsGrep =
+    /\bgrep(?:\s+-[A-Za-z]+)*\s+(?:-e\s+)?["']?[^"'\s]*\b(?:\.local|\.skyline|\.internal|\.lan)\b[^"']*["']?\s+\/etc\/hosts\b/i;
+  if (lookupTool.test(s) || hostsGrep.test(s)) {
+    return "<HOSTNAME_LOOKUP>";
+  }
   // Replace IPs first (long form before short)
   s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?\b/g, "<IP>");
   // Replace :PORT after host or IP
