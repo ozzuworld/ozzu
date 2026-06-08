@@ -99,9 +99,11 @@ const RECIPES = {
 // its own signature in recent state.
 
 function detectFailureScenario({ telemetry = [], queueItems = [], mentorFires = 0 } = {}) {
-  // 1. Executor offline: last 2 queue items both failed with "device offline" / "no such device"
+  // 1. Executor offline: last 2 queue items both failed with infrastructure-level
+  // SSH/ADB errors (NOT nmap "Connection refused" on closed ports — see dir_1780922706363).
+  // Regex must match the executor-layer error context, not just substring presence.
   const lastTwo = queueItems.slice(-2);
-  const offlineRe = /(device offline|no such device|connection refused|operation timed out)/i;
+  const offlineRe = /(adb:\s+(?:device offline|no devices)|error:\s+no such device|ssh:\s+connect to host[^\n]*Connection refused|ssh:\s+connect to host[^\n]*[Oo]peration timed out)/;
   if (lastTwo.length >= 2 && lastTwo.every(q => offlineRe.test(String(q.output || "")))) {
     return {
       scenario: FAILURE_SCENARIOS.EXECUTOR_OFFLINE,
