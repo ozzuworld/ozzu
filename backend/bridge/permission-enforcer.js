@@ -128,10 +128,30 @@ function isLikelyFilePath(s) {
   return false;
 }
 
+// dir_1780955810101: strip SQL quoted statement bodies before hostname
+// extraction. Run #11 sub#23 queued `mysql -h 10.10.20.30 -u root -e 'SELECT *
+// FROM ozzulab.flags;'` — `ozzulab.flags` matches HOSTNAME_RE and the jail
+// blocked the exploit. Same shape applies to `--execute='...'`, `--query='...'`,
+// `psql -c '...'`, etc. Anything inside the quoted SQL body is a SQL identifier
+// (db.table, schema.proc, etc.), never a hostname.
+function stripQuotedSqlBodies(command) {
+  let s = String(command || "");
+  // Match `mysql/psql/sqlite -e '...'`, `--execute='...'`, `--query='...'`,
+  // `-c '...'`, and single-quoted strings that contain SQL keywords (loose
+  // heuristic — quoted body with FROM/SELECT/UPDATE/INTO/JOIN/WHERE keyword).
+  const sqlFlagPattern = /\s(?:-(?:e|c|q|H)|--(?:execute|query|command))[= ]'([^']*)'/gi;
+  s = s.replace(sqlFlagPattern, " '<SQL>'");
+  // Also catch bare quoted strings containing SQL keywords (safety net).
+  const sqlKeywordPattern = /'([^']*(?:\bSELECT\b|\bFROM\b|\bINTO\b|\bUPDATE\b|\bJOIN\b|\bWHERE\b|\bSHOW\b|\bCREATE\b|\bDROP\b|\bALTER\b|\bDELETE\b|\bINSERT\b)[^']*)'/gi;
+  s = s.replace(sqlKeywordPattern, "'<SQL>'");
+  return s;
+}
+
 function extractTargetsFromCommand(command) {
   if (!command) return [];
-  const ips = [...new Set(String(command).match(IP_RE) || [])];
-  const hosts = [...new Set((String(command).match(HOSTNAME_RE) || [])
+  const stripped = stripQuotedSqlBodies(command);
+  const ips = [...new Set(String(stripped).match(IP_RE) || [])];
+  const hosts = [...new Set((String(stripped).match(HOSTNAME_RE) || [])
     .filter(h => !ips.includes(h)
               && !/^[0-9.]+$/.test(h)
               && !isLikelyFilePath(h)))];

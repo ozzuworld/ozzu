@@ -157,6 +157,59 @@ function renderTechStackHints(hosts) {
   return `Stack hints (use to avoid wrong-class techniques):\n${lines.join("\n")}`;
 }
 
+// dir_1780955810101: scan recent queue outputs for HTTP discovery findings
+// (gobuster: `view.php          (Status: 200) [Size: 36]`, curl HEAD: `HTTP/1.1
+// 200 OK\n... Server: nginx\n...`). Surface as structured prompt context so the
+// coordinator's exploit synthesizer USES the discovered paths instead of
+// inventing its own. Run #11: gobuster found view.php, coord still queued
+// `/page?$param=$payload` instead.
+function renderDiscoveredEndpoints(queue) {
+  if (!Array.isArray(queue) || queue.length === 0) return "";
+  const findings = new Map();   // path -> {status, host_hint, evidence_seq}
+  const hostFromCmd = (cmd) => {
+    const m = String(cmd || "").match(/https?:\/\/([^\s/'"]+)/);
+    return m ? m[1] : null;
+  };
+  for (const q of queue) {
+    if (!q || !q.output_preview) continue;
+    const out = String(q.output_preview);
+    const host = hostFromCmd(q.command_preview);
+    // gobuster "name (Status: NNN) [Size: NNN]"
+    const gob = out.matchAll(/([A-Za-z0-9_./\-]+)\s+\(Status:\s*(\d{3})\)/g);
+    for (const m of gob) {
+      const path = m[1].replace(/^\/+/, "").trim();
+      const status = m[2];
+      if (!path || path.length > 80) continue;
+      if (!findings.has(path) || findings.get(path).status !== "200")
+        findings.set(path, { status, host_hint: host, evidence_seq: q.seq });
+    }
+  }
+  if (findings.size === 0) return "";
+  const lines = [...findings.entries()]
+    .sort((a, b) => (a[1].status === "200" ? -1 : 1))
+    .slice(0, 25)
+    .map(([path, info]) =>
+      `  - ${info.host_hint ? info.host_hint + "/" : ""}${path}  (HTTP ${info.status}, seq#${info.evidence_seq})`);
+  return [
+    "Discovered web endpoints (from prior queue outputs — USE THESE EXACT PATHS in exploit commands, do not invent new ones):",
+    ...lines,
+  ].join("\n");
+}
+
+// dir_1780955810101: parse expected flag/token pattern from engagement
+// objective. Lab uses OZZULAB{...}; production engagements use whatever the
+// objective declares. Surfaced to the synthesizer so exploit commands grep
+// for the RIGHT prefix instead of generic `flag{` / `FLAG`.
+function extractFlagPattern(engagement) {
+  const scope = engagement && engagement.scope;
+  const obj = scope && typeof scope === "object" ? scope.objective : null;
+  if (!obj || typeof obj !== "string") return null;
+  // Look for `Tokens prefix OZZULAB{...}`, `Flag format OZZULAB{}`, etc.
+  // Match the prefix word followed by `{` (with optional placeholder after).
+  const m = obj.match(/\b([A-Z][A-Z0-9_]{2,})\{/);
+  return m ? m[1] : null;
+}
+
 // dir_1780848456715: Sub-agent inventory renderer for coordinator's prompt.
 function renderSubAgentsForPrompt(subAgents) {
   if (!Array.isArray(subAgents) || subAgents.length === 0) {
@@ -278,6 +331,15 @@ async function decide(engagementCtx, modelOverride) {
     `Structured recon (hosts/ports/services): ${JSON.stringify(engagementCtx.hosts || []).slice(0, 4000)}`,
     // dir_1780930740964: tech_stack hints — surface what techniques apply per host
     renderTechStackHints(engagementCtx.hosts),
+    // dir_1780955810101: discovered web endpoints (gobuster/curl) — coord
+    // must use these EXACT paths, not invent its own (`/page?$param=...`).
+    renderDiscoveredEndpoints(engagementCtx.queue),
+    // dir_1780955810101: expected flag/token prefix from engagement objective.
+    // Tells the exploit synthesizer to grep `OZZULAB{` not generic `flag{`.
+    (() => {
+      const fp = extractFlagPattern(eng);
+      return fp ? `Expected flag/token prefix in payload responses: \`${fp}{\` — grep exploit outputs for this exact prefix (NOT generic \`flag{\` or \`FLAG\`).` : "";
+    })(),
     // Findings: graph rendering when engagement opted in to graph_mode (dir_1780781999942),
     // otherwise legacy flat-list JSON. The graph encodes informed_by → enables relationships
     // so the reasoning loop sees how findings build on each other — King Kazuma's
