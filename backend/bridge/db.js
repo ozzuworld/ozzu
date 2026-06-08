@@ -1439,6 +1439,11 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_cipher_exploit_attempts_eng ON cipher_exploit_write_attempts(engagement_id, created_at DESC)`);
 
+    // dir_1780925940313: synthetic-lab bypass column on engagements.
+    // Synthetic labs (OzzuLab v0/etc.) need to capture cred-test output for
+    // flag verification — membrane shouldn't block. Production engagements
+    // stay protected by default.
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS synthetic_lab BOOLEAN DEFAULT false`);
     await pool.query(`CREATE OR REPLACE FUNCTION check_cipher_exploit_write()
     RETURNS TRIGGER AS $func$
     DECLARE
@@ -1446,6 +1451,7 @@ async function init() {
       combined TEXT;
       pattern_hit TEXT := NULL;
       col_hit TEXT;
+      is_lab BOOLEAN;
     BEGIN
       BEGIN
         bypass_label := current_setting('app.bypass_exploit_check', true);
@@ -1453,6 +1459,13 @@ async function init() {
         bypass_label := NULL;
       END;
       IF bypass_label IS NOT NULL AND bypass_label <> '' THEN
+        RETURN NEW;
+      END IF;
+
+      -- dir_1780925940313: synthetic-lab bypass
+      SELECT COALESCE(synthetic_lab, false) INTO is_lab
+        FROM pentest_engagements WHERE id = NEW.engagement_id;
+      IF is_lab THEN
         RETURN NEW;
       END IF;
 

@@ -174,12 +174,20 @@ function detectFailureScenario({ telemetry = [], queueItems = [], mentorFires = 
   // 8. dir_1780854495541: Missing resource — 3+ recent queue items reference
   //    files/binaries that don't exist. Catches the wordlist-hallucination loop.
   const missingPatterns = [
+    // Path AFTER phrase
     /(?:No such file or directory:?\s+)([^\s'":,]+)/gi,
     /(?:file does not exist:?\s+)([^\s'":,]+)/gi,
     /(?:File for logins not found:?\s+)([^\s'":,]+)/gi,
     /(?:File for passwords not found:?\s+)([^\s'":,]+)/gi,
     /(?:wordlist file "([^"]+)" does not exist)/gi,
     /([A-Za-z0-9_-]+):\s+command not found/gi,
+    // dir_1780925940313: Path BEFORE phrase — most common real shell error format
+    // "ls: cannot access '/path': No such file or directory"
+    // "stat: cannot stat '/path': No such file or directory"
+    // "cat: /path: No such file or directory"
+    /'([^']+)':?\s+No such file or directory/gi,
+    /"([^"]+)":?\s+No such file or directory/gi,
+    /([\w./_-]+):\s+No such file or directory/gi,
   ];
   const missingItems = [];
   const missingPaths = new Map(); // path -> count

@@ -91,14 +91,38 @@ const FILE_EXT_BLOCKLIST = new Set([
   "exe", "dll", "so", "dylib", "elf", "bin", "img", "iso", "deb", "rpm", "apk",
 ]);
 
+// dir_1780925940313: Python / shell module-method patterns that look like
+// hostnames but aren't. Run #2 burned 5+ iters on re.findall, h.split, etc.
+const PY_MODULE_BLOCKLIST = new Set([
+  // stdlib modules commonly used inline
+  "re", "os", "sys", "json", "time", "datetime", "math", "random", "string",
+  "subprocess", "socket", "struct", "hashlib", "base64", "urllib", "requests",
+  "threading", "asyncio", "collections", "itertools", "functools", "pathlib",
+  "io", "csv", "ssl", "http", "xml", "html", "uuid", "logging", "pickle",
+  "shutil", "tempfile", "warnings", "argparse", "operator", "copy", "abc",
+  "typing", "enum", "dataclasses", "ast", "inspect", "glob", "fnmatch",
+  // Common JS / shell namespace fragments
+  "process", "console", "document", "window", "JSON", "Math",
+]);
+
 function isLikelyFilePath(s) {
   // Anything with a slash is a path, not a host.
   if (s.includes("/") || s.includes("\\")) return true;
   // Tail extension check.
   const lastDot = s.lastIndexOf(".");
   if (lastDot <= 0) return false;
+  const head = s.slice(0, lastDot).toLowerCase();
   const ext = s.slice(lastDot + 1).toLowerCase();
-  return FILE_EXT_BLOCKLIST.has(ext);
+  // Known file extension → file
+  if (FILE_EXT_BLOCKLIST.has(ext)) return true;
+  // dir_1780925940313: Python module pattern (re.findall, os.path, etc.) →
+  // first dot-separated token is a known module
+  if (PY_MODULE_BLOCKLIST.has(head.split(".")[0])) return true;
+  // Single lowercase letter as head (e.g. `h.split`, `x.replace`, `j.parse`) =
+  // almost certainly a loop variable or short var, not a hostname
+  const headFirst = head.split(".")[0];
+  if (headFirst.length === 1 && /[a-z]/.test(headFirst)) return true;
+  return false;
 }
 
 function extractTargetsFromCommand(command) {
