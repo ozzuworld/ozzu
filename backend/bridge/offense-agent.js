@@ -22,8 +22,11 @@ const orchestrator = require("./offense-orchestrator");
 const aggregator   = require("./offense-aggregator");
 const { TOOL_SCHEMAS, dispatch } = require("./offense-agent-tools");
 
-const MODEL_URL  = process.env.OFFENSE_MODEL_URL  || "http://127.0.0.1:11434/v1";
-const MODEL_NAME = process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
+// dir_1780969435006: dual-model SOTA. Synthesizer (compact JSON + bash) uses
+// SYNTH_MODEL_*; falls back to OFFENSE_MODEL_* when not set so legacy
+// single-model deploys keep working.
+const MODEL_URL  = process.env.OFFENSE_SYNTH_MODEL_URL  || process.env.OFFENSE_MODEL_URL  || "http://127.0.0.1:11434/v1";
+const MODEL_NAME = process.env.OFFENSE_SYNTH_MODEL_NAME || process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
 const MODEL_KEY  = process.env.OFFENSE_MODEL_KEY  || "";
 
 const DEFAULT_MAX_ITER = 15;

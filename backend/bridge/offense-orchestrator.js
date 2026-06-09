@@ -19,8 +19,11 @@ const https = require("https");
 const { URL } = require("url");
 const db = require("./db");
 
-const MODEL_URL  = process.env.OFFENSE_MODEL_URL  || "http://127.0.0.1:11434/v1";
-const MODEL_NAME = process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
+// dir_1780969435006: dual-model SOTA. Orchestrator (strategic reasoning) uses
+// REASONING_MODEL_*; falls back to OFFENSE_MODEL_* when not set so legacy
+// single-model deploys keep working.
+const MODEL_URL  = process.env.OFFENSE_REASONING_MODEL_URL  || process.env.OFFENSE_MODEL_URL  || "http://127.0.0.1:11434/v1";
+const MODEL_NAME = process.env.OFFENSE_REASONING_MODEL_NAME || process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
 const MODEL_KEY  = process.env.OFFENSE_MODEL_KEY  || "";
 
 const ORCHESTRATOR_SYSTEM_PROMPT = [

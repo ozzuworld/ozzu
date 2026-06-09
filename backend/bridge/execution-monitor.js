@@ -13,8 +13,18 @@
 const http = require("http");
 const https = require("https");
 
-const MODEL_URL = process.env.OFFENSE_MODEL_URL || "http://127.0.0.1:11434/v1";
-const MODEL_NAME = process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
+// dir_1780969435006: dual-model SOTA. Execution-monitor hosts Mentor (strategic
+// pivot) + Planner (strategic plan) + Reflector (JSON repair) + Refiner +
+// Summarizer. Mentor/Planner are strategic → REASONING_MODEL_*. Reflector/
+// Refiner/Summarizer are compact-JSON → SYNTH_MODEL_*. Each caller picks
+// the role explicitly via { role: 'reasoning' | 'synth' } below.
+const REASONING_URL  = process.env.OFFENSE_REASONING_MODEL_URL  || process.env.OFFENSE_MODEL_URL  || "http://127.0.0.1:11434/v1";
+const REASONING_NAME = process.env.OFFENSE_REASONING_MODEL_NAME || process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
+const SYNTH_URL      = process.env.OFFENSE_SYNTH_MODEL_URL      || process.env.OFFENSE_MODEL_URL  || "http://127.0.0.1:11434/v1";
+const SYNTH_NAME     = process.env.OFFENSE_SYNTH_MODEL_NAME     || process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
+// Legacy aliases for backward-compat in any reference below.
+const MODEL_URL = REASONING_URL;
+const MODEL_NAME = REASONING_NAME;
 const MODEL_KEY = process.env.OFFENSE_MODEL_KEY || "";
 
 // ── Execution monitor state machine ────────────────────────────────────────
@@ -168,16 +178,23 @@ class ExecutionMonitor {
 }
 
 // ── Shared chat completion helper ──────────────────────────────────────────
-function chatCompletion(messages, modelOverride) {
+// dir_1780969435006: role-aware. role='reasoning' for strategic calls (Mentor,
+// Planner), role='synth' for compact-JSON/repair calls (Reflector, Refiner,
+// Summarizer). Falls back to single-model behavior when env vars aren't set.
+function chatCompletion(messages, modelOverride, role = "reasoning") {
   return new Promise((resolve, reject) => {
-    const base = MODEL_URL.replace(/\/+$/, "");
+    const useSynth = role === "synth";
+    const baseUrl = useSynth ? SYNTH_URL : REASONING_URL;
+    const modelName = modelOverride || (useSynth ? SYNTH_NAME : REASONING_NAME);
+    const base = baseUrl.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
     const payload = JSON.stringify({
-      model: modelOverride || MODEL_NAME,
+      model: modelName,
       messages,
       temperature: 0.2,
       stream: false,
+      max_tokens: 2048,
     });
     const headers = {
       "Content-Type": "application/json",
@@ -288,7 +305,7 @@ async function performMentor(ctx) {
   const prompt = renderMentorPrompt(ctx);
   return await chatCompletion([
     { role: "user", content: prompt },
-  ]);
+  ], null, "reasoning");
 }
 
 // performPlanner: returns the operator intent wrapped with a 3-7 step plan,
@@ -297,7 +314,7 @@ async function performPlanner({ agentType, taskQuestion, engagementContext }) {
   const prompt = renderPlannerPrompt({ agentType, taskQuestion, engagementContext });
   const plan = await chatCompletion([
     { role: "user", content: prompt },
-  ]);
+  ], null, "reasoning");
   const wrapped = [
     "<task_assignment>",
     "<original_request>",
@@ -345,7 +362,7 @@ async function performReflector({ rawText, expectedFormat, schemaHint }) {
   const prompt = renderReflectorPrompt({ rawText, expectedFormat, schemaHint });
   return await chatCompletion([
     { role: "user", content: prompt },
-  ]);
+  ], null, "synth");
 }
 
 // ── Refiner prompt (adapted from PentAGI subtasks_refiner.tmpl) ──
@@ -397,7 +414,7 @@ async function performRefiner(ctx) {
   const prompt = renderRefinerPrompt(ctx);
   const raw = await chatCompletion([
     { role: "user", content: prompt },
-  ]);
+  ], null, "synth");
   let parsed;
   try {
     const m = raw.match(/\{[\s\S]*\}/);
@@ -457,7 +474,7 @@ async function performSummarizer({ content, instructions, contentType }) {
   const prompt = renderSummarizerPrompt({ content, instructions, contentType });
   return await chatCompletion([
     { role: "user", content: prompt },
-  ]);
+  ], null, "synth");
 }
 
 // Simple FNV-1a hash for content-keyed caching (no crypto dep).
