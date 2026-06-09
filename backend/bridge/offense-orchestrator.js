@@ -52,7 +52,10 @@ function chatCompletion(messages, modelOverride) {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false });
+    // dir_1780965304265: max_tokens=4096 to give reasoning models room for
+    // <think>...</think> + final JSON. Non-reasoning models stop early
+    // naturally — no perf cost.
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: 4096 });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: 60s timeout + fresh socket per request. Tunnel death
@@ -81,9 +84,44 @@ function chatCompletion(messages, modelOverride) {
   });
 }
 
+// dir_1780965304265: reasoning-model aware JSON extraction. Reasoning models
+// (DeepSeek-R1, Qwen3.5/3.6 thinking, o1/o3, Claude thinking) emit their
+// scratchpad before the actual answer:
+//   <think>chain of thought…</think>{"select": 5, ...}
+//   Thinking Process:\n1. ...\n2. ...\n\n{"select": 5, ...}
+// Naive `{[\s\S]*}` regex either grabs a brace from the thinking block or
+// times out scanning. Strip known thinking-block shapes first, then parse.
+function stripThinkingBlocks(raw) {
+  let s = String(raw || "");
+  // 1. <think>...</think> tags (DeepSeek-R1, Qwen3.5/3.6 default format)
+  s = s.replace(/<think>[\s\S]*?<\/think>/g, "");
+  // 2. Unclosed <think> at start — take whatever's after a stray closing tag,
+  //    or after the first double-newline.
+  if (/<think>/i.test(s) && !/<\/think>/i.test(s)) {
+    const i = s.indexOf("\n\n");
+    if (i !== -1) s = s.slice(i + 2);
+  }
+  // 3. Qwen-style "Thinking Process:\n1. ...\n2. ..." block ahead of JSON.
+  //    Detect a "Thinking Process:" / "Reasoning:" / "Analysis:" header,
+  //    then skip until the first top-level `{` that starts a new line.
+  const thinkingHeaderRe = /^\s*(?:Thinking\s+Process|Reasoning|Analysis|Let me think|Step\s+\d+)\s*:?/im;
+  if (thinkingHeaderRe.test(s)) {
+    // Find the LAST `{` that begins a new "value" line — most likely the answer.
+    const last = s.lastIndexOf("\n{");
+    if (last !== -1) s = s.slice(last + 1);
+  }
+  return s;
+}
+
 function parseJSON(raw) {
-  const m = raw.match(/\{[\s\S]*\}/);
-  return JSON.parse(m ? m[0] : raw);
+  const stripped = stripThinkingBlocks(raw);
+  // Try the LAST balanced JSON object first (most reasoning models emit it last).
+  const m = stripped.match(/\{[\s\S]*\}/);
+  if (m) {
+    try { return JSON.parse(m[0]); } catch (_) {}
+  }
+  // Fall back to whole-string parse (covers non-reasoning models + edge cases).
+  return JSON.parse(stripped || raw);
 }
 
 // Pull the current DAG of an engagement. Returns {tasks: [...], graph_text: "..."}

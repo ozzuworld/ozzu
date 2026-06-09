@@ -134,7 +134,7 @@ function chatJSON(messages, modelOverride) {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false });
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: 4096 });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: see note in offense-orchestrator.js
@@ -164,7 +164,7 @@ function chatWithTools(messages, modelOverride) {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, tools: TOOL_SCHEMAS, temperature: 0.2, stream: false });
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, tools: TOOL_SCHEMAS, temperature: 0.2, stream: false, max_tokens: 8192 });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: see note in offense-orchestrator.js
@@ -189,9 +189,30 @@ function chatWithTools(messages, modelOverride) {
   });
 }
 
+// dir_1780965304265: reasoning-model aware JSON extraction. See full comment
+// in offense-orchestrator.js — kept in sync.
+function stripThinkingBlocks(raw) {
+  let s = String(raw || "");
+  s = s.replace(/<think>[\s\S]*?<\/think>/g, "");
+  if (/<think>/i.test(s) && !/<\/think>/i.test(s)) {
+    const i = s.indexOf("\n\n");
+    if (i !== -1) s = s.slice(i + 2);
+  }
+  const thinkingHeaderRe = /^\s*(?:Thinking\s+Process|Reasoning|Analysis|Let me think|Step\s+\d+)\s*:?/im;
+  if (thinkingHeaderRe.test(s)) {
+    const last = s.lastIndexOf("\n{");
+    if (last !== -1) s = s.slice(last + 1);
+  }
+  return s;
+}
+
 function parseJSON(raw) {
-  const m = raw.match(/\{[\s\S]*\}/);
-  return JSON.parse(m ? m[0] : raw);
+  const stripped = stripThinkingBlocks(raw);
+  const m = stripped.match(/\{[\s\S]*\}/);
+  if (m) {
+    try { return JSON.parse(m[0]); } catch (_) {}
+  }
+  return JSON.parse(stripped || raw);
 }
 
 // ───────────────────────────── engagement context + state ─────────────────────────────
