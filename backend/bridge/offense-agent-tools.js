@@ -137,6 +137,7 @@ async function queueStep(args) {
   try {
     const { maybeAutoExecute } = require("/app/autonomous-executor");
     auto = await maybeAutoExecute(ins.rows[0].id);
+    console.log(`[queue_step] q=${ins.rows[0].id} autoExec=${JSON.stringify(auto)}`);
   } catch (e) {
     console.error(`[queue_step] auto-execute hook failed:`, e.message);
   }

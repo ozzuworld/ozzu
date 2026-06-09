@@ -391,6 +391,16 @@ async function advanceOffense(engagementId, intent, modelOverride) {
   tel.stepQueued = true;
   await insertTelemetry(tel);
 
+  try {
+    const { maybeAutoExecute } = require("/app/autonomous-executor");
+    maybeAutoExecute(ins.rows[0].id)
+      .then(r => console.log(`[offense-engine] autoExec q=${ins.rows[0].id} result=${JSON.stringify(r)}`))
+      .catch(e =>
+        console.error(`[offense-engine] maybeAutoExecute(${ins.rows[0].id}) error:`, e.message));
+  } catch (e) {
+    console.error(`[offense-engine] autonomous-executor import error:`, e.message);
+  }
+
   return {
     queued: true,
     queue_id: ins.rows[0].id,

@@ -537,6 +537,16 @@ module.exports = function socRoutes(ctx) {
         }
 
         sendJSON(res, 200, { inserted, total_pending: inserted.length });
+
+        try {
+          const ae = require("../autonomous-executor");
+          for (const ins of inserted) {
+            ae.maybeAutoExecute(ins.id).catch(e =>
+              console.error(`[soc queue POST] maybeAutoExecute(${ins.id}) error:`, e.message));
+          }
+        } catch (e) {
+          console.error(`[soc queue POST] autonomous-executor import error:`, e.message);
+        }
         return true;
       } catch (error) {
         console.error('[soc queue POST] Error:', error);
