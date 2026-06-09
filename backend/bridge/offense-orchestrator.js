@@ -52,10 +52,10 @@ function chatCompletion(messages, modelOverride) {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    // dir_1780965304265: max_tokens=4096 to give reasoning models room for
-    // <think>...</think> + final JSON. Non-reasoning models stop early
-    // naturally — no perf cost.
-    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: 4096 });
+    // dir_1780966010401: max_tokens=2048 to fit vLLM's 8192 context with
+    // ~4-5K prompt budget. Reasoning-adapter strips <think> blocks, so 2K
+    // is plenty for short reasoning + JSON.
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: 2048 });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: 60s timeout + fresh socket per request. Tunnel death

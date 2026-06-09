@@ -134,7 +134,7 @@ function chatJSON(messages, modelOverride) {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: 4096 });
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: 2048 });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: see note in offense-orchestrator.js
@@ -164,7 +164,7 @@ function chatWithTools(messages, modelOverride) {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, tools: TOOL_SCHEMAS, temperature: 0.2, stream: false, max_tokens: 8192 });
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, tools: TOOL_SCHEMAS, temperature: 0.2, stream: false, max_tokens: 3072 });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: see note in offense-orchestrator.js
