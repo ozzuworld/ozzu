@@ -30,6 +30,8 @@ Each tool's directory MUST contain a `README.md` with these sections (in this or
 | [esp32-wg-bridge](esp32-wg-bridge/) | ESP32 L3 bridge — joins target wifi, opens WG to home hub, forwards LAN traffic for remote recon | working (2026-05-28) |
 | [android-pentest-bridge](android-pentest-bridge/) | Rooted Android tablet as L3 pentest bridge — same role as ESP32 but tablet form, full Linux kernel forwarding via Magisk root. SM-P610 procedure documented | working (2026-05-31) |
 | [oracle](oracle/) | Claude-as-teacher SFT trajectory pipeline — replays SOC engagement state to Opus (Max-plan OAuth), captures optimal commands for offense-model distillation | working (2026-06-09) |
+| [executor-agent](executor-agent/) | HTTP shim on dev-01 replacing per-command SSH dispatch — keep-alive over WG, scales SOC-engagement concurrency past sshd MaxSessions limit | working (2026-06-09) |
+| [ozzu-lab-cmdinj](ozzu-lab-cmdinj/) | OzzuLab variant #2 — command-injection in diagnose.php (vs variant #1 LFI in view.php). Different network 10.10.21.0/24, different vuln class for SFT diversity | working (2026-06-09) |
 
 ## Adding a new tool
 

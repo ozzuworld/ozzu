@@ -1,0 +1,39 @@
+services:
+  edge-gw:
+    build: ./edge-gw
+    container_name: ozzulab-cmdinj-edge-gw
+    hostname: edge-gw.prodops.local
+    networks:
+      ozzulab-cmdinj-net:
+        ipv4_address: 10.10.21.10
+    restart: unless-stopped
+
+  internal-web:
+    build: ./internal-web
+    container_name: ozzulab-cmdinj-internal-web
+    hostname: ops-tools.prodops.local
+    networks:
+      ozzulab-cmdinj-net:
+        ipv4_address: 10.10.21.20
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    build: ./db
+    container_name: ozzulab-cmdinj-db
+    hostname: db.prodops.local
+    networks:
+      ozzulab-cmdinj-net:
+        ipv4_address: 10.10.21.30
+    environment:
+      MYSQL_ROOT_PASSWORD: redacted_2026_prodops
+    restart: unless-stopped
+
+networks:
+  ozzulab-cmdinj-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.21.0/24
+          gateway: 10.10.21.1

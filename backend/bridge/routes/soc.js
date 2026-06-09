@@ -611,6 +611,83 @@ module.exports = function socRoutes(ctx) {
         // .claude/rules/soc-command-execution.md for why inlining breaks $VAR.
         // detached:true → own process group, killable with process.kill(-pid).
         const execHost = item.executor_host || 'dev-01';
+
+        // HTTP executor agent path (dir_1781019523885) — when EXEC_AGENT_URL is set
+        // and target is dev-01, route through dev-01:8888 instead of SSH. Removes
+        // per-command sshd handshake cost; enables 30+ concurrent runs.
+        // No incremental streaming (acceptable for autonomous Sprint 2b runs);
+        // operator-driven engagements without the env var still use SSH below.
+        if (execHost === 'dev-01' && process.env.EXEC_AGENT_URL) {
+          (async () => {
+            const t0 = Date.now();
+            let httpResp;
+            try {
+              httpResp = await fetch(`${process.env.EXEC_AGENT_URL}/exec`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${process.env.EXEC_AGENT_TOKEN || ''}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  command: String(item.command),
+                  timeout_seconds: timeoutSec,
+                  engagement_id: item.engagement_id,
+                }),
+                // node fetch has its own keep-alive pool; no per-request socket setup
+              });
+            } catch (e) {
+              const errMsg = `[exec-agent network error: ${e.message}]`;
+              try {
+                await db.query(
+                  `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2 AND status='running'`,
+                  [errMsg, item.id]
+                );
+                await db.query(
+                  `UPDATE agent_audit_log SET status='failed', completed_at=NOW(), output=$1 WHERE session_id=$2 AND status='running'`,
+                  [errMsg, sessionId]
+                );
+                await syncOffenseOutcome(item.id, 'failed');
+              } catch (_) { /* swallow */ }
+              broadcast({ type: 'socStepDone', engagement_id: item.engagement_id, item_id: item.id, session_id: sessionId, status: 'failed', timed_out: false, ts: Date.now() });
+              return;
+            }
+            let result;
+            try { result = await httpResp.json(); }
+            catch (e) {
+              result = { exit_code: -1, stdout: '', stderr: `[exec-agent invalid JSON: ${e.message}]`, timed_out: false };
+            }
+            const fullOutput = (result.stdout || '') + (result.stderr ? `\n[stderr]\n${result.stderr}` : '');
+            const finalStatus = (result.exit_code === 0 && !result.timed_out) ? 'done' : 'failed';
+            const appendMsg = result.timed_out ? `\n\n[TIMEOUT after ${timeoutSec}s — exec-agent killed]` : '';
+            const safeOutput = sanitizeOutput(fullOutput + appendMsg);
+            try {
+              await db.query(
+                `UPDATE soc_queue_items SET status=$1, output=$2, completed_at=NOW() WHERE id=$3 AND status='running'`,
+                [finalStatus, safeOutput, item.id]
+              );
+              await db.query(
+                `UPDATE agent_audit_log SET status=$1, completed_at=NOW(), output=$2 WHERE session_id=$3 AND status='running'`,
+                [finalStatus === 'done' ? 'completed' : 'failed', safeOutput, sessionId]
+              );
+              await syncOffenseOutcome(item.id, finalStatus === 'done' ? 'success' : 'failed');
+            } catch (err) {
+              console.error(`[soc queue run http] DB write failed for item ${item.id}:`, err.message);
+            }
+            broadcast({
+              type: 'socStepDone',
+              engagement_id: item.engagement_id,
+              item_id: item.id,
+              session_id: sessionId,
+              status: finalStatus,
+              timed_out: !!result.timed_out,
+              ts: Date.now(),
+              latency_ms: Date.now() - t0,
+              transport: 'http',
+            });
+          })();
+          return true; // HTTP path handled — skip the SSH spawn block below.
+        }
+
         const proc = execHost === 'dev-01'
           ? spawn(
               'ssh',
