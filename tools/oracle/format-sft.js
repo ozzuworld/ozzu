@@ -166,6 +166,10 @@ async function main() {
   console.error(`[format-sft] processed: ${total}, trained: ${trained}, eval: ${evaled}, skipped: ${skipped}`);
 }
 
+// dir_1781203380739: export the prompt builders so the eval harness (eval-offense.js)
+// prompts the model with the EXACT same format it was trained on (train == infer).
+module.exports = { SYSTEM_PROMPT, buildUserContent, buildAssistantContent };
+
 if (require.main === module) {
   main().catch(e => { console.error("format-sft error:", e); process.exit(1); });
 }
