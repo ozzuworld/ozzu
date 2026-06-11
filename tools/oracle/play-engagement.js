@@ -179,6 +179,13 @@ async function main() {
   const outFile = arg("out", null);
   const engagement_id = arg("id", `OPUS-${variant}-${Date.now()}`);
 
+  // dir_1781203380739 (Phase 2b): merge extra variant scopes (vulhub diversity labs) from a config file.
+  const cfgPath = arg("variants-config", null);
+  if (cfgPath) {
+    try { Object.assign(VARIANT_SCOPES, JSON.parse(fs.readFileSync(cfgPath, "utf8"))); }
+    catch (e) { console.error(`[play] failed to load variants-config ${cfgPath}: ${e.message}`); process.exit(2); }
+  }
+
   console.error(`[play] variant=${variant} max_iter=${max_iter} id=${engagement_id}`);
 
   const traj = await playEngagement({ variant, max_iter, engagement_id });

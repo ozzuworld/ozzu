@@ -18,6 +18,12 @@ const VARIANT_SCOPES = {
   v1: { allowed: ["10.10.20.10", "10.10.20.20", "10.10.20.30"], prohibited: ["10.10.20.1"] },
   v2: { allowed: ["10.10.21.10", "10.10.21.20", "10.10.21.30"], prohibited: ["10.10.21.1"] },
 };
+// dir_1781203380739 (Phase 2b): merge vulhub variant scopes so diverse-class wins format correctly.
+const cfgArgIdx = process.argv.indexOf("--variants-config");
+if (cfgArgIdx >= 0) {
+  try { Object.assign(VARIANT_SCOPES, JSON.parse(require("fs").readFileSync(process.argv[cfgArgIdx + 1], "utf8"))); }
+  catch (e) { console.error(`[play-to-scenarios] variants-config load failed: ${e.message}`); }
+}
 
 function histItem(it) {
   return {
