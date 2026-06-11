@@ -137,7 +137,7 @@ async function playEngagement({ variant, max_iter, engagement_id }) {
       oracle_intent: r.oracle_intent,
       oracle_expected: r.oracle_expected,
       command: cmd,
-      output_excerpt: (exec.output || "").slice(0, 500),
+      output_excerpt: (exec.output || "").slice(0, 2500),   // dir_1781203380739: was 500 — truncated multi-host nmap, blinding host-targeting
       exit_code: exec.exit_code,
       timed_out: exec.timed_out,
       duration_s: Number(exec.duration_s.toFixed(2)),
@@ -156,7 +156,7 @@ async function playEngagement({ variant, max_iter, engagement_id }) {
       status: exec.exit_code === 0 ? "done" : "failed",
       intent: r.oracle_intent,
       command: cmd,
-      output_excerpt: (exec.output || "").slice(0, 800),
+      output_excerpt: (exec.output || "").slice(0, 2500),   // dir_1781203380739: match iter record + eval excerpt
     });
 
     if (flagMatch) {

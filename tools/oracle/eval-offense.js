@@ -14,6 +14,7 @@
 const fs = require("fs");
 const { spawn } = require("child_process");
 const { SYSTEM_PROMPT, buildUserContent } = require("./format-sft");
+const { detectExploitation } = require("./exploitation-signals");
 
 const MODEL_URL = process.env.OFFENSE_MODEL_URL || "http://107.170.49.159:8000/v1";
 const SSH_HOST = process.env.LAB_SSH_HOST || "dev-01";
@@ -91,6 +92,9 @@ async function runEngagement({ variant, model, max_iter, id }) {
   }
   if (!traj.end_reason) traj.end_reason = "max_iter_reached";
   traj.total_iters = traj.iters.length;
+  const ex = detectExploitation(traj.iters);   // skill metric, independent of flag-discoverability
+  traj.exploitation_achieved = ex.achieved;
+  traj.exploitation_signals = ex.signals;
   return traj;
 }
 
@@ -102,20 +106,22 @@ async function main() {
   const outFile = arg("out", null);
 
   console.error(`[eval] variant=${variant} model=${model} n=${n} max_iter=${max_iter} url=${MODEL_URL}`);
-  let wins = 0; const results = [];
+  let wins = 0, exploited = 0; const results = [];
   for (let k = 0; k < n; k++) {
     const id = `EVAL-${variant}-${model}-${k}`;
     const t = await runEngagement({ variant, model, max_iter, id });
     results.push(t);
     if (t.flag_captured) wins++;
-    console.error(`[eval] ${k + 1}/${n} ${variant} flag=${t.flag_captured} iters=${t.total_iters} end=${t.end_reason} ${t.flag_value || ""}`);
+    if (t.exploitation_achieved) exploited++;
+    console.error(`[eval] ${k + 1}/${n} ${variant} flag=${t.flag_captured} exploit=${t.exploitation_achieved}[${(t.exploitation_signals || []).join(",")}] iters=${t.total_iters} end=${t.end_reason} ${t.flag_value || ""}`);
     if (outFile) fs.appendFileSync(outFile, JSON.stringify(t) + "\n");
   }
   const rate = +(wins / n * 100).toFixed(0);
+  const exRate = +(exploited / n * 100).toFixed(0);
   const itf = results.filter(r => r.flag_captured).map(r => r.total_iters);
   const avgIters = itf.length ? +(itf.reduce((a, b) => a + b, 0) / itf.length).toFixed(1) : null;
-  const summary = { variant, model, n, wins, capture_rate_pct: rate, avg_iters_to_flag: avgIters };
-  console.error(`[eval] === ${variant} ${model}: ${wins}/${n} captured (${rate}%), avg iters-to-flag ${avgIters} ===`);
+  const summary = { variant, model, n, wins, capture_rate_pct: rate, exploited, exploitation_rate_pct: exRate, avg_iters_to_flag: avgIters };
+  console.error(`[eval] === ${variant} ${model}: capture ${wins}/${n} (${rate}%) | EXPLOIT ${exploited}/${n} (${exRate}%) | avg iters-to-flag ${avgIters} ===`);
   process.stdout.write(JSON.stringify(summary) + "\n");
 }
 
