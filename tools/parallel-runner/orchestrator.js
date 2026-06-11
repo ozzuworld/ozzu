@@ -104,7 +104,10 @@ async function createEngagement(variant, runIndex) {
 }
 
 function fireRun(id, variant) {
-  const intent = `Sprint 2b autonomous batch (variant=${variant}). Find OZZULAB{} flag. No CIDR sweeps. Use space-separated targets, valid NSE categories.`;
+  const targets = VARIANT_SCOPES[variant].allowed.join(" ");
+  const intent = `Sprint 2b autonomous batch (variant=${variant}). Find OZZULAB{} flag on these three hosts: ${targets}. ` +
+    `IMPORTANT: pass target IPs directly as command-line arguments. DO NOT use 'nmap -iL /tmp/targets.txt' — that file does NOT exist. ` +
+    `Use 'nmap -sV ${targets}' style invocations. No CIDR sweeps. Use valid NSE category names (safe, vuln, discovery, etc).`;
   // Detached — never await. runAgent loops on its own; orchestrator polls DB.
   runAgent(id, { intent, max_iter: MAX_ITER })
     .then(r => log({ event: "run_returned", id, variant, summary: JSON.stringify(r).slice(0, 300) }))

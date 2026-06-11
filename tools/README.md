@@ -32,6 +32,8 @@ Each tool's directory MUST contain a `README.md` with these sections (in this or
 | [oracle](oracle/) | Claude-as-teacher SFT trajectory pipeline — replays SOC engagement state to Opus (Max-plan OAuth), captures optimal commands for offense-model distillation | working (2026-06-09) |
 | [executor-agent](executor-agent/) | HTTP shim on dev-01 replacing per-command SSH dispatch — keep-alive over WG, scales SOC-engagement concurrency past sshd MaxSessions limit | working (2026-06-09) |
 | [ozzu-lab-cmdinj](ozzu-lab-cmdinj/) | OzzuLab variant #2 — command-injection in diagnose.php (vs variant #1 LFI in view.php). Different network 10.10.21.0/24, different vuln class for SFT diversity | working (2026-06-09) |
+| [parallel-runner](parallel-runner/) | Sprint 2b data harvester — keeps N OzzuLab engagements running concurrently across lab variants, autosplits work. Hit 50 engagements / 915 raw scenarios in 1 hour batch | working (2026-06-11) |
+| [sft-train](sft-train/) | Sprint 3 SFT pipeline — LLaMA-Factory QLoRA config + procedure for fine-tuning Qwen3-Coder-30B on the Opus trajectory dataset on MI300X. ChatML format via format-sft.js. | ready-to-run (2026-06-11) |
 
 ## Adding a new tool
 
