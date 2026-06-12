@@ -214,6 +214,10 @@ def build_models(args):
     # Add a NEW LoRA on top for RL updates (keeps SFT adapter as the anchor).
     # Simpler approach: just keep merging the SFT adapter and train it further.
     policy.train()
+    # dir_1781203380739: two 30B MoE models (policy+ref) OOM the H200 at seq 4096. Gradient
+    # checkpointing cuts the policy's stored activations; pair with --max-len 2048.
+    policy.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    policy.enable_input_require_grads()
 
     log.info("loading frozen reference (base + sft adapter, no new training)")
     ref_base = AutoModelForCausalLM.from_pretrained(
