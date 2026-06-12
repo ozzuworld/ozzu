@@ -107,29 +107,39 @@ Record iter-to-flag, command/intent diversity, flag captured y/n. Compare to Run
 - **R6 — Targeted retrieval, honestly.** Commit to reading every line, or say "I'll grep for the anchor." Never pass a partial read as a full read.
 - **R7 — Pre-harvest / pre-train gate (NEW): name the held-out test first.** Before spending ANY quota or compute, write down the held-out scenario the result must pass that is NOT in the training set, and the memorization-null ("if it only memorizes, it passes [train] and fails [held-out]"). Can't name one → STOP, you are memorizing. Count distinct vuln *classes* (not flag paths) — <5 → STOP unless explicitly stamped "plumbing test."
 - **R8 — The forcing function is the harness, not willpower (NEW).** The recurring failure ("execute the visible step over reasoning whether it's correct") is a gradient problem — launching compute shows progress, designing the experiment shows nothing until later. Fix structurally: a `pre-harvest-gate.sh` that refuses to start a harvest/train run unless `EXPERIMENT.md` exists with R7's fields filled. Wire it into `play-parallel.sh` and the SFT entry point. A precondition can't be skipped under pressure; a habit can.
+- **R9 — Test the goal, not the plumbing (NEW 2026-06-11 PM).** The trap: a plumbing issue surfaces (JSON format crash, harvester bug, excerpt truncation), you fix it, and *feel* like you made progress — but it didn't move the model toward a captured flag. Before fixing any infrastructure, ask: **does this block the path to capture?** If not, bank it and move on. Phase 2 burned hours polishing diversity + format plumbing and produced a model WORSE than the pilot. Only the capability lever (GRPO) moves the goal; everything else is in service of running it, not a substitute for it.
 
 ## LOCKED DECISIONS (do not relitigate without explicit user request)
 
 - Base model: **Qwen3-Coder-30B-A3B-Instruct** (BF16 train / FP8 infer).
 - Teacher: **Opus via Max-plan OAuth** (recorded model `claude-opus-4-6`; the "4.7" label was aspirational). **NOT free — quota-metered.**
-- Labs: **OzzuLab v1 (LFI) + v2 (cmd-inject)** today; **widening to ≥10 vuln classes via Vulhub is now ON the critical path, not deferred** (deferring diversity was the bug).
+- Labs: **OzzuLab v1 (LFI) + v2 (cmd-inject)** — clean payloads, these are the GRPO classes. **Vulhub diversity widening: TESTED and PARKED** — diversity-SFT did NOT lift generalization (see PHASE 2 VERDICT). Do not reopen without a new reason.
 - SFT method: **QLoRA rank 32, alpha 64, attention-only** (MoE expert MLPs untouched).
 - RL method: **GRPO with the ONE reconciled lab-verify reward.**
 - Success criterion: **`OZZULAB{}` captured autonomously on a HELD-OUT variant.**
 
-## CURRENT STATE (as of 2026-06-11, Fable takeover)
+## CURRENT STATE (as of 2026-06-11 late — post Phase 2b)
 
-| Sprint / step | Status | Result |
+| Step | Status | Result |
 |---|---|---|
-| Sprint 1 (Coder baseline) | ✅ done | Run #13 |
-| Sprint 2/2c Opus harvest | ✅ done — wrong shape | 866 single-step trajectories |
-| Lab-verify sweep (`replay-and-verify.js`) | ✅ done today | 0 flags, 3 winners / 866 — disproved the "verify existing data" plan |
-| v2 end-to-end play-harvest (`play-engagement.js`) | ✅ ~134 engagements, killed at user request | ~98% flag capture BUT 100% v1 LFI (memorization-shaped) |
-| Sprint 3 SFT v1 | ✅ done (twice) | eval_loss 0.58, Run #14 = 22 findings / 0 flags, Run #15 = 13 / 0 |
-| Sprint 4 GRPO round-0 | ⚠️ noise (8 rollouts, K=1) | broke schema, Run #15 GRPO crashed iter 5 |
-| Phase 0 reward reconcile | ⏳ next (free) | — |
-| Phase 1 PILOT (v1 SFT, v1+v2 eval) | ⏳ pending user go | the go/no-go on generalization |
-| Phases 2–5 | ⏳ gated on pilot | — |
+| Phase 0 (reward reconcile, trainer rescue, logging) | ✅ done + committed | reward.py dawdle+inversion fixed (proven); sft_direct.py rescued into repo |
+| Phase 1 PILOT v1 (SFT on 67 v1 LFI wins) | ✅ done | **BEST MODEL.** Held-out v2 (cmd-inject, never trained): **50% exploit / 0% capture** — real RCE-on-novel-class skill transfer. v1: 2/8 capture, 6/8 exploit. Adapter: `private/sft-adapters/pilot-v1-2026-06-11`. |
+| Phase 1b pilot-v2 (retrain on replay-rebuilt full-ctx data) | ✅ done — REGRESSED | worse than pilot-v1. Replay added history-inconsistency noise. Lesson: harvest fresh, never retrofit context via replay. |
+| Phase 2b DIVERSITY (6 vulhub classes + v1 = 7-class SFT) | ✅ done — **NEGATIVE RESULT** | diverse model WORSE than pilot everywhere, captured 0 flags. See PHASE 2 VERDICT. |
+| **GRPO on the pilot** | ⏳ **THE NEXT STEP** | the capture lever — still untried |
+
+## PHASE 2 VERDICT — diversity is NOT the lever (settled, clean data)
+
+7-class diverse model vs single-class pilot, hardened harness (format crashes removed):
+- **Held-out v2: 50% exploit — IDENTICAL to the pilot.** Diversity did not lift generalization.
+- **v1: 67% exploit / 0 capture vs pilot 75% / 2 captures.** Diversity COST sharpness (generalist tax).
+- **weblogic (a TRAINED class): 0/4, 2/4 crashed** — the heavy XML deserialization payload breaks the `{reasoning,command}`-as-JSON output; the model can't reliably emit complex exploits through this protocol.
+- **Diverse model captured 0 flags total; pilot captured 2.**
+
+Banked conclusions (do NOT re-test):
+1. **Diversity-SFT ≠ generalization lever.** More vuln classes = more technique coverage, NOT the planning/capture that's missing. The bottleneck is the GAME (plan → read feedback → commit → exfiltrate), not the MOVES.
+2. **The output FORMAT is fragile for heavy payloads.** Protocol redesign (command as raw text, not a JSON-escaped string) is needed BEFORE training complex-payload classes — but NOT before GRPO on v1/v2 (clean payloads).
+3. **The pilot is our best model** and the right base for GRPO. Diversity work + diverse model are PARKED.
 
 ## FILE LOCATIONS
 
@@ -143,6 +153,15 @@ Record iter-to-flag, command/intent diversity, flag captured y/n. Compare to Run
 - GRPO training: `/home/gcp/ozzu/tools/grpo/` (`reward.py` ← reconcile with `replay-and-verify.js`)
 - Lab orchestrator: `/home/gcp/ozzu/tools/parallel-runner/`
 
-## NEXT CONCRETE ACTION
+## NEXT CONCRETE ACTION — GRPO on the pilot (the capture lever)
 
-Phase 0 (free): reconcile the reward function + add harvest logging. Then Phase 1 PILOT: SFT on the v1 data we already have, eval on v1 AND held-out v2 — the v1→v2 gap is the decision. **Gated on King Kazuma's go because Phase 1 spends one SFT cycle (~17 min H200 + the rental).** No new Opus harvest until after the pilot tells us whether the approach generalizes at all.
+Everything points here. SFT taught the moves (exploitation transfers — ~50% on a held-out class). The gap is the GAME: **0 captures — the model gets RCE but can't turn it into an exfiltrated flag.** GRPO is the only lever that targets that, because it rewards the OUTCOME instead of imitating steps. We have circled this for an entire session without running it. Run it.
+
+1. **Base = the PILOT adapter** (`/root/sft-out/pilot-v1`, durable copy `private/sft-adapters/pilot-v1-2026-06-11`). NOT the diverse model.
+2. **Classes = v1 (LFI) + v2 (cmd-inject) only.** Clean payloads; the JSON output format works. No vulhub/heavy-payload classes until the protocol is redesigned.
+3. **BUILD THE MISSING PIECE FIRST: a GRPO data generator.** GRPO needs K candidate actions per state, each lab-verified. `play-engagement.js` produces ONE action per state — it cannot feed GRPO. This generator does not exist yet and is the real blocker between SFT and GRPO.
+4. **Reward = the reconciled `reward.py`** (flag dominates, step-discount, no dawdle — already fixed and proven). Score by lab-verify execution.
+5. **GRPO: K=8, only on states where the pilot wins 20–80%** (always-win/always-lose = zero within-group variance = wasted rollouts). LR 1e-7, β (KL) 0.2. Rsync adapter the instant it writes (R1).
+6. **Eval = held-out capture.** The locked success criterion. The question GRPO answers: does it turn 50%-exploit / 0%-capture into actual held-out captures? If yes → goal. If it plateaus → that plateau is the first real evidence the 30B base is the ceiling (then, and only then, consider a bigger base).
+
+PARKED (do not resume without a reason): vulhub diversity harvest, the diverse model, the output-format redesign. They are learnings, not active work.
