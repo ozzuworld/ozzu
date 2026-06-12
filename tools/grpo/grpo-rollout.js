@@ -83,7 +83,7 @@ function parseAction(raw) {
 }
 
 // One full rollout: policy plays the engagement; record the GRPO/reward step shape.
-async function rollout({ variant, model, max_iter, group, idx }) {
+async function rollout({ variant, model, max_iter, group, idx, temp = 0.7 }) {
   const scope = VARIANT_SCOPES[variant];
   const state = { objective: scope.objective, allowed: scope.allowed, prohibited: scope.prohibited, synthetic_lab: true, queue_history: [], iter: 0, max_iter };
   const traj = { engagement_id: `GRPO-${variant}-g${group}-${idx}`, variant, group, trajectory: [], flag_captured: false, flag_value: null };
@@ -93,8 +93,8 @@ async function rollout({ variant, model, max_iter, group, idx }) {
     state.iter = i;
     const prompt = buildUserContent(state);     // EXACT SFT-format user message
     let raw = null, action = null;
-    for (const temp of [0.7, 1.0]) {            // GRPO needs diverse samples -> higher temp
-      try { raw = await askModel(model, [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: prompt }], temp); action = parseAction(raw); break; }
+    for (const tmp of [temp, Math.min(temp + 0.3, 1.2)]) {   // sample; retry hotter if unparsable
+      try { raw = await askModel(model, [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: prompt }], tmp); action = parseAction(raw); break; }
       catch (_) { action = null; }
     }
     if (!action || !action.command || !action.command.trim()) {
@@ -140,16 +140,23 @@ async function main() {
   fs.writeFileSync(outFile, "");
   console.error(`[grpo-rollout] model=${model} variants=${variants} K=${K} max_iter=${max_iter}`);
 
+  const CONC = parseInt(arg("conc", "6"), 10);   // safe for read-heavy v1 (LFI/DB reads, no state writes)
+  const TEMP = parseFloat(arg("temp", "0.7"));
   let group = 0;
   for (const variant of variants) {
-    let wins = 0;
-    for (let idx = 0; idx < K; idx++) {
-      const t = await rollout({ variant, model, max_iter, group, idx });
-      fs.appendFileSync(outFile, JSON.stringify(t) + "\n");
-      if (t.flag_captured) wins++;
-      console.error(`[grpo-rollout] ${variant} g${group} #${idx + 1}/${K} flag=${t.flag_captured} steps=${t.trajectory.length}`);
-    }
-    console.error(`[grpo-rollout] === ${variant} group ${group}: ${wins}/${K} captured (need MIX for advantage signal) ===`);
+    let wins = 0, done = 0;
+    const queue = Array.from({ length: K }, (_, idx) => idx);
+    const worker = async () => {
+      while (queue.length) {
+        const idx = queue.shift();
+        const t = await rollout({ variant, model, max_iter, group, idx, temp: TEMP });
+        fs.appendFileSync(outFile, JSON.stringify(t) + "\n");   // sync write = atomic per line
+        if (t.flag_captured) wins++;
+        console.error(`[grpo-rollout] ${variant} #${++done}/${K} flag=${t.flag_captured} steps=${t.trajectory.length}`);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONC, K) }, worker));
+    console.error(`[grpo-rollout] === ${variant}: ${wins}/${K} captured (need a MIX per group of 8) ===`);
     group++;
   }
   console.error(`[grpo-rollout] DONE -> ${outFile}`);
