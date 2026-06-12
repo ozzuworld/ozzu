@@ -49,21 +49,37 @@ function runOnDev01(command) {
   });
 }
 
-async function askModel(model, messages) {
+async function askModel(model, messages, temp = 0.2, maxTokens = 2560) {
   const res = await fetch(`${MODEL_URL}/chat/completions`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, temperature: 0.2, stream: false, max_tokens: 1024 }),
+    body: JSON.stringify({ model, messages, temperature: temp, stream: false, max_tokens: maxTokens }),
   });
   if (!res.ok) throw new Error(`vllm ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const j = await res.json();
   return j.choices?.[0]?.message?.content || "";
 }
 
+// dir_1781203380739: exploit payloads (pipes, base64, binary) routinely break strict JSON.
+// Recover the command best-effort instead of crashing the whole engagement.
+function extractField(s, field) {
+  const m = new RegExp(`"${field}"\\s*:\\s*"`).exec(s);
+  if (!m) return null;
+  const rest = s.slice(m.index + m[0].length);
+  const close = rest.match(/"\s*[,}]/);
+  const val = (close ? rest.slice(0, close.index) : rest.replace(/"\s*$/, ""))
+    .replace(/\\"/g, '"').replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\\\/g, "\\").trim();
+  return val || null;
+}
 function parseAction(raw) {
   let s = (raw || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
   const m = s.match(/\{[\s\S]*\}/);          // tolerate leading prose
   if (m) s = m[0];
-  return JSON.parse(s);
+  try { return JSON.parse(s); }
+  catch (e) {
+    const cmd = extractField(s, "command");
+    if (cmd) return { command: cmd, intent_class: extractField(s, "intent_class") || "exploit_probe", reasoning: extractField(s, "reasoning") || "" };
+    throw e;
+  }
 }
 
 async function runEngagement({ variant, model, max_iter, id }) {
@@ -71,16 +87,22 @@ async function runEngagement({ variant, model, max_iter, id }) {
   const traj = { engagement_id: id, variant, model, iters: [], flag_captured: false, flag_value: null, end_reason: null };
   const state = { objective: scope.objective, allowed: scope.allowed, prohibited: scope.prohibited, synthetic_lab: true, queue_history: [], iter: 0, max_iter };
 
+  let consecFail = 0;
   for (let i = 1; i <= max_iter; i++) {
     state.iter = i;
-    let action;
-    try {
-      const raw = await askModel(model, [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: buildUserContent(state) }]);
-      action = parseAction(raw);
-    } catch (e) { traj.end_reason = `model_error_iter_${i}:${String(e.message).slice(0, 80)}`; break; }
-
+    let action = null;
+    for (const temp of [0.2, 0.6]) {   // dir_1781203380739: retry once hotter if the output won't parse
+      try { action = parseAction(await askModel(model, [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: buildUserContent(state) }], temp)); break; }
+      catch (_) { action = null; }
+    }
+    if (!action || !action.command || !action.command.trim()) {
+      // recover instead of crashing the engagement on one malformed output — skip, keep playing
+      traj.iters.push({ iter: i, intent: "parse_fail", command: null, output_excerpt: "", exit_code: -1, flag_captured: false });
+      if (++consecFail >= 4) { traj.end_reason = `parse_fail_x4_iter_${i}`; break; }
+      continue;
+    }
+    consecFail = 0;
     const cmd = action.command;
-    if (!cmd || !cmd.trim()) { traj.end_reason = `empty_command_iter_${i}`; break; }
 
     const exec = await runOnDev01(cmd);
     const flagMatch = (exec.output || "").match(FLAG_RE);
@@ -104,6 +126,12 @@ async function main() {
   const n = parseInt(arg("n", "10"), 10);
   const max_iter = parseInt(arg("max-iter", "12"), 10);
   const outFile = arg("out", null);
+
+  const cfgPath = arg("variants-config", null);
+  if (cfgPath) {
+    try { Object.assign(VARIANT_SCOPES, JSON.parse(fs.readFileSync(cfgPath, "utf8"))); }
+    catch (e) { console.error(`[eval] variants-config load failed: ${e.message}`); process.exit(2); }
+  }
 
   console.error(`[eval] variant=${variant} model=${model} n=${n} max_iter=${max_iter} url=${MODEL_URL}`);
   let wins = 0, exploited = 0; const results = [];
