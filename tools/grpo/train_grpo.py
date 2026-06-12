@@ -37,7 +37,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel, LoraConfig, get_peft_model
 
 sys.path.insert(0, str(Path(__file__).parent))
-from reward import score_trajectory, grpo_advantages
+from reward import (score_trajectory, grpo_advantages,
+                    per_step_rewards, discounted_returns_to_go, grpo_step_advantages)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("grpo")
@@ -56,32 +57,43 @@ def parse_args():
     p.add_argument("--micro-batch", type=int, default=1)
     p.add_argument("--max-len", type=int, default=4096)
     p.add_argument("--grad-accum", type=int, default=4)
+    # dir_1781203380739: per-step credit assignment (see reward.py). stepwise =
+    # discounted return-to-go per step (concentrates credit on the close); trajectory =
+    # the old single-advantage-per-trajectory behavior (gamma is ignored), kept for A/B.
+    p.add_argument("--credit", choices=["stepwise", "trajectory"], default="stepwise")
+    p.add_argument("--gamma", type=float, default=0.9, help="discount for stepwise return-to-go")
     return p.parse_args()
 
 
-def load_groups(path: str, group_size: int):
-    """Read JSONL trajectories, partition into groups, score each group.
+def load_groups(path: str, group_size: int, credit: str = "stepwise", gamma: float = 0.9):
+    """Read JSONL trajectories, partition into groups, attach a PER-STEP advantage.
 
-    Yields: list of dicts with keys {trajectory, return, advantage}.
+    Each returned scored entry carries {traj, step_adv} where step_adv[i] is the
+    advantage for trajectory step i (aligned to traj["trajectory"]). For
+    credit="stepwise" this is group-normalized discounted return-to-go (close steps
+    get the most credit); for credit="trajectory" every step shares one
+    group-relative advantage (the old behavior).
     """
     with open(path) as fh:
         trajs = [json.loads(line) for line in fh if line.strip()]
     if not trajs:
         raise SystemExit(f"no trajectories in {path}")
 
-    log.info(f"loaded {len(trajs)} trajectories from {path}")
+    log.info(f"loaded {len(trajs)} trajectories from {path} (credit={credit} gamma={gamma})")
     groups = []
     for i in range(0, len(trajs), group_size):
         chunk = trajs[i:i + group_size]
         if len(chunk) < 2:
             continue  # need at least 2 for relative advantage
-        scored = []
-        for t in chunk:
-            _, total = score_trajectory(t["trajectory"])
-            scored.append({"traj": t, "return": total})
-        advs = grpo_advantages([s["return"] for s in scored])
-        for s, a in zip(scored, advs):
-            s["advantage"] = a
+        step_rewards = [per_step_rewards(t["trajectory"]) for t in chunk]
+        if credit == "stepwise":
+            group_returns = [discounted_returns_to_go(sr, gamma) for sr in step_rewards]
+            step_advs = grpo_step_advantages(group_returns)
+        else:  # trajectory: one advantage per traj, broadcast to all its steps
+            totals = [sum(sr) for sr in step_rewards]
+            tadv = grpo_advantages(totals)
+            step_advs = [[a] * len(sr) for a, sr in zip(tadv, step_rewards)]
+        scored = [{"traj": t, "step_adv": sa} for t, sa in zip(chunk, step_advs)]
         groups.append(scored)
     log.info(f"composed {len(groups)} groups")
     return groups
@@ -144,8 +156,8 @@ class StepDataset(Dataset):
         for group in groups:
             for s in group:
                 traj = s["traj"]["trajectory"]
-                adv = s["advantage"]
-                for step in traj:
+                step_adv = s["step_adv"]   # per-step advantage, aligned to traj
+                for step, adv in zip(traj, step_adv):
                     # dir_1781203380739: use the EXACT prompt+completion the rollout recorded
                     # (format-consistent with SFT), not the old re-rendered stub (wrong IPs / no history).
                     if not step.get("command") or not step.get("prompt") or step.get("completion") is None:
@@ -163,20 +175,31 @@ class StepDataset(Dataset):
 
     def __getitem__(self, i):
         ex = self.examples[i]
-        # Build chat-template-rendered prompt + assistant completion.
         messages = [
             {"role": "system",    "content": SYSTEM_PROMPT},
             {"role": "user",      "content": ex["prompt"]},
             {"role": "assistant", "content": ex["completion"]},
         ]
-        text = self.tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-        enc = self.tok(text, max_length=self.max_len, truncation=True, return_tensors="pt")
-        input_ids = enc.input_ids[0]
-        # Find where the assistant turn starts so we can mask out the prompt tokens.
+        # Render the prompt (through the assistant-open marker) and the full text;
+        # the completion is the tail of full beyond the prompt. Tokenize the two
+        # pieces SEPARATELY so the completion is guaranteed to survive truncation.
         prompt_text = self.tok.apply_chat_template(messages[:-1], tokenize=False, add_generation_prompt=True)
-        prompt_ids = self.tok(prompt_text, max_length=self.max_len, truncation=True, return_tensors="pt").input_ids[0]
-        labels = input_ids.clone()
-        labels[: len(prompt_ids)] = -100
+        full_text   = self.tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+        completion_text = full_text[len(prompt_text):] if full_text.startswith(prompt_text) else \
+            self.tok.apply_chat_template([messages[-1]], tokenize=False, add_generation_prompt=False)
+        prompt_ids     = self.tok(prompt_text, add_special_tokens=False).input_ids
+        completion_ids = self.tok(completion_text, add_special_tokens=False).input_ids
+        # dir_1781203380739: the CLOSE step is the LONGEST-prompt step in each
+        # trajectory (queue_history grows every iter). Right-truncation drops the
+        # completion (the flag grab) and zeros its gradient — silently negating
+        # credit assignment (and it crippled rounds 0-2). Instead reserve room for
+        # the WHOLE completion and LEFT-trim the oldest prompt history.
+        keep_completion = completion_ids[: self.max_len - 1]   # completion never dropped
+        max_prompt = max(1, self.max_len - len(keep_completion))
+        if len(prompt_ids) > max_prompt:
+            prompt_ids = prompt_ids[-max_prompt:]              # keep the most RECENT context
+        input_ids = torch.tensor(prompt_ids + keep_completion, dtype=torch.long)
+        labels    = torch.tensor([-100] * len(prompt_ids) + keep_completion, dtype=torch.long)
         return {
             "input_ids": input_ids,
             "labels":    labels,
@@ -262,11 +285,18 @@ def compute_loss(policy, ref, batch, beta: float):
 
 def main():
     args = parse_args()
-    groups = load_groups(args.trajectories, args.group_size)
+    groups = load_groups(args.trajectories, args.group_size, args.credit, args.gamma)
     tok, policy, ref = build_models(args)
     ds = StepDataset(groups, tok, args.max_len)
     if len(ds) == 0:
         raise SystemExit("no usable (step, advantage) examples after filtering — bad trajectories?")
+
+    # dir_1781203380739: prove the completion-preserving fix. NO example may have all
+    # its labels masked — that was the round0-2 truncation bug that zeroed the close.
+    masked_tok = [int((ds[j]["labels"] != -100).sum()) for j in range(len(ds))]
+    all_masked = sum(1 for m in masked_tok if m == 0)
+    log.info(f"label-token check: {all_masked}/{len(ds)} examples fully masked (want 0); "
+             f"{sum(masked_tok)} supervised tokens, max completion {max(masked_tok)} tok")
 
     pad_id = tok.pad_token_id
     loader = DataLoader(ds, batch_size=args.micro_batch, shuffle=True,
