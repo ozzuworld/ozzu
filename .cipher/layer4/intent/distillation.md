@@ -2,7 +2,7 @@
 
 **Read every session before touching anything related to Sprint 2c, Sprint 3, Sprint 4, OzzuLab runs, the offense model, or any Opus-as-teacher work. This file is the source of truth. TaskList titles go stale — this file does not.**
 
-Last reviewed: 2026-06-11 (Fable takeover — rewritten after the lab-verify sweep + v2 end-to-end play-harvest exposed that the prior plan was chasing winners that don't exist).
+Last reviewed: 2026-06-12 (GRPO rounds 0–3 ran: in-distribution capture SOLVED, self-hosted, zero Opus; held-out v2 still 0 — see CURRENT STATE + NEXT CONCRETE ACTION). Prior review 2026-06-11 (Fable takeover — rewritten after the lab-verify sweep + v2 end-to-end play-harvest exposed that the prior plan was chasing winners that don't exist).
 
 ---
 
@@ -118,15 +118,20 @@ Record iter-to-flag, command/intent diversity, flag captured y/n. Compare to Run
 - RL method: **GRPO with the ONE reconciled lab-verify reward.**
 - Success criterion: **`OZZULAB{}` captured autonomously on a HELD-OUT variant.**
 
-## CURRENT STATE (as of 2026-06-11 late — post Phase 2b)
+## CURRENT STATE (as of 2026-06-12 — post GRPO round 3)
 
 | Step | Status | Result |
 |---|---|---|
 | Phase 0 (reward reconcile, trainer rescue, logging) | ✅ done + committed | reward.py dawdle+inversion fixed (proven); sft_direct.py rescued into repo |
-| Phase 1 PILOT v1 (SFT on 67 v1 LFI wins) | ✅ done | **BEST MODEL.** Held-out v2 (cmd-inject, never trained): **50% exploit / 0% capture** — real RCE-on-novel-class skill transfer. v1: 2/8 capture, 6/8 exploit. Adapter: `private/sft-adapters/pilot-v1-2026-06-11`. |
+| Phase 1 PILOT v1 (SFT on 67 v1 LFI wins) | ✅ done | **BEST SFT MODEL.** Held-out v2 (cmd-inject, never trained): **50% exploit / 0% capture** — real RCE-on-novel-class skill transfer. v1: 2/8 capture, 6/8 exploit. Adapter: `private/sft-adapters/pilot-v1-2026-06-11`. |
 | Phase 1b pilot-v2 (retrain on replay-rebuilt full-ctx data) | ✅ done — REGRESSED | worse than pilot-v1. Replay added history-inconsistency noise. Lesson: harvest fresh, never retrofit context via replay. |
 | Phase 2b DIVERSITY (6 vulhub classes + v1 = 7-class SFT) | ✅ done — **NEGATIVE RESULT** | diverse model WORSE than pilot everywhere, captured 0 flags. See PHASE 2 VERDICT. |
-| **GRPO on the pilot** | ⏳ **THE NEXT STEP** | the capture lever — still untried |
+| **GRPO rounds 0–3 on the pilot (v1+v2)** | ✅ done 2026-06-12 — **IN-DIST CAPTURE SOLVED** | grpo3 captures **v1 75% (6/8)** @max_iter=30, self-hosted, **zero Opus**; edges pilot (63%) at equal budget. Rounds 0–2 were crippled by the close-step truncation bug, now fixed — see [[reference_sft_completion_truncation]]. Adapter: `private/grpo-adapters/round3-pilot-2026-06-12` (backed up, R1). Served via vLLM-LoRA on DO 107.170.49.159 (BILLING). |
+| **Iteration-cap finding** | ✅ banked 2026-06-12 | Eval `max_iter=15` was guillotining captures ~1 step before the flag. @30 capture TRIPLES (grpo3 0→6/8, pilot 2→5/8). Eval at ≥30; raise the cap before judging any "can't capture." See [[feedback_offense_eval_iteration_cap]]. **Prod offense harness likely capped too low — free capture win.** |
+| **Held-out v2 capture (the LOCKED goal)** | ❌ **NOT met** — 0/8, now **TRUSTWORTHY** | grpo3 gets RCE on the unseen box (**75% exploit**), 7/8 run the FULL 30 iters, captures 0. CAVEAT RESOLVED 2026-06-12: re-eval with a faithful parser → **0 parser-miss, 0 model-no-cmd**; the old "parse_fails" were CONTEXT-OVERFLOW (`api_error`), not command-truncation. The 0 is REAL. Root cause = **perseveration**: it hammers `exploit_probe ×18–27` (re-picking a lock it already owns) instead of sweeping the filesystem for the flag. Learned v1's specific close, not a general "I have RCE → hunt the flag" habit. |
+| Harness hardening (2026-06-12) | ✅ done — `tools/oracle/eval-offense.js` | (1) parser anchors close on last-quote-before-brace → faithful; (2) crash-safe + 3-way failure tagging (api_error/parse-miss/no-cmd) so overflow is never again miscounted as parse-fail; (3) history sliding-window (≤22K chars) so long engagements don't overflow 16K (was killing 3/8 exploiting v1 runs); (4) **flag-check hardened — a capture must be in OUTPUT, NOT in the model's command** → kills hallucinated/echoed `OZZULAB{}` fakes. NOT YET COMMITTED. |
+| v2 bootstrap SFT (2026-06-12) | ✅ done — **split: v1 BEST-EVER, v2 still 0** | Re-SFT on 616 pairs (275 v1 + 341 from `sprint2c-v2-opus-play`) → `qwen3-coder-30b-boot` (eval_loss 0.455; adapter `private/sft-adapters/bootstrap-v1v2-2026-06-12`, R1-backed). Eval @30 faithful harness: **v1 7/8 (88%, BEST EVER, all REAL flag2) · v2 0/8 (exploit 63%)**. **ROOT CAUSE: the "v2 demos" are MISLABELED v1 data** — they capture `flag2-internal-web-LFI` (65×) + `flag3-db-pivot` (2×), i.e. v1 closes, NOT the v2 cmd-inject close. So the bootstrap taught MORE v1 (→88%) and ZERO real v2 close. **The SFT-close mechanism WORKS (v1 proof); we fed it the wrong data.** No real v2-cmd-inject demos exist on disk — the prior session trusted the filename, never checked flag values. |
+| Vulhub generalization re-test (2026-06-12, fixed parser) | ✅ done — **diversity ceiling CONFIRMED (solid)** | Re-ran diverse model on vh-drupal/laravel/weblogic/nexus @30 with the faithful parser. parse_fail deaths **4/6/5/1 → 0/0/0/0** (parser confound REMOVED), but **exploit still 0/6** and all "captures" were HALLUCINATED fakes (caught by the flag-check fix). The 30B can't blind-exploit version-exact CVEs even with recon hints — a real capability ceiling, not scaffolding. "Diversity failed" now stands SOLIDLY. **Contrast — v1 captures verified REAL** (`flag2-internal-web-LFI`, `flag3-db-pivot-via-mysql`): the headline 75% is genuine, NOT inflated. Scaffolding was the wall on v1/v2 (the model's real domain); the CVE wall is genuine. |
 
 ## PHASE 2 VERDICT — diversity is NOT the lever (settled, clean data)
 
@@ -153,15 +158,23 @@ Banked conclusions (do NOT re-test):
 - GRPO training: `/home/gcp/ozzu/tools/grpo/` (`reward.py` ← reconcile with `replay-and-verify.js`)
 - Lab orchestrator: `/home/gcp/ozzu/tools/parallel-runner/`
 
-## NEXT CONCRETE ACTION — GRPO on the pilot (the capture lever)
+## NEXT CONCRETE ACTION — harvest REAL v2 demos (the bootstrap mechanism is proven) (2026-06-12 PM)
 
-Everything points here. SFT taught the moves (exploitation transfers — ~50% on a held-out class). The gap is the GAME: **0 captures — the model gets RCE but can't turn it into an exfiltrated flag.** GRPO is the only lever that targets that, because it rewards the OUTCOME instead of imitating steps. We have circled this for an entire session without running it. Run it.
+The bootstrap RAN and gave a split, clarifying result: **v1 → 88% (best ever, real flags) but v2 still 0.** Root cause: the supposed "v2 demos" (`sprint2c-v2-opus-play.jsonl`) actually capture **v1 flags** (`flag2-internal-web-LFI` 65×, `flag3-db-pivot` 2×) — they are MISLABELED v1 data. So the SFT taught MORE v1 and ZERO real v2 cmd-inject close.
 
-1. **Base = the PILOT adapter** (`/root/sft-out/pilot-v1`, durable copy `private/sft-adapters/pilot-v1-2026-06-11`). NOT the diverse model.
-2. **Classes = v1 (LFI) + v2 (cmd-inject) only.** Clean payloads; the JSON output format works. No vulhub/heavy-payload classes until the protocol is redesigned.
-3. **BUILD THE MISSING PIECE FIRST: a GRPO data generator.** GRPO needs K candidate actions per state, each lab-verified. `play-engagement.js` produces ONE action per state — it cannot feed GRPO. This generator does not exist yet and is the real blocker between SFT and GRPO.
-4. **Reward = the reconciled `reward.py`** (flag dominates, step-discount, no dawdle — already fixed and proven). Score by lab-verify execution.
-5. **GRPO: K=8, only on states where the pilot wins 20–80%** (always-win/always-lose = zero within-group variance = wasted rollouts). LR 1e-7, β (KL) 0.2. Rsync adapter the instant it writes (R1).
-6. **Eval = held-out capture.** The locked success criterion. The question GRPO answers: does it turn 50%-exploit / 0%-capture into actual held-out captures? If yes → goal. If it plateaus → that plateau is the first real evidence the 30B base is the ceiling (then, and only then, consider a bigger base).
+**What this PROVES (banked): SFT-on-close-demos WORKS** — real close demonstrations took v1 from 75%→88%. The mechanism is not the problem. **We have never actually trained on a real v2 cmd-inject capture.**
 
-PARKED (do not resume without a reason): vulhub diversity harvest, the diverse model, the output-format redesign. They are learnings, not active work.
+THE DATA SITUATION (re-verified 2026-06-12 — trust flag VALUES, never filenames):
+- ❌ `sprint2c-v2-opus-play.jsonl` — captures v1 flags (flag2/flag3), NOT v2 cmd-inject. Mislabeled. Do NOT reuse as v2.
+- ❌ `curated-v2*.jsonl` — replay-rebuilt, regressed pilot-v2. Do NOT use.
+- ✅ `private/sft-adapters/bootstrap-v1v2-2026-06-12` = `qwen3-coder-30b-boot`: the new best v1 model (88%). Real, banked.
+- The v2 eval lab's REAL flag is at an obscure cmd-inject-only path (`/var/lib/ops-tools/.flag`, per 16:04) — DIFFERENT from flag2. No demo on disk teaches finding it via RCE.
+
+THE STEPS:
+1. **Harvest REAL v2 demos:** Opus plays the ACTUAL v2 cmd-inject lab end-to-end; KEEP only trajectories whose `flag_value` is the v2 lab's real flag (assert it ≠ flag2/flag3 — the exact check that would have caught this). Costs Max quota (King Kazuma OK'd "keeping the x20", 16:48) — budget + report after first batch.
+2. **Re-SFT** combining v1 (proven) + the REAL v2 demos → eval v2 @30. This is the true test of whether the cmd-inject close is learnable (the channel may still break complex flag-grabs — the open risk from 16:04 / the vulhub ceiling).
+3. **If v2 captures → GRPO** (base = that adapter; K=8, 20–80%-win states; LR 1e-7, β(KL) 0.2), then eval a genuinely-unseen variant — the locked success criterion.
+
+ANTI-DRIFT (this session's lessons): (a) **verify flag VALUES, not filenames** — the whole v2-bootstrap detour ran on mislabeled data because a filename was trusted. (b) Harness bugs masked truth twice (parser, overflow) — confirm the harness faithfully runs what the model emits before any "can't" claim. (c) The faithful flag-check (output-not-command) is what made captures trustworthy — keep it. Stay filter-safe: sanitized telemetry only — [[reference_blocked_session_recovery]].
+
+PARKED (do not resume without a reason): vulhub diversity harvest + the diverse model (NEGATIVE result, settled).

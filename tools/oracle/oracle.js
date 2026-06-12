@@ -121,14 +121,36 @@ async function askOracle(state, opts = {}) {
       .trim();
     parsed = JSON.parse(stripped);
   } catch (e) {
-    return {
-      ok: false,
-      raw: text,
-      error: `JSON parse failed: ${e.message}`,
-      latency_ms,
-      usage,
-      model: resultModel,
+    // dir_1781203380739: Opus cmd-inject payloads (unescaped quotes/brackets/newlines) break strict JSON.
+    // Recover the command best-effort instead of killing the harvest — same fix as eval-offense.js: anchor
+    // the command's close on the LAST quote before the object brace; bounded extract for the simple fields.
+    const s = text.replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
+    const field = (f) => {
+      const m = new RegExp(`"${f}"\\s*:\\s*"`).exec(s);
+      if (!m) return null;
+      const rest = s.slice(m.index + m[0].length);
+      const close = rest.match(/"\s*[,}]/);
+      const v = (close ? rest.slice(0, close.index) : rest.replace(/"\s*$/, ""))
+        .replace(/\\"/g, '"').replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\\\/g, "\\").trim();
+      return v || null;
     };
+    const looseCmd = () => {
+      const m = /"command"\s*:\s*"/.exec(s);
+      if (!m) return null;
+      const tail = s.slice(m.index + m[0].length);
+      let end = tail.search(/"\s*\}\s*$/);
+      if (end === -1) end = tail.lastIndexOf('"');
+      if (end <= 0) return null;
+      return tail.slice(0, end)
+        .replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r")
+        .replace(/\\"/g, '"').replace(/\\\\/g, "\\").trim() || null;
+    };
+    const cmd = looseCmd() || field("command");
+    if (cmd) {
+      parsed = { command: cmd, intent_class: field("intent_class") || "exploit_probe", reasoning: field("reasoning") || "", expected_artifact: field("expected_artifact") || "" };
+    } else {
+      return { ok: false, raw: text, error: `JSON parse failed: ${e.message}`, latency_ms, usage, model: resultModel };
+    }
   }
 
   return {
