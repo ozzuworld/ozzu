@@ -51,14 +51,25 @@ function runOnDev01(command) {
   });
 }
 
-async function askModel(model, messages, temp, maxTokens = 2560) {
-  const res = await fetch(`${MODEL_URL}/chat/completions`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, temperature: temp, stream: false, max_tokens: maxTokens }),
-  });
-  if (!res.ok) throw new Error(`vllm ${res.status}`);
-  const j = await res.json();
-  return j.choices?.[0]?.message?.content || "";
+async function askModel(model, messages, temp, maxTokens = 1536) {
+  // dir_1781203380739: retry transient vLLM errors/empty completions; 1536 output (was 2560) avoids the
+  // 16K context overflow that killed runs. Mirrors eval-offense.js.
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${MODEL_URL}/chat/completions`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages, temperature: temp, stream: false, max_tokens: maxTokens }),
+      });
+      if (!res.ok) throw new Error(`vllm ${res.status}: ${(await res.text()).slice(0, 150)}`);
+      const j = await res.json();
+      const content = j.choices?.[0]?.message?.content || "";
+      if (content) return content;
+      lastErr = new Error("empty completion");
+    } catch (e) { lastErr = e; }
+    await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+  }
+  throw lastErr;
 }
 
 function extractField(s, field) {
@@ -70,13 +81,26 @@ function extractField(s, field) {
     .replace(/\\"/g, '"').replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\\\/g, "\\").trim();
   return val || null;
 }
+// dir_1781203380739: faithful command recovery (anchor close on LAST quote before the brace) so cmd-inject
+// payloads survive strict-JSON failures. Mirrors eval-offense.js — without it the v2 rollouts get garbled.
+function extractCommandLoose(s) {
+  const m = /"command"\s*:\s*"/.exec(s);
+  if (!m) return null;
+  const tail = s.slice(m.index + m[0].length);
+  let end = tail.search(/"\s*\}\s*$/);
+  if (end === -1) end = tail.lastIndexOf('"');
+  if (end <= 0) return null;
+  return tail.slice(0, end)
+    .replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r")
+    .replace(/\\"/g, '"').replace(/\\\\/g, "\\").trim() || null;
+}
 function parseAction(raw) {
   let s = (raw || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
   const m = s.match(/\{[\s\S]*\}/);
   if (m) s = m[0];
   try { return JSON.parse(s); }
   catch (e) {
-    const cmd = extractField(s, "command");
+    const cmd = extractCommandLoose(s) || extractField(s, "command");
     if (cmd) return { command: cmd, intent_class: extractField(s, "intent_class") || "exploit_probe", reasoning: extractField(s, "reasoning") || "" };
     throw e;
   }
@@ -104,7 +128,10 @@ async function rollout({ variant, model, max_iter, group, idx, temp = 0.7 }) {
     consecFail = 0;
     const cmd = action.command;
     const exec = await runOnDev01(cmd);
-    const flagMatch = (exec.output || "").match(FLAG_RE);
+    // dir_1781203380739: REAL capture = flag in OUTPUT, NOT in the model's own command. Echoed/hallucinated
+    // fakes would CORRUPT the GRPO reward (reinforce flag-faking). Mirrors eval-offense.js.
+    const outMatches = (exec.output || "").match(new RegExp(FLAG_RE, "g")) || [];
+    const flagMatch = outMatches.find(fl => !(cmd || "").includes(fl)) || null;
     const intent = action.intent_class || "exploit_probe";
     const excerpt = (exec.output || "").slice(0, EXCERPT);
 
@@ -120,8 +147,10 @@ async function rollout({ variant, model, max_iter, group, idx, temp = 0.7 }) {
       outcome: { exit_code: exec.exit_code, output: excerpt },   // reward.py reads outcome.output
     });
     state.queue_history.push({ id: i, status: exec.exit_code === 0 ? "done" : "failed", intent, command: cmd, output_excerpt: excerpt });
+    // dir_1781203380739: bound the model's view so dense cmd-inject history doesn't overflow the 16K window.
+    while (state.queue_history.length > 4 && JSON.stringify(state.queue_history).length > 14000) state.queue_history.shift();
 
-    if (flagMatch) { traj.flag_captured = true; traj.flag_value = flagMatch[0]; traj.end_reason = "flag_captured"; break; }
+    if (flagMatch) { traj.flag_captured = true; traj.flag_value = flagMatch; traj.end_reason = "flag_captured"; break; }
   }
   if (!traj.end_reason) traj.end_reason = "max_iter_reached";
   return traj;

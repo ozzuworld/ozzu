@@ -49,14 +49,25 @@ function runOnDev01(command) {
   });
 }
 
-async function askModel(model, messages, temp = 0.2, maxTokens = 2560) {
-  const res = await fetch(`${MODEL_URL}/chat/completions`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, temperature: temp, stream: false, max_tokens: maxTokens }),
-  });
-  if (!res.ok) throw new Error(`vllm ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const j = await res.json();
-  return j.choices?.[0]?.message?.content || "";
+async function askModel(model, messages, temp = 0.2, maxTokens = 1536) {
+  // dir_1781203380739: retry transient vLLM errors / empty completions with backoff so a hiccup doesn't
+  // kill an iteration (3/8 v2 runs died to 4-in-a-row api_error empties under concurrent serving load).
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${MODEL_URL}/chat/completions`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages, temperature: temp, stream: false, max_tokens: maxTokens }),
+      });
+      if (!res.ok) throw new Error(`vllm ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      const j = await res.json();
+      const content = j.choices?.[0]?.message?.content || "";
+      if (content) return content;
+      lastErr = new Error("empty completion");
+    } catch (e) { lastErr = e; }
+    await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+  }
+  throw lastErr;
 }
 
 // dir_1781203380739: exploit payloads (pipes, base64, binary) routinely break strict JSON.
@@ -146,7 +157,10 @@ async function runEngagement({ variant, model, max_iter, id }) {
     // api_error(overflow) was killing EXPLOITING runs at iter 20-30 (3/8 v1 captures lost to it). Slide a
     // window over history — drop OLDEST, keep recent context; objective/scope live in `state` and are
     // always present. traj.iters keeps the full record, so telemetry/scoring is unaffected.
-    while (state.queue_history.length > 4 && JSON.stringify(state.queue_history).length > 22000) state.queue_history.shift();
+    // dir_1781203380739: budget by chars but conservatively — v2 cmd-inject output is DENSE (~1.6 chars/token),
+    // so 22000 chars hit ~13825 tokens and overflowed the 16K window (+output). 14000 chars (~9K tokens dense)
+    // + system/scope + 1536 output stays well under 16384.
+    while (state.queue_history.length > 4 && JSON.stringify(state.queue_history).length > 14000) state.queue_history.shift();
 
     if (flagMatch) { traj.flag_captured = true; traj.flag_value = flagMatch; traj.end_reason = "flag_captured"; break; }
   }
