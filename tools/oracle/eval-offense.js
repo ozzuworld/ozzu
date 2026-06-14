@@ -187,15 +187,27 @@ async function main() {
 
   console.error(`[eval] variant=${variant} model=${model} n=${n} max_iter=${max_iter} url=${MODEL_URL}`);
   let wins = 0, exploited = 0; const results = [];
-  for (let k = 0; k < n; k++) {
-    const id = `EVAL-${variant}-${model}-${k}`;
-    const t = await runEngagement({ variant, model, max_iter, id });
-    results.push(t);
-    if (t.flag_captured) wins++;
-    if (t.exploitation_achieved) exploited++;
-    console.error(`[eval] ${k + 1}/${n} ${variant} flag=${t.flag_captured} exploit=${t.exploitation_achieved}[${(t.exploitation_signals || []).join(",")}] iters=${t.total_iters} end=${t.end_reason} ${t.flag_value || ""}`);
-    if (outFile) fs.appendFileSync(outFile, JSON.stringify(t) + "\n");
+  // dir_1781203380739: worker-pool concurrency so the GPU stays batched (not idle between
+  // sequential engagements). CONC engagements run at once; each is still internally serial
+  // (one model call per step). Default 1 = original sequential behavior. JS is single-threaded
+  // so wins/exploited/results mutations are race-free across the awaiting workers.
+  const CONC = Math.max(1, parseInt(arg("concurrency", "1"), 10));
+  let next = 0, done = 0;
+  async function worker() {
+    while (true) {
+      const k = next++;
+      if (k >= n) return;
+      const id = `EVAL-${variant}-${model}-${k}`;
+      const t = await runEngagement({ variant, model, max_iter, id });
+      results.push(t);
+      if (t.flag_captured) wins++;
+      if (t.exploitation_achieved) exploited++;
+      done++;
+      console.error(`[eval] ${done}/${n} ${variant} flag=${t.flag_captured} exploit=${t.exploitation_achieved}[${(t.exploitation_signals || []).join(",")}] iters=${t.total_iters} end=${t.end_reason} ${t.flag_value || ""}`);
+      if (outFile) fs.appendFileSync(outFile, JSON.stringify(t) + "\n");
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(CONC, n) }, () => worker()));
   const rate = +(wins / n * 100).toFixed(0);
   const exRate = +(exploited / n * 100).toFixed(0);
   const itf = results.filter(r => r.flag_captured).map(r => r.total_iters);
