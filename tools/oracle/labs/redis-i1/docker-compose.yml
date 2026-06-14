@@ -1,0 +1,9 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: ozzulab-redis-i1
+    command: ["redis-server","--save","","--appendonly","no","--protected-mode","no"]
+    networks: { labnet: { ipv4_address: 10.10.34.20 } }
+networks:
+  labnet:
+    ipam: { config: [ { subnet: 10.10.34.0/24 } ] }
