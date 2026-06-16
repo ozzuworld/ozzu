@@ -1,0 +1,9 @@
+services:
+  web:
+    build: .
+    container_name: ozzulab-authbypass-i1-web
+    restart: unless-stopped
+    networks: { labnet: { ipv4_address: 10.10.39.20 } }
+networks:
+  labnet:
+    ipam: { config: [ { subnet: 10.10.39.0/24 } ] }
