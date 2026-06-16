@@ -1767,7 +1767,7 @@ function smartDeploy(directive) {
         `RUN_ID=$(gh run list --workflow=build-tv.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
         `gh run watch "$RUN_ID" --exit-status`,
         `rm -rf /tmp/ozzu-tv-release`,
-        `gh run download "$RUN_ID" --name ozzu-tv --dir /tmp/ozzu-tv-release -R ozzuworld/ozzu`,
+        `gh release download tv-latest --dir /tmp/ozzu-tv-release -R ozzuworld/ozzu --clobber`,
         `mkdir -p /tmp/ozzu-bridge/tv-releases`,
         `test -f /tmp/ozzu-tv-release/app-release.apk && cp /tmp/ozzu-tv-release/app-release.apk /tmp/ozzu-bridge/tv-releases/ozzu-tv.apk || echo "APK not found"`,
         `test -f /tmp/ozzu-tv-release/latest.json && cp /tmp/ozzu-tv-release/latest.json /tmp/ozzu-bridge/tv-releases/latest.json || echo "metadata not found"`,
