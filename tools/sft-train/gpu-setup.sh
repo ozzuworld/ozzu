@@ -14,7 +14,12 @@ export DEBIAN_FRONTEND=noninteractive
 echo "=== [1/4] apt deps ==="
 # NO `| tail` here: a pipe makes the pipeline exit status that of `tail` (0), masking an
 # apt failure from `set -e` -> the script ran on to build a pip-less venv (cost a setup 2026-06-15).
-apt-get update && apt-get install -y python3-venv python3-pip python3-dev git
+apt-get update
+# Install the VERSION-SPECIFIC venv pkg too: the meta `python3-venv` does NOT always pull
+# `python3.X-venv` (which provides ensurepip) on DO's GPU images, and a pip-less venv then
+# fails step [2/4]. Cost two setups (nyc2 + atl1, 2026-06-16). Detect the version, install both.
+PYV=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+apt-get install -y python3-venv "python${PYV}-venv" python3-pip python3-dev git
 
 echo "=== [2/4] venv ==="
 python3 -m venv /root/sftvenv

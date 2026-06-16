@@ -38,6 +38,8 @@ EPOCHS      = float(os.environ.get("EPOCHS", "3"))
 GRAD_CKPT   = os.environ.get("GRAD_CKPT", "0") == "1"
 NUM_WORKERS = int(os.environ.get("NUM_WORKERS", "4"))
 MAX_STEPS   = int(os.environ.get("MAX_STEPS", "-1"))
+RANK        = int(os.environ.get("RANK", "32"))     # LoRA rank — bump (e.g. 64) to test capacity vs held-out dilution
+ALPHA       = int(os.environ.get("ALPHA", "64"))    # keep ALPHA = 2*RANK
 
 
 def load_jsonl(path):
@@ -116,7 +118,7 @@ def main():
     model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=GRAD_CKPT)
 
     lora = LoraConfig(
-        r=32, lora_alpha=64, lora_dropout=0.05, bias="none",
+        r=RANK, lora_alpha=ALPHA, lora_dropout=0.05, bias="none",
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
         task_type="CAUSAL_LM",
     )
