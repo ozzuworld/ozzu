@@ -1,0 +1,14 @@
+services:
+  web:
+    build: ./web
+    container_name: ozzulab-sqli-i2-web
+    restart: unless-stopped
+    networks: { labnet: { ipv4_address: 10.10.36.20 } }
+  db:
+    build: ./db
+    container_name: ozzulab-sqli-i2-db
+    restart: unless-stopped
+    networks: { labnet: { ipv4_address: 10.10.36.30 } }
+networks:
+  labnet:
+    ipam: { config: [ { subnet: 10.10.36.0/24 } ] }
