@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "com.ozzu.tv",
-      "versionCode": 2,
+      "versionCode": 3,
       "minSdkVersion": 24,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -38,7 +38,12 @@
           }
         }
       ],
-      "./plugins/tv-leanback",
+      [
+        "@react-native-tvos/config-tv",
+        {
+          "isTV": true
+        }
+      ],
       "./plugins/force-bundle-js",
       "./plugins/enable-updates",
       "./plugins/disable-dev-support",
