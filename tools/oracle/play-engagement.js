@@ -37,8 +37,14 @@ const VARIANT_SCOPES = {
 };
 
 const FLAG_RE = /OZZULAB\{[^}]+\}/;
-const PER_CMD_TIMEOUT_S = 60;
+const PER_CMD_TIMEOUT_S = parseInt(process.env.PER_CMD_TIMEOUT_S || "60", 10);
 const SSH_HOST = "dev-01";
+// dir_1781203380739: optional userspace-proxy routing for off-lab (real) engagements.
+// When ENGAGEMENT_PROXYCHAINS points at a proxychains conf on the executor, every
+// remote `bash -s` runs under `proxychains4 -q -f <conf>`, so every tool the model spawns
+// routes through it — e.g. a SOCKS bridge into a target LAN the executor can't reach
+// directly (subnet collision / dropped L3 bridge). Unset = plain bash, no-op.
+const ENG_PROXY = process.env.ENGAGEMENT_PROXYCHAINS || null;
 
 function arg(name, def = null) {
   const i = process.argv.indexOf(`--${name}`);
@@ -52,7 +58,7 @@ function runOnDev01(command) {
       "-o", "StrictHostKeyChecking=no",
       "-o", "ConnectTimeout=10",
       "-o", "ServerAliveInterval=5",
-      SSH_HOST, "bash", "-s"
+      SSH_HOST, ...(ENG_PROXY ? ["proxychains4", "-q", "-f", ENG_PROXY, "bash", "-s"] : ["bash", "-s"])
     ], { stdio: ["pipe", "pipe", "pipe"] });
 
     let stdout = "", stderr = "", killed = false;
@@ -101,7 +107,7 @@ async function playEngagement({ variant, max_iter, engagement_id }) {
     objective: scope.objective,
     allowed: scope.allowed,
     prohibited: scope.prohibited,
-    synthetic_lab: true,
+    synthetic_lab: scope.synthetic_lab !== false,
     queue_history: [],
     iter: 0,
     max_iter,
