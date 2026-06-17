@@ -18,7 +18,12 @@ const { detectExploitation } = require("./exploitation-signals");
 
 const MODEL_URL = process.env.OFFENSE_MODEL_URL || "http://107.170.49.159:8000/v1";
 const SSH_HOST = process.env.LAB_SSH_HOST || "dev-01";
-const PER_CMD_TIMEOUT_S = 60;
+// dir_1781203380739: optional userspace-proxy routing for off-lab (real) engagements — mirrors
+// play-engagement.js. ENGAGEMENT_PROXYCHAINS=<conf> runs the remote bash under `proxychains4 -q -f <conf>`
+// so every command the model spawns routes through a SOCKS bridge into a LAN dev-01 can't reach directly.
+// Unset = plain bash, no-op (synthetic-lab evals unaffected).
+const ENG_PROXY = process.env.ENGAGEMENT_PROXYCHAINS || null;
+const PER_CMD_TIMEOUT_S = parseInt(process.env.PER_CMD_TIMEOUT_S || "60", 10);
 const FLAG_RE = /OZZULAB\{[^}]+\}/;
 // dir_1781203380739: output excerpt fed back into the model's context. 500 was too small —
 // a multi-host nmap got truncated after the first host, blinding the model to which host
@@ -38,7 +43,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(`--${name}`); re
 function runOnDev01(command) {
   return new Promise((resolve) => {
     const start = Date.now();
-    const proc = spawn("ssh", ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", SSH_HOST, "bash", "-s"], { stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn("ssh", ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", SSH_HOST, ...(ENG_PROXY ? ["proxychains4", "-q", "-f", ENG_PROXY, "bash", "-s"] : ["bash", "-s"])], { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "", killed = false;
     const timer = setTimeout(() => { killed = true; try { proc.kill("SIGKILL"); } catch (_) {} }, PER_CMD_TIMEOUT_S * 1000);
     proc.stdout.on("data", d => stdout += d.toString());
