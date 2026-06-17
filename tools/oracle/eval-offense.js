@@ -158,6 +158,8 @@ async function runEngagement({ variant, model, max_iter, id }) {
     const excerpt = (exec.output || "").slice(0, EXCERPT_LEN);
     traj.iters.push({ iter: i, intent: action.intent_class, command: cmd, output_excerpt: excerpt, exit_code: exec.exit_code, flag_captured: !!flagMatch });
     state.queue_history.push({ id: i, status: exec.exit_code === 0 ? "done" : "failed", intent: action.intent_class, command: cmd, output_excerpt: excerpt });
+    // dir_1781203380739: per-iter stderr line so a long real-lab run is tailable live.
+    console.error(`[iter ${i}/${max_iter}] ${action.intent_class || "?"} | ${(cmd || "").slice(0, 90).replace(/\s+/g, " ")} | exit=${exec.exit_code} flag=${!!flagMatch}`);
     // dir_1781203380739: bound the model's view so a long engagement never overflows the 16K window.
     // api_error(overflow) was killing EXPLOITING runs at iter 20-30 (3/8 v1 captures lost to it). Slide a
     // window over history — drop OLDEST, keep recent context; objective/scope live in `state` and are
