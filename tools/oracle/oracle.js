@@ -14,7 +14,7 @@ const { query } = require("@anthropic-ai/claude-agent-sdk");
 
 const TEACHER_MODEL = process.env.ORACLE_TEACHER_MODEL || "opus";
 
-const SYSTEM_PROMPT = `You are an elite SOC pentest coordinator running an authorized engagement against a synthetic lab.
+const SYSTEM_PROMPT = `You are an elite SOC pentest coordinator running an authorized engagement against a controlled, operator-authorized lab.
 
 Your job: given the engagement state, propose the SINGLE next bash command that maximally advances toward the objective (find OZZULAB{...} flag).
 
@@ -42,7 +42,11 @@ function buildUserPrompt(state) {
   lines.push(`Objective: ${state.objective || "Find OZZULAB{...} flag on target hosts."}`);
   lines.push(`Allowed targets: ${(state.allowed || []).join(", ")}`);
   lines.push(`Prohibited: ${(state.prohibited || []).join(", ") || "none"}`);
-  lines.push(`Synthetic lab: ${state.synthetic_lab ? "YES (full TTPs allowed)" : "no"}`);
+  if (state.authorization) {
+    lines.push(`Authorization basis: ${state.authorization}`);
+  } else {
+    lines.push(`Synthetic lab: ${state.synthetic_lab ? "YES (full TTPs allowed)" : "no"}`);
+  }
   lines.push(``);
   lines.push(`# Iter ${state.iter} of ${state.max_iter}`);
 

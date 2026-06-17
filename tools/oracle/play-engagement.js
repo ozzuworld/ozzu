@@ -108,6 +108,7 @@ async function playEngagement({ variant, max_iter, engagement_id }) {
     allowed: scope.allowed,
     prohibited: scope.prohibited,
     synthetic_lab: scope.synthetic_lab !== false,
+    authorization: scope.authorization || null,
     queue_history: [],
     iter: 0,
     max_iter,
