@@ -54,7 +54,7 @@ function runOnDev01(command) {
   });
 }
 
-async function askModel(model, messages, temp = 0.2, maxTokens = 1536) {
+async function askModel(model, messages, temp = 0.2, maxTokens = 4096) {
   // dir_1781203380739: retry transient vLLM errors / empty completions with backoff so a hiccup doesn't
   // kill an iteration (3/8 v2 runs died to 4-in-a-row api_error empties under concurrent serving load).
   let lastErr;
@@ -96,6 +96,7 @@ function extractCommandLoose(s) {
   if (!m) return null;
   const tail = s.slice(m.index + m[0].length);
   let end = tail.search(/"\s*\}\s*$/);          // ideal: command is the last field, closes the object
+  if (end === -1) end = tail.search(/"\s*,\s*"[a-zA-Z_]+"\s*:/);  // dir_1781203380739: command followed by another field — close at the boundary, don't leak the next field into the command
   if (end === -1) end = tail.lastIndexOf('"');  // fallback: last quote anywhere in the tail
   if (end <= 0) return null;
   const val = tail.slice(0, end)
