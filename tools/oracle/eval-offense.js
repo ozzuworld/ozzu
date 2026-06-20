@@ -17,6 +17,10 @@ const { SYSTEM_PROMPT, buildUserContent } = require("./format-sft");
 const { detectExploitation } = require("./exploitation-signals");
 
 const MODEL_URL = process.env.OFFENSE_MODEL_URL || "http://107.170.49.159:8000/v1";
+// dir_1781203380739: optional Bearer auth for EXTERNAL OpenAI-compatible APIs (OpenRouter, Together, Fireworks).
+// Unset = local vLLM (no auth header). To test a permissive frontier reasoning brain via OpenRouter:
+//   OFFENSE_MODEL_URL=https://openrouter.ai/api/v1  OFFENSE_MODEL_KEY=sk-or-...  --model deepseek/deepseek-v3.2
+const MODEL_KEY = process.env.OFFENSE_MODEL_KEY || null;
 const SSH_HOST = process.env.LAB_SSH_HOST || "dev-01";
 // dir_1781203380739: optional userspace-proxy routing for off-lab (real) engagements — mirrors
 // play-engagement.js. ENGAGEMENT_PROXYCHAINS=<conf> runs the remote bash under `proxychains4 -q -f <conf>`
@@ -61,10 +65,15 @@ async function askModel(model, messages, temp = 0.2, maxTokens = 4096) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(`${MODEL_URL}/chat/completions`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // dir_1781203380739: external-API auth (OpenRouter etc.) only when a key is set; local vLLM needs none.
+          ...(MODEL_KEY ? { "Authorization": `Bearer ${MODEL_KEY}`, "HTTP-Referer": "https://ozzu.local", "X-Title": "Ozzu-SOC-offense-eval" } : {}),
+        },
         body: JSON.stringify({ model, messages, temperature: temp, stream: false, max_tokens: maxTokens }),
       });
-      if (!res.ok) throw new Error(`vllm ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      if (!res.ok) throw new Error(`model-api ${res.status}: ${(await res.text()).slice(0, 200)}`);
       const j = await res.json();
       const content = j.choices?.[0]?.message?.content || "";
       if (content) return content;
