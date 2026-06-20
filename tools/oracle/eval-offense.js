@@ -58,7 +58,7 @@ function runOnDev01(command) {
   });
 }
 
-async function askModel(model, messages, temp = 0.2, maxTokens = 4096) {
+async function askModel(model, messages, temp = 0.2, maxTokens = parseInt(process.env.OFFENSE_MAX_TOKENS || "4096", 10)) {
   // dir_1781203380739: retry transient vLLM errors / empty completions with backoff so a hiccup doesn't
   // kill an iteration (3/8 v2 runs died to 4-in-a-row api_error empties under concurrent serving load).
   let lastErr;
