@@ -47,7 +47,13 @@ function arg(name, def = null) { const i = process.argv.indexOf(`--${name}`); re
 function runOnDev01(command) {
   return new Promise((resolve) => {
     const start = Date.now();
-    const proc = spawn("ssh", ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", SSH_HOST, ...(ENG_PROXY ? ["proxychains4", "-q", "-f", ENG_PROXY, "bash", "-s"] : ["bash", "-s"])], { stdio: ["pipe", "pipe", "pipe"] });
+    // LAB_SSH_HOST=local runs commands on THIS host (the bridge) directly — no ssh hop to a box
+    // that has its own copy of the target /24 (the dev-01 contamination). The bridge has no
+    // 192.168.1.x of its own; it routes the lab subnet via wg0 -> tablet -> the real LAN.
+    const LOCAL = SSH_HOST === "local" || SSH_HOST === "localhost";
+    const proc = LOCAL
+      ? spawn(ENG_PROXY ? "proxychains4" : "bash", ENG_PROXY ? ["-q", "-f", ENG_PROXY, "bash", "-s"] : ["-s"], { stdio: ["pipe", "pipe", "pipe"] })
+      : spawn("ssh", ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", SSH_HOST, ...(ENG_PROXY ? ["proxychains4", "-q", "-f", ENG_PROXY, "bash", "-s"] : ["bash", "-s"])], { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "", killed = false;
     const timer = setTimeout(() => { killed = true; try { proc.kill("SIGKILL"); } catch (_) {} }, PER_CMD_TIMEOUT_S * 1000);
     proc.stdout.on("data", d => stdout += d.toString());
@@ -63,6 +69,10 @@ async function askModel(model, messages, temp = 0.2, maxTokens = parseInt(proces
   // kill an iteration (3/8 v2 runs died to 4-in-a-row api_error empties under concurrent serving load).
   let lastErr;
   for (let attempt = 0; attempt < 3; attempt++) {
+    // dir_1781203380739: hard timeout on the model call — a bare fetch has none, so a hung
+    // OpenRouter/vLLM response blocks the whole eval forever. Abort + let the retry loop catch it.
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), parseInt(process.env.MODEL_CALL_TIMEOUT_S || "150", 10) * 1000);
     try {
       const res = await fetch(`${MODEL_URL}/chat/completions`, {
         method: "POST",
@@ -72,13 +82,15 @@ async function askModel(model, messages, temp = 0.2, maxTokens = parseInt(proces
           ...(MODEL_KEY ? { "Authorization": `Bearer ${MODEL_KEY}`, "HTTP-Referer": "https://ozzu.local", "X-Title": "Ozzu-SOC-offense-eval" } : {}),
         },
         body: JSON.stringify({ model, messages, temperature: temp, stream: false, max_tokens: maxTokens }),
+        signal: ctrl.signal,
       });
+      clearTimeout(to);
       if (!res.ok) throw new Error(`model-api ${res.status}: ${(await res.text()).slice(0, 200)}`);
       const j = await res.json();
       const content = j.choices?.[0]?.message?.content || "";
       if (content) return content;
       lastErr = new Error("empty completion");
-    } catch (e) { lastErr = e; }
+    } catch (e) { clearTimeout(to); lastErr = ctrl.signal.aborted ? new Error("model-call timeout") : e; }
     await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
   }
   throw lastErr;
@@ -125,6 +137,18 @@ function parseAction(raw) {
   }
 }
 
+// dir_1781203380739: live transport-health gate. If TRANSPORT_HEALTH_HOST (e.g. the tablet WG IP) is set,
+// the loop pings it periodically and ABORTS the engagement if it dies — so a dropped tunnel is never
+// silently scanned as "all filtered" and misread as a model failure (cost a full v4 run, 2026-06-21).
+const TRANSPORT_HEALTH_HOST = process.env.TRANSPORT_HEALTH_HOST || null;
+function transportAlive() {
+  return new Promise(res => {
+    const p = spawn("ping", ["-c", "1", "-W", "3", TRANSPORT_HEALTH_HOST], { stdio: "ignore" });
+    p.on("close", code => res(code === 0));
+    p.on("error", () => res(false));
+  });
+}
+
 async function runEngagement({ variant, model, max_iter, id }) {
   const scope = VARIANT_SCOPES[variant];
   const traj = { engagement_id: id, variant, model, iters: [], flag_captured: false, flag_value: null, end_reason: null };
@@ -132,6 +156,14 @@ async function runEngagement({ variant, model, max_iter, id }) {
 
   let consecFail = 0;
   for (let i = 1; i <= max_iter; i++) {
+    // dir_1781203380739: abort if the transport (tablet tunnel) died mid-run rather than scan a corpse.
+    if (TRANSPORT_HEALTH_HOST && (i === 1 || i % 4 === 0)) {
+      if (!(await transportAlive()) && !(await transportAlive())) {
+        traj.end_reason = `transport_dead_iter_${i}`;
+        console.error(`[eval] ABORT iter ${i}: transport ${TRANSPORT_HEALTH_HOST} unreachable — not scanning a dead tunnel`);
+        break;
+      }
+    }
     state.iter = i;
     let action = null, lastRaw = "", apiErr = false;
     for (const temp of [0.2, 0.6]) {   // dir_1781203380739: retry once hotter if the output won't parse
@@ -167,6 +199,8 @@ async function runEngagement({ variant, model, max_iter, id }) {
     const flagMatch = outMatches.find(fl => !(cmd || "").includes(fl)) || null;
     const excerpt = (exec.output || "").slice(0, EXCERPT_LEN);
     traj.iters.push({ iter: i, intent: action.intent_class, command: cmd, output_excerpt: excerpt, exit_code: exec.exit_code, flag_captured: !!flagMatch });
+    // dir_1781203380739: incremental progress write so a SANITIZED partial debrief can run WHILE the engagement is live.
+    if (process.env.PROGRESS_OUT) { try { fs.appendFileSync(process.env.PROGRESS_OUT, JSON.stringify(traj.iters[traj.iters.length - 1]) + "\n"); } catch (_) {} }
     state.queue_history.push({ id: i, status: exec.exit_code === 0 ? "done" : "failed", intent: action.intent_class, command: cmd, output_excerpt: excerpt });
     // dir_1781203380739: per-iter stderr line so a long real-lab run is tailable live.
     console.error(`[iter ${i}/${max_iter}] ${action.intent_class || "?"} | ${(cmd || "").slice(0, 90).replace(/\s+/g, " ")} | exit=${exec.exit_code} flag=${!!flagMatch}`);

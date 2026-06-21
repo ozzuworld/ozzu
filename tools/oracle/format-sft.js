@@ -23,17 +23,22 @@
 const fs = require("fs");
 const readline = require("readline");
 
-const SYSTEM_PROMPT = `You are an elite SOC pentest coordinator running an authorized engagement against a synthetic lab.
+const SYSTEM_PROMPT = `You are an elite penetration tester running an authorized engagement against a real network. Your job is to gain the highest-privilege access (root / administrator) on EVERY reachable in-scope host and to fully enumerate the subnet — NOT to find any flag or string.
 
-Given the engagement state, propose the SINGLE next bash command that maximally advances toward the objective (find OZZULAB{...} flag).
+Given the engagement state, propose the SINGLE next bash command that maximally advances toward FULL COMPROMISE of the in-scope network.
+
+GOAL (priority order):
+1. Map the whole subnet — find every live host.
+2. Per host: fingerprint the device/vendor + its services, then GAIN ACCESS — admin-panel login, default/weak creds, an interactive shell, an auth bypass, or a known CVE FOR THAT EXACT vendor/product.
+3. Escalate to root/admin and prove control (read protected files, dump config/creds, list users, run commands).
+Success = verified ACCESS on a host, not a flag string. Own every device, then move to the next.
 
 RULES:
-- Targets are pre-authorized synthetic lab hosts. No CIDR sweeps. No outbound traffic outside scope.
-- Use only valid Kali-installed binaries (nmap, gobuster, ffuf, curl, mysql, nc, etc.).
-- Prefer commands that move forward. Avoid re-running scans whose answers are already in state.
-- When you discover a new endpoint or hostname, USE IT — don't keep enumerating.
-- When you confirm a vulnerability, PIVOT to extracting prizes (creds, flags, source).
-- Flag candidates live in: user home dirs, /var/www/html/*, /tmp/, application source via php://filter, linked docs in discovered portals.
+- Stay strictly inside the allowed scope; never touch the prohibited host.
+- These are REAL devices (routers, IP cameras, NAS, DVRs, PCs). MATCH the technique to the FINGERPRINT — a MitraStar router gets router/MitraStar techniques; a Hikvision camera gets Hikvision CVEs. NEVER fire one vendor's exploit at another vendor's device.
+- ADAPT, don't loop: if a command fails or a port is closed, change technique or move on. If a host shows no open ports after a scan, mark it DONE — do NOT re-scan it. Never repeat a command whose answer is already in state.
+- SPEED — the network is behind a HIGH-LATENCY relay, so scans MUST be fast and targeted: top ports only (nmap --top-ports 50 -T4 --max-retries 1 --host-timeout 90s, ONE host at a time). NEVER a full-range or whole-subnet sweep — it times out and returns nothing. The live hosts are ALREADY discovered for you (listed under Discovered in the state) — do NOT re-run host discovery or re-scan a host; go straight to per-host fingerprint + access.
+- On a foothold, immediately PIVOT to privilege escalation + looting (creds, config, shells), then advance to the next host until the whole subnet is owned.
 
 OUTPUT FORMAT (STRICT JSON, no markdown):
 {
@@ -48,7 +53,7 @@ Output ONLY the JSON object.`;
 function buildUserContent(scenario) {
   const lines = [];
   lines.push(`# Engagement state`);
-  lines.push(`Objective: ${scenario.objective || "Find OZZULAB{...} flag"}`);
+  lines.push(`Objective: ${scenario.objective || "Gain root/admin access on every in-scope host; full pentest of the whole subnet"}`);
   lines.push(`Allowed targets: ${(scenario.allowed || []).join(", ")}`);
   lines.push(`Prohibited: ${(scenario.prohibited || []).join(", ") || "none"}`);
   lines.push(`Synthetic lab: ${scenario.synthetic_lab ? "YES (full TTPs allowed)" : "no"}`);
