@@ -183,7 +183,109 @@ module.exports = function socRoutes(ctx) {
           executor_capable: !!d.wg_ip || d.device_id === "dev-01",
         };
       });
+      // dev-01 is the always-available local executor (ssh-reachable, has wlan0). Surface it
+      // even when it isn't heartbeating into device_state, so the wizard can always pick it.
+      if (!executors.some((e) => e.device_id === "dev-01")) {
+        executors.push({
+          device_id: "dev-01", status: "online", online: true,
+          wifi_ssid: null, lan_ip: null, lan_subnet: null,
+          wg_ip: null, wg_up: true, wg_handshake_age_s: null, battery_pct: null,
+          last_seen: null, executor_capable: true,
+        });
+      }
       sendJSON(res, 200, { executors });
+      return true;
+    }
+
+    // POST /soc/executors/:device_id/wifi-scan — run a LIVE Wi-Fi scan ON the chosen device
+    // and return the networks it actually sees, so the creation wizard NEVER makes the operator
+    // type an SSID (dir_1782156946277). dev-01 + any Linux relay scan via ssh+nmcli; the rooted
+    // tablet scans via adb -> `cmd wifi`. The device's CURRENT ssid is flagged in the same
+    // response so the Wi-Fi gate knows on-network vs needs-access without a second call.
+    if (req.method === "POST" && pathname.startsWith("/soc/executors/") && pathname.endsWith("/wifi-scan")) {
+      if (!requireAuth(req, res)) return true;
+      const deviceId = decodeURIComponent(pathname.split("/")[3] || "");
+      try {
+        const dr = await db.query(`SELECT * FROM device_state WHERE device_id = $1`, [deviceId]);
+        // dev-01 is the always-available local executor — allow scanning it even when it isn't
+        // heartbeating into device_state (its joined SSID is read from nmcli's IN-USE marker).
+        const dev = dr.rows[0] || (deviceId === "dev-01" ? { device_id: "dev-01", wifi_ssid: null, wg_ip: null, executor_adb_target: null } : null);
+        if (!dev) { sendJSON(res, 404, { error: `unknown device ${deviceId}` }); return true; }
+
+        // Pick the scan transport + command for this device.
+        const NMCLI = "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list --rescan yes 2>/dev/null";
+        let cmd, args, kind;
+        if (deviceId === "dev-01") {
+          kind = "nmcli"; cmd = "ssh";
+          args = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "dev-01", NMCLI];
+        } else if (/tab|p610|android|phone/i.test(deviceId)) {
+          const target = dev.executor_adb_target || (dev.wg_ip ? `${dev.wg_ip}:5555` : null);
+          if (!target) { sendJSON(res, 422, { error: `${deviceId} has no adb target / wg_ip to scan` }); return true; }
+          kind = "android"; cmd = "bash";
+          args = ["-c", `adb connect ${target} >/dev/null 2>&1; adb -s ${target} shell "su -c 'cmd wifi start-scan >/dev/null 2>&1; sleep 2; cmd wifi list-scan-results 2>/dev/null'"`];
+        } else if (dev.wg_ip) {
+          kind = "nmcli"; cmd = "ssh";
+          args = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", `root@${dev.wg_ip}`, NMCLI];
+        } else {
+          sendJSON(res, 422, { error: `${deviceId} is not Wi-Fi-scan capable (no ssh/adb path)` });
+          return true;
+        }
+
+        const out = await new Promise((resolve, reject) => {
+          const p = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+          let o = "", e = "";
+          const t = setTimeout(() => p.kill("SIGKILL"), 25000);
+          p.stdout.on("data", (d) => (o += d));
+          p.stderr.on("data", (d) => (e += d));
+          p.on("error", (err) => { clearTimeout(t); reject(err); });
+          p.on("close", () => { clearTimeout(t); resolve(o || ""); });
+        });
+
+        // Normalize to [{ ssid, signal(0-100), security }], strongest first, deduped by SSID.
+        const byssid = new Map();
+        const nmcliJoined = new Set();   // SSIDs nmcli marks IN-USE ('*') — the joined network
+        if (kind === "android") {
+          // `cmd wifi list-scan-results`: BSSID Frequency RSSI Age SSID Flags...
+          for (const line of out.split("\n")) {
+            const m = line.trim().match(/^([0-9a-fA-F:]{17})\s+\d+\s+(-?\d+)\s+\d+\s+(.*?)\s*(\[[^\]]*\].*)?$/);
+            if (!m) continue;
+            const ssid = (m[3] || "").trim();
+            if (!ssid) continue;
+            const signal = Math.max(0, Math.min(100, 2 * (parseInt(m[2], 10) + 100)));
+            const security = /WPA|WEP|EAP|PSK|SAE/i.test(m[4] || "") ? "secured" : "open";
+            const prev = byssid.get(ssid);
+            if (!prev || signal > prev.signal) byssid.set(ssid, { ssid, signal, security });
+          }
+        } else {
+          // nmcli -t: IN-USE:SSID:SIGNAL:SECURITY ('*' in IN-USE = the joined network; escaped
+          // colons inside an SSID arrive as \:).
+          for (const line of out.split("\n")) {
+            if (!line.trim()) continue;
+            const parts = line.split(/(?<!\\):/);
+            const ssid = (parts[1] || "").replace(/\\:/g, ":").trim();
+            if (!ssid) continue;
+            if ((parts[0] || "").trim() === "*") nmcliJoined.add(ssid);
+            const signal = parseInt(parts[2] || "0", 10) || 0;
+            const security = (parts[3] || "").trim() || "open";
+            const prev = byssid.get(ssid);
+            if (!prev || signal > prev.signal) byssid.set(ssid, { ssid, signal, security });
+          }
+        }
+        const networks = [...byssid.values()].sort((a, b) => b.signal - a.signal);
+        // "current" = the JOINED network: nmcli IN-USE (Linux) or the heartbeat's wifi_ssid
+        // (Android tablet — the scan output doesn't flag the joined network).
+        const hbCur = (dev.wifi_ssid || "").trim().toLowerCase();
+        for (const n of networks) {
+          n.current = kind === "android"
+            ? (!!hbCur && n.ssid.trim().toLowerCase() === hbCur)
+            : nmcliJoined.has(n.ssid);
+        }
+
+        sendJSON(res, 200, { device_id: deviceId, current_ssid: dev.wifi_ssid || null, count: networks.length, networks });
+      } catch (error) {
+        console.error("[soc/wifi-scan] Error:", error);
+        sendJSON(res, 502, { error: "wifi scan failed", details: error.message });
+      }
       return true;
     }
 
