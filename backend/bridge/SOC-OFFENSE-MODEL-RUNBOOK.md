@@ -1,5 +1,7 @@
 # SOC Offense-Model Runbook — on-demand vast.ai (Layer L3)
 
+> ⚠️ **SUPERSEDED (2026-06-22) — the offense model is now DeepSeek V4 via OpenRouter, not a self-hosted model on vast.ai.** This runbook (Ollama / WhiteRabbitNeo / Qwen + GPU rental) is the OLD self-hosted approach, kept for reference only. The harness is model-agnostic via `OFFENSE_MODEL_URL` — point it at OpenRouter + a Bearer key, no GPU. Current path: `private/distillation/PROJECT-DOCUMENTATION.md`.
+
 **Status:** vast-rental-ready prep (`dir_1780575644710`). **NOTHING here rents a GPU.**
 The `gpu_create` call is the spend trigger and is gated on King Kazuma's approval
 (defer-spend rule). This runbook makes that rental turnkey + per-engagement.

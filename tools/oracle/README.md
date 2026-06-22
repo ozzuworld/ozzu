@@ -1,5 +1,7 @@
 # oracle — Claude-as-teacher SFT trajectory pipeline
 
+> ⚠️ **SUPERSEDED (2026-06-22) for its original purpose.** This harvested teacher trajectories to **train** an offense model — that approach is ABANDONED (the trained model didn't generalize). The offense model is now **DeepSeek V4 via OpenRouter + the harness**, no training. NOTE: the *harness* pieces this pipeline pioneered — `play-engagement.js` (end-to-end play) and `eval-offense.js` — live on and drive the current DeepSeek path. Current path: `private/distillation/PROJECT-DOCUMENTATION.md`.
+
 ## 1. What it is + use case
 
 Sprint 2 of the distillation roadmap. Given a SOC engagement state at iter N, query Claude Opus (via Max-plan OAuth, no API key) for the optimal next bash command. Persist (state → opus answer) pairs as training data for Sprint 3 SFT of the offense base model.

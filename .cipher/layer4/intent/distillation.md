@@ -1,8 +1,16 @@
-# Ozzu Distillation — The Master Plan
+# Ozzu Offense Model — Research Record (train-your-own approach: CLOSED)
 
-**Read every session before touching anything related to Sprint 2c, Sprint 3, Sprint 4, OzzuLab runs, the offense model, or any Opus-as-teacher work. This file is the source of truth. TaskList titles go stale — this file does not.**
-
-Last reviewed: 2026-06-17 (boot7 8-class SFT + the first offense-model run against a `192.168.1.0/24` — but its **target/routing is UNVERIFIED and the run is INVALID as a real-lab benchmark** (KAZUMA-PC, King Kazuma's real PC, appeared in results; dev-01 has a direct route to that subnet), see REAL-LAB BENCHMARK; King Kazuma LOCKED the goal = **autonomous pentest, human oversees, autonomy is the main part** — see GOAL DECISION + NEXT CONCRETE ACTION). Prior review 2026-06-12 (GRPO rounds 0–3: in-distribution capture SOLVED, self-hosted, zero Opus; held-out v2 still 0). Origin 2026-06-11 (Fable takeover — rewritten after the lab-verify sweep exposed the prior plan chasing winners that don't exist).
+> ⚠️ **STATUS — 2026-06-22: the train-your-own approach in this file is ABANDONED. Do NOT action anything here as a next step.**
+>
+> **Confirmed path = DeepSeek V4 (`deepseek/deepseek-v4-pro`) via OpenRouter, driving our harness. NO fine-tuning, NO SFT, NO GRPO.** A bought frontier reasoning model + the harness beat the trained 30B on held-out synthetic labs and captured 2 flags on the physical EDIFICIO lab — so we rent the brain instead of training one.
+>
+> **Naming caveat (the main source of confusion):** below, *"DeepSeek-R1 distillation recipe"* means the training **methodology** (teacher → SFT → RL). That is NOT the DeepSeek-**V4 model** we now run. The recipe is what we dropped; the model is what we adopted.
+>
+> **Why abandoned:** the trained model does not generalize across vuln classes — adding instances OR breadth lowered held-out capture (peak ~44–50% at boot6 → 19–25%). It memorizes; it doesn't learn pentest skill.
+>
+> **Current canonical doc:** `private/distillation/PROJECT-DOCUMENTATION.md`. Condensed memory record: `project_distillation_10day_accounting.md`.
+>
+> **Everything below is the HISTORICAL RESEARCH RECORD** (June 2026) — kept for the findings (negative generalization, the iter-cap confound, the reward-Goodhart insight, the EDIFICIO A/B), not as a live plan.
 
 ---
 
@@ -226,7 +234,9 @@ Banked conclusions (do NOT re-test):
 - GRPO training: `/home/gcp/ozzu/tools/grpo/` (`reward.py` ← reconcile with `replay-and-verify.js`)
 - Lab orchestrator: `/home/gcp/ozzu/tools/parallel-runner/`
 
-## NEXT CONCRETE ACTION — held-out synthetic eval on the newest adapters, then redefine the reward (2026-06-17)
+## NEXT CONCRETE ACTION — ⚠️ VOID: superseded by the DeepSeek-V4 pivot (2026-06-20)
+
+> The steps below were the *train-your-own* next-actions; they are **no longer the plan**. The project pivoted to DeepSeek V4 + harness — no further SFT/GRPO. Kept only as the record of where the training path stopped. Current next step: `private/distillation/PROJECT-DOCUMENTATION.md` §6.
 
 Goal is locked (autonomy primary); the metric is held-out synthetic capture. The newest adapters (boot7, grpo3) POST-DATE the doc's eval table and have never been measured together on the on-plan held-out. **This was staged at the end of the prior session and the session tripped the cyber-safety filter before it ran** — that is exactly where we left off. Get those numbers first, then move the capability lever.
 

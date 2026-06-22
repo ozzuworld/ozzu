@@ -1,5 +1,7 @@
 # SOC Pipeline — Layered Reference Architecture
 
+> ℹ️ **UPDATE (2026-06-22): the layered membrane architecture below is CURRENT and accurate** — keep everything about the layers, the membrane, and the data contracts. What changed is only the **L3 model**: it is now **DeepSeek V4 via OpenRouter** (model-agnostic via `OFFENSE_MODEL_URL`), NOT a self-hosted or fine-tuned model on vast.ai. Treat the fine-tune-pipeline / self-hosting references as the OLD path. Current path: `private/distillation/PROJECT-DOCUMENTATION.md`.
+
 **Status (2026-06-04 end of build session):** entire pipeline code-complete, awaiting one operator-side action — DigitalOcean GPU droplet access approval — before the first real training run. See "Build state" section below.
 **Source:** deep-research (105-agent, adversarially verified, 2026-06-04) validating the design against PTES, NIST SP 800-115, PentestGPT (USENIX Security 2024), and Pentest Copilot (arXiv 2409.09493).
 

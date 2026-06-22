@@ -1,5 +1,7 @@
 # sft-train — Sprint 3 SFT pipeline for Qwen3-Coder-30B
 
+> ⚠️ **SUPERSEDED (2026-06-22) — SFT is ABANDONED.** Offense model is now **DeepSeek V4 via OpenRouter + the harness** (no training). Research artifact only. Current path: `private/distillation/PROJECT-DOCUMENTATION.md`.
+
 ## 1. What it is + use case
 
 Fine-tunes Qwen3-Coder-30B-A3B-Instruct-FP8 (base) on the curated Opus trajectories

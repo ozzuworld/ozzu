@@ -1,5 +1,7 @@
 # offense-agent.js — Design Doc
 
+> ℹ️ **UPDATE (2026-06-22): the agent design here (stateful loop / tools / membrane) is implemented and current.** The open "model choice" question below (qwen3:32b vs deepseek-r1:32b on Ollama) is RESOLVED and superseded: the offense model is now **DeepSeek V4 via OpenRouter** (model-agnostic via `OFFENSE_MODEL_URL`). Current path: `private/distillation/PROJECT-DOCUMENTATION.md`.
+
 **Status:** Design (pre-implementation). Pairs with `OFFENSE-MODEL-RUNBOOK.md` (rental + serve) and `SOC-PIPELINE-ARCHITECTURE.md` (membrane / data contracts). Implementation to follow as separate directives.
 
 **Author intent:** King Kazuma, 2026-06-04 conversation — "L3 becomes an agent, Cipher sits on top to make it better." This doc converts that into a concrete build plan grounded in two pieces of academic prior art: **PentestGPT** (Deng et al., arXiv 2308.06782) and **AutoPenBench** (arXiv 2410.03225).

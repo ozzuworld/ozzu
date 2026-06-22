@@ -1,5 +1,7 @@
 # tools/finetune — Qwen3-32B LoRA fine-tune pipeline
 
+> ⚠️ **SUPERSEDED (2026-06-22) — fine-tuning is ABANDONED.** The offense model is now **DeepSeek V4 via OpenRouter + the harness** (no training). The trained models didn't generalize across vuln classes. Kept as a research artifact only. Current path: `private/distillation/PROJECT-DOCUMENTATION.md`.
+
 Reproduces the xOffense fine-tune recipe on King Kazuma's $100 DigitalOcean MI300X credit. Output: a LoRA adapter we register in Ollama as `ozzu-soc-v1` alongside the base Qwen3-32B.
 
 **Read first:**
