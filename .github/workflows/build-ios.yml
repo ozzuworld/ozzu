@@ -3,6 +3,9 @@ name: Build iOS IPA
 on:
   workflow_dispatch: # Manual trigger from GitHub UI
 
+permissions:
+  contents: write   # publish the IPA to the ios-latest Release (bypasses the artifact-storage quota)
+
 jobs:
   build-ios:
     runs-on: macos-15
@@ -98,11 +101,15 @@ jobs:
           EOF
           cat ozzu-build-meta.json
 
-      - name: Upload IPA + metadata
-        uses: actions/upload-artifact@v4
-        with:
-          name: ozzu-ios
-          path: |
-            frontend/ozzu.ipa
-            frontend/ozzu-build-meta.json
-          retention-days: 30
+      - name: Publish IPA + metadata to the ios-latest Release
+        # actions/upload-artifact recurringly fails with "Artifact storage quota has
+        # been hit"; Release assets have a SEPARATE quota. Idempotent: ensure the
+        # rolling release exists, then clobber-upload the IPA + meta sidecar.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ios-latest >/dev/null 2>&1 || \
+            gh release create ios-latest --title "iOS latest IPA" \
+              --notes "Rolling latest iOS build (auto-updated by build-ios.yml)" --prerelease
+          gh release upload ios-latest \
+            frontend/ozzu.ipa frontend/ozzu-build-meta.json --clobber
