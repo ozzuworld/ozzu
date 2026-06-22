@@ -1012,6 +1012,22 @@ module.exports = function directiveRoutes(ctx) {
         } catch (err) {
           log.bridge.warn(`[artifacts] Failed to fetch artifacts for run ${run.runId}: ${err.message}`);
         }
+        // iOS now ships via a Release asset (not upload-artifact), so the run carries no
+        // GitHub artifact. Fall back to the locally-cached IPA so the directive-page
+        // download button still finds something to download.
+        if (run.platform === "ios" && !artifacts.some((a) => a.runId === run.runId)) {
+          try {
+            const st = fs.statSync("/home/gcp/ozzu/artifacts/ozzu-latest.ipa");
+            artifacts.push({
+              artifactId: run.runId,
+              runId: run.runId,
+              platform: "ios",
+              name: "ozzu.ipa",
+              sizeBytes: st.size,
+              cached: true,
+            });
+          } catch (_) { /* no cached IPA on disk yet */ }
+        }
       }
       sendJSON(res, 200, { artifacts });
       return true;
@@ -1090,6 +1106,20 @@ module.exports = function directiveRoutes(ctx) {
         const stream = fs.createReadStream(filePath);
         stream.pipe(res);
       } catch (err) {
+        // GitHub artifact unavailable (iOS now ships via a Release asset, not an
+        // upload-artifact). Fall back to the locally-cached IPA if present.
+        const cachedIpa = "/home/gcp/ozzu/artifacts/ozzu-latest.ipa";
+        if (fs.existsSync(cachedIpa)) {
+          const st = fs.statSync(cachedIpa);
+          res.writeHead(200, {
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename="ozzu.ipa"`,
+            "Content-Length": st.size,
+            ...CORS_HEADERS,
+          });
+          fs.createReadStream(cachedIpa).pipe(res);
+          return true;
+        }
         log.bridge.warn(`[artifact-download] GitHub fetch failed: ${err.message}`);
         sendJSON(res, 500, { error: `Download failed: ${err.message}` });
       }
