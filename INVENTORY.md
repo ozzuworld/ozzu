@@ -101,13 +101,15 @@ These took 1 week to build and tune on embed-pipeline-v2.py:
 
 ## Deploy Workflow
 
+**The app is iOS-ONLY (dir_1782138428827) — no Android build/OTA/mirror for the app.**
+
 | Change type | Command |
 |-------------|---------|
-| Android OTA (JS only) | `./scripts/ota-deploy.sh --restart` |
-| Android APK (native) | CI auto-triggers after merge |
-| iOS | `gh workflow run build-ios.yml` → King Kazuma installs via AltStore |
-| TV OTA (JS only) | `./scripts/ota-deploy-tv.sh` |
-| TV APK (native) | CI auto-triggers on `tv/` push to main → self-installs via Device Owner |
+| Ozzu app (any change) | `merge-and-deploy` → iOS IPA in CI → `artifacts/ozzu-latest.ipa` → SideStore/AltStore. NO Android. |
+| Ozzu app iOS rebuild (recovery) | `stage_ios` MCP tool |
+| TV app OTA (JS only) | `./scripts/ota-deploy-tv.sh` (Android TV — SEPARATE from the app) |
+| TV app APK (native) | CI auto-triggers on `tv/` push to main → self-installs via Device Owner |
+| ~~Android app OTA/APK~~ | **DECOMMISSIONED — app is iOS-only** |
 | Bridge restart | `docker compose restart bridge` (in `/home/gcp/ozzu/backend/`) |
 | Full redeploy | `POST /directives/{id}/merge-and-deploy` via MCP |
 
@@ -252,6 +254,8 @@ sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
 
 - **Ozzu is a React Native app — NO website.** "dashboard" = the RN app in `frontend/`
 - **iPhone NEVER receives OTA** — always native build + sideload via AltStore
+- **Ozzu app is iOS-ONLY (dir_1782138428827, 2026-06-22)** — no Android build/OTA/mirror for the app; the Redroid screenshot loop is decommissioned. TV app (`tv/`, Android TV), pentest tablet, WhatsApp phone are SEPARATE Android infra, NOT the app.
+- **Host Node = current LTS (20+)** — upgraded from 18 (Metro 0.83 needs Node 20+ for local/TV bundling; iOS CI uses its own cloud Node)
 - **Face count**: query Qdrant live — NEVER state from memory
 - **Moving to Spain soon** — no persistent LAN. Only always-on devices: iPhone, Android (3226033350), Windows laptop (sometimes)
 - **Disk**: 82% used after 2026-04-09 cleanup (44GB free, 111GB is Qdrant face DB)

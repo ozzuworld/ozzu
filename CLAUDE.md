@@ -127,29 +127,27 @@ You tend to produce "AI slop" — generic layouts that show data but have no vis
 6. **Font hierarchy.** Title: 15px semibold white. Subtitle/description: 12px normal tertiary. Metadata: 10-11px disabled. Never use the same size+weight+color for different levels of information.
 7. **Interactive feedback.** Pressables need: opacity change OR scale animation on press. Reference: `ProjectCard.tsx` uses `scale: 0.98` + `opacity: 0.92`.
 
-### Visual Feedback Loop (mandatory for UI work)
-An iPhone 16 mirror device (Redroid, 1179x2556, 480 DPI, port 5560) is always running.
-The `android-mcp` MCP server provides `State-Tool` (screenshot + UI tree) and interaction tools.
+### Visual Feedback Loop (UI work) — iOS-ONLY app
 
-**After ANY UI change:**
-1. OTA deploy: `./scripts/ota-deploy.sh --restart`
-2. Screenshot the device using `State-Tool` with `use_vision=True`
-3. Analyze: does this match the design target? Is the visual hierarchy clear? Do cards have structure?
-4. If it looks like a text dump or doesn't match the reference — fix it BEFORE telling King Kazuma it's done
-5. Repeat until the screenshot looks right
+**The Ozzu app is iOS-only (dir_1782138428827).** There is NO Android build, NO OTA, and NO Redroid mirror for the app — that whole `android-mcp` / `State-Tool` / port-5560 screenshot loop is **decommissioned**. A Linux box has no local iOS preview (the iOS simulator needs macOS), so there is **no automated screenshot loop** for app UI. Do not look for a mirror; it isn't there.
 
-**To install Expo app on the mirror device:**
-`adb -s localhost:5560 install <apk-path>` or push OTA after initial install.
+**After a UI change:**
+1. `merge-and-deploy` → the iOS IPA builds in CI (~10 min) → caches to `artifacts/ozzu-latest.ipa`.
+2. King Kazuma refreshes via SideStore/AltStore and verifies on his iPhone.
+3. You can't screenshot it yourself — so get the design RIGHT before shipping: match `ProjectCard.tsx` + the design tokens, re-read the anti-slop rules, and reason carefully about hierarchy/structure instead of leaning on a screenshot.
+
+**(Optional future local preview):** Expo-web in the headless `browser` container could give a Linux-local preview — only viable if the app's native deps (secure-store, video, …) tolerate web. Not set up; evaluate before relying on it.
+
+**TV app (`tv/`) is separate** — it IS Android (Android TV) with its own OTA. The mirror/State-Tool guidance never applied to it either; treat TV as a distinct Android target.
 
 ### Before Writing UI Code
 1. Read `frontend/Components.md` — does a component already exist for this?
 2. Read `frontend/lib/design-tokens.ts` — use ONLY these values
 3. If King Kazuma sent reference images to the bridge, READ THEM at `/home/gcp/ozzu/data/uploads/` and match the visual language — not just the data fields
-4. After writing, screenshot the mirror device and compare against the reference — not just the data fields
+4. You CANNOT screenshot it (iOS-only, no local preview) — compare your code against the reference (`ProjectCard.tsx` + tokens) before shipping; King Kazuma verifies the built app on his iPhone
 
 ## Reference
 
 Bridge server: `docker compose restart bridge`
-Deploy Android: `./scripts/deploy.sh [device-names]`
-OTA (Android only): `./scripts/ota-deploy.sh --restart`
-Deploy iOS: `gh workflow run build-ios.yml` → King Kazuma installs via AltStore
+Deploy the app (iOS-ONLY): `merge-and-deploy` → iOS IPA builds in CI → `artifacts/ozzu-latest.ipa` → King Kazuma installs via SideStore/AltStore. The app has NO Android build/OTA.
+Deploy TV (separate Android-TV app, not the ozzu app): `./scripts/ota-deploy-tv.sh` (JS) or CI APK on `tv/` push.
