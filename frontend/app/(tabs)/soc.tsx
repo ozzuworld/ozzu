@@ -136,13 +136,17 @@ export default function SOCScreen() {
             );
           })}
         </ScrollView>
-        <Pressable
-          onPress={() => router.push("/soc/new")}
-          style={({ pressed }) => [styles.createBtn, pressed && { opacity: 0.85 }]}
-        >
-          <Text style={{ color: colors.bg.base, fontSize: fs.sm, fontWeight: fw.semibold }}>+ New</Text>
-        </Pressable>
       </View>
+
+      {/* Unmissable full-width create button — its own full-width row, so it can't be
+          clipped or pushed off-screen like the old inline filter-row button was. Opens
+          the standalone /newsoc page (zero shared layout chrome). */}
+      <Pressable
+        onPress={() => router.push("/newsoc")}
+        style={({ pressed }) => [styles.createWide, pressed && { opacity: 0.9 }]}
+      >
+        <Text style={{ color: colors.bg.base, fontSize: 16, fontWeight: "800" }}>+ New Engagement</Text>
+      </Pressable>
 
       <ScrollView
         style={{ flex: 1 }}
@@ -194,11 +198,14 @@ const styles = StyleSheet.create({
   filterPillSelected: {
     backgroundColor: colors.accent,
   },
-  createBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.full,
+  createWide: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    paddingVertical: 14,
+    borderRadius: radius.md,
     backgroundColor: colors.accent,
+    alignItems: "center",
   },
   createBtnLg: {
     marginTop: spacing.lg,
