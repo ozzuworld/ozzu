@@ -150,6 +150,107 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // GET /soc/executors — live status of physical devices for the engagement-creation
+    // wizard's executor picker (dir_1782136917098). Reads device_state (heartbeat +
+    // wg-poll maintained) so devices are LIVE, never hardcoded. Read-only. Powers the
+    // device status cards AND the Wi-Fi/reachability gate (the wizard compares a device's
+    // wifi_ssid / lan_subnet against the target network).
+    if (req.method === "GET" && pathname === "/soc/executors") {
+      const r = await db.query(`SELECT * FROM device_state ORDER BY device_id`);
+      const STALE_WG_S = 180; // WG handshake older than this = tunnel not live
+      const executors = r.rows.map((d) => {
+        const wgAge = d.wg_handshake_age_s;
+        const wgUp = wgAge != null && wgAge < STALE_WG_S;
+        // Derive the /24 the device sits on, from its LAN ip (for reachability checks).
+        let subnet = null;
+        if (d.lan_ip && /^\d+\.\d+\.\d+\.\d+$/.test(d.lan_ip)) {
+          subnet = d.lan_ip.split(".").slice(0, 3).join(".") + ".0/24";
+        }
+        return {
+          device_id: d.device_id,
+          status: d.status,                 // online | stale | offline
+          online: d.status === "online",
+          wifi_ssid: d.wifi_ssid || null,
+          lan_ip: d.lan_ip || null,
+          lan_subnet: subnet,
+          wg_ip: d.wg_ip || null,
+          wg_up: wgUp,
+          wg_handshake_age_s: wgAge ?? null,
+          battery_pct: d.battery_pct ?? null,
+          last_seen: d.last_seen,
+          // WG-reachable devices can act as a remote executor/relay; dev-01 is the
+          // local default. Heuristic only — the wizard still gates on reachability.
+          executor_capable: !!d.wg_ip || d.device_id === "dev-01",
+        };
+      });
+      sendJSON(res, 200, { executors });
+      return true;
+    }
+
+    // POST /soc/engagements — create an engagement from the in-app wizard
+    // (dir_1782136917098). Mirrors the create_engagement MCP tool's id + INSERT, plus the
+    // wizard's device-aware fields: executor_host / executor_adb_target, the structured
+    // target_networks (kept inside scope), and the Wi-Fi-gate outcome — when the chosen
+    // executor is online but NOT on the target SSID, the wizard sets
+    // first_objective='gain_wifi_access' + wifi_target, persisted in metadata so the
+    // autonomous run opens with a Wi-Fi-access phase before the real targets.
+    if (req.method === "POST" && pathname === "/soc/engagements") {
+      if (!requireAuth(req, res)) return true; // writes a new engagement row
+      try {
+        const body = await parseBody(req);
+        if (!body.client_name || !body.engagement_type) {
+          sendJSON(res, 400, { error: "client_name and engagement_type are required" });
+          return true;
+        }
+        const engagementId = `SKYLINE-SOC-${new Date().getFullYear()}-${String(Date.now()).slice(-3)}`;
+
+        // Classic scope shape (targets/allowed/prohibited/credentials) + the wizard's
+        // structured target_networks carried alongside it.
+        const scope = body.scope && typeof body.scope === "object" ? body.scope : {};
+        if (Array.isArray(body.target_networks)) scope.target_networks = body.target_networks;
+
+        const metadata = (body.metadata && typeof body.metadata === "object") ? body.metadata : {};
+        if (body.first_objective) metadata.first_objective = body.first_objective; // 'gain_wifi_access'
+        if (body.wifi_target) metadata.wifi_target = body.wifi_target;             // SSID to join
+        metadata.created_via = "wizard";
+
+        await db.query(
+          `INSERT INTO pentest_engagements (
+             id, client_name, engagement_type, scope, roe, start_date, end_date,
+             lead_engineer, sow_url, status, executor_host, executor_adb_target, metadata
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [
+            engagementId,
+            body.client_name,
+            body.engagement_type,
+            JSON.stringify(scope),
+            JSON.stringify(body.roe || {}),
+            body.start_date || null,
+            body.end_date || null,
+            body.lead_engineer || null,
+            body.sow_url || null,
+            "scoping",
+            body.executor_host || "dev-01",
+            body.executor_adb_target || null,
+            JSON.stringify(metadata),
+          ]
+        );
+
+        broadcast({ type: "socQueueChanged", engagement_id: engagementId, change: "created", ts: Date.now() });
+        sendJSON(res, 201, {
+          id: engagementId,
+          status: "scoping",
+          executor_host: body.executor_host || "dev-01",
+          first_objective: metadata.first_objective || null,
+        });
+        return true;
+      } catch (error) {
+        console.error("[soc create] Error:", error);
+        if (!res.headersSent) sendJSON(res, 500, { error: "Internal server error", details: error.message });
+        return true;
+      }
+    }
+
     // GET /soc/engagements/:id - Get engagement details
     if (req.method === "GET" && pathname.startsWith("/soc/engagements/") && pathname.split("/").length === 4) {
       const id = pathname.split("/")[3];

@@ -96,8 +96,8 @@ export default function SOCScreen() {
       <TopBar title="🔐 SOC" background={colors.bg.elevated} borderBottom />
       <GroupNav group="work" />
 
-      {/* Filter pills */}
-      <View style={{ flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}>
+      {/* Filter pills + Create */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}>
         {FILTERS.map((f) => {
           const selected = filter === f.key;
           const c = counts[f.key];
@@ -129,6 +129,12 @@ export default function SOCScreen() {
             </Pressable>
           );
         })}
+        <Pressable
+          onPress={() => router.push("/soc/new")}
+          style={({ pressed }) => [styles.createBtn, pressed && { opacity: 0.85 }]}
+        >
+          <Text style={{ color: colors.bg.base, fontSize: fs.sm, fontWeight: fw.semibold }}>+ New</Text>
+        </Pressable>
       </View>
 
       <ScrollView
@@ -148,11 +154,12 @@ export default function SOCScreen() {
             <Text style={{ color: colors.text.tertiary, fontSize: fs.md, textAlign: "center" }}>
               {engagements.length === 0 ? "No engagements yet" : `No ${filter} engagements`}
             </Text>
-            {engagements.length === 0 ? (
-              <Text style={{ color: colors.text.disabled, fontSize: fs.sm, textAlign: "center", marginTop: spacing.xs }}>
-                Create one via Cipher MCP tools
-              </Text>
-            ) : null}
+            <Pressable
+              onPress={() => router.push("/soc/new")}
+              style={({ pressed }) => [styles.createBtnLg, pressed && { opacity: 0.85 }]}
+            >
+              <Text style={{ color: colors.bg.base, fontSize: fs.lg, fontWeight: fw.semibold }}>+ New Engagement</Text>
+            </Pressable>
           </View>
         ) : (
           filtered.map((eng) => (
@@ -178,6 +185,20 @@ const styles = StyleSheet.create({
     backgroundColor: withAlpha(colors.text.secondary, 0.08),
   },
   filterPillSelected: {
+    backgroundColor: colors.accent,
+  },
+  createBtn: {
+    marginLeft: "auto",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+  },
+  createBtnLg: {
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
     backgroundColor: colors.accent,
   },
 });
