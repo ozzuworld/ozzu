@@ -96,39 +96,46 @@ export default function SOCScreen() {
       <TopBar title="🔐 SOC" background={colors.bg.elevated} borderBottom />
       <GroupNav group="work" />
 
-      {/* Filter pills + Create */}
+      {/* Filter pills (scrollable) + Create button (always pinned/visible) */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}>
-        {FILTERS.map((f) => {
-          const selected = filter === f.key;
-          const c = counts[f.key];
-          return (
-            <Pressable
-              key={f.key}
-              onPress={() => setFilter(f.key)}
-              style={({ pressed }) => [
-                styles.filterPill,
-                selected && styles.filterPillSelected,
-                pressed && { opacity: 0.8 },
-              ]}
-            >
-              <Text style={{
-                color: selected ? colors.bg.base : colors.text.secondary,
-                fontSize: fs.sm,
-                fontWeight: selected ? fw.semibold : fw.medium,
-              }}>
-                {f.label}
-              </Text>
-              <Text style={{
-                color: selected ? colors.bg.base : colors.text.tertiary,
-                fontSize: fs.xs,
-                fontFamily: "monospace",
-                marginLeft: 4,
-              }}>
-                {c}
-              </Text>
-            </Pressable>
-          );
-        })}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ flexShrink: 1 }}
+          contentContainerStyle={{ gap: spacing.xs, alignItems: "center" }}
+        >
+          {FILTERS.map((f) => {
+            const selected = filter === f.key;
+            const c = counts[f.key];
+            return (
+              <Pressable
+                key={f.key}
+                onPress={() => setFilter(f.key)}
+                style={({ pressed }) => [
+                  styles.filterPill,
+                  selected && styles.filterPillSelected,
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <Text style={{
+                  color: selected ? colors.bg.base : colors.text.secondary,
+                  fontSize: fs.sm,
+                  fontWeight: selected ? fw.semibold : fw.medium,
+                }}>
+                  {f.label}
+                </Text>
+                <Text style={{
+                  color: selected ? colors.bg.base : colors.text.tertiary,
+                  fontSize: fs.xs,
+                  fontFamily: "monospace",
+                  marginLeft: 4,
+                }}>
+                  {c}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
         <Pressable
           onPress={() => router.push("/soc/new")}
           style={({ pressed }) => [styles.createBtn, pressed && { opacity: 0.85 }]}
@@ -188,7 +195,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   createBtn: {
-    marginLeft: "auto",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs + 2,
     borderRadius: radius.full,
