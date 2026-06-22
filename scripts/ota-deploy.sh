@@ -22,7 +22,9 @@ RESTART=false
 
 echo "=== OTA Deploy (Android) ==="
 
-# Export Android JS bundle only — iOS is never OTA'd (sideloaded via AltStore)
+# Export BOTH iOS + Android JS bundles. iOS IS OTA'd via expo-updates even though the
+# app is sideloaded (AltStore) — expo-updates delivers JS independent of how the app was
+# installed, so the 7-day sideload signing expiry never touches OTA.
 cd "$FRONTEND"
 
 # Ensure deps are installed before invoking expo. Without node_modules/expo,
@@ -35,7 +37,12 @@ fi
 
 echo "[1/3] Exporting JS bundle (iOS + Android)..."
 rm -rf /tmp/ota-export
-npx expo export --output-dir /tmp/ota-export 2>&1 | tail -5
+# --clear wipes Metro's transformer cache first. WITHOUT it, `expo export` can ship a
+# STALE bundle (old screen code) even when the working tree is current — Metro's cache
+# does not reliably invalidate after a git checkout/merge. Cost a full session 2026-06-22
+# (shipped the OLD SOC tab over OTA; the app even ran old JS below its embedded build).
+# Always export clean for OTA — the few extra seconds beat ever shipping stale JS.
+npx expo export --clear --output-dir /tmp/ota-export 2>&1 | tail -5
 
 # Verify export produced a valid bundle
 METADATA="/tmp/ota-export/metadata.json"
@@ -55,6 +62,14 @@ if [ "$BUNDLE_SIZE" -lt 100000 ]; then
   exit 1
 fi
 
+# expo-updates' manifest needs the resolved app config (expoClient). `expo export` does
+# NOT emit it, so generate it explicitly — without this the OTA manifest ships an empty
+# expoClient ({}) and the app REJECTS the update (fetches the manifest, downloads 0 assets).
+# Cost a full debugging session 2026-06-22.
+echo "[1b/3] Generating expoConfig.json (expoClient) for the manifest..."
+npx expo config --json 2>/dev/null > /tmp/ota-export-config.json || true
+node -e "const fs=require('fs');try{const c=JSON.parse(fs.readFileSync('/tmp/ota-export-config.json','utf8'));fs.writeFileSync('/tmp/ota-export/expoConfig.json',JSON.stringify(c.expo||c));console.log('  expoConfig.json written ('+((c.expo||c).name)+')');}catch(e){console.log('  WARN: expoConfig.json generation failed:',e.message);}"
+
 # Publish to bridge updates directory
 echo "[2/3] Publishing update..."
 rm -rf "$UPDATES_DIR"
@@ -64,6 +79,17 @@ sync  # Flush writes to disk before restarting apps
 
 echo "Published to $UPDATES_DIR"
 echo "Bundle: $(du -sh "$UPDATES_DIR" | cut -f1) ($BUNDLE_SIZE bytes)"
+
+# Sanity-check that the bridge actually serves the new manifest for iOS (the primary
+# device). /api/manifest is a public path (no auth). Soft check — warn, don't abort.
+# The bridge returns the expo-updates manifest as multipart/mixed (boundary=ota-boundary),
+# NOT plain JSON — so grep the body for "launchAsset" (the bundle ref), not a JSON key.
+MANIFEST_JSON=$(curl -s --max-time 5 -H "expo-platform: ios" -H "expo-runtime-version: $RUNTIME_VERSION" http://localhost:3333/api/manifest 2>/dev/null || true)
+if echo "$MANIFEST_JSON" | grep -q '"launchAsset"'; then
+  echo "  manifest served OK — $(echo "$MANIFEST_JSON" | grep -oE '"id":"[^"]+"' | head -1)"
+else
+  echo "  WARN: bridge did not return a valid iOS manifest — check the bridge is up and serving $UPDATES_DIR"
+fi
 
 # Double-restart: 1st downloads OTA, 2nd applies it
 if [ "$RESTART" = true ]; then

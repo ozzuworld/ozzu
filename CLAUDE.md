@@ -149,5 +149,5 @@ You tend to produce "AI slop" — generic layouts that show data but have no vis
 ## Reference
 
 Bridge server: `docker compose restart bridge`
-Deploy the app (iOS-ONLY): `merge-and-deploy` → iOS IPA builds in CI → `artifacts/ozzu-latest.ipa` → King Kazuma installs via SideStore/AltStore. The app has NO Android build/OTA.
+Deploy the app (iOS-ONLY): `merge-and-deploy` — smartDeploy auto-picks the tier. **JS/TSX change → OTA** (`ota-deploy.sh`, ~30s, no reinstall; King Kazuma force-quits + reopens TWICE to apply — expo-updates downloads on the first launch, applies on the second). **Native change** (`app.json` / `plugins/**` / `modules/**/ios/**` / new native deps) → iOS IPA builds in CI → `artifacts/ozzu-latest.ipa` → sideload via SideStore/AltStore. No Android target for the app. Full tiers + OTA gotchas (Metro stale-cache, expoConfig, two-step apply): `.claude/rules/pipeline.md`.
 Deploy TV (separate Android-TV app, not the ozzu app): `./scripts/ota-deploy-tv.sh` (JS) or CI APK on `tv/` push.
