@@ -1,147 +1,148 @@
-// NowTab — focal "what's happening" view for an engagement.
-// LiveExecBanner if anything is running, "Next up" (first 3 pending), then
-// "Recent findings" (last 5 sorted severity/recency). The dashboard.
+// NowTab — OBSERVER view of the autonomous run. DeepSeek drives the engagement; you watch.
+// dir_1782169917222 / Phase 2. Replaces the old manual-step "dashboard" (run/skip lived here)
+// — those controls now live only in the Queue tab. This leads with: run status (phase / step /
+// agent state), executor health (the device's live Wi-Fi + WG, now that the tablet reports),
+// a read-only activity feed of what the model is doing, and findings as they land.
 
 import { useMemo } from "react";
 import { ScrollView, Text, View } from "react-native";
 import {
-  colors,
-  fontSize,
-  fontWeight,
-  spacing,
+  colors, fontSize, fontWeight, spacing, radius,
 } from "../../lib/design-tokens";
 import { FindingRow, type FindingRowData } from "./FindingRow";
-import { LiveExecBanner, type RunningItem } from "./LiveExecBanner";
-import { QueueRow, type QueueItemRow } from "./QueueRow";
 import { SEVERITY_ORDER } from "./phaseColors";
 
+export type ExecutorLite = {
+  device_id: string;
+  online: boolean;
+  wifi_ssid: string | null;
+  wg_up: boolean;
+  battery_pct: number | null;
+} | null;
+
 interface NowTabProps {
-  engagementId: string;
-  queue: QueueItemRow[];
+  engagement: any;
+  executor: ExecutorLite;
+  queue: any[];
   findings: FindingRowData[];
-  busyId: number | null;
-  onRun: (item: QueueItemRow) => void;
-  onCancel: (item: QueueItemRow) => void;
-  onSkip: (item: QueueItemRow) => void;
-  onOpenExec: (item: RunningItem) => void;
-  onOutputUpdate: (itemId: number, output: string) => void;
   onFindingPress: (finding: FindingRowData) => void;
 }
 
-function severityRank(sev: string): number {
-  const i = (SEVERITY_ORDER as readonly string[]).indexOf((sev || "").toLowerCase());
+function sevRank(s: string): number {
+  const i = (SEVERITY_ORDER as readonly string[]).indexOf((s || "").toLowerCase());
   return i < 0 ? 99 : i;
 }
 
-export function NowTab(props: NowTabProps) {
-  const { engagementId, queue, findings, busyId, onRun, onCancel, onSkip, onOpenExec, onOutputUpdate, onFindingPress } = props;
+export function NowTab({ engagement, executor, queue, findings, onFindingPress }: NowTabProps) {
+  const agentStatus: string = engagement?.agent_status || "idle";
+  const phase: string = engagement?.engagement_phase || "—";
+  const ars = (engagement?.agent_run_state && typeof engagement.agent_run_state === "object") ? engagement.agent_run_state : {};
+  const iter = ars.iter ?? ars.iteration ?? ars.current_iter ?? null;
 
   const running = queue.find((q) => q.status === "running");
-  const runningAsRunning: RunningItem | null = running
-    ? {
-        id: running.id,
-        seq: running.seq,
-        title: running.title,
-        output: (running as any).output ?? null,
-        started_at: (running as any).started_at ?? null,
-      }
-    : null;
+  const done = queue.filter((q) => q.status === "done").length;
 
-  const nextUp = useMemo(
-    () => queue.filter((q) => q.status === "pending").slice(0, 3),
+  const activity = useMemo(
+    () => queue.filter((q) => ["running", "done", "failed"].includes(q.status))
+      .sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 10),
     [queue],
   );
-
-  const recentFindings = useMemo(
-    () =>
-      [...findings]
-        .sort((a, b) => {
-          const sd = severityRank(a.severity) - severityRank(b.severity);
-          if (sd !== 0) return sd;
-          const ta = a.discovered_at ? new Date(a.discovered_at).getTime() : 0;
-          const tb = b.discovered_at ? new Date(b.discovered_at).getTime() : 0;
-          return tb - ta;
-        })
-        .slice(0, 5),
+  const topFindings = useMemo(
+    () => [...findings].sort((a, b) => {
+      const r = sevRank(a.severity) - sevRank(b.severity);
+      if (r !== 0) return r;
+      const ta = a.discovered_at ? new Date(a.discovered_at).getTime() : 0;
+      const tb = b.discovered_at ? new Date(b.discovered_at).getTime() : 0;
+      return tb - ta;
+    }).slice(0, 6),
     [findings],
   );
 
+  const live = agentStatus === "running";
+  const statusColor = live ? colors.success
+    : agentStatus === "error" ? colors.error
+    : agentStatus === "completed" ? colors.accent
+    : colors.text.tertiary;
+  const statusLine = live ? "DeepSeek is running"
+    : agentStatus === "completed" ? "Run complete"
+    : agentStatus === "error" ? "Run errored"
+    : "Idle — not launched yet";
+
   return (
-    <ScrollView
-      style={{ flex: 1 }}
-      contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxl }}
-    >
-      {/* Live exec banner */}
-      {runningAsRunning ? (
-        <LiveExecBanner
-          item={runningAsRunning}
-          engagementId={engagementId}
-          onOpenFull={() => onOpenExec(runningAsRunning)}
-          onCancel={() => onCancel(running as QueueItemRow)}
-          onOutputUpdate={onOutputUpdate}
-        />
-      ) : null}
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxl, gap: spacing.md }}>
+      {/* Run status */}
+      <View style={{ backgroundColor: colors.bg.elevated, borderRadius: radius.lg, borderLeftWidth: 3, borderLeftColor: statusColor, padding: spacing.md }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+          <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: statusColor }} />
+          <Text style={{ color: colors.text.primary, fontSize: fontSize.lg, fontWeight: fontWeight.semibold, flex: 1 }}>{statusLine}</Text>
+        </View>
+        <View style={{ flexDirection: "row", gap: spacing.xl, marginTop: spacing.sm }}>
+          <Stat k="Phase" v={phase} />
+          <Stat k="Step" v={iter != null ? String(iter) : "—"} />
+          <Stat k="Done" v={`${done}/${queue.length}`} />
+          <Stat k="Findings" v={String(findings.length)} />
+        </View>
+        {running ? (
+          <Text style={{ color: colors.text.secondary, fontSize: fontSize.sm, marginTop: spacing.sm }} numberOfLines={2}>▶ {running.title}</Text>
+        ) : null}
+      </View>
 
-      {/* Next up */}
-      <SectionTitle title="⏭ Next up" empty={nextUp.length === 0 ? "queue is empty" : undefined} />
-      {nextUp.length > 0 ? (
-        <View style={{ gap: spacing.sm, marginBottom: spacing.lg }}>
-          {nextUp.map((item) => (
-            <QueueRow
-              key={item.id}
-              item={item}
-              busyId={busyId}
-              onRun={onRun}
-              onSkip={onSkip}
-            />
-          ))}
+      {/* Executor health */}
+      {executor ? (
+        <View style={{ backgroundColor: colors.bg.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border.subtle }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: !executor.online ? colors.error : !executor.wg_up ? colors.warning : colors.success }} />
+            <Text style={{ color: colors.text.primary, fontSize: fontSize.base, fontWeight: fontWeight.medium, flex: 1 }}>{executor.device_id}</Text>
+            <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs }}>
+              {executor.wifi_ssid || "—"}{executor.battery_pct != null ? ` · ${executor.battery_pct}%` : ""}
+            </Text>
+          </View>
+          {(!executor.online || !executor.wg_up) ? (
+            <Text style={{ color: colors.warning, fontSize: fontSize.xs, marginTop: 4 }}>
+              ⚠ executor {!executor.online ? "offline" : "WG stale"} — the run will stall until it recovers
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
-      {/* Recent findings */}
+      {/* Live activity (read-only) */}
+      <SectionTitle title="⚡ Activity" empty={activity.length === 0 ? "nothing yet — launch a run to watch it here" : undefined} />
+      {activity.map((item) => (
+        <View key={item.id} style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.xs }}>
+          <Text style={{ fontSize: fontSize.sm }}>{item.status === "running" ? "▶" : item.status === "failed" ? "✗" : "✓"}</Text>
+          <Text style={{ color: item.status === "failed" ? colors.error : colors.text.secondary, fontSize: fontSize.sm, flex: 1 }} numberOfLines={1}>{item.title}</Text>
+          {item.intent_class ? <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, fontFamily: "monospace" }}>{item.intent_class}</Text> : null}
+        </View>
+      ))}
+
+      {/* Findings */}
       <SectionTitle
-        title="🚨 Recent findings"
-        rightLabel={findings.length > recentFindings.length ? `+${findings.length - recentFindings.length} more` : undefined}
-        empty={recentFindings.length === 0 ? "no findings yet" : undefined}
+        title="🚨 Findings"
+        rightLabel={findings.length > topFindings.length ? `+${findings.length - topFindings.length}` : undefined}
+        empty={topFindings.length === 0 ? "none yet" : undefined}
       />
-      {recentFindings.length > 0 ? (
-        <View style={{ gap: spacing.sm }}>
-          {recentFindings.map((f) => (
-            <FindingRow key={f.id} finding={f} onPress={onFindingPress} />
-          ))}
-        </View>
-      ) : null}
+      {topFindings.map((f) => <FindingRow key={f.id} finding={f} onPress={onFindingPress} />)}
     </ScrollView>
+  );
+}
+
+function Stat({ k, v }: { k: string; v: string }) {
+  return (
+    <View>
+      <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs }}>{k}</Text>
+      <Text style={{ color: colors.text.primary, fontSize: fontSize.base, fontWeight: fontWeight.semibold }}>{v}</Text>
+    </View>
   );
 }
 
 function SectionTitle({ title, rightLabel, empty }: { title: string; rightLabel?: string; empty?: string }) {
   return (
-    <View style={{ marginBottom: spacing.sm }}>
+    <View style={{ marginTop: spacing.sm }}>
       <View style={{ flexDirection: "row", alignItems: "center" }}>
-        <Text
-          style={{
-            flex: 1,
-            color: colors.text.secondary,
-            fontSize: fontSize.sm,
-            fontWeight: fontWeight.semibold,
-            textTransform: "uppercase",
-            letterSpacing: 0.5,
-          }}
-        >
-          {title}
-        </Text>
-        {rightLabel ? (
-          <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, fontFamily: "monospace" }}>
-            {rightLabel}
-          </Text>
-        ) : null}
+        <Text style={{ flex: 1, color: colors.text.secondary, fontSize: fontSize.sm, fontWeight: fontWeight.semibold, textTransform: "uppercase", letterSpacing: 0.5 }}>{title}</Text>
+        {rightLabel ? <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, fontFamily: "monospace" }}>{rightLabel}</Text> : null}
       </View>
-      {empty ? (
-        <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, marginTop: spacing.xs, marginBottom: spacing.lg }}>
-          {empty}
-        </Text>
-      ) : null}
+      {empty ? <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, marginTop: spacing.xs }}>{empty}</Text> : null}
     </View>
   );
 }

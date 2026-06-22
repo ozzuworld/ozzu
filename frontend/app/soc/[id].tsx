@@ -26,7 +26,7 @@ import {
   withAlpha,
 } from "../../lib/design-tokens";
 import { PhasePill } from "../../components/soc/PhasePill";
-import { NowTab } from "../../components/soc/NowTab";
+import { NowTab, type ExecutorLite } from "../../components/soc/NowTab";
 import { QueueTab } from "../../components/soc/QueueTab";
 import { FindingsTab } from "../../components/soc/FindingsTab";
 import { DetailTab, type EngagementMeta, type ReconHostRow, type AuditLogRow, type TaskGraphNode } from "../../components/soc/DetailTab";
@@ -86,6 +86,7 @@ function EngagementDetailInner() {
   const [tab, setTab] = useState<Tab>("now");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [execItem, setExecItem] = useState<RunningItem | null>(null);
+  const [executor, setExecutor] = useState<ExecutorLite>(null);
 
   const mountedRef = useRef(true);
 
@@ -144,6 +145,16 @@ function EngagementDetailInner() {
       const engData = await engRes.json();
       if (!mountedRef.current) return;
       setEngagement(engData.engagement);
+      // Executor health for the observer view — match the engagement's executor against live device_state.
+      const execHost = engData.engagement?.executor_host;
+      if (execHost) {
+        try {
+          const er = await fetch(`${getBridgeUrl()}/soc/executors`);
+          const ed = await er.json();
+          const match = (ed.executors || []).find((x: any) => x.device_id === execHost) || null;
+          if (mountedRef.current) setExecutor(match);
+        } catch {}
+      }
       await Promise.all([fetchQueue(), fetchFindings(), fetchRecon(), fetchAuditLog(), fetchTaskGraph()]);
     } catch {
       Alert.alert("Error", "Failed to load engagement");
@@ -361,15 +372,10 @@ function EngagementDetailInner() {
       {/* Active tab body */}
       {tab === "now" ? (
         <NowTab
-          engagementId={id!}
+          engagement={engagement}
+          executor={executor}
           queue={queue}
           findings={findings}
-          busyId={busyId}
-          onRun={runQueueItem}
-          onCancel={cancelQueueItem}
-          onSkip={skipQueueItem}
-          onOpenExec={(item) => setExecItem(item)}
-          onOutputUpdate={onOutputUpdate}
           onFindingPress={onFindingPress}
         />
       ) : null}
