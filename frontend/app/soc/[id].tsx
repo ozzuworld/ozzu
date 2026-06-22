@@ -27,6 +27,7 @@ import {
 } from "../../lib/design-tokens";
 import { PhasePill } from "../../components/soc/PhasePill";
 import { NowTab, type ExecutorLite } from "../../components/soc/NowTab";
+import { ReportTab } from "../../components/soc/ReportTab";
 import { QueueTab } from "../../components/soc/QueueTab";
 import { FindingsTab } from "../../components/soc/FindingsTab";
 import { DetailTab, type EngagementMeta, type ReconHostRow, type AuditLogRow, type TaskGraphNode } from "../../components/soc/DetailTab";
@@ -37,12 +38,13 @@ import type { QueueItemRow } from "../../components/soc/QueueRow";
 import type { FindingRowData } from "../../components/soc/FindingRow";
 import type { RunningItem } from "../../components/soc/LiveExecBanner";
 
-type Tab = "now" | "queue" | "findings" | "detail";
+type Tab = "now" | "queue" | "findings" | "report" | "detail";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "now", label: "Now" },
   { key: "queue", label: "Queue" },
   { key: "findings", label: "Findings" },
+  { key: "report", label: "Report" },
   { key: "detail", label: "Detail" },
 ];
 
@@ -391,6 +393,7 @@ function EngagementDetailInner() {
       {tab === "findings" ? (
         <FindingsTab findings={findings} onFindingPress={onFindingPress} />
       ) : null}
+      {tab === "report" ? <ReportTab engagementId={id!} /> : null}
       {tab === "detail" ? (
         <DetailTab
           engagement={engagement}

@@ -2,6 +2,7 @@
 "use strict";
 
 const { spawn } = require('child_process');
+const fs = require('fs');
 const { parseReconOutput } = require('../soc-recon-parser');
 
 // In-memory registry of running SSH children, keyed by session_id.
@@ -302,6 +303,71 @@ module.exports = function socRoutes(ctx) {
         console.error("[soc/wifi-scan] Error:", error);
         sendJSON(res, 502, { error: "wifi scan failed", details: error.message });
       }
+      return true;
+    }
+
+    // POST /soc/engagements/:id/report?kind=mid|final — generate the engagement's report(s) from
+    // its postgres trajectory via the proven DeepSeek two-report writer (tools/oracle/report-via-
+    // model.js). kind=mid => sanitized DEBRIEF only (safe mid-run); kind=final => FULL operator
+    // report + DEBRIEF. The offensive bytes flow postgres -> temp file -> DeepSeek -> report files;
+    // never back through Claude. The app only ever reads the sanitized DEBRIEF. dir_1782171502039.
+    if (req.method === "POST" && /^\/soc\/engagements\/[^/]+\/report$/.test(pathname)) {
+      if (!requireAuth(req, res)) return true;
+      const eid = decodeURIComponent(pathname.split("/")[3] || "");
+      let kind = "mid";
+      try { kind = new URL(req.url, "http://x").searchParams.get("kind") === "final" ? "final" : "mid"; } catch {}
+      try {
+        const er = await db.query(`SELECT * FROM pentest_engagements WHERE id = $1`, [eid]);
+        if (er.rows.length === 0) { sendJSON(res, 404, { error: "engagement not found" }); return true; }
+        const eng = er.rows[0];
+        const qr = await db.query(`SELECT seq, command, output, status, intent_class FROM soc_queue_items WHERE engagement_id = $1 ORDER BY seq`, [eid]);
+        if (qr.rows.length === 0) { sendJSON(res, 422, { error: "no run trajectory yet — launch a run first, then there's something to report on" }); return true; }
+        const iters = qr.rows.map((q) => ({
+          iter: q.seq,
+          intent_class: q.intent_class || null,
+          exit_code: q.status === "done" ? 0 : (q.status === "failed" ? 1 : null),
+          flag_captured: /OZZULAB\{/.test(q.output || ""),
+          command: q.command || "",
+          output_excerpt: (q.output || "").slice(0, 4000),
+        }));
+        const scopeObj = { id: eng.id, client_name: eng.client_name, engagement_type: eng.engagement_type, scope: eng.scope, executor_host: eng.executor_host };
+        const dir = `/home/gcp/ozzu/private/soc-reports/${eid.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(`${dir}/trajectory.jsonl`, JSON.stringify({ engagement_id: eid, iters }) + "\n");
+        fs.writeFileSync(`${dir}/scope.json`, JSON.stringify(scopeObj, null, 1));
+        const fullPath = kind === "final" ? `${dir}/report-FULL.md` : "none";
+        const debriefPath = `${dir}/report-DEBRIEF.md`;
+        const child = spawn("node", ["/home/gcp/ozzu/tools/oracle/report-via-model.js", `${dir}/trajectory.jsonl`, `${dir}/scope.json`, fullPath, debriefPath], {
+          env: { ...process.env, REPORT_MODEL: process.env.OFFENSE_MODEL_NAME || "deepseek/deepseek-v4-pro" },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let log = "";
+        child.stdout.on("data", (d) => (log += d));
+        child.stderr.on("data", (d) => (log += d));
+        child.on("close", () => {
+          const debrief = fs.existsSync(debriefPath) ? fs.readFileSync(debriefPath, "utf8") : null;
+          const hasFull = kind === "final" && fs.existsSync(fullPath);
+          db.query(`UPDATE pentest_engagements SET metadata = COALESCE(metadata,'{}'::jsonb) || $2::jsonb WHERE id = $1`,
+            [eid, JSON.stringify({ last_report_kind: kind, last_report_has_full: hasFull })]).catch(() => {});
+          if (!res.headersSent) {
+            if (debrief) sendJSON(res, 200, { kind, debrief, has_full: hasFull });
+            else sendJSON(res, 502, { error: "report produced no debrief", log: log.slice(-300) });
+          }
+        });
+        child.on("error", (e) => { if (!res.headersSent) sendJSON(res, 500, { error: "report spawn failed", details: e.message }); });
+      } catch (error) {
+        console.error("[soc/report] Error:", error);
+        if (!res.headersSent) sendJSON(res, 500, { error: "report failed", details: error.message });
+      }
+      return true;
+    }
+
+    // GET /soc/engagements/:id/report — the last sanitized DEBRIEF for the app (operator FULL stays on disk).
+    if (req.method === "GET" && /^\/soc\/engagements\/[^/]+\/report$/.test(pathname)) {
+      const eid = decodeURIComponent(pathname.split("/")[3] || "").replace(/[^A-Za-z0-9_-]/g, "_");
+      const dpath = `/home/gcp/ozzu/private/soc-reports/${eid}/report-DEBRIEF.md`;
+      if (fs.existsSync(dpath)) sendJSON(res, 200, { debrief: fs.readFileSync(dpath, "utf8"), has_full: fs.existsSync(`/home/gcp/ozzu/private/soc-reports/${eid}/report-FULL.md`) });
+      else sendJSON(res, 404, { error: "no report generated yet" });
       return true;
     }
 
