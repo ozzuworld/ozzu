@@ -5,20 +5,25 @@ paths:
 
 # Deploy Pipeline
 
-**The Ozzu app is iOS-ONLY (dir_1782138428827).** There is NO Android build, OTA, APK, or Redroid mirror for the app — decommissioned. The only other deployable frontend is the **TV app** (`tv/`), which IS Android (Android TV) with its own OTA. Don't conflate them.
+**The Ozzu app is iOS-ONLY (dir_1782138428827)** — the iPhone is the only app device; there is no Android build/APK/mirror for the app. But iOS-only does **NOT** mean "always rebuild": the app ships JS changes **over-the-air (OTA)** and only does a full native CI build when native code changes. The **TV app** (`tv/`) is a separate Android-TV target with its own OTA — don't conflate them.
 
-## The Ozzu app — iOS only
+## The Ozzu app — two tiers (OTA architecture, 2026-06-22)
 
-**Trigger:** `merge-and-deploy` on a `cipher/dir_*` branch.
-**What happens:** the iOS IPA builds in GitHub Actions CI (~10 min) and caches to `artifacts/ozzu-latest.ipa`. **iOS CI runs its OWN Node/Xcode in the cloud — fully independent of this box's host toolchain.**
-**Install:** King Kazuma refreshes via SideStore/AltStore on his iPhone (his only app device). The iPhone NEVER receives OTA — every app change is a native CI build + sideload.
-**No Android, no fast lane.** No `ota-deploy.sh`, no APK, no mirror. There is no JS-only "HOT ~25s" path anymore (that was Android OTA, now gone) — every app change goes through the ~10-min iOS CI build.
+| Change | Path | Time | How it lands on the iPhone |
+|---|---|---|---|
+| **JS / TSX only** (components, screens, logic) | **OTA** — `ota-deploy.sh` exports the iOS+Android JS bundle; bridge serves it at `GET /api/manifest` | ~25–30s | App pulls the new JS on next launch (expo-updates `checkAutomatically: ON_LOAD`). **No reinstall.** |
+| **Native** (`app.json`, `plugins/**`, `modules/**/ios/**`, new native deps) | **iOS CI build** (`build-ios.yml`) → IPA → `ios-latest` Release → `artifacts/ozzu-latest.ipa` | ~10 min | Sideload via SideStore/AltStore. Bump `runtimeVersion`. |
 
-### Native vs JS — same path now
-Both go through the same iOS CI build. `app.json` / `plugins/**` / `modules/**/ios/**` / new native deps = a native rebuild (same ~10 min). There is no separate JS fast lane.
+**Trigger:** `merge-and-deploy` on a `cipher/dir_*` branch. smartDeploy auto-detects JS-only vs native (`detectNativeChanges` / `detectFrontendChanges`) and picks the tier.
+
+**Why OTA works on a sideloaded app:** expo-updates delivers JS via the manifest, independent of how the app was installed. The 7-day sideload signing expiry doesn't touch OTA (it updates JS, not the signature).
+
+**runtimeVersion gate (important):** the OTA bundle's `runtimeVersion` (currently `1.0.0`, in `app.json`) must match the installed build's. A native change that breaks JS↔native compatibility MUST bump `runtimeVersion` — that bump is exactly what stops a stale JS bundle from being served to a new native build, and what forces the native-build tier.
+
+**Gotcha that cost a whole session (2026-06-22):** because the app runs OTA JS, a *correct* IPA can still show *old* UI if the OTA bundle is stale (or, historically, if iOS OTA was hard-blocked in `pipeline.js`). When "new build looks identical," check the OTA bundle the manifest serves BEFORE blaming the IPA or the install.
 
 ### STAGING (recovery)
-`stage_ios` MCP tool — rebuild the iOS IPA on demand if a `merge-and-deploy` iOS build failed/cancelled.
+`stage_ios` MCP tool — rebuild the iOS IPA on demand if a native `merge-and-deploy` build failed/cancelled.
 
 ## The TV app (`tv/`) — Android TV, SEPARATE from the app
 
@@ -36,15 +41,16 @@ Both go through the same iOS CI build. `app.json` / `plugins/**` / `modules/**/i
 ## Scripts
 | Script / tool | Purpose |
 |---|---|
-| `merge-and-deploy` MCP tool | THE app deploy — merges the cipher branch + triggers the iOS CI build. Always use it; never run build scripts manually after a merge. |
-| `stage_ios` MCP tool | Rebuild the iOS IPA on demand (recovery). |
+| `merge-and-deploy` MCP tool | THE app deploy — merges the cipher branch + smartDeploy picks OTA (JS) or CI build (native). Always use it. |
+| `./scripts/ota-deploy.sh` | App JS OTA — exports the **iOS + Android** bundle and publishes to the bridge manifest. Run by smartDeploy on JS-only changes; safe to run manually to re-publish. `--restart` double-restarts Android tablets (iPhone applies on its own next launch). |
+| `stage_ios` MCP tool | Rebuild the iOS IPA on demand (recovery, native tier). |
 | `./scripts/ota-deploy-tv.sh` | TV Android OTA — **TV app only**. |
-| `./scripts/ota-deploy.sh`, `./scripts/deploy.sh` | **DEPRECATED for the app** (were the app's Android OTA/APK). Dead path; do not use for the app. |
+| `./scripts/deploy.sh` | DEPRECATED (was the app's Android APK path). Dead. |
 
 ## Rules for Cipher
-1. **The app is iOS-only.** Never reach for Android OTA / `ota-deploy.sh` / `deploy.sh` / a mirror for the app — decommissioned 2026-06-22.
-2. **ALWAYS use `merge-and-deploy`** for the app — it merges + triggers the iOS build. Don't manually run build scripts after merge.
-3. **After deploy**, tell King Kazuma: "iPhone IPA building (~10 min), will land at `artifacts/ozzu-latest.ipa` — refresh via SideStore."
+1. **JS change → OTA, native change → build.** Don't force a 10-min native build for a JS-only change — that's what OTA is for. Don't try to OTA a native change — bump `runtimeVersion` and build.
+2. **ALWAYS use `merge-and-deploy`** for the app — smartDeploy auto-picks the tier. Don't run build/OTA scripts manually after a merge.
+3. **After a JS deploy**, tell King Kazuma: "Published over-the-air — reopen Ozzu to load it (~30s)." After a native deploy: "iPhone IPA building (~10 min) → `artifacts/ozzu-latest.ipa`, refresh via SideStore."
 4. **UI cannot be previewed locally** (iOS needs macOS; no mirror). Get the design right in code; King Kazuma verifies on his iPhone.
 5. **Bridge restart delay** — if bridge code changed, smartDeploy waits 60s before restarting. Don't restart manually.
-6. **Host Node must be ≥ current LTS (20+).** The TV OTA + any local Metro bundling needs it. (iOS CI is unaffected — separate cloud Node.)
+6. **Host Node must be ≥ current LTS (20+).** OTA bundling + any local Metro needs it. (iOS CI is unaffected — separate cloud Node.)

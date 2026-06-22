@@ -555,25 +555,8 @@ module.exports = function createPipelineRoutes(ctx) {
       sendJSON(res, 500, { error: "Corrupt OTA metadata" });
       return true;
     }
-    // iPhone NEVER receives OTA updates
-    if (platform === "ios") {
-      const boundary = "ota-boundary";
-      res.writeHead(200, {
-        "expo-protocol-version": "1",
-        "expo-sfv-version": "0",
-        "cache-control": "private, max-age=0",
-        "content-type": `multipart/mixed; boundary=${boundary}`,
-        ...CORS_HEADERS,
-      });
-      res.end(
-        `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="directive"\r\n` +
-        `Content-Type: application/json\r\n\r\n` +
-        `{"type":"noUpdateAvailable"}\r\n` +
-        `--${boundary}--\r\n`
-      );
-      return true;
-    }
+    // iOS + Android both receive OTA for JS-only changes. Native changes must bump
+    // runtimeVersion so a JS bundle is never served to an incompatible native build.
 
     const platformMeta = metadata.fileMetadata?.[platform];
     if (!platformMeta) {

@@ -1715,10 +1715,11 @@ function smartDeploy(directive) {
       spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
     }
   } else if (frontend.any) {
-    // HOT tier — JS-only frontend changes. Android OTA (~25s) + iOS CI build (~10 min) in parallel.
-    // iPhone is King Kazuma's PRIMARY device — iOS is built every frontend deploy. No manual /stage-ios.
-    log("HOT deploy: Android OTA + iOS CI build (parallel — iPhone is primary)");
-    notify("Quick update going out — tablets ~25s, iPhone IPA ~10 min.");
+    // HOT tier — JS-only frontend change. OTA to BOTH platforms (iPhone + tablets), ~25s.
+    // No native build: the iPhone pulls the new JS bundle on next launch via expo-updates.
+    // Native changes take the WARM tier above (full CI build + sideload) instead.
+    log("HOT deploy: OTA (iOS + Android) — no native build for JS-only");
+    notify("Quick update going out over-the-air — reopen Ozzu to load it (~30s).");
 
     exec(`cd ${WORKDIR} && ./scripts/ota-deploy.sh --restart`, {
       cwd: WORKDIR,
@@ -1726,14 +1727,12 @@ function smartDeploy(directive) {
     }, (err) => {
       if (err) {
         log(`HOT deploy failed: ${err.message}`);
-        notify("Tablet update failed — might need a full rebuild.");
+        notify("OTA update failed — might need a full rebuild.");
       } else {
-        log("HOT deploy complete — tablets updated");
-        notify("Tablets updated. iPhone IPA still building — will land at artifacts/ozzu-latest.ipa.");
+        log("HOT deploy complete — OTA published for iOS + Android");
+        notify("Update published over-the-air. Reopen Ozzu on your iPhone to load it.");
       }
     });
-
-    spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
   } else {
     // Backend-only / TV-only / firmware-only / docs / cipher meta-work — no phone app build needed.
     log("No frontend changes — skipping Android OTA + iOS CI");

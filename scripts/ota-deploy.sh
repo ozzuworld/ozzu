@@ -1,10 +1,13 @@
 #!/bin/bash
-# ota-deploy.sh — Export Android JS bundle and publish as OTA update
-# This is the HOT deploy path — Android only, ~25s total.
-# iOS builds are triggered separately via staging (build-ios.yml).
+# ota-deploy.sh — Export the JS bundle (iOS + Android) and publish as an OTA update.
+# HOT deploy path for JS-only changes (~25s). Both platforms pull the new JS on next
+# app launch (iPhone included — it's the primary device). Native changes (app.json /
+# native modules / new native deps) still need a full CI build + sideload; this script
+# does NOT cover those — bump runtimeVersion and build instead.
 #
 # Usage: ./scripts/ota-deploy.sh [--restart]
-#   --restart    Force-restart + double-restart to apply OTA immediately
+#   --restart    Double-restart Android devices via adb to apply OTA immediately.
+#                (iPhone applies on its own next launch — no adb path.)
 
 set -e
 
@@ -30,9 +33,9 @@ if [ ! -d "$FRONTEND/node_modules/expo" ]; then
   npm ci --no-audit --no-fund 2>&1 | tail -3
 fi
 
-echo "[1/3] Exporting JS bundle (Android only)..."
+echo "[1/3] Exporting JS bundle (iOS + Android)..."
 rm -rf /tmp/ota-export
-npx expo export --platform android --output-dir /tmp/ota-export 2>&1 | tail -5
+npx expo export --output-dir /tmp/ota-export 2>&1 | tail -5
 
 # Verify export produced a valid bundle
 METADATA="/tmp/ota-export/metadata.json"
@@ -40,14 +43,15 @@ if [ ! -f "$METADATA" ]; then
   echo "ERROR: Export produced no metadata.json — aborting"
   exit 1
 fi
-BUNDLE_REL=$(node -e "const m=JSON.parse(require('fs').readFileSync('$METADATA','utf8')); console.log(m.fileMetadata.android.bundle)" 2>/dev/null || true)
+# iPhone is the primary device — verify the iOS bundle specifically.
+BUNDLE_REL=$(node -e "const m=JSON.parse(require('fs').readFileSync('$METADATA','utf8')); console.log(m.fileMetadata.ios.bundle)" 2>/dev/null || true)
 if [ -z "$BUNDLE_REL" ] || [ ! -f "/tmp/ota-export/$BUNDLE_REL" ]; then
-  echo "ERROR: Android bundle file missing from export — aborting"
+  echo "ERROR: iOS bundle file missing from export — aborting"
   exit 1
 fi
 BUNDLE_SIZE=$(stat -c%s "/tmp/ota-export/$BUNDLE_REL" 2>/dev/null || echo 0)
 if [ "$BUNDLE_SIZE" -lt 100000 ]; then
-  echo "ERROR: Android bundle too small ($BUNDLE_SIZE bytes), likely corrupt — aborting"
+  echo "ERROR: iOS bundle too small ($BUNDLE_SIZE bytes), likely corrupt — aborting"
   exit 1
 fi
 
