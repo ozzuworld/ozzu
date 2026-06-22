@@ -112,4 +112,4 @@ jobs:
             gh release create ios-latest --title "iOS latest IPA" \
               --notes "Rolling latest iOS build (auto-updated by build-ios.yml)" --prerelease
           gh release upload ios-latest \
-            frontend/ozzu.ipa frontend/ozzu-build-meta.json --clobber
+            ozzu.ipa ozzu-build-meta.json --clobber
