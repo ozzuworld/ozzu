@@ -212,6 +212,22 @@ module.exports = function socRoutes(ctx) {
         const dev = dr.rows[0] || (deviceId === "dev-01" ? { device_id: "dev-01", wifi_ssid: null, wg_ip: null, executor_adb_target: null } : null);
         if (!dev) { sendJSON(res, 404, { error: `unknown device ${deviceId}` }); return true; }
 
+        // If the device self-reports its scan via heartbeat (the tablet's reporter runs `iw scan`
+        // locally and posts meta.wifi_networks), serve THAT — no ssh/adb chain. This is how the
+        // tablet is scannable at all: the bridge's adb isn't authorized on it, only dev-01's is.
+        const selfScan = dev.meta && Array.isArray(dev.meta.wifi_networks) ? dev.meta.wifi_networks : null;
+        if (selfScan && selfScan.length) {
+          const cur0 = (dev.wifi_ssid || "").trim().toLowerCase();
+          const networks = selfScan.filter((n) => n && n.ssid).map((n) => ({
+            ssid: String(n.ssid),
+            signal: Math.max(0, Math.min(100, Math.round(2 * ((Number(n.signal_dbm) || -100) + 100)))),
+            security: n.security || "secured",
+            current: !!cur0 && String(n.ssid).trim().toLowerCase() === cur0,
+          })).sort((a, b) => b.signal - a.signal);
+          sendJSON(res, 200, { device_id: deviceId, current_ssid: dev.wifi_ssid || null, count: networks.length, networks, source: "device-reported" });
+          return true;
+        }
+
         // Pick the scan transport + command for this device.
         const NMCLI = "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list --rescan yes 2>/dev/null";
         let cmd, args, kind;
