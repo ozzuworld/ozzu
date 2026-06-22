@@ -172,24 +172,6 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Direct entry to the standalone /newsoc creation page — lives on Home so it
-            NEVER depends on the SOC tab rendering it. dir_1782156946277. */}
-        <Pressable
-          onPress={() => router.push("/newsoc" as any)}
-          style={({ pressed }) => ({
-            marginHorizontal: SIDE,
-            marginTop: 8,
-            marginBottom: 4,
-            backgroundColor: colors.accent,
-            borderRadius: 14,
-            paddingVertical: 16,
-            alignItems: "center",
-            opacity: pressed ? 0.9 : 1,
-          })}
-        >
-          <Text style={{ color: colors.bg.base, fontSize: 16, fontWeight: "800" }}>+ New SOC Engagement</Text>
-        </Pressable>
-
         {/* ── Hero logo ── */}
         <View style={{
           alignItems: "center",

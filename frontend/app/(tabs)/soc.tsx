@@ -16,6 +16,7 @@ import { useRouter } from "expo-router";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
 import { GroupNav } from "../../components/GroupNav";
 import { TopBar } from "../../components/TopBar";
+import { StatusBadge } from "../../components/StatusBadge";
 import { getBridgeUrl } from "../../lib/bridge-api";
 import { useBridgeStream } from "../../lib/useBridgeStream";
 import {
@@ -93,10 +94,33 @@ export default function SOCScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
       <StatusBar style="light" />
 
-      <TopBar title="🔐 SOC" background={colors.bg.elevated} borderBottom />
+      <TopBar
+        title="🔐 SOC"
+        background={colors.bg.elevated}
+        borderBottom
+        right={
+          <>
+            <Pressable
+              onPress={() => router.push("/soc/new")}
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: pressed ? withAlpha(colors.accent, 0.13) : "transparent",
+              })}
+            >
+              <Text style={{ color: colors.accent, fontSize: 24, lineHeight: 26 }}>+</Text>
+            </Pressable>
+            <StatusBadge />
+          </>
+        }
+      />
       <GroupNav group="work" />
 
-      {/* Filter pills (scrollable) + Create button (always pinned/visible) */}
+      {/* Status filter pills (scrollable). Create action lives in the TopBar (right). */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}>
         <ScrollView
           horizontal
@@ -137,16 +161,6 @@ export default function SOCScreen() {
           })}
         </ScrollView>
       </View>
-
-      {/* Unmissable full-width create button — its own full-width row, so it can't be
-          clipped or pushed off-screen like the old inline filter-row button was. Opens
-          the standalone /newsoc page (zero shared layout chrome). */}
-      <Pressable
-        onPress={() => router.push("/newsoc")}
-        style={({ pressed }) => [styles.createWide, pressed && { opacity: 0.9 }]}
-      >
-        <Text style={{ color: colors.bg.base, fontSize: 16, fontWeight: "800" }}>+ New Engagement</Text>
-      </Pressable>
 
       <ScrollView
         style={{ flex: 1 }}
@@ -197,15 +211,6 @@ const styles = StyleSheet.create({
   },
   filterPillSelected: {
     backgroundColor: colors.accent,
-  },
-  createWide: {
-    marginHorizontal: spacing.md,
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
-    paddingVertical: 14,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-    alignItems: "center",
   },
   createBtnLg: {
     marginTop: spacing.lg,
