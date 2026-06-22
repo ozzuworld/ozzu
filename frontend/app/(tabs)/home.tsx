@@ -91,6 +91,31 @@ export default function HomeScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
       <StatusBar style="light" />
 
+      {/* ── BUILD TRACER (dir_1782156946277) — diagnostic, remove after confirming deploy reaches device ── */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          top: insets.top,
+          left: 0,
+          right: 0,
+          zIndex: 9999,
+          backgroundColor: colors.accent,
+          paddingVertical: 16,
+          paddingHorizontal: 16,
+          alignItems: "center",
+          borderBottomWidth: 3,
+          borderBottomColor: colors.bg.base,
+        }}
+      >
+        <Text style={{ color: colors.bg.base, fontSize: 24, fontWeight: "800", letterSpacing: 1 }}>
+          🟢 NEW BUILD LIVE — TRACER #1
+        </Text>
+        <Text style={{ color: colors.bg.base, fontSize: 13, fontWeight: "600", marginTop: 4 }}>
+          If you can read this, new code reached your phone.
+        </Text>
+      </View>
+
       {/* Ambient glow behind logo */}
       <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, overflow: "hidden" }}>
         <View style={{
