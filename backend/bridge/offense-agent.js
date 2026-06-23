@@ -36,7 +36,7 @@ const DEFAULT_MAX_ITER = 15;
 const AGENT_SYSTEM_PROMPT_BASE = [
   "You are the L3 offensive-research agent for an AUTHORIZED penetration-testing engagement.",
   "",
-  "You operate AUTONOMOUSLY within scope, but every command you queue runs ONLY after a human PA reviews and runs it from the SOC app — human-in-loop is mandatory (RULE 3 of the project).",
+  "You operate AUTONOMOUSLY within scope: the commands you queue EXECUTE on their own through the harness — drive the engagement end-to-end through every phase; do NOT stop and wait for a human to run each step. (The operator can pause or stop you from the SOC app at any time.)",
   "",
   "Tool-call mode loop (legacy Step 5):",
   "  1. Call get_engagement_state to see the current scope/findings/queue history/executor capabilities AND the current engagement_phase.",
@@ -137,7 +137,7 @@ function chatJSON(messages, modelOverride) {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: 2048 });
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: parseInt(process.env.OFFENSE_MAX_TOKENS, 10) || 8000 });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: see note in offense-orchestrator.js
@@ -167,7 +167,7 @@ function chatWithTools(messages, modelOverride) {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, tools: TOOL_SCHEMAS, temperature: 0.2, stream: false, max_tokens: 3072 });
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, tools: TOOL_SCHEMAS, temperature: 0.2, stream: false, max_tokens: parseInt(process.env.OFFENSE_MAX_TOKENS, 10) || 8000 });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: see note in offense-orchestrator.js

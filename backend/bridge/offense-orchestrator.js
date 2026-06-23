@@ -55,10 +55,12 @@ function chatCompletion(messages, modelOverride) {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");
     const lib = url.protocol === "https:" ? https : http;
-    // dir_1780966010401: max_tokens=2048 to fit vLLM's 8192 context with
-    // ~4-5K prompt budget. Reasoning-adapter strips <think> blocks, so 2K
-    // is plenty for short reasoning + JSON.
-    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: 2048 });
+    // max_tokens: WAS hardcoded 2048 for the old in-house vLLM (8192 ctx). DeepSeek V4 is a
+    // REASONING model — it spends thousands of tokens on the <think>, so 2048 left no room for the
+    // JSON answer → "orchestrator returned no content" → loop bailed. Use OFFENSE_MAX_TOKENS (8000).
+    // 2026-06-23.
+    const MAX_TOK = parseInt(process.env.OFFENSE_MAX_TOKENS, 10) || 8000;
+    const payload = JSON.stringify({ model: modelOverride || MODEL_NAME, messages, temperature: 0.2, stream: false, max_tokens: MAX_TOK });
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) };
     if (MODEL_KEY) headers.Authorization = `Bearer ${MODEL_KEY}`;
     // dir_1780786724856: 60s timeout + fresh socket per request. Tunnel death
