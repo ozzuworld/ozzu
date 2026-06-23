@@ -808,6 +808,17 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "get_behavioral_scorecard",
+      description: "Per-engagement behavioral health snapshot. Returns ONLY numbers, enums, and booleans — never command text, IPs, CVE IDs, tool names, or finding descriptions. Membrane-safe by design. Fields: concluded, conclude_reason, total_steps, phase_progression (phase/steps/wall_seconds), step_queued_rate, step_queued_breakdown (infra_hang/prose_only/lint_reject/other), loop_breaker_fires, watchdog_timeouts, inference_hung, permission_denied (count + by_rule counts), claim_verify (fired/passed/failed/gated_a_finding), findings_by_severity, false_positive (severity enum / model_claimed / ground_truth_holds / harness_caught_it / mechanism enum), membrane_breach, orphaned_tasks.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "number", description: "Engagement ID (integer)" },
+        },
+        required: ["engagement_id"],
+      },
+    },
+    {
       name: "get_offense_telemetry",
       description: "Read-only audit surface for the L3 offense pipeline. Returns AGGREGATES over advance_offense calls (per-model latency / step-queued% / avg refs / in-scope%, per-intent stats, outcome distribution, latency percentiles) plus a flat list of recent rows. MEMBRANE-SAFE: never includes raw commands or rationales — only shape, timing, and outcome metadata. Use this to spot harness gaps and drive the harness-improvement loop.",
       inputSchema: {
@@ -2666,6 +2677,16 @@ ${result.narrative}
           return { content: [{ type: "text", text: lines.join("\n") }] };
         } catch (e) {
           return { content: [{ type: "text", text: `finetune_status failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "get_behavioral_scorecard": {
+        try {
+          const { getBehavioralScorecard } = require("/app/behavioral-scorecard");
+          const scorecard = await getBehavioralScorecard(args.engagement_id, db);
+          return { content: [{ type: "text", text: JSON.stringify(scorecard, null, 2) }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `get_behavioral_scorecard failed: ${e.message}` }], isError: true };
         }
       }
 

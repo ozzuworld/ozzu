@@ -204,7 +204,36 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
       // dir_1780781999942: optional graph fields. informed_by/enables/kind let the
       // model author findings that already wire into the attack graph. Backward-
       // compatible — defaults are confirmed/empty when absent.
-      const kind = ["confirmed", "hypothesis", "refuted"].includes(f.kind) ? f.kind : "confirmed";
+      let kind = ["confirmed", "hypothesis", "refuted"].includes(f.kind) ? f.kind : "confirmed";
+      let finalSeverity = (["info","low","medium","high","critical"].includes(f.severity)) ? f.severity : "low";
+      let finalEvidence = f.evidence ? String(f.evidence).slice(0, 2000) : null;
+      let preVerifyResolved = false; // true when pre-insert check already resolved the verdict
+
+      // Pre-insert gate: run the synchronous exposure-with-403 check BEFORE writing.
+      // If the evidence already shows a hidden-status code, floor severity and mark
+      // unverified instead of inserting at the model's claimed severity.
+      // Cred-test verification stays post-insert (needs DB id for the active probe).
+      try {
+        const { verifyFindingDataSync } = require("/app/claim-verifier");
+        const preCheck = verifyFindingDataSync({ title: f.title, evidence: f.evidence, evidence_summary: f.evidence, affected_asset: f.affected_asset });
+        if (preCheck.verdict === "fail") {
+          finalSeverity = "info";
+          kind = "unverified";
+          finalEvidence = (finalEvidence || "") + `\n\n[PRE-INSERT GATE: severity floored to info — ${preCheck.notes || "verify_fail"}]`;
+          preVerifyResolved = true;
+          try {
+            await db.query(
+              `INSERT INTO offense_telemetry
+                 (engagement_id, queue_item_id, model_used, intent_category,
+                  n_hosts, n_findings, step_queued, in_scope, n_references,
+                  latency_ms, outcome, outcome_notes)
+               VALUES ($1, NULL, 'claim-verifier', 'pre_insert_gate',
+                       0, 1, false, true, 0, 0, 'verify_gate_fail', $2)`,
+              [engagementId, `title="${String(f.title).slice(0,80)}"; code=${preCheck.code || "?"}; floored_to=info`]);
+          } catch (_) {}
+        }
+      } catch (_) { /* verifier module load failure — continue with original values */ }
+
       const ins = await db.query(
         `INSERT INTO pentest_findings
            (engagement_id, title, severity, status, affected_asset, refs, evidence_summary,
@@ -214,19 +243,18 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
         [
           engagementId,
           String(f.title).slice(0, 240),
-          (["info","low","medium","high","critical"].includes(f.severity)) ? f.severity : "low",
+          finalSeverity,
           f.affected_asset ? String(f.affected_asset).slice(0, 240) : null,
           JSON.stringify(Array.isArray(f.refs) ? f.refs : []),
-          f.evidence ? String(f.evidence).slice(0, 2000) : null,
+          finalEvidence ? finalEvidence.slice(0, 2000) : null,
           JSON.stringify(Array.isArray(f.informed_by) ? f.informed_by : []),
           JSON.stringify(Array.isArray(f.enables) ? f.enables : []),
           kind,
         ]);
-      // dir_1780789196002: fire-and-forget claim verifier. Catches cred_test
-      // false positives like #34 (model interpreted 200 OK on root URL as
-      // auth success). Async — never blocks aggregator. v1 only handles
-      // cred_test claims; other patterns silently no-op.
-      if (ins.rows && ins.rows.length > 0) {
+      // dir_1780789196002: fire-and-forget claim verifier for cred_test claims.
+      // Only fires when the pre-insert gate did NOT already resolve the verdict
+      // (pre-insert handles exposure-with-403; post-insert handles cred_test probes).
+      if (!preVerifyResolved && ins.rows && ins.rows.length > 0) {
         const newId = ins.rows[0].id;
         try {
           const { verifyFinding } = require("/app/claim-verifier");

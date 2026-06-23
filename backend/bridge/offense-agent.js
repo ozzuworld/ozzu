@@ -762,6 +762,17 @@ async function runAgent(engagementId, opts = {}) {
         await setAgentStatus(engagementId, "running", { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, last_action: "added_tasks_no_select" });
         continue;
       }
+      // Non-productive turn attribution: orchestrator gave no selection → other
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'harness', 'non_productive_turn',
+                   0, 0, false, true, 0, 0, 'other', $2)`,
+          [engagementId, `iter=${iter}; orchestrator_no_select; stall_streak=${stallStreak}`]);
+      } catch (_) {}
       stallStreak++;
       const workRow = await db.query(
         `SELECT COUNT(*)::int AS n FROM soc_queue_items WHERE engagement_id = $1 AND status IN ('pending','running')`,
@@ -820,6 +831,20 @@ async function runAgent(engagementId, opts = {}) {
         key_signals: [`synthesizer failed: ${e.message}`],
         new_findings: [], new_hosts: [], followup: [], error_category: "parse_error",
       });
+      // Non-productive turn attribution: synthesizer threw — classify cause
+      const isHangErr = e && /timeout|ETIMEDOUT|ECONNRESET|socket hang up/i.test(e.message || "");
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'harness', 'non_productive_turn',
+                   0, 0, false, true, 0, 0, $2, $3)`,
+          [engagementId,
+           isHangErr ? "infra_hang" : "prose_only",
+           `iter=${iter}; task=${task.id}; synthesizer_err=${(e.message||"").slice(0,120)}`]);
+      } catch (_) {}
       continue;
     }
     if (!step || typeof step.command !== "string" || !step.command.trim()) {
@@ -828,6 +853,17 @@ async function runAgent(engagementId, opts = {}) {
         key_signals: ["synthesizer returned no command"],
         new_findings: [], new_hosts: [], followup: [], error_category: null,
       });
+      // Non-productive turn attribution: synthesizer returned no command → prose_only
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'harness', 'non_productive_turn',
+                   0, 0, false, true, 0, 0, 'prose_only', $2)`,
+          [engagementId, `iter=${iter}; task=${task.id}; no_command_from_synthesizer`]);
+      } catch (_) {}
       continue;
     }
 
@@ -852,6 +888,17 @@ async function runAgent(engagementId, opts = {}) {
         key_signals: [`queue_step failed: ${queueResult.error || "no queue_id"}`],
         new_findings: [], new_hosts: [], followup: [], error_category: "unexpected",
       });
+      // Non-productive turn attribution: queue_step rejected the step → lint_reject
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'harness', 'non_productive_turn',
+                   0, 0, false, true, 0, 0, 'lint_reject', $2)`,
+          [engagementId, `iter=${iter}; task=${task.id}; queue_err=${(queueResult.error||"no queue_id").slice(0,120)}`]);
+      } catch (_) {}
       continue;
     }
     await orchestrator.linkQueueItem(task.id, queueResult.queue_id);

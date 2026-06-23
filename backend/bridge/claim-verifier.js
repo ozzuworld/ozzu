@@ -174,6 +174,23 @@ function refuteExposureBy403(finding) {
       "Hidden, not exposed."}` };
 }
 
+// Pre-insert synchronous gate. Called by offense-aggregator BEFORE the finding
+// is written to DB. Only applies the stateless exposure-with-403 check (no probe
+// needed — the evidence already tells us the status). Returns:
+//   {verdict:'fail', notes}  — gate: floor severity + mark unverified before INSERT
+//   {verdict:'skip'}         — no gate; proceed with normal INSERT
+// Cred-test verification still runs post-insert (needs DB id for the probe).
+function verifyFindingDataSync(f) {
+  if (!f || !f.title) return { verdict: "skip" };
+  if (isExposureClaim(f)) {
+    const haystack = `${f.evidence || ""} ${f.evidence_summary || ""} ${f.affected_asset || ""}`;
+    const synthetic = { title: f.title, evidence_summary: haystack, affected_asset: f.affected_asset || "" };
+    const fast = refuteExposureBy403(synthetic);
+    if (fast) return { verdict: "fail", notes: fast.notes, code: fast.code };
+  }
+  return { verdict: "skip" };
+}
+
 // Main entry. Dispatches by claim type.
 async function verifyFinding(findingId) {
   try {
@@ -254,6 +271,7 @@ async function verifyFinding(findingId) {
 }
 
 module.exports = {
-  verifyFinding, isCredTestClaim, detectVendor,
+  verifyFinding, verifyFindingDataSync,
+  isCredTestClaim, detectVendor,
   isExposureClaim, refuteExposureBy403,
 };
