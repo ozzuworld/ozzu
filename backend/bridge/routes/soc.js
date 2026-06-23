@@ -821,30 +821,40 @@ module.exports = function socRoutes(ctx) {
       }
 
       // Parse findings and create records.
-      // FIX 2 (dir_1782255739233): run the synchronous pre-insert gate so this
+      // FIX 2 (dir_1782255739233): run the shared synchronous pre-insert gate so this
       // path cannot bypass verification. Only the stateless exposure-with-403
       // check is applied here (no active probe — that needs a DB id). A clean
       // human-authored finding with no self-contradicting evidence passes through
       // unchanged (gate returns verdict:'skip').
-      let _syncGate = null;
-      try { _syncGate = require('/app/claim-verifier').verifyFindingDataSync; } catch (_) {}
+      // MINOR 1: applyPreInsertGate emits telemetry on BOTH a floor (VERIFY_GATE_FAIL)
+      // and a gate-internal throw (gate_failed_open); the catch below covers the one
+      // case the gate cannot self-report — its own module failing to load — by
+      // emitting a gate_failed_open row so a broken gate is still countable.
+      let _gate = null;
+      try { _gate = require('/app/claim-verifier').applyPreInsertGate; } catch (_) {}
+      if (!_gate) {
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry
+               (engagement_id, queue_item_id, model_used, intent_category,
+                n_hosts, n_findings, step_queued, in_scope, n_references,
+                latency_ms, outcome, outcome_notes)
+             VALUES ($1, NULL, 'claim-verifier', 'manual_gate',
+                     0, $2, false, true, 0, 0, 'gate_failed_open', $3)`,
+            [engagement_id, Array.isArray(findings) ? findings.length : 1,
+             'source=submit_results; claim-verifier module failed to load; findings inserted at claimed severity']);
+        } catch (_) { /* telemetry never blocks manual submission */ }
+      }
       const createdFindings = [];
       for (const finding of findings) {
         let insertSeverity = finding.severity || 'info';
         let insertKind     = 'confirmed';
-        if (_syncGate) {
+        if (_gate) {
           try {
-            const preCheck = _syncGate({
-              title:            finding.title,
-              evidence:         finding.description || '',
-              evidence_summary: finding.description || '',
-              affected_asset:   finding.affected_asset || '',
-            });
-            if (preCheck.verdict === 'fail') {
-              insertSeverity = 'info';
-              insertKind     = 'unverified';
-            }
-          } catch (_) { /* gate failure is never fatal for manual submissions */ }
+            const gated = await _gate(finding, { db, engagementId: engagement_id, source: 'submit_results' });
+            insertSeverity = gated.severity;
+            insertKind     = gated.kind;
+          } catch (_) { /* applyPreInsertGate self-reports throws; never fatal for manual submissions */ }
         }
         const result = await db.query(`
           INSERT INTO pentest_findings (

@@ -16,7 +16,18 @@
 "use strict";
 
 const { spawn } = require("child_process");
-const db = require("/app/db");
+const { VERIFY_GATE_FAIL } = require("./verify-gate-constants");
+
+// dir_1782255739233: load the real db lazily so this module can be `require`d
+// outside the Docker container (tests run on the host, where /app/db does not
+// exist). In-container the absolute path resolves; on the host the require throws
+// and we leave the binding null — every consumer accepts an injected db (the DI
+// seam below), so production keeps the real module and tests inject a mock.
+let _realDb = null;
+try { _realDb = require("/app/db"); } catch (_) { /* host: no /app/db — injected by caller */ }
+function resolveDb(injected) {
+  return injected || _realDb;
+}
 
 // Title patterns that should trigger cred-test verification. Conservative for v1.
 const CRED_TEST_TITLE_PATTERNS = [
@@ -51,7 +62,7 @@ function detectVendor(finding) {
 
 // Find the queue item that most likely produced this finding: most recent done
 // step on the same engagement with a curl -u pattern in its command.
-async function findSourceQueueItem(engagementId) {
+async function findSourceQueueItem(engagementId, db) {
   const r = await db.query(
     `SELECT id, command FROM soc_queue_items
        WHERE engagement_id = $1 AND status = 'done'
@@ -97,7 +108,11 @@ async function runViaExecutor(engagement, innerCmd) {
 //   {verdict:'pass', code, notes}     — finding stands
 //   {verdict:'fail', code, notes}     — finding is refuted
 //   {verdict:'skip', reason}          — can't verify, leave finding alone
-async function verifyCredTestFinding(finding) {
+async function verifyCredTestFinding(finding, db, runProbe) {
+  // dir_1782255739233: runProbe is the executor seam — defaults to the real
+  // local-spawn executor; tests inject a deterministic probe response so the
+  // PRODUCTION verdict→UPDATE logic can be exercised without a live target.
+  runProbe = runProbe || runViaExecutor;
   const vendor = detectVendor(finding);
   if (!vendor || !PROBE_PATHS[vendor]) return { verdict: "skip", reason: `no probe path for vendor=${vendor || "unknown"}` };
 
@@ -114,7 +129,7 @@ async function verifyCredTestFinding(finding) {
   if (eng.rows.length === 0) return { verdict: "skip", reason: "engagement not found" };
   const engagement = eng.rows[0];
 
-  const src = await findSourceQueueItem(finding.engagement_id);
+  const src = await findSourceQueueItem(finding.engagement_id, db);
   if (!src) return { verdict: "skip", reason: "no curl -u source queue item in last 10 done steps" };
 
   // Extract cred token from source command. Stays in-memory; never logged.
@@ -126,7 +141,7 @@ async function verifyCredTestFinding(finding) {
   // auth-required path with same cred, short timeout.
   const probePath = PROBE_PATHS[vendor];
   const probeCmd = `curl -sS -o /tmp/cv -w 'HTTP=%{http_code}\\n' --connect-timeout 8 --max-time 15 -u ${cred} http://${targetIp}${probePath}; head -c 600 /tmp/cv 2>/dev/null`;
-  const out = await runViaExecutor(engagement, probeCmd);
+  const out = await runProbe(engagement, probeCmd);
 
   const httpMatch = out.match(/HTTP=(\d{3})/);
   const code = httpMatch ? httpMatch[1] : null;
@@ -191,8 +206,85 @@ function verifyFindingDataSync(f) {
   return { verdict: "skip" };
 }
 
+// dir_1782255739233 (FIX 2 + MINOR 1): the single shared pre-insert gate the
+// MANUAL write-paths (routes/soc.js submit-results, routes/mcp.js add_finding)
+// call before INSERT, so neither path can bypass verification by hand-authoring
+// a self-contradicting finding. Returns the severity/kind the caller must INSERT
+// with. Field names are the manual-path shape (description, severity, kind).
+//
+// MINOR 1 — the gate must be COUNTABLE, never silent:
+//   - when it FLOORS a finding it emits an offense_telemetry row with the shared
+//     VERIFY_GATE_FAIL token (matching the offense aggregator's pre-insert gate),
+//     so the false-positive metric sees manual-path floors too;
+//   - when it FAILS OPEN (gate throws, or the verifier module won't load) it emits
+//     a distinct 'gate_failed_open' row, so a broken gate is countable rather than
+//     silently inserting at the claimed severity and corrupting the FP metric.
+//
+// telemetry is best-effort: a telemetry write failure never blocks the insert.
+async function applyPreInsertGate(finding, { db, engagementId, source } = {}) {
+  const dbh = resolveDb(db);
+  let severity = finding.severity || "info";
+  let kind = ["confirmed", "hypothesis", "refuted"].includes(finding.kind) ? finding.kind : "confirmed";
+  let gated = false;
+  let failedOpen = false;
+  let code = null;
+
+  try {
+    const preCheck = verifyFindingDataSync({
+      title:            finding.title,
+      evidence:         finding.description || finding.evidence || "",
+      evidence_summary: finding.description || finding.evidence_summary || "",
+      affected_asset:   finding.affected_asset || "",
+    });
+    if (preCheck.verdict === "fail") {
+      severity = "info";
+      kind     = "unverified";
+      gated    = true;
+      code     = preCheck.code || null;
+    }
+  } catch (e) {
+    // The gate threw — fail OPEN (insert at claimed severity) but LOUDLY.
+    failedOpen = true;
+    if (dbh) {
+      try {
+        await dbh.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'claim-verifier', 'manual_gate',
+                   0, 1, false, true, 0, 0, 'gate_failed_open', $2)`,
+          [engagementId || null,
+           `source=${source || "manual"}; gate threw: ${(e.message || "").slice(0, 80)}; inserted at claimed severity`]);
+      } catch (_) { /* telemetry never blocks the insert */ }
+    }
+    return { severity, kind, gated, failedOpen, code };
+  }
+
+  if (gated && dbh) {
+    try {
+      await dbh.query(
+        `INSERT INTO offense_telemetry
+           (engagement_id, queue_item_id, model_used, intent_category,
+            n_hosts, n_findings, step_queued, in_scope, n_references,
+            latency_ms, outcome, outcome_notes)
+         VALUES ($1, NULL, 'claim-verifier', 'manual_gate',
+                 0, 1, false, true, 0, 0, $2, $3)`,
+        [engagementId || null, VERIFY_GATE_FAIL,
+         `source=${source || "manual"}; title="${String(finding.title || "").slice(0, 80)}"; code=${code || "?"}; floored_to=info`]);
+    } catch (_) { /* telemetry never blocks the insert */ }
+  }
+
+  return { severity, kind, gated, failedOpen, code };
+}
+
 // Main entry. Dispatches by claim type.
-async function verifyFinding(findingId) {
+// dir_1782255739233: optional `injectedDb` is the DI seam — production calls
+// verifyFinding(id) and gets the real /app/db; tests call verifyFinding(id, mockDb)
+// to capture the exact SQL the PRODUCTION function issues.
+async function verifyFinding(findingId, injectedDb, opts = {}) {
+  const db = resolveDb(injectedDb);
+  const runProbe = opts.runProbe; // executor seam; undefined → real local executor
   try {
     const r = await db.query(
       `SELECT id, engagement_id, title, severity, kind, affected_asset, evidence_summary
@@ -230,7 +322,7 @@ async function verifyFinding(findingId) {
 
     if (!isCredTestClaim(finding)) return;
 
-    const result = await verifyCredTestFinding(finding);
+    const result = await verifyCredTestFinding(finding, db, runProbe);
     // outcome column is VARCHAR(24) — short tokens only.
     const outcome = result.verdict === "pass" ? "verify_pass"
                   : result.verdict === "fail" ? "verify_fail"
@@ -284,7 +376,7 @@ async function verifyFinding(findingId) {
 }
 
 module.exports = {
-  verifyFinding, verifyFindingDataSync,
+  verifyFinding, verifyFindingDataSync, applyPreInsertGate,
   isCredTestClaim, detectVendor,
   isExposureClaim, refuteExposureBy403,
 };

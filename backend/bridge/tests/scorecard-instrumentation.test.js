@@ -326,277 +326,220 @@ function makeMockDb(overrides = {}) {
 
   // ── 4. Tightening-pass fixes (dir_1782255739233) ──────────────────────────────
   //
-  // These tests exercise paths the prior 28 tests did NOT cover:
-  //   (a) post-insert FAIL must floor severity, not just relabel kind
-  //   (b) manual write-paths now pass through the sync gate; clean findings unchanged
-  //   (c) skip→unverified labeling
-  //   (d) writer-token and scorecard-reader-token are the same shared constant
+  // REWRITTEN (dir_1782255739233 hardening pass): these tests now drive the REAL
+  // production functions in claim-verifier.js instead of inline copies, so a
+  // reverted production fix turns them RED. claim-verifier.js is `require`-able on
+  // the host because its /app/db import is lazy and every consumer takes an
+  // injected db (the DI seam). Two seams are used:
+  //   • verifyFinding(id, mockDb, {runProbe}) — captures the SQL the PRODUCTION
+  //     function issues; runProbe injects a deterministic probe response so the
+  //     verdict→UPDATE branch runs without a live target.
+  //   • applyPreInsertGate(finding, {db}) — the SHARED gate both manual routes
+  //     (soc.js submit-results, mcp.js add_finding) call; tested directly.
   //
-  // The full async DB paths (verifyFinding) and the /app/* module paths (soc.js,
-  // mcp.js) cannot be exercised without Docker, so tests here model the logic
-  // directly — the same pattern used by tests [1]–[3] above.
+  //   (a) post-insert FAIL must floor severity, not just relabel kind
+  //   (b) manual write-paths pass through the REAL shared gate; clean findings
+  //       unchanged; floor + fail-open emit telemetry (MINOR 1)
+  //   (c) skip→unverified labeling with the AND kind='confirmed' guard
+  //   (d) writer-token and scorecard-reader-token are the same shared constant
   // ─────────────────────────────────────────────────────────────────────────────
   console.log("\n[4] Tightening-pass: post-insert severity floor, bypass paths, skip-unverified, shared constant");
 
-  // ── (a) Post-insert FAIL downgrades severity (FIX 1) ─────────────────────────
-  // Simulate the DB UPDATE that verifyFinding now emits on verdict:'fail'.
-  // We verify that the SQL contains `severity = 'info'` for both claim types.
-  {
-    // Build a minimal mock that captures the SQL sent to it.
-    // Note: SQL strings contain newlines so table-name matching uses /FROM\s+pentest_findings/s
-    // or a string-includes approach — not /.*/  (which doesn't cross lines without the s flag).
-    function makeCapturingDb() {
-      const captures = [];
-      return {
-        capturedSql: captures,
-        async query(sql, params) {
-          captures.push({ sql, params });
-          const flat = sql.replace(/\s+/g, ' ');
-          // Simulate "finding found" on SELECT; "1 row affected" on UPDATE.
-          if (/SELECT .* FROM pentest_findings/.test(flat)) {
-            return { rows: [{ id: 1, engagement_id: 'e1', title: 'Default Credentials Accepted', severity: 'critical', kind: 'confirmed', affected_asset: '1.2.3.4', evidence_summary: '' }] };
-          }
-          if (/SELECT .* FROM pentest_engagements/.test(flat)) {
-            return { rows: [{ id: 'e1', executor_host: null, executor_adb_target: null }] };
-          }
-          // Queue lookup — return nothing so verifyCredTestFinding returns 'skip'.
-          if (/FROM soc_queue_items/.test(flat)) return { rows: [] };
-          if (/INSERT INTO offense_telemetry/.test(flat)) return { rows: [] };
-          return { rows: [] };
-        },
-      };
-    }
+  // The REAL production module — loadable on the host post-DI-seam.
+  const claimVerifier = require(path.join(__dirname, "../claim-verifier"));
 
-    // Inline the post-insert UPDATE logic extracted from claim-verifier.js
-    // to verify that severity = 'info' is present in the UPDATE statement.
-    // This mirrors exactly what verifyFinding does on verdict:'fail'.
-    async function simulateVerifyFail(db, findingId) {
-      const r = await db.query(
-        `SELECT id, engagement_id, title, severity, kind, affected_asset, evidence_summary
-           FROM pentest_findings WHERE id = $1`,
-        [findingId]);
-      if (r.rows.length === 0) return;
-      const finding = r.rows[0];
-      if (finding.kind === "refuted") return;
-      // Simulate verdict:'fail' (as the fixed code does).
-      const verdict = "fail";
-      if (verdict === "fail") {
-        await db.query(
-          `UPDATE pentest_findings
-              SET kind = 'refuted',
-                  severity = 'info',
-                  evidence_summary = COALESCE(evidence_summary, '') || $1
-            WHERE id = $2`,
-          [`\n\n[REFUTED by claim-verifier: probe rejected cred]`, finding.id]);
-      }
-    }
-
-    await checkAsync("(a) post-insert FAIL UPDATE includes severity='info' (cred-test path)", async () => {
-      const db = makeCapturingDb();
-      await simulateVerifyFail(db, 1);
-      const updateEntry = db.capturedSql.find(c => /UPDATE pentest_findings/.test(c.sql.replace(/\s+/g, ' ')));
-      assert.ok(updateEntry, "UPDATE statement must have been issued");
-      const flat = updateEntry.sql.replace(/\s+/g, ' ');
-      assert.ok(/severity\s*=\s*'info'/.test(flat),
-        `UPDATE must include severity = 'info'; got: ${flat}`);
-      assert.ok(/kind\s*=\s*'refuted'/.test(flat),
-        "UPDATE must include kind = 'refuted'");
-    });
-
-    // Inline the exposure-path post-insert UPDATE (also fixed).
-    async function simulateExposureVerifyFail(db, findingId) {
-      const r = await db.query(
-        `SELECT id, engagement_id, title, severity, kind, affected_asset, evidence_summary
-           FROM pentest_findings WHERE id = $1`,
-        [findingId]);
-      if (r.rows.length === 0) return;
-      const finding = r.rows[0];
-      if (finding.kind === "refuted") return;
-      // Exposure fast-path verdict:'fail' — fixed to include severity.
-      await db.query(
-        `UPDATE pentest_findings
-            SET kind = 'refuted',
-                severity = 'info',
-                evidence_summary = COALESCE(evidence_summary, '') || $1
-          WHERE id = $2`,
-        [`\n\n[REFUTED by claim-verifier: HTTP 403 — hidden not exposed]`, finding.id]);
-    }
-
-    await checkAsync("(a) post-insert FAIL UPDATE includes severity='info' (exposure path)", async () => {
-      const db = makeCapturingDb();
-      await simulateExposureVerifyFail(db, 1);
-      const updateEntry = db.capturedSql.find(c => /UPDATE pentest_findings/.test(c.sql.replace(/\s+/g, ' ')));
-      assert.ok(updateEntry, "UPDATE statement must have been issued");
-      const flat = updateEntry.sql.replace(/\s+/g, ' ');
-      assert.ok(/severity\s*=\s*'info'/.test(flat),
-        "Exposure refute UPDATE must floor severity to info");
-    });
+  // Capturing db: records every (sql, params) the production code issues and
+  // returns whatever rows the verdict path needs. `findingRow` lets each test
+  // shape the finding the SELECT returns.
+  function makeVerifierCapturingDb(findingRow) {
+    const captures = [];
+    return {
+      capturedSql: captures,
+      async query(sql, params) {
+        captures.push({ sql, params });
+        const flat = sql.replace(/\s+/g, ' ');
+        if (/SELECT[\s\S]*FROM pentest_findings/.test(flat)) {
+          return { rows: [findingRow] };
+        }
+        if (/SELECT[\s\S]*FROM pentest_engagements/.test(flat)) {
+          return { rows: [{ id: findingRow.engagement_id, executor_host: 'tablet-relay', executor_adb_target: '10.0.0.1:5555' }] };
+        }
+        if (/FROM soc_queue_items/.test(flat)) {
+          // A done step whose decoded command carries a curl -u cred → lets
+          // verifyCredTestFinding extract a cred and reach the probe.
+          return { rows: [{ id: 99, command: "curl -u admin:admin http://x/" }] };
+        }
+        return { rows: [] };
+      },
+    };
   }
+  const findUpdate = (db) => db.capturedSql
+    .map(c => c.sql.replace(/\s+/g, ' '))
+    .find(s => /UPDATE pentest_findings/.test(s));
 
-  // ── (b) Bypass write-paths route through sync gate; clean findings unchanged ──
-  // Inline the FIX 2 logic from soc.js (submit-results) and mcp.js (add_finding).
-  // The sync gate is the same verifyFindingDataSync function from [1] above.
+  // ── (a) Post-insert FAIL floors severity — via the REAL verifyFinding ─────────
   {
-    // Reuse the inline verifyFindingDataSync from section [1].
-    const EXPOSURE_TITLE_PATTERNS_B = [
-      /sensitive\s+file\s+exposure/i,
-      /exposed\s+(file|directory|endpoint|configuration|credentials?|database|backup)/i,
-      /file\s+disclosure/i,
-      /information\s+disclosure(?!.*version)/i,
-      /directory\s+listing/i,
-    ];
-    const HIDDEN_STATUS_RE_B = /(?:Status:\s*|HTTP[/ ]\d\.?\d?\s*|http_code[=:]?\s*)(40[1-4])\b/i;
-    function isExposureClaim_B(f) {
-      if (!f || !f.title) return false;
-      return EXPOSURE_TITLE_PATTERNS_B.some(re => re.test(String(f.title)));
-    }
-    function refuteExposureBy403_B(f) {
-      const haystack = `${f.evidence_summary || ""} ${f.affected_asset || ""}`;
-      const m = haystack.match(HIDDEN_STATUS_RE_B);
-      if (!m) return null;
-      return { verdict: "fail", code: m[1], notes: `hidden ${m[1]}` };
-    }
-    function verifyFindingDataSync_B(f) {
-      if (!f || !f.title) return { verdict: "skip" };
-      if (isExposureClaim_B(f)) {
-        const haystack = `${f.evidence || ""} ${f.evidence_summary || ""} ${f.affected_asset || ""}`;
-        const synthetic = { title: f.title, evidence_summary: haystack, affected_asset: f.affected_asset || "" };
-        const fast = refuteExposureBy403_B(synthetic);
-        if (fast) return { verdict: "fail", notes: fast.notes, code: fast.code };
-      }
-      return { verdict: "skip" };
-    }
-
-    // Simulate the FIX 2 logic from soc.js / mcp.js: apply sync gate before INSERT.
-    function applyGateToFinding(finding, syncGateFn) {
-      let insertSeverity = finding.severity || 'info';
-      let insertKind = finding.kind || 'confirmed';
-      const preCheck = syncGateFn({
-        title:            finding.title,
-        evidence:         finding.description || '',
-        evidence_summary: finding.description || '',
-        affected_asset:   finding.affected_asset || '',
+    // Cred-test path: inject a probe response that looks like a 401 so the REAL
+    // verdict logic resolves to 'fail' and issues the real refute UPDATE.
+    await checkAsync("(a) REAL verifyFinding floors severity='info' on cred-test FAIL", async () => {
+      const db = makeVerifierCapturingDb({
+        id: 1, engagement_id: 'e1',
+        title: 'Default Credentials Accepted on Hikvision',  // cred-test + vendor=hikvision
+        severity: 'critical', kind: 'confirmed',
+        affected_asset: '10.20.30.40', evidence_summary: '',
       });
-      if (preCheck.verdict === 'fail') {
-        insertSeverity = 'info';
-        insertKind     = 'unverified';
-      }
-      return { insertSeverity, insertKind };
-    }
+      const probe401 = async () => "HTTP=401\nHTTP/1.1 401 Unauthorized\n";
+      await claimVerifier.verifyFinding(1, db, { runProbe: probe401 });
+      const upd = findUpdate(db);
+      assert.ok(upd, "production verifyFinding must issue an UPDATE on a fail verdict");
+      assert.ok(/severity\s*=\s*'info'/.test(upd),
+        `real UPDATE must floor severity to 'info'; got: ${upd}`);
+      assert.ok(/kind\s*=\s*'refuted'/.test(upd),
+        "real UPDATE must set kind = 'refuted' on a fail verdict");
+    });
 
-    check("(b) submit-results: exposure-with-403 finding is floored before INSERT", () => {
-      const finding = {
+    // Exposure fast-path: 403 evidence → real verifyFinding refutes with no probe.
+    await checkAsync("(a) REAL verifyFinding floors severity='info' on exposure-with-403 FAIL", async () => {
+      const db = makeVerifierCapturingDb({
+        id: 1, engagement_id: 'e1',
         title: 'Sensitive File Exposure',
-        description: 'Status: 403',
-        severity: 'high',
-        affected_asset: '1.2.3.4',
-      };
-      const { insertSeverity, insertKind } = applyGateToFinding(finding, verifyFindingDataSync_B);
-      assert.strictEqual(insertSeverity, 'info',       "severity must be floored to info");
-      assert.strictEqual(insertKind,     'unverified', "kind must become unverified");
-    });
-
-    check("(b) add_finding MCP: exposure-with-403 finding is floored before INSERT", () => {
-      const args = {
-        title: 'Exposed Configuration File',
-        description: 'http_code=403',
-        severity: 'medium',
-        affected_asset: '1.2.3.4',
-        kind: 'confirmed',
-      };
-      const { insertSeverity, insertKind } = applyGateToFinding(args, verifyFindingDataSync_B);
-      assert.strictEqual(insertSeverity, 'info',       "MCP add_finding: severity floored");
-      assert.strictEqual(insertKind,     'unverified', "MCP add_finding: kind unverified");
-    });
-
-    check("(b) clean human finding (no self-contradicting evidence) passes UNCHANGED", () => {
-      const finding = {
-        title: 'Admin Panel Accessible',
-        description: 'Logged in as admin, session cookie received',
-        severity: 'critical',
-        affected_asset: '1.2.3.4',
-        kind: 'confirmed',
-      };
-      const { insertSeverity, insertKind } = applyGateToFinding(finding, verifyFindingDataSync_B);
-      assert.strictEqual(insertSeverity, 'critical',   "clean finding: severity unchanged");
-      assert.strictEqual(insertKind,     'confirmed',  "clean finding: kind unchanged");
-    });
-
-    check("(b) clean cred-test finding (no evidence fields) passes UNCHANGED through gate", () => {
-      // A finding with no description/evidence — gate must degrade gracefully.
-      const finding = {
-        title: 'Default Credentials Accepted',
-        description: '',
-        severity: 'high',
-        affected_asset: '',
-        kind: 'confirmed',
-      };
-      const { insertSeverity, insertKind } = applyGateToFinding(finding, verifyFindingDataSync_B);
-      assert.strictEqual(insertSeverity, 'high',      "cred-test finding: severity preserved when no self-contra evidence");
-      assert.strictEqual(insertKind,     'confirmed', "cred-test finding: kind preserved");
+        severity: 'high', kind: 'confirmed',
+        affected_asset: '10.20.30.40', evidence_summary: 'Status: 403',
+      });
+      await claimVerifier.verifyFinding(1, db); // no probe needed for exposure fast-path
+      const upd = findUpdate(db);
+      assert.ok(upd, "production verifyFinding must issue an UPDATE on exposure-with-403");
+      assert.ok(/severity\s*=\s*'info'/.test(upd),
+        "real exposure-refute UPDATE must floor severity to 'info'");
+      assert.ok(/kind\s*=\s*'refuted'/.test(upd),
+        "real exposure-refute UPDATE must set kind = 'refuted'");
     });
   }
 
-  // ── (c) skip→unverified labeling (FIX 4) ─────────────────────────────────────
-  // Simulate the FIX 4 UPDATE that verifyFinding now emits on verdict:'skip'.
+  // ── (b) Manual write-paths route through the REAL shared gate ─────────────────
+  // applyPreInsertGate is the exact function soc.js submit-results and mcp.js
+  // add_finding call. Driving it here exercises the real gate, not a copy.
   {
-    function makeSkipCapturingDb() {
-      const captures = [];
+    // A db that captures telemetry INSERTs so we can prove MINOR-1 emissions.
+    function makeTelemetryCapturingDb() {
+      const telemetry = [];
       return {
-        capturedSql: captures,
+        telemetry,
         async query(sql, params) {
-          captures.push({ sql, params });
-          const flat = sql.replace(/\s+/g, ' ');
-          if (/SELECT .* FROM pentest_findings/.test(flat)) {
-            return { rows: [{ id: 2, engagement_id: 'e1', title: 'Default Credentials Accepted', severity: 'high', kind: 'confirmed', affected_asset: '1.2.3.4', evidence_summary: '' }] };
+          if (/INSERT INTO offense_telemetry/.test(sql)) {
+            // params: [...] — outcome is the 11th positional ($11) → index 1 here
+            // since this INSERT uses ($1, NULL, 'claim-verifier', intent, ..., outcome, notes).
+            telemetry.push({ sql: sql.replace(/\s+/g, ' '), params });
           }
           return { rows: [] };
         },
       };
     }
 
-    // Inline the skip-path UPDATE from the fixed verifyFinding.
-    async function simulateVerifySkip(db, findingId) {
-      const r = await db.query(
-        `SELECT id, engagement_id, title, severity, kind, affected_asset, evidence_summary
-           FROM pentest_findings WHERE id = $1`,
-        [findingId]);
-      if (r.rows.length === 0) return;
-      const finding = r.rows[0];
-      if (finding.kind === "refuted") return;
-      const verdict = "skip";
-      const reason = "no probe path for vendor=unknown";
-      if (verdict === "skip") {
-        await db.query(
-          `UPDATE pentest_findings
-              SET kind = 'unverified',
-                  evidence_summary = COALESCE(evidence_summary, '') || $1
-            WHERE id = $2 AND kind = 'confirmed'`,
-          [`\n\n[INCONCLUSIVE by claim-verifier: ${reason}]`, finding.id]);
-      }
-    }
-
-    await checkAsync("(c) post-insert skip verdict sets kind='unverified' (not severity change)", async () => {
-      const db = makeSkipCapturingDb();
-      await simulateVerifySkip(db, 2);
-      const updateEntry = db.capturedSql.find(c => /UPDATE pentest_findings/.test(c.sql.replace(/\s+/g, ' ')));
-      assert.ok(updateEntry, "UPDATE statement must be issued on skip");
-      const flat = updateEntry.sql.replace(/\s+/g, ' ');
-      assert.ok(/kind\s*=\s*'unverified'/.test(flat),
-        "skip UPDATE must set kind = 'unverified'");
-      // Severity must NOT be touched on skip.
-      assert.ok(!/severity/.test(flat),
-        "skip UPDATE must NOT alter severity");
+    await checkAsync("(b) REAL gate floors exposure-with-403 finding before INSERT (submit-results shape)", async () => {
+      const db = makeTelemetryCapturingDb();
+      const r = await claimVerifier.applyPreInsertGate(
+        { title: 'Sensitive File Exposure', description: 'Status: 403', severity: 'high', affected_asset: '10.20.30.40' },
+        { db, engagementId: 'e1', source: 'submit_results' });
+      assert.strictEqual(r.severity, 'info',       "real gate must floor severity to info");
+      assert.strictEqual(r.kind,     'unverified', "real gate must mark kind unverified");
+      assert.strictEqual(r.gated,    true,         "real gate must report gated=true");
     });
 
-    await checkAsync("(c) skip UPDATE only targets kind='confirmed' rows (no double-flip)", async () => {
-      const db = makeSkipCapturingDb();
-      await simulateVerifySkip(db, 2);
-      const updateEntry = db.capturedSql.find(c => /UPDATE pentest_findings/.test(c.sql.replace(/\s+/g, ' ')));
-      assert.ok(updateEntry, "UPDATE must have been issued");
-      const flat = updateEntry.sql.replace(/\s+/g, ' ');
-      assert.ok(/WHERE id = .* AND kind = 'confirmed'/.test(flat),
-        "skip UPDATE must guard with AND kind = 'confirmed' to avoid flipping already-refuted rows");
+    await checkAsync("(b) REAL gate floors exposure-with-403 finding (add_finding shape)", async () => {
+      const db = makeTelemetryCapturingDb();
+      const r = await claimVerifier.applyPreInsertGate(
+        { title: 'Exposed Configuration File', description: 'http_code=403', severity: 'medium', kind: 'confirmed', affected_asset: '10.20.30.40' },
+        { db, engagementId: 'e1', source: 'add_finding' });
+      assert.strictEqual(r.severity, 'info',       "MCP add_finding: real gate floors severity");
+      assert.strictEqual(r.kind,     'unverified', "MCP add_finding: real gate marks unverified");
+    });
+
+    await checkAsync("(b) REAL gate passes a clean finding UNCHANGED", async () => {
+      const db = makeTelemetryCapturingDb();
+      const r = await claimVerifier.applyPreInsertGate(
+        { title: 'Admin Panel Accessible', description: 'Logged in as admin, session cookie received', severity: 'critical', kind: 'confirmed', affected_asset: '10.20.30.40' },
+        { db, engagementId: 'e1', source: 'submit_results' });
+      assert.strictEqual(r.severity, 'critical',  "clean finding: severity unchanged through real gate");
+      assert.strictEqual(r.kind,     'confirmed', "clean finding: kind unchanged through real gate");
+      assert.strictEqual(r.gated,    false,       "clean finding: real gate reports gated=false");
+      assert.strictEqual(db.telemetry.length, 0,  "clean finding: no floor telemetry emitted");
+    });
+
+    await checkAsync("(b) REAL gate passes a clean cred-test finding (no evidence) UNCHANGED", async () => {
+      const db = makeTelemetryCapturingDb();
+      const r = await claimVerifier.applyPreInsertGate(
+        { title: 'Default Credentials Accepted', description: '', severity: 'high', kind: 'confirmed', affected_asset: '' },
+        { db, engagementId: 'e1', source: 'add_finding' });
+      assert.strictEqual(r.severity, 'high',      "cred-test finding: severity preserved (no self-contra evidence)");
+      assert.strictEqual(r.kind,     'confirmed', "cred-test finding: kind preserved");
+    });
+
+    // MINOR 1: a floor must be COUNTABLE — the real gate emits a VERIFY_GATE_FAIL
+    // telemetry row when it floors, matching the offense path's pattern.
+    await checkAsync("(b/MINOR-1) REAL gate emits VERIFY_GATE_FAIL telemetry when it floors", async () => {
+      const db = makeTelemetryCapturingDb();
+      await claimVerifier.applyPreInsertGate(
+        { title: 'Sensitive File Exposure', description: 'Status: 403', severity: 'high', affected_asset: '10.20.30.40' },
+        { db, engagementId: 'e1', source: 'submit_results' });
+      assert.strictEqual(db.telemetry.length, 1, "floor must emit exactly one telemetry row");
+      const { VERIFY_GATE_FAIL } = require(path.join(__dirname, "../verify-gate-constants"));
+      assert.ok(db.telemetry[0].params.includes(VERIFY_GATE_FAIL),
+        "floor telemetry row must carry the VERIFY_GATE_FAIL token as its outcome");
+    });
+
+    // MINOR 1: a fail-OPEN must be COUNTABLE too — when the gate's internal check
+    // throws, the real gate inserts at claimed severity but emits gate_failed_open.
+    await checkAsync("(b/MINOR-1) REAL gate emits gate_failed_open telemetry when it fails open", async () => {
+      const db = makeTelemetryCapturingDb();
+      // A finding whose .title getter throws → forces verifyFindingDataSync to throw
+      // inside applyPreInsertGate, exercising the real fail-open branch.
+      const poison = { description: 'x', severity: 'high', affected_asset: '10.20.30.40' };
+      Object.defineProperty(poison, 'title', { get() { throw new Error('boom'); }, enumerable: true });
+      const r = await claimVerifier.applyPreInsertGate(poison, { db, engagementId: 'e1', source: 'add_finding' });
+      assert.strictEqual(r.failedOpen, true, "real gate must report failedOpen=true on internal throw");
+      assert.strictEqual(r.severity, 'high', "fail-open inserts at CLAIMED severity (does not silently downgrade)");
+      assert.strictEqual(db.telemetry.length, 1, "fail-open must emit exactly one telemetry row");
+      // The fail-open outcome token is a literal in the INSERT's VALUES clause, so
+      // assert against the captured SQL (not the params array).
+      assert.ok(/gate_failed_open/.test(db.telemetry[0].sql),
+        "fail-open telemetry row must carry the 'gate_failed_open' outcome so a broken gate is countable");
+    });
+  }
+
+  // ── (c) skip→unverified labeling — via the REAL verifyFinding ─────────────────
+  {
+    await checkAsync("(c) REAL verifyFinding sets kind='unverified' (not severity) on SKIP", async () => {
+      const db = makeVerifierCapturingDb({
+        id: 2, engagement_id: 'e1',
+        title: 'Default Credentials Accepted on Hikvision',
+        severity: 'high', kind: 'confirmed',
+        affected_asset: '10.20.30.40', evidence_summary: '',
+      });
+      // Inconclusive probe (404) → real verdict resolves to 'skip'.
+      const probe404 = async () => "HTTP=404\nNot Found\n";
+      await claimVerifier.verifyFinding(2, db, { runProbe: probe404 });
+      const upd = findUpdate(db);
+      assert.ok(upd, "production verifyFinding must issue an UPDATE on a skip verdict");
+      assert.ok(/kind\s*=\s*'unverified'/.test(upd),
+        `real skip UPDATE must set kind = 'unverified'; got: ${upd}`);
+      assert.ok(!/severity\s*=/.test(upd),
+        "real skip UPDATE must NOT alter severity (inconclusive ≠ wrong)");
+    });
+
+    await checkAsync("(c) REAL verifyFinding skip UPDATE guards with AND kind='confirmed'", async () => {
+      const db = makeVerifierCapturingDb({
+        id: 2, engagement_id: 'e1',
+        title: 'Default Credentials Accepted on Hikvision',
+        severity: 'high', kind: 'confirmed',
+        affected_asset: '10.20.30.40', evidence_summary: '',
+      });
+      const probe404 = async () => "HTTP=404\nNot Found\n";
+      await claimVerifier.verifyFinding(2, db, { runProbe: probe404 });
+      const upd = findUpdate(db);
+      assert.ok(upd, "UPDATE must have been issued");
+      assert.ok(/WHERE id = .* AND kind\s*=\s*'confirmed'/.test(upd),
+        "real skip UPDATE must guard with AND kind = 'confirmed' to avoid flipping already-refuted rows");
     });
   }
 
@@ -650,6 +593,51 @@ function makeMockDb(overrides = {}) {
         "offense-aggregator.js must require('./verify-gate-constants')");
       assert.ok(!/'verify_gate_fail'/.test(aggregatorSrc),
         "offense-aggregator.js must not contain the literal 'verify_gate_fail' — use the constant");
+    });
+
+    // MINOR 2: importing the constant is not enough — assert the producer actually
+    // USES VERIFY_GATE_FAIL as the token WRITTEN into the telemetry INSERT (i.e. it
+    // appears inside the params array of an `INSERT INTO offense_telemetry`), so a
+    // future edit that swaps the written token back to a literal/other var goes red.
+    check("(d/MINOR-2) offense-aggregator.js WRITES VERIFY_GATE_FAIL as the telemetry INSERT token", () => {
+      const fs = require("fs");
+      const aggregatorSrc = fs.readFileSync(
+        path.join(__dirname, "../offense-aggregator.js"), "utf8");
+      // The aggregator has MORE THAN ONE `INSERT INTO offense_telemetry` (the
+      // reflector-recovery row legitimately writes a different token). Scan EVERY
+      // such INSERT's params-array window and require that at least one carries the
+      // VERIFY_GATE_FAIL identifier as a written param — proving the constant is the
+      // token actually persisted by the pre-insert gate, not merely imported.
+      let from = 0, found = false, count = 0;
+      while (true) {
+        const idx = aggregatorSrc.indexOf("INSERT INTO offense_telemetry", from);
+        if (idx < 0) break;
+        count++;
+        const tail = aggregatorSrc.slice(idx);
+        const closeIdx = tail.indexOf("]);");
+        const stmtWindow = closeIdx >= 0 ? tail.slice(0, closeIdx) : tail;
+        if (/\bVERIFY_GATE_FAIL\b/.test(stmtWindow)) found = true;
+        from = idx + 1;
+      }
+      assert.ok(count >= 1, "aggregator must contain an INSERT INTO offense_telemetry");
+      assert.ok(found,
+        "VERIFY_GATE_FAIL must appear as a written param in an offense_telemetry INSERT — " +
+        "the import alone does not prove the constant is the token actually persisted");
+    });
+
+    // Cross-check the value end-to-end at runtime: a telemetry row whose outcome is
+    // the constant's value is counted by the scorecard reader, proving writer-side
+    // value and reader-side filter agree (no drift). (Complements the source check.)
+    await checkAsync("(d/MINOR-2) scorecard counts a row written with the constant's value", async () => {
+      const { VERIFY_GATE_FAIL } = require(path.join(__dirname, "../verify-gate-constants"));
+      const db = makeMockDb({
+        telemetry: [
+          { outcome: VERIFY_GATE_FAIL, intent_category: "pre_insert_gate", step_queued: false, outcome_notes: "", created_at: new Date() },
+        ],
+      });
+      const sc = await getBehavioralScorecard(1, db);
+      assert.strictEqual(sc.claim_verify.gated_a_finding, 1,
+        "the value the producer writes (VERIFY_GATE_FAIL) must be exactly what the reader counts");
     });
   }
 })().then(() => {

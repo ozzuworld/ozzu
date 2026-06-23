@@ -2099,25 +2099,39 @@ ${result.narrative}
       case "add_finding": {
         // Attack-graph fields (dir_1780781999942): informed_by/enables/kind are optional;
         // backward-compatible for callers that don't pass them. kind defaults to 'confirmed'.
-        // FIX 2 (dir_1782255739233): run the synchronous pre-insert gate before writing so
-        // this strategist/manual path cannot bypass verification. Only the stateless
-        // exposure-with-403 check applies (no active probe). A legitimate human/strategist
-        // finding with no self-contradicting evidence passes through UNCHANGED (verdict:'skip').
+        // FIX 2 (dir_1782255739233): run the shared synchronous pre-insert gate before
+        // writing so this strategist/manual path cannot bypass verification. Only the
+        // stateless exposure-with-403 check applies (no active probe). A legitimate
+        // human/strategist finding with no self-contradicting evidence passes through
+        // UNCHANGED (verdict:'skip').
+        // MINOR 1: applyPreInsertGate emits telemetry on BOTH a floor (VERIFY_GATE_FAIL)
+        // and a gate-internal throw (gate_failed_open); the catch below covers the one
+        // case the gate cannot self-report — its own module failing to load — by emitting
+        // a gate_failed_open row so a broken gate is countable instead of silent.
         let addFindingKind = ["confirmed", "hypothesis", "refuted"].includes(args.kind) ? args.kind : "confirmed";
         let addFindingSeverity = args.severity;
-        try {
-          const { verifyFindingDataSync } = require("/app/claim-verifier");
-          const preCheck = verifyFindingDataSync({
-            title:            args.title,
-            evidence:         args.description || '',
-            evidence_summary: args.description || '',
-            affected_asset:   args.affected_asset || '',
-          });
-          if (preCheck.verdict === 'fail') {
-            addFindingSeverity = 'info';
-            addFindingKind     = 'unverified';
-          }
-        } catch (_) { /* gate failure is never fatal for strategist submissions */ }
+        let _addGate = null;
+        try { _addGate = require("/app/claim-verifier").applyPreInsertGate; } catch (_) {}
+        if (_addGate) {
+          try {
+            const gated = await _addGate(
+              { title: args.title, description: args.description, severity: args.severity, kind: addFindingKind, affected_asset: args.affected_asset },
+              { db, engagementId: args.engagement_id, source: 'add_finding' });
+            addFindingSeverity = gated.severity;
+            addFindingKind     = gated.kind;
+          } catch (_) { /* applyPreInsertGate self-reports throws; never fatal for strategist submissions */ }
+        } else {
+          try {
+            await db.query(
+              `INSERT INTO offense_telemetry
+                 (engagement_id, queue_item_id, model_used, intent_category,
+                  n_hosts, n_findings, step_queued, in_scope, n_references,
+                  latency_ms, outcome, outcome_notes)
+               VALUES ($1, NULL, 'claim-verifier', 'manual_gate',
+                       0, 1, false, true, 0, 0, 'gate_failed_open', $2)`,
+              [args.engagement_id, 'source=add_finding; claim-verifier module failed to load; finding inserted at claimed severity']);
+          } catch (_) { /* telemetry never blocks strategist submission */ }
+        }
         await db.query(`
           INSERT INTO pentest_findings (
             engagement_id, severity, title, description, cvss_score, cvss_vector,
