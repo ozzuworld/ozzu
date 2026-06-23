@@ -1,22 +1,35 @@
 # SOC Command Execution Contract
 
-## How queue items run
+## How queue items run (2026-06-23: dev-01 OUT — execution is LOCAL on the bridge)
 
 When a queue item is executed (`POST /soc/execute` or `POST /soc/queue/:id/run`),
-the bridge does:
+the bridge runs it **locally** — NOT over ssh to dev-01:
 
 ```js
-spawn(
-  'ssh',
-  ['-o', '...', 'dev-01', 'bash', '-s'],
-  { stdio: ['pipe', 'pipe', 'pipe'], detached: true }
-);
+spawn('bash', ['-s'], { stdio: ['pipe', 'pipe', 'pipe'], detached: true });
 proc.stdin.write(item.command);
 proc.stdin.end();
 ```
 
-The command is shipped **via ssh stdin** to a remote `bash -s`. It never passes
-through a local shell string.
+The command is piped **via stdin** to a local `bash -s`. It never passes through a
+local shell string (so `$VAR` assignments survive — see below).
+
+**Why local, and how it reaches a physical lab:** the bridge container is
+`network_mode: host`, and the host routes the lab `/24` over `wg0`
+(`192.168.1.0/24 → wg0 → tablet relay → EDIFICIO LAN`). So **the bridge holds the
+offense toolkit** (`nmap` et al., baked into `backend/bridge/Dockerfile`) and **the
+tablet is the L3 doorway** into the lab. The engagement's `executor_host` names the
+**relay**, not an ssh target.
+
+**dev-01 is REMOVED from the offense pipeline** (King Kazuma 2026-06-23). It's a GCP
+cloud VM with its own conflicting `192.168.1.x` (the sim labs) — running offense
+there scanned the cloud, not the lab. It's no longer surfaced as an executor, no
+longer a default, and the `ssh dev-01` / `dev-01:8888` exec-agent paths are gone
+from both execute endpoints.
+
+**Anti-cloud pre-flight:** both endpoints abort a command that targets cloud infra
+(the GCP metadata IP `169.254.169.254` or an `*.internal` host), so a mis-scoped
+scan can never hit GCP/dev-01 instead of the lab.
 
 ## Why this matters for Cipher
 
@@ -64,5 +77,7 @@ The workaround was base64-wrapping every multi-statement script:
 - Long scripts still get truncated in postgres if larger than TOAST limit;
   prefer concise scripts that produce checkable artifacts and `find`/`ls`
   summaries rather than dumping megabytes of disassembly.
-- SSH process is in its own process group (`detached: true`) so the cancel
+- The local process is in its own process group (`detached: true`) so the cancel
   endpoint can `process.kill(-pid)` the whole chain.
+- `whoami` is now the **bridge** user (the command runs locally), not dev-01's.
+  File-path assumptions that depended on dev-01's `$HOME` no longer hold.
