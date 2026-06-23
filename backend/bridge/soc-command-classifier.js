@@ -84,15 +84,18 @@ const EXPLOIT_TEST_COMMANDS = new Set([
 // dir_1780854637935: nc/ncat/socat moved to CONTEXTUAL_COMMANDS — their
 // intent depends on flags (-z = recon, -l/-e = exploit_rce). See
 // classifyContextual() below.
+// dir_1782239552993: python/python3/perl/ruby/node moved to CONTEXTUAL_COMMANDS
+// — running `python exploit.py target` is exploit_test; only inline shell
+// invocations (-c "os.system(...)" / -e "exec ...") are exploit_rce.
+// bash/sh/zsh/powershell/pwsh stay EXPLOIT_RCE — shell execution is always RCE.
 const EXPLOIT_RCE_COMMANDS = new Set([
-  "python", "python3", "perl", "ruby", "node",  // when used to spawn shells
   "powershell", "pwsh",
   "bash", "sh", "zsh",                          // remote shell invocation
 ]);
 
 // CONTEXTUAL: same binary, different intent depending on flags. The
 // classifyByFirstToken path delegates to classifyContextual() for these.
-const CONTEXTUAL_COMMANDS = new Set(["nc", "ncat", "socat"]);
+const CONTEXTUAL_COMMANDS = new Set(["nc", "ncat", "socat", "python", "python3", "perl", "ruby", "node"]);
 
 // POST_EXPLOIT: persistence, lateral movement, credential theft on host.
 const POST_EXPLOIT_COMMANDS = new Set([
@@ -147,6 +150,8 @@ function firstNonFlagToken(command) {
 
 // dir_1780854637935: flag-aware classification for nc/ncat/socat. Same
 // binary maps to different intents based on what flags follow it.
+// dir_1782239552993: extended to python/python3/perl/ruby/node — script-file
+// invocations are exploit_test; inline shell exec (-c/-e) are exploit_rce.
 function classifyContextual(token, fullCommand) {
   const cmdStr = String(fullCommand || "");
   if (token === "nc" || token === "ncat") {
@@ -169,6 +174,55 @@ function classifyContextual(token, fullCommand) {
     if (/(TCP[46]?-LISTEN|UDP[46]?-LISTEN|OPENSSL-LISTEN|UNIX-LISTEN)/.test(cmdStr))
       return { intent: "exploit_rce",  matched_rule: "socat_listener_handler" };
     return { intent: "enumeration",    matched_rule: "socat_client_default" };
+  }
+  // dir_1782239552993: scripting-language contextual classification.
+  // - python/python3/perl/ruby/node running a SCRIPT FILE → exploit_test
+  //   (model is executing an exploit module, not spawning an interactive shell)
+  // - inline exec flags (-c / -e / --command) that invoke shell builtins → exploit_rce
+  //   (e.g. `python3 -c "import os; os.system('/bin/sh')"`)
+  // Default: exploit_test (any script execution is at minimum exploit scope)
+  if (token === "python" || token === "python3") {
+    // -c "..." inline code execution is always exploit_rce — the payload is arbitrary
+    // Python code that can trivially spawn shells. Note: the pipe-split in classifyCommand
+    // may truncate the -c payload at ';' so we cannot reliably inspect its content;
+    // the mere presence of -c is sufficient to classify as exploit_rce.
+    if (/(^|\s)-c\s/.test(cmdStr))
+      return { intent: "exploit_rce", matched_rule: `${token}_inline_exec` };
+    // Running a script file: positional argument ending in .py OR a path (contains /)
+    if (/\s[\w./~-]*\.py(?:\s|$)/.test(cmdStr) || /\s\/\S+\.py(?:\s|$)/.test(cmdStr))
+      return { intent: "exploit_test", matched_rule: `${token}_script_file` };
+    // -m module execution (e.g. python3 -m http.server) → enumeration class
+    if (/(^|\s)-m\s+\w/.test(cmdStr))
+      return { intent: "enumeration",  matched_rule: `${token}_module_run` };
+    // Bare invocation or unknown pattern → exploit_test (conservative)
+    return { intent: "exploit_test",   matched_rule: `${token}_default` };
+  }
+  if (token === "perl") {
+    // -e "..." inline execution
+    if (/(^|\s)-e\s/.test(cmdStr))
+      return { intent: "exploit_rce",  matched_rule: "perl_inline_exec" };
+    // Script file
+    if (/\s[\w./~-]*\.pl(?:\s|$)/.test(cmdStr))
+      return { intent: "exploit_test", matched_rule: "perl_script_file" };
+    return { intent: "exploit_test",   matched_rule: "perl_default" };
+  }
+  if (token === "ruby") {
+    // -e "..." inline execution
+    if (/(^|\s)-e\s/.test(cmdStr))
+      return { intent: "exploit_rce",  matched_rule: "ruby_inline_exec" };
+    // Script file
+    if (/\s[\w./~-]*\.rb(?:\s|$)/.test(cmdStr))
+      return { intent: "exploit_test", matched_rule: "ruby_script_file" };
+    return { intent: "exploit_test",   matched_rule: "ruby_default" };
+  }
+  if (token === "node") {
+    // -e "..." inline execution
+    if (/(^|\s)-e\s/.test(cmdStr))
+      return { intent: "exploit_rce",  matched_rule: "node_inline_exec" };
+    // Script file
+    if (/\s[\w./~-]*\.js(?:\s|$)/.test(cmdStr))
+      return { intent: "exploit_test", matched_rule: "node_script_file" };
+    return { intent: "exploit_test",   matched_rule: "node_default" };
   }
   return { intent: "unknown", matched_rule: `contextual_unhandled:${token}` };
 }
