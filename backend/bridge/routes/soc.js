@@ -413,14 +413,14 @@ module.exports = function socRoutes(ctx) {
       let enabled = true;
       try { const b = await parseBody(req); if (b && typeof b.enabled === "boolean") enabled = b.enabled; } catch {}
       try {
-        const er = await db.query(`SELECT id FROM pentest_engagements WHERE id = $1`, [eid]);
+        const er = await db.query(`SELECT id, agent_status FROM pentest_engagements WHERE id = $1`, [eid]);
         if (er.rows.length === 0) { sendJSON(res, 404, { error: "engagement not found" }); return true; }
         await db.query(
           `UPDATE pentest_engagements SET autonomous_execution_enabled = $2,
              autonomous_paused = CASE WHEN $2 THEN false ELSE autonomous_paused END
            WHERE id = $1`,
           [eid, enabled]);
-        let kicked = 0;
+        let kicked = 0, launched = false;
         if (enabled) {
           try {
             const autoEx = require("../autonomous-executor");
@@ -429,8 +429,16 @@ module.exports = function socRoutes(ctx) {
               try { const r = await autoEx.maybeAutoExecute(row.id); if (r && r.autoExecuted) kicked++; } catch (_) {}
             }
           } catch (e) { console.error("[soc/autonomy] kick:", e && e.message); }
+          // Autorun: "Auto on" means run autonomously. If no loop is active, START one — it queues
+          // steps and (auto_exec=true) auto-runs them through the membrane. The operator's toggle is
+          // the trigger (same hand-on-the-switch as Launch).
+          if (er.rows[0].agent_status !== "running") {
+            const agent = require("../offense-agent");
+            agent.runAgent(eid, { max_iter: 50 }).catch((e) => console.error("[soc/autonomy] runAgent:", e && e.message));
+            launched = true;
+          }
         }
-        sendJSON(res, 200, { ok: true, autonomous_execution_enabled: enabled, kicked });
+        sendJSON(res, 200, { ok: true, autonomous_execution_enabled: enabled, kicked, launched });
       } catch (error) {
         console.error("[soc/autonomy] Error:", error);
         sendJSON(res, 500, { error: "autonomy toggle failed", details: error.message });
