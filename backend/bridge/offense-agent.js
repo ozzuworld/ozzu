@@ -480,6 +480,19 @@ async function runAgent(engagementId, opts = {}) {
       return { engagement_id: engagementId, ok: true, iter, ended_by_model: false, end_reason: "operator_stopped", elapsed_sec: Math.round((Date.now()-startMs)/1000) };
     }
 
+    // dir_1782243745921 Fix 3: reconciliation sweep — resolve any 'pending' items
+    // that are older than ORPHAN_TIMEOUT_SEC with no active execution. These are
+    // items whose synthesis hung (inference timed out) or whose run endpoint call
+    // failed silently without writing a terminal status. Fires at the top of each
+    // iteration so the orchestrator never sees ghost-pending items when deciding
+    // whether there's pending work in flight.
+    try {
+      const { reconcilePendingItems } = require("/app/autonomous-executor");
+      await reconcilePendingItems(engagementId);
+    } catch (e) {
+      console.error(`[offense-agent] reconcile sweep failed:`, e.message);
+    }
+
     // dir_1780845298918: recovery_recipes — detect known failure scenarios and
     // apply structured recovery before this iter's model call. Saves a model
     // call when executor is offline + auto-paces fabrication streaks.

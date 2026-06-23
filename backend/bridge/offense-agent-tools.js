@@ -204,10 +204,22 @@ async function waitForOutcome(args) {
   // dir_1782238863765 Part 2+3: watchdog fired — log to offense_telemetry so
   // analyze_engagement_telemetry surfaces 'outcome_timeout' as a warning.
   // Also look up the engagement_id from the queue row for the telemetry insert.
+  //
+  // dir_1782243745921 Fix 1: a step that timed out while STILL 'pending' (never
+  // reached 'running') means execution never started — synthesis hung or the run
+  // endpoint failed silently. Resolve the row to 'failed' so it can never stay
+  // 'pending' indefinitely. A step that reached 'running' is a legitimately long
+  // operation (brute-force, large scan) — do NOT touch it; the caller will re-poll
+  // or handle the timeout outcome without overwriting the live execution.
+  let engId = null;
+  let itemStatus = null;
   try {
     const qRow = await db.query(
-      `SELECT engagement_id FROM soc_queue_items WHERE id = $1`, [queue_item_id]);
-    const engId = qRow.rows[0] && qRow.rows[0].engagement_id;
+      `SELECT engagement_id, status FROM soc_queue_items WHERE id = $1`, [queue_item_id]);
+    if (qRow.rows[0]) {
+      engId = qRow.rows[0].engagement_id;
+      itemStatus = qRow.rows[0].status;
+    }
     if (engId) {
       await db.query(
         `INSERT INTO offense_telemetry
@@ -218,15 +230,37 @@ async function waitForOutcome(args) {
                  $3, 'outcome_timeout', $4)`,
         [engId, queue_item_id,
          Math.round(timeoutMs),
-         `queue_item ${queue_item_id} stayed 'pending' for ${Math.round(timeoutMs/1000)}s — watchdog fired (dir_1782238863765)`]);
+         `queue_item ${queue_item_id} stayed '${itemStatus || "pending"}' for ${Math.round(timeoutMs/1000)}s — watchdog fired (dir_1782238863765)`]);
     }
   } catch (_) { /* telemetry never breaks the watchdog */ }
+
+  // dir_1782243745921 Fix 1: only resolve 'pending' items — a 'running' item
+  // may still complete legitimately (long scan/brute-force).
+  if (itemStatus === "pending") {
+    try {
+      await db.withBypass("watchdog_timeout_resolve", (client) => client.query(
+        `UPDATE soc_queue_items
+            SET status='failed',
+                output = COALESCE(output, '') ||
+                         '[WATCHDOG_TIMEOUT — dir_1782243745921 Fix 1]\n' ||
+                         'Step never reached running state after ' || $1 || 's. ' ||
+                         'Likely cause: command synthesis timed out (inference hung) or ' ||
+                         'the run endpoint failed silently. Resolved to failed so it cannot ' ||
+                         'block the agent indefinitely.',
+                completed_at = NOW()
+          WHERE id = $2 AND status = 'pending'`,
+        [Math.round(timeoutMs / 1000), queue_item_id]));
+    } catch (_) { /* resolution failure must never crash the watchdog */ }
+  }
 
   return {
     queue_item_id,
     status:       "timeout",
+    item_status_at_timeout: itemStatus || "unknown",
     elapsed_sec:  Math.round(timeoutMs / 1000),
-    note:         "Step stayed pending past watchdog timeout — agent should adapt (dir_1782238863765). If gated-intent: PA has not yet approved it. Agent should continue with other tasks or wait.",
+    note:         itemStatus === "pending"
+      ? "Step never started (stayed 'pending' past watchdog timeout) — resolved to 'failed' in DB (dir_1782243745921 Fix 1). Synthesis likely timed out. Agent should re-queue with a simpler command."
+      : "Step stayed 'running' past watchdog timeout — execution may still complete; agent should move on (dir_1782238863765).",
   };
 }
 

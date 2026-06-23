@@ -780,6 +780,28 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
       const okBody = resp.ok ? await resp.json().catch(() => null) : null;
+      if (!resp.ok) {
+        // dir_1782243745921 Fix 2: run endpoint returned a non-2xx status — the item
+        // will never reach 'running' on its own. Mark it 'failed' immediately so
+        // waitForOutcome unblocks in milliseconds instead of waiting the full
+        // OUTCOME_TIMEOUT_MS. Leave a diagnostic in the output column.
+        const diag = `[RUN_ENDPOINT_FAILED — dir_1782243745921 Fix 2]\nrun endpoint returned HTTP ${resp.status} for queue_item ${item.id}. Item auto-marked failed (would otherwise stay 'pending' for ${Math.round(120)}s until watchdog fires).`;
+        try {
+          await db.withBypass("autonomous_run_endpoint_fail", (client) => client.query(
+            `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2 AND status='pending'`,
+            [diag, item.id]));
+          await db.query(
+            `INSERT INTO offense_telemetry
+               (engagement_id, queue_item_id, model_used, intent_category,
+                n_hosts, n_findings, step_queued, in_scope, n_references,
+                latency_ms, outcome, outcome_notes)
+             VALUES ($1, $2, 'auto_executor', 'run_endpoint', 0, 0, false, true, 0, 0,
+                     'run_endpoint_failed', $3)`,
+            [item.engagement_id, item.id, `HTTP ${resp.status}`]);
+        } catch (dbErr) {
+          console.error(`[autonomous-executor] failed to mark item ${item.id} failed after run-endpoint error:`, dbErr.message);
+        }
+      }
       return {
         autoExecuted: resp.ok,
         reason: resp.ok ? "ssh-spawned" : `run endpoint returned ${resp.status}`,
@@ -788,6 +810,24 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       };
     } catch (e) {
       console.error(`[autonomous-executor] run-endpoint call failed for item ${item.id}:`, e.message);
+      // dir_1782243745921 Fix 2: network/fetch error means execution never started.
+      // Mark the item 'failed' so it doesn't sit 'pending' until the watchdog fires.
+      const diag = `[RUN_ENDPOINT_ERROR — dir_1782243745921 Fix 2]\nfetch to run endpoint threw: ${e.message}. Item auto-marked failed — cannot start execution.`;
+      try {
+        await db.withBypass("autonomous_run_endpoint_error", (client) => client.query(
+          `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2 AND status='pending'`,
+          [diag, item.id]));
+        await db.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, $2, 'auto_executor', 'run_endpoint', 0, 0, false, true, 0, 0,
+                   'run_endpoint_error', $3)`,
+          [item.engagement_id, item.id, e.message.slice(0, 200)]);
+      } catch (dbErr) {
+        console.error(`[autonomous-executor] failed to mark item ${item.id} failed after fetch error:`, dbErr.message);
+      }
       return { autoExecuted: false, reason: `run endpoint error: ${e.message}`, inferred };
     }
   } catch (e) {
@@ -876,10 +916,70 @@ async function onPhaseAdvance(engagementId, oldPhase, newPhase) {
   }
 }
 
+// ── Reconciliation sweep (dir_1782243745921 Fix 3) ──
+// Finds any queue item for this engagement that has been 'pending' longer than
+// ORPHAN_TIMEOUT_SEC with no corresponding 'running' row. These are items whose
+// execution was never started (synthesis hung, run endpoint failed silently, or
+// maybeAutoExecute returned autoExecuted=false without marking the row failed).
+// Marks them 'failed' with reason 'orphaned — never executed'.
+//
+// Safety: items that ARE 'running' are never touched. The sweep only targets
+// items that have NEVER had their status leave 'pending', identified by:
+//   - status = 'pending'
+//   - created_at older than ORPHAN_TIMEOUT_SEC (2 minutes — matches OUTCOME_TIMEOUT_MS)
+// This is conservative: a freshly-inserted pending item that hasn't had time to
+// reach the run endpoint yet will not be swept (it's < 2 min old).
+const ORPHAN_TIMEOUT_SEC = 120; // matches OUTCOME_TIMEOUT_MS / 1000
+
+async function reconcilePendingItems(engagementId) {
+  let resolved = 0;
+  try {
+    const r = await db.withBypass("reconcile_pending", (client) => client.query(
+      `UPDATE soc_queue_items
+          SET status='failed',
+              output = COALESCE(output, '') ||
+                       '[ORPHAN_RESOLVED — dir_1782243745921 Fix 3]\n' ||
+                       'Item stayed pending for >' || $2 || 's with no execution. ' ||
+                       'Likely cause: command synthesis timed out before queue_step ' ||
+                       'could call maybeAutoExecute, or run endpoint failed without ' ||
+                       'writing a terminal status. Resolved by reconciliation sweep.',
+              completed_at = NOW()
+        WHERE engagement_id = $1
+          AND status = 'pending'
+          AND created_at < NOW() - ($2 || ' seconds')::interval
+        RETURNING id`,
+      [engagementId, ORPHAN_TIMEOUT_SEC]));
+    resolved = r.rows.length;
+    if (resolved > 0) {
+      console.log(`[autonomous-executor] reconcile: resolved ${resolved} orphaned pending item(s) for engagement ${engagementId} (dir_1782243745921 Fix 3)`);
+      // Emit telemetry for each resolved item so analyze_engagement_telemetry
+      // can surface 'orphan_resolved' as a WARNING.
+      for (const row of r.rows) {
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry
+               (engagement_id, queue_item_id, model_used, intent_category,
+                n_hosts, n_findings, step_queued, in_scope, n_references,
+                latency_ms, outcome, outcome_notes)
+             VALUES ($1, $2, 'reconcile', 'pending_sweep', 0, 0, false, true, 0, 0,
+                     'orphan_resolved', $3)`,
+            [engagementId, row.id,
+             `queue_item ${row.id} stayed pending >${ORPHAN_TIMEOUT_SEC}s — resolved by sweep (dir_1782243745921 Fix 3)`]);
+        } catch (_) { /* telemetry never blocks resolution */ }
+      }
+    }
+  } catch (e) {
+    // Sweep failure must never crash the agent loop — it's a best-effort guard.
+    console.error(`[autonomous-executor] reconcile sweep failed for ${engagementId}:`, e.message);
+  }
+  return { resolved };
+}
+
 module.exports = {
   maybeAutoExecute,
   onPhaseAdvance,
   pushOnGatedIntent,
+  reconcilePendingItems,
   roeLint,
   inferIntentFromCommand,
   lintCommandPreflight,
@@ -891,4 +991,5 @@ module.exports = {
   AUTO_RUN_INTENTS,
   GATE_INTENTS,
   VALID_INTENTS,
+  ORPHAN_TIMEOUT_SEC,
 };
