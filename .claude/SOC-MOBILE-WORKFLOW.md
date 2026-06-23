@@ -1,53 +1,79 @@
-# SOC Mobile Interface — Human-in-Loop Pentest Execution
+# SOC Interface — Autonomous + Human-in-Loop Pentest Execution
 
-## Architecture (Redesigned)
+> **Updated 2026-06-23** — dev-01 is OUT. Execution is LOCAL on the bridge.
+> The original "PA Engineer runs each step on dev-01" model still applies in
+> **manual mode** (autonomy toggle OFF). In **autonomous mode** (the default for
+> SKYLINE ops), the bridge executes every step locally with no human touch.
+> See `.claude/rules/soc-command-execution.md` for the definitive execution contract.
+
+## Architecture (current as of 2026-06-23)
 
 ```
-┌─────────────────────────────────────────────────┐
-│ CIPHER (Opus 4.6, ozzu-vm)                      │
-│ • Strategy & Planning (via Claude Code CLI)    │
-│ • Engagement creation                           │
-│ • Results analysis (MANUAL in active session)  │
-│ • Report generation                             │
-└──────────────┬──────────────────────────────────┘
-               │
-               │ create_engagement MCP tool
-               ↓
-┌─────────────────────────────────────────────────┐
-│ BRIDGE — Postgres DB                           │
-│ • Stores engagements                            │
-│ • Stores scripts/phases                         │
-│ • Stores execution results                      │
-│ • NO auto-triggering of Cipher                 │
-└──────────────┬──────────────────────────────────┘
-               │
-               │ REST API (/soc/*)
-               ↓
-┌─────────────────────────────────────────────────┐
-│ OZZU APP — SOC Tab                              │
-│ • PA Engineer views engagements                 │
-│ • Taps scripts to execute on dev-01             │
-│ • Views live output (SSE stream)                │
-│ • Submits results back to bridge                │
-└──────────────┬──────────────────────────────────┘
-               │
-               │ SSH execution (bridge → dev-01)
-               ↓
-┌─────────────────────────────────────────────────┐
-│ DEV-01 (Kali, pentest tools)                    │
-│ • PA Engineer's execution environment           │
-│ • Runs nmap, metasploit, exploits, etc.        │
-│ • Output streams back to app via bridge         │
-└─────────────────────────────────────────────────┘
++--------------------------------------------------+
+| CIPHER (strategist, ozzu-vm)                     |
+| - Engagement creation + scoping                  |
+| - Strategic decisions (what to scan/exploit)     |
+| - Results analysis (MCP tools, in active session)|
+| - Report generation                              |
++--------------------+-----------------------------+
+                     |
+                     | create_engagement MCP tool
+                     v
++--------------------------------------------------+
+| BRIDGE — runAgent loop (DeepSeek V4 / OR)        |
+| - Orchestrates the engagement autonomously       |
+| - Calls offense tools -> queueStep               |
+| - maybeAutoExecute fires each step locally       |
+| - Postgres: engagements, queue, findings, hosts  |
++--------------------+-----------------------------+
+                     |
+                     | spawn('bash',['-s']) — LOCAL
+                     v
++--------------------------------------------------+
+| BRIDGE CONTAINER — offense toolkit               |
+| - nmap, nuclei, httpx, whatweb, searchsploit     |
+| - netcat, curl (/dev/tcp)                        |
+| - Routes lab /24 via host wg0 -> tablet -> LAN  |
+| - Anti-cloud preflight (blocks GCP metadata IPs)|
++--------------------------------------------------+
+
+Manual mode (autonomy OFF):
+  queue items stay 'pending' -> PA Engineer taps Run in app
+  -> same local bash execution, just human-gated
 ```
 
 ---
 
-## End-to-End Workflow
+## Execution Modes
+
+### Autonomous mode (default for SKYLINE ops)
+
+The autonomy toggle sets `autonomous_execution_enabled=true`, clears paused, kicks
+existing pending items, AND starts `runAgent(eid,{max_iter:50})`:
+
+```
+POST /soc/engagements/:id/autonomy  { enabled: true }
+```
+
+`runAgent` loop: orchestrator (DeepSeek) -> `queueStep` -> `maybeAutoExecute` ->
+`POST /soc/queue/:id/run` -> `spawn('bash',['-s'])` -> output -> findings.
+
+No human touch unless a step has a gated intent (see "5 Reasons" below).
+
+### Manual mode (autonomy OFF)
+
+Steps stay `status='pending'`. PA Engineer opens the SOC tab in the Ozzu app,
+taps Run on each step, sees live output via SSE, and results land in Postgres.
+
+Manual handoff to Cipher: PA tells Cipher "results ready for SKYLINE-SOC-2026-XXX"
+in the active Claude Code session so Cipher can analyze with full context.
+
+---
+
+## End-to-End Workflow (autonomous)
 
 ### 1. Cipher Creates Engagement
 
-**In Claude Code session (Cipher):**
 ```javascript
 create_engagement({
   client_name: "Acme Corp",
@@ -57,115 +83,80 @@ create_engagement({
     allowed: ["port scanning", "service enumeration", "web app testing"],
     prohibited: ["DoS", "social engineering"]
   },
-  roe: {
-    destructive_actions: "requires approval",
-    testing_hours: "Mon-Fri 9AM-5PM EST"
-  }
+  roe: { destructive_actions: "requires approval" }
 })
 ```
 
-**Returns:** `SKYLINE-SOC-2026-XXX`
+Returns: `SKYLINE-SOC-2026-XXX`
 
----
-
-### 2. PA Engineer Executes via Mobile App
-
-**On Ozzu app:**
-1. Open **SOC tab** 🔐
-2. Tap engagement **SKYLINE-SOC-2026-XXX**
-3. View available scripts:
-   - Phase 1: Network Discovery
-   - Phase 2: Vulnerability Scan
-   - Phase 3: Exploitation
-4. **Tap [▶ Run]** on a script
-5. **Live output streams** from dev-01 to app (via SSE)
-6. Script completes
-7. **Tap [Submit Results to Cipher]**
-8. Enter findings summary (or uses auto-parsed output)
-9. Results saved to postgres
-
----
-
-### 3. PA Engineer Notifies Cipher
-
-**CRITICAL:** PA engineer manually tells Cipher in the **active Claude Code session**:
+### 2. Toggle Autonomy — Loop Starts
 
 ```
-"Phase 3 results are ready for SKYLINE-SOC-2026-XXX"
+POST /soc/engagements/SKYLINE-SOC-2026-XXX/autonomy  { enabled: true }
 ```
 
----
+The `runAgent` loop begins. Steps execute locally in the bridge container, findings
+accumulate in Postgres automatically.
 
-### 4. Cipher Analyzes Results (Manual, In-Session)
+### 3. Monitor
 
-**Cipher reads results:**
 ```javascript
+get_offense_telemetry({ engagement_id: "SKYLINE-SOC-2026-XXX" })
 list_findings({ engagement_id: "SKYLINE-SOC-2026-XXX" })
 ```
 
-**Cipher analyzes with full conversation context:**
-- Reviews output
-- Understands what was attempted
-- Knows the engagement context from this session
-- Generates report section
-- Plans next phase
+### 4. Analysis + Report (Cipher, in active session)
 
-**Cipher updates engagement:**
 ```javascript
-add_finding({
-  engagement_id: "SKYLINE-SOC-2026-XXX",
-  severity: "high",
-  title: "Kernel Privilege Escalation (CVE-2017-16995)",
-  description: "Target is vulnerable to eBPF kernel exploit...",
-  cvss_score: 7.8,
-  affected_asset: "192.168.1.10",
-  reproduction: { steps: [...] },
-  remediation: "Upgrade kernel to 4.4.200+"
-})
+list_findings({ engagement_id: "SKYLINE-SOC-2026-XXX" })
+// structured findings -> Cipher generates report
 ```
 
 ---
 
-## Why Manual Notification?
+## 5 Reasons a Queue Item Stays `pending`
 
-**Problem with auto-triggering:**
-- If bridge auto-triggers Cipher analysis when results arrive, Cipher spawns in a **new session** without conversation context
-- Cipher doesn't know:
-  - What phase this is
-  - What was already tried
-  - What the plan is
-  - What King Kazuma's instructions were
-- Results in: confusion, repeated work, loss of continuity
+1. `autonomous_execution_enabled=false` (manual mode — human must tap Run)
+2. `autonomous_paused=true` (kill switch toggled)
+3. Gated intent (`cred_test`/`exploit_probe`/`lateral`/`post_exploit`) AND
+   `autonomous_full_access=false` — waits for human approval + push notification
+4. ROE blocklist match — set `failed` (not pending)
+5. Preflight lint fail — set `failed`
 
-**Solution (manual handoff):**
-- PA engineer executes via app
-- Results stored in postgres
-- PA engineer tells Cipher **in the same ongoing session**: "results ready"
-- Cipher analyzes with **full context** of the conversation
-- Clean handoff, no context loss
+---
+
+## `advance_offense` — What It Is and Is NOT
+
+`advance_offense` is a **single-shot** tool: one orchestrator call -> inserts ONE
+queue item -> `maybeAutoExecute` fire-and-forget -> returns immediately.
+
+It does **NOT** start or resume `runAgent`. Steps it queues into a completed
+engagement will sit `pending` forever (no live loop = no watchdog).
+
+Use `advance_offense` for one-off nudges only. To start or resume an engagement:
+use the autonomy toggle or `POST /soc/engagements/:id/run`.
 
 ---
 
 ## Workflow Summary
 
-| Step | Who | Where | Action |
-|------|-----|-------|--------|
-| 1 | Cipher | Claude Code CLI | Create engagement, plan phases |
-| 2 | PA Engineer | Ozzu app → dev-01 | Execute scripts, view output |
-| 3 | PA Engineer | Ozzu app | Submit results to bridge |
-| 4 | PA Engineer | Claude Code CLI | Tell Cipher "results ready" |
-| 5 | Cipher | Claude Code CLI | Read results, analyze, report |
-| 6 | Repeat | — | Next phase |
+| Step | Who | Mode | Action |
+|------|-----|------|--------|
+| 1 | Cipher | — | Create engagement, define scope |
+| 2 | Cipher | autonomous | Toggle autonomy — loop starts |
+| 3 | Bridge | autonomous | runAgent executes steps locally |
+| 2b | PA Engineer | manual | Tap Run in app for each pending step |
+| 4 | Cipher | — | Analyze findings via MCP, generate report |
 
 ---
 
 ## Key Points
 
-1. **Cipher NEVER runs exploits** — PA engineer executes via app
-2. **Bridge NEVER auto-triggers Cipher** — PA engineer manually notifies in active session
+1. **Cipher NEVER runs exploits directly** — the bridge bash does, via the autonomous loop
+2. **Bridge NEVER auto-triggers a new Cipher session** — Cipher stays in control in the active session
 3. **Context preservation** — All analysis happens in the ongoing conversation
-4. **80/20 automation** — Cipher plans, PA executes, Cipher analyzes
-5. **Mobile-first** — PA engineer can execute from tablet/phone anywhere
+4. **dev-01 is OUT** — execution is local in the bridge container; lab reached via wg0 -> tablet
+5. **Mobile app** — still the UI for manual mode and for monitoring queue output via SSE
 
 ---
 
@@ -174,73 +165,43 @@ add_finding({
 **Backend (bridge server):**
 - `GET /soc/engagements` — List all engagements
 - `GET /soc/engagements/:id` — Get engagement details
-- `GET /soc/engagements/:id/scripts` — Get scripts for engagement
-- `POST /soc/execute` — Execute script on dev-01 (SSE stream)
-- `POST /soc/submit-results` — Submit results (NO auto-trigger)
+- `POST /soc/engagements/:id/autonomy` — Toggle autonomous execution (also starts runAgent)
+- `POST /soc/execute` — Execute a command locally (SSE stream, no dev-01)
+- `POST /soc/queue/:id/run` — Run a specific queue item (SSE stream, local bash)
 
 **Frontend (Ozzu app):**
 - `/soc` — SOC tab (engagements list)
-- `/soc/[id]` — Engagement detail + script execution
+- `/soc/[id]` — Engagement detail + manual step execution + live output
 
 ---
 
-## Example Session
+## Planning Language Rules (MANDATORY — unchanged)
 
-```
-Cipher: "I've created engagement SKYLINE-SOC-2026-002 for Acme Corp. Target: 192.168.1.50. Phase 1 script is ready in the app."
+Cipher's role is **orchestration and triage**, not exploit authoring. To avoid
+Anthropic AUP refusals mid-engagement every planning turn must follow these rules:
 
-[PA Engineer opens app, taps engagement, runs Phase 1 script]
-[Output streams to app: nmap results showing open ports 22, 80, 443]
-[PA Engineer taps Submit Results]
-
-PA Engineer: "Phase 1 results ready for SKYLINE-SOC-2026-002"
-
-Cipher: [reads results via list_findings]
-"Found SSH (22), HTTP (80), HTTPS (443). SSH version appears outdated (OpenSSH 6.6). Recommending Phase 2: vulnerability scan focusing on SSH and web services."
-
-[PA Engineer runs Phase 2 script...]
-[Repeat...]
-```
-
----
-
-## Planning Language Rules (MANDATORY)
-
-Cipher's role in SOC engagements is **orchestration and triage**, not
-exploit authoring. To avoid Anthropic AUP refusals mid-engagement
-(which break the session flow and lose context), every planning turn
-must follow these rules:
-
-1. **Reference public artifacts only.** Cite ExploitDB IDs, CVE numbers,
-   NVD entries, MSF module paths, or published PoC repositories. Do NOT
-   write, modify, port, or tune exploit source code inside the chat.
-2. **Output is always a queue for the PA engineer** — numbered list of
-   (existing tool/PoC + expected evidence artifact). Never runnable
-   exploit code.
-3. **Tuning is PA's job on dev-01.** Offset adjustment, shellcode
-   encoding, payload crafting, kernel version matching — flag these as
-   PA-engineer tasks, do not perform them in the planning turn.
+1. **Reference public artifacts only.** Cite ExploitDB IDs, CVE numbers, NVD entries,
+   MSF module paths, or published PoC repositories. Do NOT write, modify, port, or tune
+   exploit source code inside the chat.
+2. **Output is always a queue** — numbered list of (existing tool/PoC + expected
+   evidence artifact). Never runnable exploit code.
+3. **Tuning is a PA-engineer task** on dev-01 (or bridge where applicable). Offset
+   adjustment, shellcode encoding, payload crafting — flag these, do not perform them
+   in the planning turn.
 4. **Use the stop-at-queue template** from `.claude/SOC-PROMPT-TEMPLATE.md`.
-5. **Banned phrasings** (these trip the classifier — rephrase them):
-   - "let's create our own [exploit / variant]" → "queue published
-     variants from ExploitDB"
-   - "get root on X" → "verify privilege-escalation path per ROE"
-   - "iterate exploit variants" → "list published PoCs, rank by
-     reliability"
-   - "bypass / break into" → "test authentication per scope"
-   - "weaponize / port the exploit" → "PA engineer tuning task on dev-01"
-
-If a planning turn gets refused: rephrase as triage + queue, not
-authorship. Do NOT retry with the same framing.
+5. **Banned phrasings** (these trip the classifier):
+   - "let's create our own [exploit / variant]" -> "queue published variants from ExploitDB"
+   - "get root on X" -> "verify privilege-escalation path per ROE"
+   - "iterate exploit variants" -> "list published PoCs, rank by reliability"
+   - "bypass / break into" -> "test authentication per scope"
+   - "weaponize / port the exploit" -> "PA engineer tuning task"
 
 ---
 
 ## Remember
 
-- ✅ **Results stored** — postgres has all outputs
-- ✅ **Manual handoff** — PA tells Cipher when ready
-- ✅ **Context preserved** — Cipher analyzes in same session
-- ❌ **NO auto-analysis** — would lose conversation context
-- ❌ **NO nested agents** — Claude models refuse exploit execution anyway
-
-This is the **sellable SOC product** — human-in-loop with excellent UX.
+- Results stored in Postgres — always accessible via MCP tools
+- In autonomous mode no manual handoff is needed — Cipher pulls findings directly
+- In manual mode PA notifies Cipher in the active session for context preservation
+- NO auto-analysis that would spawn a fresh session (would lose context)
+- NO nested agents — Claude models refuse exploit execution anyway

@@ -1,6 +1,6 @@
 # SOC Pipeline — Layered Reference Architecture
 
-**Status (2026-06-04 end of build session):** entire pipeline code-complete, awaiting one operator-side action — DigitalOcean GPU droplet access approval — before the first real training run. See "Build state" section below.
+**Status (updated 2026-06-23):** pipeline fully operational with autonomous execution. The GPU-rental gate (DigitalOcean approval) was the original blocker; as of 2026-06-23 the offense model runs via DeepSeek V4 on OpenRouter from the bridge directly — no vast.ai rental required for current operations. See "Build state" section below.
 **Source:** deep-research (105-agent, adversarially verified, 2026-06-04) validating the design against PTES, NIST SP 800-115, PentestGPT (USENIX Security 2024), and Pentest Copilot (arXiv 2409.09493).
 
 ## Build state
@@ -45,22 +45,23 @@ so no single tool or person holds the whole engagement.
 
 | Layer | Owner | Reads (in) | Emits (out) |
 |---|---|---|---|
-| L0 Execution | Human PA + dev-01/tablet | command + rationale | raw stdout, XML, binaries, screenshots |
+| L0 Execution | **Bridge LOCAL bash** (`spawn('bash',['-s'])`) + (optional) human PA via app | command + rationale | raw stdout, XML, binaries, screenshots |
 | L1 System-of-record | Postgres | raw output | server-side evidence keyed to engagement/host |
 | **L2 Membrane** | `soc-recon-parser.js` | raw evidence | structured rows: `recon_hosts` + `pentest_findings` |
-| L3 Offense-synthesis | self-hosted model on vast.ai (on-demand) | structured rows + retained raw | candidate PoCs **by ID**, queued server-side |
+| L3 Offense-synthesis | DeepSeek V4 via OpenRouter (current); self-hosted model on vast.ai (on-demand, future) | structured rows + retained raw | candidate PoCs **by ID**, queued server-side |
 | L4 Strategist | Claude (frontier) | **ONLY** L2 structured rows | scoping, methodology, CVE-by-ID, report; queues command+rationale |
 
 The loop re-enters L0 after each pivot (NIST "Additional Discovery" feedback arrow) —
 the schema is re-entrant, not a one-shot pipeline.
 
 ### Where the membrane sits
-The membrane is the **L2 normalizer at the dev-01 → Postgres boundary**. The PA runs
-the tool on dev-01; raw output lands in Postgres as evidence (server-side);
-`soc-recon-parser` normalizes it into `recon_hosts` / `pentest_findings` rows; the
-strategist reads ONLY those rows via `get_recon` / `list_findings`. The raw blob never
-crosses into Claude's context. (= NIST Discovery's banner→version→NVD normalization +
-Pentest Copilot's raw→plaintext-before-the-model, implemented as our parser.)
+The membrane is the **L2 normalizer at the execution → Postgres boundary**. Commands
+run locally in the bridge container (or via a human PA in manual mode); raw output
+lands in Postgres as evidence (server-side); `soc-recon-parser` normalizes it into
+`recon_hosts` / `pentest_findings` rows; the strategist reads ONLY those rows via
+`get_recon` / `list_findings`. The raw blob never crosses into Claude's context.
+(= NIST Discovery's banner→version→NVD normalization + Pentest Copilot's
+raw→plaintext-before-the-model, implemented as our parser.)
 
 ## Structured schema (the data contract)
 
@@ -77,10 +78,58 @@ Pentest Copilot's raw→plaintext-before-the-model, implemented as our parser.)
 - **C.** L2/L3 data-contract spec — how much raw L3 ingests + how its output is sanitized before queueing for the PA.
 - **D.** Wire L3 — `gpu_create` → pull model → OpenAI-compat API → read findings → emit structured next-steps. **Stop at vast-rental-ready; GPU stays on-demand.**
 
+## Execution reality (verified 2026-06-23 — ground truth from code)
+
+**Execution is LOCAL on the bridge** — `spawn('bash',['-s'])` in `routes/soc.js`. dev-01
+is fully removed from the offense pipeline (soc.js:986, 1079). The bridge container is
+`network_mode: host`; the host routes the lab `/24` via `wg0` → tablet relay → EDIFICIO
+LAN, so `nmap`, `httpx`, etc. reach physical lab targets.
+
+**Two modes per engagement** (flags in DB via `db.js`):
+- `autonomous_execution_enabled=true` (`autonomous_paused=false`): `queueStep` →
+  `maybeAutoExecute` (`autonomous-executor.js`) → `POST /soc/queue/:id/run` → bash. No
+  human touch.
+- `autonomous_execution_enabled=false`: item stays `status='pending'` until a human taps
+  Run in the app.
+- **Wizard default** (`POST /soc/engagements`): sets `permission_mode='full_engagement'` +
+  `autonomous_full_access=true`, but does NOT set `autonomous_execution_enabled` — you
+  must toggle autonomy or use `/run` to start the loop.
+
+**The autonomy toggle (`POST /soc/engagements/:id/autonomy {enabled:true}`) also STARTS
+`runAgent(eid,{max_iter:50})`** if none is running (soc.js:435-439). It is the primary
+way to start or resume an engagement.
+
+**`advance_offense` ≠ the autonomous loop** (`offense-engine.js:218`). It is a separate
+single-shot path: one orchestrator call → inserts ONE queue item → `maybeAutoExecute`
+fire-and-forget → returns. It does NOT resume `runAgent`. Steps queued into a completed
+engagement via `advance_offense` will sit `pending` forever (no live loop = no watchdog).
+Do NOT use `advance_offense` to "resume" a halted/completed run.
+
+**5 reasons a queue item stays `status='pending'`** (autonomous-executor.js):
+1. `autonomous_execution_enabled=false`
+2. `autonomous_paused=true`
+3. Gated intent (`cred_test`/`exploit_probe`/`lateral`/`post_exploit` — GATE_INTENTS) AND
+   `autonomous_full_access=false` → waits for human approval + push notification
+4. ROE blocklist match → set `failed` (not pending)
+5. Preflight lint fail → set `failed`
+
+**Deployed reliability fixes (2026-06-23):**
+- `dir_1782234450321` — loop-breaker (patience: empty orchestrator response ≠ quit)
+- `dir_1782238863765` — outcome-watchdog (stuck running → failed after timeout)
+- `dir_1782242371780` — dark-loop / halt-detector (terminal-phase conclude + budget guard)
+- `dir_1782243745921` — orphaned-pending resolver (items left pending in a dead run → auto-fail)
+
+**Current offense model:** DeepSeek V4 via OpenRouter (`backend/.env`). Latency ~120s/step
+(reasoning model). The `inference_hung` error (no content after 120s) is transient and the
+loop now retries it rather than quitting.
+
+**Bridge offense toolkit** (in-container, `backend/bridge/Dockerfile`):
+`nmap`, `nuclei`, `httpx`, `whatweb`, `searchsploit`, `netcat-openbsd`, `curl` (`/dev/tcp` works).
+
 ## Operational rules (must ship alongside the code)
 
 - The membrane is **necessary but not sufficient**: a resumed/compacted hot SOC session re-scans accumulated context and re-trips. **RULE: SOC analysis = fresh, single-purpose session; never `--resume` a SOC chat.**
-- L4 (Claude) is **TEACHER** — references PoCs by ID only, never authors exploit source. L0 human PA executes. (This human gate is our safety/legal choice, not something the literature mandates.)
+- L4 (Claude) is **TEACHER** — references PoCs by ID only, never authors exploit source. L0 execution is autonomous (bridge bash) in full_engagement mode; human gate applies when `autonomous_full_access=false`. (This human gate is our safety/legal choice, not something the literature mandates.)
 
 ## Verified sources
 - PTES — http://www.pentest-standard.org

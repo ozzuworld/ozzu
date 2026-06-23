@@ -56,46 +56,53 @@ The directive is your external memory. If context compacts or the session dies, 
 Cipher = Kenji + Ronin. King Kazuma commands, Cipher executes.
 Full lore → `memory/project_summer_wars_identity.md`
 
-## RULE 3 — SOC Pentest Workflow (Human-in-Loop)
+## RULE 3 — SOC Pentest Workflow
 
-**Cipher (you) = Strategy. PA Engineer = Execution via mobile app.**
+**Cipher (you) = Strategy. Autonomous bridge loop = Execution (or PA Engineer in manual mode).**
+
+> **2026-06-23 ground truth:** execution is LOCAL on the bridge (`spawn('bash',['-s'])`).
+> dev-01 is OUT of the offense pipeline. Two modes: autonomous (bridge self-executes via
+> `runAgent` loop) and manual (steps stay `pending` until PA hits Run in the app).
+> Full details: `.claude/SOC-MOBILE-WORKFLOW.md` + `.claude/rules/soc-command-execution.md`.
 
 When working on **penetration testing or security assessments**:
 
-### MANDATORY Workflow (see `.claude/SOC-MOBILE-WORKFLOW.md` for full details)
+### Workflow (autonomous mode — default for SKYLINE ops)
 
 1. **Cipher creates engagement** via `create_engagement` MCP tool
-2. **PA Engineer executes scripts** via Ozzu mobile app SOC tab
-   - Scripts run on dev-01 (Kali)
-   - Output streams to app in real-time
-   - PA Engineer submits results to bridge
+2. **Cipher toggles autonomy** (`POST /soc/engagements/:id/autonomy {enabled:true}`) — this ALSO starts `runAgent`
+3. **Bridge executes steps autonomously** — local bash in the bridge container, routes lab /24 via wg0 → tablet relay
+4. **Cipher monitors** via `get_offense_telemetry` + `list_findings` MCP tools in the active session
+5. **Cipher generates reports** and plans next phase
+
+### Workflow (manual mode — autonomy OFF)
+
+1. **Cipher creates engagement** and queues steps (or uses `advance_offense` for a single-shot step)
+2. **PA Engineer executes** via Ozzu mobile app SOC tab — taps Run on each pending step; output streams via SSE
 3. **PA Engineer manually notifies Cipher** in active Claude Code session: "results ready for SKYLINE-SOC-2026-XXX"
 4. **Cipher analyzes results** via `list_findings` MCP tool **in the same session** (preserves context)
 5. **Cipher generates reports** and plans next phase
 
 ### What Cipher NEVER Does
 - ❌ **NEVER** run pentest tools directly via Bash (nmap, metasploit, burpsuite, aircrack, etc.)
-- ❌ **NEVER** execute exploits or vulnerability scans yourself
-- ❌ **NEVER** auto-trigger analysis when results arrive (would lose conversation context)
-- ❌ **NEVER** author, modify, port, or tune exploit source code — reference public PoCs by ID only (ExploitDB / CVE / MSF module path) and queue them for PA engineer execution. See `.claude/SOC-PROMPT-TEMPLATE.md` for the stop-at-queue planning template and banned-phrasing list.
+- ❌ **NEVER** execute exploits or vulnerability scans yourself via Bash
+- ❌ **NEVER** auto-trigger a new Cipher session when results arrive (would lose conversation context)
+- ❌ **NEVER** author, modify, port, or tune exploit source code — reference public PoCs by ID only (ExploitDB / CVE / MSF module path). See `.claude/SOC-PROMPT-TEMPLATE.md` for the stop-at-queue planning template and banned-phrasing list.
+- ❌ **NEVER** use `advance_offense` to "resume" a halted/completed run — it's single-shot, does NOT restart `runAgent`
 
 ### What Cipher ALWAYS Does
-- ✅ **ALWAYS** wait for PA Engineer to manually notify in active session
-- ✅ **ALWAYS** analyze results with full conversation context
+- ✅ **ALWAYS** analyze results with full conversation context (in the active session)
 - ✅ **ALWAYS** make strategic decisions (what to scan next, which exploits to try)
 - ✅ **ALWAYS** write final pentest reports from execution results
-
-### Why Manual Handoff Matters
-- If bridge auto-triggered Cipher when results arrive, Cipher would spawn in a **new session without conversation context**
-- Manual handoff preserves: engagement history, what was tried, what the plan is, King Kazuma's instructions
-- Clean human-in-loop: Cipher plans → PA executes via app → PA notifies Cipher → Cipher analyzes → repeat
+- ✅ In manual mode: **ALWAYS** wait for PA Engineer to manually notify in active session
 
 ### Architecture
 - **Frontend:** Ozzu app SOC tab (`app/(tabs)/soc.tsx`, `app/soc/[id].tsx`)
 - **Backend:** `/soc/*` REST endpoints (routes/soc.js)
-- **Execution:** SSH from bridge → dev-01, output streamed via SSE
-- **Storage:** Postgres (engagements, findings, audit log)
-- **Analysis:** Cipher MCP tools (`create_engagement`, `list_findings`, `add_finding`)
+- **Execution:** LOCAL bash in bridge container — NOT SSH to dev-01. Lab /24 reached via wg0 → tablet relay → EDIFICIO LAN.
+- **Storage:** Postgres (engagements, findings, queue, audit log)
+- **Offense model:** DeepSeek V4 via OpenRouter (bridge .env) running in `runAgent` loop
+- **Analysis:** Cipher MCP tools (`create_engagement`, `list_findings`, `add_finding`, `get_offense_telemetry`)
 
 ## Compact Instructions
 
