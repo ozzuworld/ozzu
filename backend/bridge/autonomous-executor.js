@@ -727,6 +727,13 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
     // it isn't a real intent but is allowed past the VALID_INTENTS gate below.
     if (claimed !== "unclassified" && !VALID_INTENTS.has(claimed)) {
       await recordIntentMismatch(item.engagement_id, item.id, claimed, inferred || "(none)", item.command);
+      // dir_1782238863765 Part 1: write terminal status so waitForOutcome unblocks.
+      // A bad intent_class is a model error — mark the row 'failed' with a clear
+      // diagnostic; the agent reads it on the next poll and self-corrects.
+      const diag = `[PERMISSION_DENIED — dir_1782238863765]\nlayer=intent_class_invalid\nreason=intent_class='${claimed}' is not a recognized intent. Valid values: ${[...VALID_INTENTS].join(", ")}\nAgent: fix the intent_class and retry.`;
+      await db.withBypass("autonomous_intent_invalid", (client) => client.query(
+        `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+        [diag, item.id]));
       return { autoExecuted: false, reason: `intent_class=${claimed} not in enum — gated`, inferred };
     }
     // Mismatch check: if we COULD infer an intent and it disagrees with the
@@ -741,6 +748,13 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
         if (GATE_INTENTS.has(inferred)) {
           await pushOnGatedIntent(item.engagement_id, item.id, `mismatch(${claimed}→${inferred})`, item.command);
         }
+        // dir_1782238863765 Part 1: write terminal status so waitForOutcome unblocks.
+        // Intent mismatch is a model-error signal; mark failed so the agent sees
+        // the diagnostic on the next poll and picks a corrected intent_class.
+        const diagMismatch = `[PERMISSION_DENIED — dir_1782238863765]\nlayer=intent_mismatch\nreason=declared intent_class='${claimed}' but command content suggests='${inferred}'. One of these is gated — step blocked. Retry with the correct (and honest) intent_class.\nAgent: review the queue_step tool description: claiming a benign intent for a gated command is logged as a model-behavior signal.`;
+        await db.withBypass("autonomous_intent_mismatch", (client) => client.query(
+          `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+          [diagMismatch, item.id]));
         return { autoExecuted: false, reason: `intent_mismatch claimed=${claimed} inferred=${inferred}` };
       }
     }

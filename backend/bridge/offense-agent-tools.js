@@ -1,5 +1,10 @@
 "use strict";
 // offense-agent-tools.js — Step 4 of OFFENSE-AGENT-DESIGN.md (dir_1780588998478)
+// dir_1782238863765: OUTCOME_TIMEOUT_MS watchdog — no single step can freeze the loop.
+// When a step is stuck 'pending' (e.g. gated for human approval, or executor offline)
+// past this timeout, waitForOutcome synthesizes a 'timeout' outcome and the agent
+// loop continues to the next decision. Timeout is logged to offense_telemetry as
+// 'outcome_timeout' so analyze_engagement_telemetry surfaces it as a warning.
 //
 // The seven tools the L3 agent (Step 5) calls during its SUMMARY→THOUGHT→ACTION
 // loop. Each tool is server-side and membrane-safe: returns structured data or
@@ -20,6 +25,15 @@
 
 const db = require("./db");
 const executorProbe = require("./executor-probe");
+
+// dir_1782238863765 Part 2 — watchdog timeout for wait_for_outcome.
+// Named constant so it's visible in telemetry searches and easy to tune.
+// Default: 2 minutes. Overridden by the caller's timeout_sec arg (which comes
+// from runAgent's waitTimeoutSec, default 1800s for the human-in-loop case).
+// The watchdog fires when the default timeout_sec is not overridden AND the step
+// never executes (e.g. gated-pending, executor offline). The agent sees a
+// 'timeout' outcome and continues to the next decision instead of freezing.
+const OUTCOME_TIMEOUT_MS = 120000; // 2 minutes
 
 // Mirror of offense-engine.wrapForExecutor — copied here so this module is
 // self-contained and the agent loop doesn't pull all of offense-engine in.
@@ -157,14 +171,20 @@ async function queueStep(args) {
 async function waitForOutcome(args) {
   const { queue_item_id, timeout_sec } = args || {};
   if (!queue_item_id) return { error: "queue_item_id required" };
-  const timeoutMs = (Number(timeout_sec) > 0 ? Number(timeout_sec) : 1800) * 1000;
+  // dir_1782238863765 Part 2 — watchdog. Use OUTCOME_TIMEOUT_MS as the default
+  // so an un-executed (pending) step never freezes the agent beyond 2 minutes.
+  // Callers may still pass timeout_sec to override (e.g. runAgent passes
+  // waitTimeoutSec=1800 for the human-in-loop approval case — that override is
+  // intentional for manual-PA engagements). Minimum cap: OUTCOME_TIMEOUT_MS.
+  const callerMs = Number(timeout_sec) > 0 ? Number(timeout_sec) * 1000 : OUTCOME_TIMEOUT_MS;
+  const timeoutMs = callerMs;
   const pollMs   = 5000;
   const start = Date.now();
 
   while ((Date.now() - start) < timeoutMs) {
     const r = await db.query(
       `SELECT id, status, LEFT(COALESCE(output, ''), 2000) AS output_preview,
-              started_at, completed_at
+              started_at, completed_at, engagement_id
          FROM soc_queue_items WHERE id = $1`, [queue_item_id]);
     if (r.rows.length === 0) return { error: `queue_item ${queue_item_id} not found` };
     const row = r.rows[0];
@@ -180,11 +200,33 @@ async function waitForOutcome(args) {
     }
     await new Promise((res) => setTimeout(res, pollMs));
   }
+
+  // dir_1782238863765 Part 2+3: watchdog fired — log to offense_telemetry so
+  // analyze_engagement_telemetry surfaces 'outcome_timeout' as a warning.
+  // Also look up the engagement_id from the queue row for the telemetry insert.
+  try {
+    const qRow = await db.query(
+      `SELECT engagement_id FROM soc_queue_items WHERE id = $1`, [queue_item_id]);
+    const engId = qRow.rows[0] && qRow.rows[0].engagement_id;
+    if (engId) {
+      await db.query(
+        `INSERT INTO offense_telemetry
+           (engagement_id, queue_item_id, model_used, intent_category,
+            n_hosts, n_findings, step_queued, in_scope, n_references,
+            latency_ms, outcome, outcome_notes)
+         VALUES ($1, $2, 'watchdog', 'wait_for_outcome', 0, 0, false, true, 0,
+                 $3, 'outcome_timeout', $4)`,
+        [engId, queue_item_id,
+         Math.round(timeoutMs),
+         `queue_item ${queue_item_id} stayed 'pending' for ${Math.round(timeoutMs/1000)}s — watchdog fired (dir_1782238863765)`]);
+    }
+  } catch (_) { /* telemetry never breaks the watchdog */ }
+
   return {
     queue_item_id,
     status:       "timeout",
     elapsed_sec:  Math.round(timeoutMs / 1000),
-    note:         "PA did not run the step within the timeout — agent should escalate or skip.",
+    note:         "Step stayed pending past watchdog timeout — agent should adapt (dir_1782238863765). If gated-intent: PA has not yet approved it. Agent should continue with other tasks or wait.",
   };
 }
 

@@ -31,6 +31,13 @@ const MODEL_KEY  = process.env.OFFENSE_MODEL_KEY  || "";
 
 const DEFAULT_MAX_ITER = 15;
 
+// dir_1782238863765 Part 2 — watchdog default for wait_for_outcome in the
+// autonomous loop. 120 seconds: if a queued step hasn't started executing
+// (status still 'pending') after 2 minutes, the watchdog fires and the agent
+// continues. Operators who want human-in-loop approval (PA runs each step
+// manually) should pass wait_timeout_sec=1800 in start_engagement_run opts.
+const DEFAULT_WAIT_TIMEOUT_SEC = 120; // 2 minutes
+
 // ─────────── loop-breaker constants (dir_1782234450321) ───────────────────────
 // When the orchestrator picks tasks that map to the same engagement phase
 // MAX_CONSECUTIVE_INTENT times in a row, it's stuck in a loop. Force-advance
@@ -356,7 +363,10 @@ async function runAgent(engagementId, opts = {}) {
   const maxIter = Number(opts.max_iter) > 0 ? Number(opts.max_iter) : DEFAULT_MAX_ITER;
   const intent  = opts.intent || null;
   const modelOverride = opts.model_override || null;
-  const waitTimeoutSec = Number(opts.wait_timeout_sec) > 0 ? Number(opts.wait_timeout_sec) : 1800;
+  // dir_1782238863765: default changed from 1800→DEFAULT_WAIT_TIMEOUT_SEC (120s).
+  // Autonomous mode should not wait 30 minutes for a step that got blocked.
+  // Human-in-loop callers pass wait_timeout_sec=1800 explicitly.
+  const waitTimeoutSec = Number(opts.wait_timeout_sec) > 0 ? Number(opts.wait_timeout_sec) : DEFAULT_WAIT_TIMEOUT_SEC;
 
   // Initial state push so the operator sees status=running immediately
   // dir_1780832189054: persist intent + max_iter so the bridge-startup
