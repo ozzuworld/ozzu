@@ -417,6 +417,7 @@ async function runAgent(engagementId, opts = {}) {
     console.error(`[offense-agent] Mentor/Planner module load failed:`, e.message);
   }
 
+  let stallStreak = 0; // consecutive empty orchestrator decisions — don't quit on the first one
   while (iter < maxIter) {
     iter++;
 
@@ -602,15 +603,34 @@ async function runAgent(engagementId, opts = {}) {
       break;
     }
 
-    // (5) No selection — give the loop one more chance if we just added tasks, else exit
+    // (5) No selection. Be PATIENT — DeepSeek intermittently returns a thin decision, and during the
+    // multi-agent fan-out the coordinator legitimately has "nothing to pick" while sub-agents are still
+    // scanning. Don't quit on the first one: while there's pending/running work in the queue, wait +
+    // re-orchestrate (a pure wait must NOT burn the iteration budget); only stall out after a few
+    // empties with nothing in flight, or a hard patience cap. 2026-06-23.
     if (decision.select == null) {
       if (decision.add && decision.add.length) {
+        stallStreak = 0;
         await setAgentStatus(engagementId, "running", { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, last_action: "added_tasks_no_select" });
         continue;
       }
-      endReason = "orchestrator returned no task and no end signal — likely stuck";
-      break;
+      stallStreak++;
+      const workRow = await db.query(
+        `SELECT COUNT(*)::int AS n FROM soc_queue_items WHERE engagement_id = $1 AND status IN ('pending','running')`,
+        [engagementId]).catch(() => ({ rows: [{ n: 0 }] }));
+      const haveWork = !!(workRow.rows[0] && workRow.rows[0].n > 0);
+      if ((stallStreak >= 3 && !haveWork) || stallStreak >= 30) {
+        endReason = `orchestrator gave no task ${stallStreak}× (work in flight: ${haveWork}) — engagement exhausted`;
+        break;
+      }
+      // transient empty, or sub-agents still scanning — wait, then re-orchestrate. A pure wait must
+      // not consume the iteration budget, so undo this turn's iter++.
+      await setAgentStatus(engagementId, "running", { iter, last_action: `no_select_wait (${stallStreak}, work=${haveWork})` });
+      await new Promise((r) => setTimeout(r, 4000));
+      if (iter > 0) iter--;
+      continue;
     }
+    stallStreak = 0;
 
     // (6) Load the selected task + mark in_flight
     const taskRow = await db.query(`SELECT id, directive, phase, prerequisites, parent_ids, status FROM engagement_tasks WHERE id = $1 AND engagement_id = $2`, [decision.select, engagementId]);
