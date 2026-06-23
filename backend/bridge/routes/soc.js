@@ -955,8 +955,15 @@ module.exports = function socRoutes(ctx) {
           ? item.timeout_seconds
           : 300;
 
+        // dir_1782246387821: Strip output/completed_at from this SET clause.
+        // The membrane trigger fires on UPDATE OF command,output — including
+        // output=NULL here caused it to run check_cipher_exploit_write() and
+        // raise P0001 for any queue item whose command contains exploit patterns
+        // (default creds, curl -u ...). Items arriving here always have
+        // status='pending' (enforced above), so output and completed_at are
+        // already NULL from insertion — clearing them here is a no-op anyway.
         await db.query(
-          `UPDATE soc_queue_items SET status = 'running', session_id = $1, started_at = NOW(), output = NULL, completed_at = NULL, pid = NULL WHERE id = $2`,
+          `UPDATE soc_queue_items SET status = 'running', session_id = $1, started_at = NOW(), pid = NULL WHERE id = $2`,
           [sessionId, item.id]
         );
         await db.query(
@@ -1245,6 +1252,24 @@ module.exports = function socRoutes(ctx) {
         return true;
       } catch (error) {
         console.error('[soc queue run] Error:', error);
+        // dir_1782246387821: CIPHER_EXPLOIT_WRITE_BLOCKED (P0001) means the DB
+        // membrane trigger rejected a write. Return 403 with a clear reason
+        // (not a generic 500) and mark the item failed so it doesn't stay pending.
+        if (error && error.code === 'P0001' && String(error.message).includes('CIPHER_EXPLOIT_WRITE_BLOCKED')) {
+          const diagMsg = `[MEMBRANE_BLOCKED — dir_1782246387821]\nDB trigger check_cipher_exploit_write() rejected this step: ${error.message}\nThis is a structural safeguard — Cipher cannot author exploit content. The offense engine should queue steps via withBypass.`;
+          try {
+            const { itemId: bid } = (() => {
+              try { return { itemId: parseInt(pathname.split("/")[3], 10) }; } catch (_) { return { itemId: null }; }
+            })();
+            if (bid) {
+              await db.query(
+                `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2 AND status IN ('pending','running')`,
+                [diagMsg, bid]);
+            }
+          } catch (_) { /* best-effort — don't let cleanup throw propagate */ }
+          if (!res.headersSent) sendJSON(res, 403, { error: 'Membrane blocked: exploit-write guard triggered', details: error.message });
+          return true;
+        }
         if (!res.headersSent) sendJSON(res, 500, { error: 'Internal server error', details: error.message });
         return true;
       }
