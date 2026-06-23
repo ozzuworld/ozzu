@@ -123,7 +123,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
       ) : null}
 
       {/* Live activity (read-only) */}
-      <SectionTitle title="⚡ Activity" empty={activity.length === 0 ? "nothing yet — launch a run to watch it here" : undefined} />
+      <SectionTitle title="⚡ Activity" empty={activity.length === 0 ? (live ? "waiting for the first step to run…" : "nothing yet — launch a run to watch it here") : undefined} />
       {activity.map((item) => (
         <View key={item.id} style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.xs }}>
           <Text style={{ fontSize: fontSize.sm }}>{item.status === "running" ? "▶" : item.status === "failed" ? "✗" : "✓"}</Text>
@@ -145,6 +145,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
 
 function RunBtn({ label, onPress, tone }: { label: string; onPress?: () => void; tone: "go" | "stop" }) {
   const bg = tone === "stop" ? colors.error : colors.accent;
+  const fg = tone === "stop" ? colors.gray[50] : colors.bg.base;
   return (
     <Pressable
       onPress={onPress}
@@ -154,11 +155,11 @@ function RunBtn({ label, onPress, tone }: { label: string; onPress?: () => void;
         justifyContent: "center",
         backgroundColor: bg,
         borderRadius: radius.md,
-        paddingVertical: spacing.sm + 3,
+        paddingVertical: spacing.sm + 4,
         opacity: pressed ? 0.85 : 1,
       })}
     >
-      <Text style={{ color: colors.bg.base, fontSize: fontSize.base, fontWeight: fontWeight.bold, letterSpacing: 0.3 }}>{label}</Text>
+      <Text style={{ color: fg, fontSize: fontSize.base, fontWeight: fontWeight.bold, letterSpacing: 0.3 }}>{label}</Text>
     </Pressable>
   );
 }

@@ -378,6 +378,7 @@ function EngagementDetailInner() {
               ]}
             >
               <Text
+                numberOfLines={1}
                 style={{
                   color: active ? colors.accent : colors.text.secondary,
                   fontSize: fs.sm,
@@ -386,17 +387,21 @@ function EngagementDetailInner() {
               >
                 {t.label}
               </Text>
-              {badge != null ? (
-                <Text
+              {badge != null && badge > 0 ? (
+                <View
                   style={{
-                    color: active ? colors.accent : colors.text.tertiary,
-                    fontSize: fs.xs,
-                    fontFamily: "monospace",
-                    marginLeft: 4,
+                    minWidth: 17,
+                    paddingHorizontal: 5,
+                    paddingVertical: 1,
+                    borderRadius: 9,
+                    backgroundColor: colors.gray[700],
+                    alignItems: "center",
                   }}
                 >
-                  {badge}
-                </Text>
+                  <Text style={{ color: active ? colors.accent : colors.text.secondary, fontSize: 10, fontFamily: "monospace", fontWeight: fw.semibold }}>
+                    {badge}
+                  </Text>
+                </View>
               ) : null}
             </Pressable>
           );
@@ -457,10 +462,12 @@ function countForTab(key: Tab, queue: QueueItem[], findings: FindingRowData[]): 
 const styles = StyleSheet.create({
   tab: {
     flex: 1,
-    flexDirection: "row",
+    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: spacing.md,
+    gap: 3,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: 2,
     borderBottomWidth: 2,
     borderBottomColor: "transparent",
   },
