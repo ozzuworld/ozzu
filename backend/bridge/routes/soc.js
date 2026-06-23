@@ -371,6 +371,46 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // POST /soc/engagements/:id/run — operator-fired launch of the autonomous DeepSeek run. RULE 3:
+    // the operator executes via the app; this is the trigger the app was missing. Kicks off
+    // offense-agent.runAgent in the BACKGROUND (long-running loop) and returns at once; the Now tab
+    // observes via postgres. Cipher builds the control; the operator is the one who fires it.
+    if (req.method === "POST" && /^\/soc\/engagements\/[^/]+\/run$/.test(pathname)) {
+      if (!requireAuth(req, res)) return true;
+      const eid = decodeURIComponent(pathname.split("/")[3] || "");
+      try {
+        const er = await db.query(`SELECT id, agent_status FROM pentest_engagements WHERE id = $1`, [eid]);
+        if (er.rows.length === 0) { sendJSON(res, 404, { error: "engagement not found" }); return true; }
+        if (er.rows[0].agent_status === "running") { sendJSON(res, 409, { error: "a run is already in progress" }); return true; }
+        let maxIter = 50;
+        try { const b = await parseBody(req); if (b && b.max_iter) maxIter = Math.max(1, Math.min(200, parseInt(b.max_iter, 10) || 50)); } catch {}
+        // clear any leftover abort flag so the new run isn't halted on its first iteration
+        await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) - 'abort_requested' WHERE id = $1`, [eid]).catch(() => {});
+        const agent = require("../offense-agent");
+        agent.runAgent(eid, { max_iter: maxIter }).catch((e) => console.error("[soc/run] runAgent:", e && e.message));
+        sendJSON(res, 202, { ok: true, status: "launching", engagement_id: eid, max_iter: maxIter });
+      } catch (error) {
+        console.error("[soc/run] Error:", error);
+        sendJSON(res, 500, { error: "launch failed", details: error.message });
+      }
+      return true;
+    }
+
+    // POST /soc/engagements/:id/stop — operator stop. Sets the abort flag the run loop honors at its
+    // next iteration boundary (halts cleanly after the current step finishes).
+    if (req.method === "POST" && /^\/soc\/engagements\/[^/]+\/stop$/.test(pathname)) {
+      if (!requireAuth(req, res)) return true;
+      const eid = decodeURIComponent(pathname.split("/")[3] || "");
+      try {
+        await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) || '{"abort_requested":true}'::jsonb WHERE id = $1`, [eid]);
+        sendJSON(res, 200, { ok: true, status: "stopping", engagement_id: eid });
+      } catch (error) {
+        console.error("[soc/stop] Error:", error);
+        sendJSON(res, 500, { error: "stop failed", details: error.message });
+      }
+      return true;
+    }
+
     // POST /soc/engagements — create an engagement from the in-app wizard
     // (dir_1782136917098). Mirrors the create_engagement MCP tool's id + INSERT, plus the
     // wizard's device-aware fields: executor_host / executor_adb_target, the structured

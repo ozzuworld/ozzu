@@ -5,7 +5,7 @@
 // a read-only activity feed of what the model is doing, and findings as they land.
 
 import { useMemo } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import {
   colors, fontSize, fontWeight, spacing, radius,
 } from "../../lib/design-tokens";
@@ -26,6 +26,8 @@ interface NowTabProps {
   queue: any[];
   findings: FindingRowData[];
   onFindingPress: (finding: FindingRowData) => void;
+  onLaunch?: () => void;
+  onStop?: () => void;
 }
 
 function sevRank(s: string): number {
@@ -33,7 +35,7 @@ function sevRank(s: string): number {
   return i < 0 ? 99 : i;
 }
 
-export function NowTab({ engagement, executor, queue, findings, onFindingPress }: NowTabProps) {
+export function NowTab({ engagement, executor, queue, findings, onFindingPress, onLaunch, onStop }: NowTabProps) {
   const agentStatus: string = engagement?.agent_status || "idle";
   const phase: string = engagement?.engagement_phase || "—";
   const ars = (engagement?.agent_run_state && typeof engagement.agent_run_state === "object") ? engagement.agent_run_state : {};
@@ -85,6 +87,21 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress }
         {running ? (
           <Text style={{ color: colors.text.secondary, fontSize: fontSize.sm, marginTop: spacing.sm }} numberOfLines={2}>▶ {running.title}</Text>
         ) : null}
+        {/* Operator's run control — the trigger the app was missing (RULE 3: operator executes). */}
+        <View style={{ marginTop: spacing.md }}>
+          {live ? (
+            <RunBtn label="■  Stop run" tone="stop" onPress={onStop} />
+          ) : (
+            <RunBtn
+              label={agentStatus === "paused" ? "▶  Continue run" : agentStatus === "completed" ? "↻  Run again" : "▶  Launch run"}
+              tone="go"
+              onPress={onLaunch}
+            />
+          )}
+          <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, marginTop: spacing.xs }}>
+            {live ? "Halts after the current step finishes." : "DeepSeek runs this engagement autonomously — you can stop it anytime."}
+          </Text>
+        </View>
       </View>
 
       {/* Executor health */}
@@ -123,6 +140,26 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress }
       />
       {topFindings.map((f) => <FindingRow key={f.id} finding={f} onPress={onFindingPress} />)}
     </ScrollView>
+  );
+}
+
+function RunBtn({ label, onPress, tone }: { label: string; onPress?: () => void; tone: "go" | "stop" }) {
+  const bg = tone === "stop" ? colors.error : colors.accent;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: bg,
+        borderRadius: radius.md,
+        paddingVertical: spacing.sm + 3,
+        opacity: pressed ? 0.85 : 1,
+      })}
+    >
+      <Text style={{ color: colors.bg.base, fontSize: fontSize.base, fontWeight: fontWeight.bold, letterSpacing: 0.3 }}>{label}</Text>
+    </Pressable>
   );
 }
 

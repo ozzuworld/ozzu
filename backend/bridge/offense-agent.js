@@ -423,6 +423,14 @@ async function runAgent(engagementId, opts = {}) {
       return { engagement_id: engagementId, ok: false, iter, reason: "engagement not found", elapsed_sec: Math.round((Date.now()-startMs)/1000) };
     }
 
+    // Operator Stop: the app's Stop control sets agent_run_state.abort_requested. Honor it at the
+    // iteration boundary so a run halts cleanly after the current step finishes (RULE 3: the
+    // operator controls execution via the app). dir_1782172690399.
+    if (ctx.engagement.agent_run_state && ctx.engagement.agent_run_state.abort_requested) {
+      await setAgentStatus(engagementId, "paused", { iter, end_reason: "operator stopped the run" });
+      return { engagement_id: engagementId, ok: true, iter, ended_by_model: false, end_reason: "operator_stopped", elapsed_sec: Math.round((Date.now()-startMs)/1000) };
+    }
+
     // dir_1780845298918: recovery_recipes — detect known failure scenarios and
     // apply structured recovery before this iter's model call. Saves a model
     // call when executor is offline + auto-paces fabrication streaks.
