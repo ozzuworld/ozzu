@@ -132,7 +132,9 @@ module.exports = function socRoutes(ctx) {
           COUNT(DISTINCT CASE WHEN q.status = 'running' THEN q.id END) as queue_running,
           COUNT(DISTINCT CASE WHEN q.status = 'pending' THEN q.id END) as queue_pending,
           COUNT(DISTINCT CASE WHEN q.status = 'failed' THEN q.id END) as queue_failed,
-          MAX(q.started_at) as last_activity_at
+          MAX(q.started_at) as last_activity_at,
+          MAX(q.completed_at) as last_completed_at,
+          (SELECT ot.outcome FROM offense_telemetry ot WHERE ot.engagement_id = e.id ORDER BY ot.created_at DESC LIMIT 1) as latest_telemetry_outcome
         FROM pentest_engagements e
         LEFT JOIN pentest_findings f ON e.id = f.engagement_id
         LEFT JOIN soc_queue_items q ON e.id = q.engagement_id
@@ -560,8 +562,27 @@ module.exports = function socRoutes(ctx) {
         [id]
       );
 
+      // Staleness signals: most recent completed queue step + last 3 telemetry outcomes.
+      // No schema change — reading existing columns.
+      const stalenessResult = await db.query(
+        `SELECT
+           MAX(q.completed_at) as last_completed_at,
+           (SELECT json_agg(sub.* ORDER BY sub.created_at DESC)
+            FROM (SELECT outcome, created_at FROM offense_telemetry
+                  WHERE engagement_id = $1 ORDER BY created_at DESC LIMIT 3) sub
+           ) as recent_telemetry
+         FROM soc_queue_items q
+         WHERE q.engagement_id = $1`,
+        [id]
+      );
+      const staleness = stalenessResult.rows[0] || {};
+
       sendJSON(res, 200, {
-        engagement,
+        engagement: {
+          ...engagement,
+          last_completed_at: staleness.last_completed_at ?? null,
+          recent_telemetry: staleness.recent_telemetry ?? [],
+        },
         findings: findingsResult.rows,
         activity: activityResult.rows
       });

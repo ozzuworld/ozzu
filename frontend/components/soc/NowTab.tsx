@@ -20,6 +20,68 @@ export type ExecutorLite = {
   battery_pct: number | null;
 } | null;
 
+/** Outcomes that signal the loop is dark / stuck (not healthy progress). */
+const STALL_OUTCOMES = new Set(["outcome_timeout", "loop_halted", "orphan_resolved"]);
+
+/** 3-min stall threshold = 1.5× the 120s per-step ceiling. */
+const STALL_MS = 3 * 60 * 1000;
+
+function minutesSince(isoStr: string | null | undefined): number | null {
+  if (!isoStr) return null;
+  const ms = Date.now() - new Date(isoStr).getTime();
+  if (isNaN(ms) || ms < 0) return null;
+  return Math.round(ms / 60000);
+}
+
+function stalledLabel(engagement: any): string {
+  const lastCompleted: string | null = engagement?.last_completed_at ?? null;
+  const mins = minutesSince(lastCompleted);
+  return mins != null ? `Stalled — no activity (${mins}m)` : "Stalled — no activity";
+}
+
+/**
+ * Computed run status — replaces the binary `live = agent_status==='running'` that
+ * kept showing green even when the loop was dark/stalled (night-of-confusion root cause).
+ *
+ * STALLED  = running + no completed queue step within STALL_MS OR last telemetry is a stall outcome.
+ * RUNNING  = running + healthy activity.
+ * PAUSED   = paused.
+ * DONE     = completed.
+ * FAILED   = error.
+ * IDLE     = idle / null / anything else.
+ */
+export type RunStatus = "running" | "stalled" | "paused" | "completed" | "failed" | "idle";
+
+function computeRunStatus(engagement: any): RunStatus {
+  const s: string = engagement?.agent_status || "idle";
+  if (s !== "running") {
+    if (s === "paused") return "paused";
+    if (s === "completed") return "completed";
+    if (s === "error") return "failed";
+    return "idle";
+  }
+  // agent_status === "running" — check for staleness
+  const recentTelemetry: Array<{ outcome: string; created_at: string }> =
+    Array.isArray(engagement?.recent_telemetry) ? engagement.recent_telemetry : [];
+  const latestOutcome = recentTelemetry[0]?.outcome ?? null;
+  if (latestOutcome && STALL_OUTCOMES.has(latestOutcome)) return "stalled";
+
+  const lastCompleted: string | null = engagement?.last_completed_at ?? null;
+  if (lastCompleted) {
+    const age = Date.now() - new Date(lastCompleted).getTime();
+    if (age > STALL_MS) return "stalled";
+  } else {
+    // No completed steps at all — only stalled if we've been "running" long enough.
+    // Use engagement's updated_at as the start proxy (conservative: no false positives early).
+    const updatedAt: string | null = engagement?.updated_at ?? null;
+    if (updatedAt) {
+      const age = Date.now() - new Date(updatedAt).getTime();
+      if (age > STALL_MS) return "stalled";
+    }
+  }
+  return "running";
+}
+
 interface NowTabProps {
   engagement: any;
   executor: ExecutorLite;
@@ -37,7 +99,6 @@ function sevRank(s: string): number {
 }
 
 export function NowTab({ engagement, executor, queue, findings, onFindingPress, onLaunch, onStop, onToggleAuto }: NowTabProps) {
-  const agentStatus: string = engagement?.agent_status || "idle";
   const autoEnabled = !!engagement?.autonomous_execution_enabled;
   const phase: string = engagement?.engagement_phase || "—";
   const ars = (engagement?.agent_run_state && typeof engagement.agent_run_state === "object") ? engagement.agent_run_state : {};
@@ -62,15 +123,31 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
     [findings],
   );
 
-  const live = agentStatus === "running";
-  const statusColor = live ? colors.success
-    : agentStatus === "error" ? colors.error
-    : agentStatus === "completed" ? colors.accent
+  // ── Honest run status (replaces the binary `live = agent_status==='running'`) ──
+  const runStatus: RunStatus = computeRunStatus(engagement);
+  const live = runStatus === "running";
+
+  const statusColor: string =
+    runStatus === "running"   ? colors.success
+    : runStatus === "stalled"  ? colors.warning
+    : runStatus === "failed"   ? colors.error
+    : runStatus === "completed" ? colors.accent
+    : runStatus === "paused"   ? colors.status.in_progress
     : colors.text.tertiary;
-  const statusLine = live ? "DeepSeek is running"
-    : agentStatus === "completed" ? "Run complete"
-    : agentStatus === "error" ? "Run errored"
+
+  const statusLine: string =
+    runStatus === "running"   ? "DeepSeek is running"
+    : runStatus === "stalled"  ? stalledLabel(engagement)
+    : runStatus === "failed"   ? "Run errored"
+    : runStatus === "completed" ? "Run complete"
+    : runStatus === "paused"   ? "Paused"
     : "Idle — not launched yet";
+
+  // Telemetry warning rows for stall signals (shown only when stalled)
+  const recentTelemetry: Array<{ outcome: string; created_at: string }> =
+    runStatus === "stalled" && Array.isArray(engagement?.recent_telemetry)
+      ? engagement.recent_telemetry
+      : [];
 
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxl, gap: spacing.md }}>
@@ -89,19 +166,27 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
         {running ? (
           <Text style={{ color: colors.text.secondary, fontSize: fontSize.sm, marginTop: spacing.sm }} numberOfLines={2}>▶ {running.title}</Text>
         ) : null}
+        {/* Telemetry stall warnings — only when stalled and telemetry is available. */}
+        {recentTelemetry.slice(0, 2).map((t, i) =>
+          t.outcome === "outcome_timeout" ? (
+            <Text key={i} style={{ color: colors.warning, fontSize: fontSize.xs, marginTop: i === 0 ? spacing.sm : 2 }}>⚠ A step timed out</Text>
+          ) : t.outcome === "loop_halted" ? (
+            <Text key={i} style={{ color: colors.warning, fontSize: fontSize.xs, marginTop: i === 0 ? spacing.sm : 2 }}>⚠ Loop halted</Text>
+          ) : null
+        )}
         {/* Operator's run control — the trigger the app was missing (RULE 3: operator executes). */}
         <View style={{ marginTop: spacing.md }}>
-          {live ? (
+          {live || runStatus === "stalled" ? (
             <RunBtn label="■  Stop run" tone="stop" onPress={onStop} />
           ) : (
             <RunBtn
-              label={agentStatus === "paused" ? "▶  Continue run" : agentStatus === "completed" ? "↻  Run again" : "▶  Launch run"}
+              label={runStatus === "paused" ? "▶  Continue run" : runStatus === "completed" ? "↻  Run again" : "▶  Launch run"}
               tone="go"
               onPress={onLaunch}
             />
           )}
           <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, marginTop: spacing.xs }}>
-            {live ? "Halts after the current step finishes." : "DeepSeek runs this engagement autonomously — you can stop it anytime."}
+            {live ? "Halts after the current step finishes." : runStatus === "stalled" ? "Loop appears stalled — stop to reset." : "DeepSeek runs this engagement autonomously — you can stop it anytime."}
           </Text>
         </View>
 

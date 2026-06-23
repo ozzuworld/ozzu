@@ -15,6 +15,7 @@ export interface EngagementSummary {
   client_name: string;
   engagement_type: string;
   status: string;
+  agent_status?: string | null;
   engagement_phase?: string | null;
   findings_count?: number;
   critical_count?: number;
@@ -28,6 +29,8 @@ export interface EngagementSummary {
   queue_pending?: number;
   queue_failed?: number;
   last_activity_at?: string | null;
+  last_completed_at?: string | null;
+  latest_telemetry_outcome?: string | null;
   created_at?: string;
 }
 
@@ -44,6 +47,10 @@ const SEV: Record<string, string> = {
   low: colors.brand.blue,
   info: colors.gray[200],
 };
+
+/** Stall outcomes that mean the loop is dark (mirrors NowTab.tsx STALL_OUTCOMES). */
+const STALL_OUTCOMES = new Set(["outcome_timeout", "loop_halted", "orphan_resolved"]);
+const STALL_MS = 3 * 60 * 1000;
 
 function relativeTime(iso?: string | null): string {
   if (!iso) return "no activity";
@@ -64,16 +71,33 @@ function num(v: any): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** Honest stall detection for the list card (mirrors NowTab.tsx computeRunStatus). */
+function isStalled(engagement: EngagementSummary): boolean {
+  if (engagement.agent_status !== "running") return false;
+  if (engagement.latest_telemetry_outcome && STALL_OUTCOMES.has(engagement.latest_telemetry_outcome)) return true;
+  const lastCompleted = engagement.last_completed_at ?? null;
+  if (lastCompleted) {
+    return Date.now() - new Date(lastCompleted).getTime() > STALL_MS;
+  }
+  // No completions + no last_activity_at → if last_activity_at is old, stalled.
+  const lastAct = engagement.last_activity_at ?? null;
+  if (lastAct) {
+    return Date.now() - new Date(lastAct).getTime() > STALL_MS;
+  }
+  return false;
+}
+
 export function EngagementCard({ engagement, onPress }: EngagementCardProps) {
   const phase = engagement.engagement_phase || "scoping";
   const queueTotal = num(engagement.queue_total);
   const queueDone = num(engagement.queue_done);
   const queueRunning = num(engagement.queue_running);
   const queuePending = num(engagement.queue_pending);
-  const isLive = queueRunning > 0;
+  const isLive = queueRunning > 0 && !isStalled(engagement);
+  const stalled = queueRunning > 0 && isStalled(engagement);
 
-  // Accent identity: LIVE green when a step is running, otherwise the engagement's phase color.
-  const accent = isLive ? colors.success : phaseColor(phase);
+  // Accent identity: LIVE green when a step is running and healthy, amber when stalled, otherwise phase color.
+  const accent = isLive ? colors.success : stalled ? colors.warning : phaseColor(phase);
 
   const crit = num(engagement.critical_count);
   const high = num(engagement.high_count);
@@ -112,7 +136,9 @@ export function EngagementCard({ engagement, onPress }: EngagementCardProps) {
           >
             {safe(engagement.id, "—")}
           </Text>
-          {isLive ? <Chip text="● LIVE" color={colors.success} /> : <Chip text={phaseLabel(phase).toUpperCase()} color={accent} />}
+          {isLive ? <Chip text="● LIVE" color={colors.success} />
+            : stalled ? <Chip text="⚠ STALLED" color={colors.warning} />
+            : <Chip text={phaseLabel(phase).toUpperCase()} color={accent} />}
         </View>
 
         {/* Client + type */}
