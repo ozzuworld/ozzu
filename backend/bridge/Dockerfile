@@ -8,8 +8,12 @@ FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git git-lfs git-crypt unzip ca-certificates \
     python3 python3-pip python3-venv libimage-exiftool-perl \
-    openssh-client prusa-slicer ffmpeg && \
+    openssh-client prusa-slicer ffmpeg \
+    nmap net-tools iproute2 iputils-ping dnsutils netcat-openbsd && \
     rm -rf /var/lib/apt/lists/*
+# SOC offense toolkit (nmap/net-tools/iproute2/iputils/dnsutils/netcat) — the bridge is the
+# toolkit host (2026-06-23): SOC execution runs LOCAL here, routing the lab /24 via wg0 → tablet
+# relay → EDIFICIO. dev-01 is OUT of the offense pipeline (host-networked → wg0 already routes it).
 
 # Python OSINT tools in isolated venv (light — heavy tools live in osint-tools container)
 RUN python3 -m venv /opt/osint-venv --system-site-packages && \

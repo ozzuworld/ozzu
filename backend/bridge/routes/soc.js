@@ -179,21 +179,13 @@ module.exports = function socRoutes(ctx) {
           wg_handshake_age_s: wgAge ?? null,
           battery_pct: d.battery_pct ?? null,
           last_seen: d.last_seen,
-          // WG-reachable devices can act as a remote executor/relay; dev-01 is the
-          // local default. Heuristic only — the wizard still gates on reachability.
-          executor_capable: !!d.wg_ip || d.device_id === "dev-01",
+          // WG-reachable devices act as the relay/doorway into a physical lab (the bridge holds
+          // the toolkit). Heuristic only — the wizard still gates on reachability.
+          executor_capable: !!d.wg_ip,
         };
       });
-      // dev-01 is the always-available local executor (ssh-reachable, has wlan0). Surface it
-      // even when it isn't heartbeating into device_state, so the wizard can always pick it.
-      if (!executors.some((e) => e.device_id === "dev-01")) {
-        executors.push({
-          device_id: "dev-01", status: "online", online: true,
-          wifi_ssid: null, lan_ip: null, lan_subnet: null,
-          wg_ip: null, wg_up: true, wg_handshake_age_s: null, battery_pct: null,
-          last_seen: null, executor_capable: true,
-        });
-      }
+      // dev-01 REMOVED from the offense pipeline (King Kazuma 2026-06-23) — no longer surfaced as
+      // an executor. Offense runs LOCAL on the bridge, routing the lab /24 via wg0 → tablet relay.
       sendJSON(res, 200, { executors });
       return true;
     }
@@ -411,6 +403,41 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // POST /soc/engagements/:id/autonomy {enabled} — the OPERATOR's switch between human-in-the-loop
+    // (model proposes, operator runs each step) and AUTO (queued steps auto-execute through the
+    // membrane: ROE block-list / permission verdict / auto-verify / preflight). Cipher builds this
+    // switch; the operator throws it. On enable, kick any pending steps so the run un-sticks.
+    if (req.method === "POST" && /^\/soc\/engagements\/[^/]+\/autonomy$/.test(pathname)) {
+      if (!requireAuth(req, res)) return true;
+      const eid = decodeURIComponent(pathname.split("/")[3] || "");
+      let enabled = true;
+      try { const b = await parseBody(req); if (b && typeof b.enabled === "boolean") enabled = b.enabled; } catch {}
+      try {
+        const er = await db.query(`SELECT id FROM pentest_engagements WHERE id = $1`, [eid]);
+        if (er.rows.length === 0) { sendJSON(res, 404, { error: "engagement not found" }); return true; }
+        await db.query(
+          `UPDATE pentest_engagements SET autonomous_execution_enabled = $2,
+             autonomous_paused = CASE WHEN $2 THEN false ELSE autonomous_paused END
+           WHERE id = $1`,
+          [eid, enabled]);
+        let kicked = 0;
+        if (enabled) {
+          try {
+            const autoEx = require("../autonomous-executor");
+            const pend = await db.query(`SELECT id FROM soc_queue_items WHERE engagement_id = $1 AND status = 'pending' ORDER BY seq`, [eid]);
+            for (const row of pend.rows) {
+              try { const r = await autoEx.maybeAutoExecute(row.id); if (r && r.autoExecuted) kicked++; } catch (_) {}
+            }
+          } catch (e) { console.error("[soc/autonomy] kick:", e && e.message); }
+        }
+        sendJSON(res, 200, { ok: true, autonomous_execution_enabled: enabled, kicked });
+      } catch (error) {
+        console.error("[soc/autonomy] Error:", error);
+        sendJSON(res, 500, { error: "autonomy toggle failed", details: error.message });
+      }
+      return true;
+    }
+
     // POST /soc/engagements — create an engagement from the in-app wizard
     // (dir_1782136917098). Mirrors the create_engagement MCP tool's id + INSERT, plus the
     // wizard's device-aware fields: executor_host / executor_adb_target, the structured
@@ -454,7 +481,7 @@ module.exports = function socRoutes(ctx) {
             body.lead_engineer || null,
             body.sow_url || null,
             "scoping",
-            body.executor_host || "dev-01",
+            body.executor_host || null,
             body.executor_adb_target || null,
             JSON.stringify(metadata),
           ]
@@ -464,7 +491,7 @@ module.exports = function socRoutes(ctx) {
         sendJSON(res, 201, {
           id: engagementId,
           status: "scoping",
-          executor_host: body.executor_host || "dev-01",
+          executor_host: body.executor_host || null,
           first_objective: metadata.first_objective || null,
         });
         return true;
@@ -678,14 +705,22 @@ module.exports = function socRoutes(ctx) {
         // Execute command in background (after response sent). Honor engagement's
         // executor_host (dir_1780756261315) — bridge-local for tablet-mediated
         // engagements, ssh dev-01 otherwise. Pipe via stdin in both branches.
-        const execHost = engResult.rows[0].executor_host || 'dev-01';
-        const proc = execHost === 'dev-01'
-          ? spawn(
-              'ssh',
-              ['-o', 'StrictHostKeyChecking=no', 'dev-01', 'bash', '-s'],
-              { detached: false, stdio: ['pipe', 'pipe', 'pipe'] }
-            )
-          : spawn('bash', ['-s'], { detached: false, stdio: ['pipe', 'pipe', 'pipe'] });
+        // dev-01 REMOVED from the offense pipeline (King Kazuma 2026-06-23). Always run LOCAL on the
+        // bridge: it's host-networked and routes the lab /24 via wg0 → tablet → EDIFICIO, so the
+        // engagement's executor_host names the RELAY into the lab, not an ssh target. The bridge
+        // holds the toolkit; the tablet is the doorway; dev-01 is unplugged from this job.
+        //
+        // Anti-cloud pre-flight: never let a command actively target cloud infra (the GCP metadata
+        // IP or an *.internal host), so a mis-scoped scan can't hit GCP/dev-01 instead of the lab.
+        const CLOUD_TARGET = /169\.254\.169\.254|metadata\.google|metadata\.goog|\b[a-z0-9-]+\.internal\b/i;
+        if (CLOUD_TARGET.test(String(command))) {
+          await db.query(
+            `UPDATE agent_audit_log SET status='failed', completed_at=NOW(), output=$1 WHERE session_id=$2`,
+            ["BLOCKED by anti-cloud pre-flight: this command targets cloud infrastructure (metadata IP / *.internal). The lab is 192.168.1.0/24 reached via the tablet relay — not the cloud. Re-scope the target to the lab subnet.", sessionId],
+          ).catch((e) => console.error(`[soc/execute] anti-cloud log fail ${sessionId}:`, e.message));
+          return true;
+        }
+        const proc = spawn('bash', ['-s'], { detached: false, stdio: ['pipe', 'pipe', 'pipe'] });
         proc.stdin.write(command);
         proc.stdin.end();
 
@@ -935,7 +970,7 @@ module.exports = function socRoutes(ctx) {
         // Pipe script via stdin (`bash -s`) in both branches — see
         // .claude/rules/soc-command-execution.md for why inlining breaks $VAR.
         // detached:true → own process group, killable with process.kill(-pid).
-        const execHost = item.executor_host || 'dev-01';
+        const execHost = item.executor_host || null; // dev-01 removed from offense pipeline (2026-06-23) — always local below
 
         // HTTP executor agent path (dir_1781019523885) — when EXEC_AGENT_URL is set
         // and target is dev-01, route through dev-01:8888 instead of SSH. Removes
@@ -1013,24 +1048,25 @@ module.exports = function socRoutes(ctx) {
           return true; // HTTP path handled — skip the SSH spawn block below.
         }
 
-        const proc = execHost === 'dev-01'
-          ? spawn(
-              'ssh',
-              [
-                // Tighter for lossy remote-LAN links (EDIFICIO LAURA wifi ~40% loss).
-                '-o', 'StrictHostKeyChecking=no',
-                '-o', 'ConnectTimeout=20',
-                '-o', 'ConnectionAttempts=3',
-                '-o', 'ServerAliveInterval=8',
-                '-o', 'ServerAliveCountMax=2',
-                '-o', 'TCPKeepAlive=yes',
-                '-o', 'BatchMode=yes',
-                'dev-01',
-                'bash', '-s',
-              ],
-              { detached: true, stdio: ['pipe', 'pipe', 'pipe'] }
-            )
-          : spawn('bash', ['-s'], { detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+        // Anti-cloud pre-flight (2026-06-23): never run a command that actively targets cloud infra
+        // (the GCP metadata IP or an *.internal host) — the lab is 192.168.1.0/24 via the tablet
+        // relay, so a mis-scoped scan must never hit GCP/dev-01 instead.
+        const CLOUD_TARGET = /169\.254\.169\.254|metadata\.google|metadata\.goog|\b[a-z0-9-]+\.internal\b/i;
+        if (CLOUD_TARGET.test(String(item.command))) {
+          const blk = "BLOCKED by anti-cloud pre-flight: command targets cloud infrastructure (metadata IP / *.internal). The lab is 192.168.1.0/24 via the tablet relay — re-scope to the lab subnet.";
+          try {
+            await db.query(`UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2 AND status='running'`, [blk, item.id]);
+            await db.query(`UPDATE agent_audit_log SET status='failed', completed_at=NOW(), output=$1 WHERE session_id=$2 AND status='running'`, [blk, sessionId]);
+            await syncOffenseOutcome(item.id, 'failed').catch(() => {});
+          } catch (_) { /* swallow */ }
+          broadcast({ type: 'socStepDone', engagement_id: item.engagement_id, item_id: item.id, session_id: sessionId, status: 'failed', timed_out: false, ts: Date.now() });
+          return true;
+        }
+        // dev-01 REMOVED from the offense pipeline (King Kazuma 2026-06-23). Always run LOCAL on the
+        // bridge — it's host-networked and routes the lab /24 via wg0 → tablet → EDIFICIO, so the
+        // engagement's executor_host names the relay/doorway, not an ssh target. Bridge holds the
+        // toolkit; tablet is the doorway. detached:true → own process group (killable via -pid).
+        const proc = spawn('bash', ['-s'], { detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
         proc.stdin.write(String(item.command));
         proc.stdin.end();
         let fullOutput = '';

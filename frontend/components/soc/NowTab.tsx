@@ -28,6 +28,7 @@ interface NowTabProps {
   onFindingPress: (finding: FindingRowData) => void;
   onLaunch?: () => void;
   onStop?: () => void;
+  onToggleAuto?: (enabled: boolean) => void;
 }
 
 function sevRank(s: string): number {
@@ -35,8 +36,9 @@ function sevRank(s: string): number {
   return i < 0 ? 99 : i;
 }
 
-export function NowTab({ engagement, executor, queue, findings, onFindingPress, onLaunch, onStop }: NowTabProps) {
+export function NowTab({ engagement, executor, queue, findings, onFindingPress, onLaunch, onStop, onToggleAuto }: NowTabProps) {
   const agentStatus: string = engagement?.agent_status || "idle";
+  const autoEnabled = !!engagement?.autonomous_execution_enabled;
   const phase: string = engagement?.engagement_phase || "—";
   const ars = (engagement?.agent_run_state && typeof engagement.agent_run_state === "object") ? engagement.agent_run_state : {};
   const iter = ars.iter ?? ars.iteration ?? ars.current_iter ?? null;
@@ -102,6 +104,22 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
             {live ? "Halts after the current step finishes." : "DeepSeek runs this engagement autonomously — you can stop it anytime."}
           </Text>
         </View>
+
+        {/* Auto-execute switch — operator's call: model proposes & you approve, vs auto-fire (gated). */}
+        <Pressable
+          onPress={() => onToggleAuto?.(!autoEnabled)}
+          style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", marginTop: spacing.md, opacity: pressed ? 0.8 : 1 })}
+        >
+          <View style={{ flex: 1, paddingRight: spacing.sm }}>
+            <Text style={{ color: colors.text.primary, fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>Auto-execute steps</Text>
+            <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, marginTop: 1 }}>
+              {autoEnabled ? "On — DeepSeek runs each step itself (membrane-gated)." : "Off — you run each step from the Queue tab."}
+            </Text>
+          </View>
+          <View style={{ width: 46, height: 28, borderRadius: 14, backgroundColor: autoEnabled ? colors.success : colors.gray[600], padding: 3, justifyContent: "center" }}>
+            <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.gray[50], alignSelf: autoEnabled ? "flex-end" : "flex-start" }} />
+          </View>
+        </Pressable>
       </View>
 
       {/* Executor health */}

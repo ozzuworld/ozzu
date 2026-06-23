@@ -300,6 +300,18 @@ function EngagementDetailInner() {
     try { await fetch(`${getBridgeUrl()}/soc/engagements/${id}/stop`, { method: "POST" }); setTimeout(fetchAll, 600); } catch {}
   }, [id, fetchAll]);
 
+  // Operator's autonomy switch — flip the run between propose-and-approve and auto-execute (gated).
+  const toggleAuto = useCallback(async (enabled: boolean) => {
+    try {
+      await fetch(`${getBridgeUrl()}/soc/engagements/${id}/autonomy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      setTimeout(fetchAll, 700);
+    } catch (e: any) { Alert.alert("Couldn't change mode", e?.message || "network error"); }
+  }, [id, fetchAll]);
+
   const running = useMemo(() => queue.find((q) => q.status === "running"), [queue]);
 
   // ── Loading / not-found gates ──
@@ -418,6 +430,7 @@ function EngagementDetailInner() {
           onFindingPress={onFindingPress}
           onLaunch={launchRun}
           onStop={stopRun}
+          onToggleAuto={toggleAuto}
         />
       ) : null}
       {tab === "queue" ? (
