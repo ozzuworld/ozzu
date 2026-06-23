@@ -149,7 +149,7 @@ export default function SOCScreen() {
                   {f.label}
                 </Text>
                 <Text style={{
-                  color: selected ? colors.bg.base : colors.text.tertiary,
+                  color: selected ? colors.bg.base : colors.gray[200],
                   fontSize: fs.xs,
                   fontFamily: "monospace",
                   marginLeft: 4,

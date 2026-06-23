@@ -24,8 +24,8 @@ export function phaseColor(phase?: string | null): string {
     case "exploitation": return colors.brand.orange;
     case "post_exploit": return colors.brand.purple;
     case "reporting": return colors.success;
-    case "scoping": return colors.text.tertiary;
-    default: return colors.text.tertiary;
+    case "scoping": return colors.gray[250];
+    default: return colors.gray[250];
   }
 }
 
@@ -45,8 +45,8 @@ export function severityColor(severity?: string | null): string {
     case "high": return colors.brand.orange;
     case "medium": return colors.warning;
     case "low": return colors.brand.blue;
-    case "info": return colors.text.tertiary;
-    default: return colors.text.tertiary;
+    case "info": return colors.gray[200];
+    default: return colors.gray[200];
   }
 }
 
