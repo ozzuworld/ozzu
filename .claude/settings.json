@@ -79,6 +79,19 @@
           {
             "type": "command",
             "command": "/home/gcp/ozzu/.claude/hooks/merge-deploy-alert.sh"
+          },
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/soc-progress-log.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__ozzu-bridge__merge_and_deploy",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/soc-progress-log.sh"
           }
         ]
       },

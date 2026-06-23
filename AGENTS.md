@@ -44,7 +44,7 @@ The repo is too big for any single LLM context window. Use the indexes, do NOT p
 ## Security
 
 - **OZZU public output uses the "KingKazuma" handle.** Never cross-link to real-name / company / geographic identifiers. Linter at `private/security-advisories/tools/lint-realname-leakage.py` enforces on security docs.
-- **Cipher does NOT run pentest tools** (nmap, metasploit, etc.) directly via Bash. Penetration testing is queued to the SOC app (`/soc/engagements`) for the PA Engineer to execute on dev-01. See `.claude/SOC-MOBILE-WORKFLOW.md` and `.cipher/layer4/intent/security.md`.
+- **Cipher does NOT run pentest tools** (nmap, metasploit, etc.) directly via Bash. Execution is LOCAL on the bridge (`spawn('bash','-s')`) driven by the offense model, or human-gated via the SOC app (`/soc/engagements`) in manual mode; dev-01 is OUT of the pipeline. See the canonical SOC doc `backend/bridge/SOC-PIPELINE-ARCHITECTURE.md` and `.cipher/layer4/intent/security.md`.
 - **Hard stop:** if a target has no public PoC and the path requires deriving a novel exploit primitive from RE, STOP. Write a "no public bypass exists" finding. Don't progressively-frame this as "just analysis."
 - **Secrets** live in `backend/docker-compose.override.yml` (gitignored) — ANTHROPIC_API_KEY, BRIDGE_API_KEY, email creds, etc. Backups use AES-256-CBC + PBKDF2 with BRIDGE_API_KEY as passphrase.
 - **Personal data screens** in the app require biometric auth (Identity tab uses Face ID; future Finance/Files/Backups screens inherit this).

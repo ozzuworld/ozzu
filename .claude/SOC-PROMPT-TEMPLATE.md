@@ -84,4 +84,6 @@ Once Cipher produces the queue, PA engineer:
 5. Cipher reads results via `list_findings`, analyzes with full
    session context, then plans next phase (using this template again).
 
-See `.claude/SOC-MOBILE-WORKFLOW.md` for the full architecture.
+For the full architecture + current ground truth, see the canonical doc
+`backend/bridge/SOC-PIPELINE-ARCHITECTURE.md`. (This template is kept as the
+banned-phrasing / stop-at-queue reference that CLAUDE.md RULE 3 points to.)

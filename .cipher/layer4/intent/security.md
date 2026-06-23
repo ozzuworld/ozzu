@@ -61,7 +61,7 @@ Each step looked like "just static analysis." Aggregate = novel exploit chain. T
 
 ## The SOC mobile workflow
 
-Canonical doc: `.claude/SOC-MOBILE-WORKFLOW.md`. Summary:
+Canonical doc: `backend/bridge/SOC-PIPELINE-ARCHITECTURE.md`. Summary:
 
 ```
 [Cipher] creates engagement via create_engagement MCP
@@ -149,5 +149,5 @@ Note the naming split: engagements are tagged Skyline (client-facing engagement 
 - PRINCIPLES § VI (the security section: 19/20/21)
 - Memory: `project_soc_redteam_consulting.md`, `feedback_security_role.md`, `reference_soc_dev01_toolkit.md`
 - Rules: `.claude/rules/soc-command-execution.md`, CLAUDE.md § "RULE 3 — SOC Pentest Workflow"
-- Docs: `.claude/SOC-MOBILE-WORKFLOW.md`, `.claude/SOC-PENTEST-WORKFLOW.md`, `.claude/SOC-PROMPT-TEMPLATE.md`
+- Docs: `backend/bridge/SOC-PIPELINE-ARCHITECTURE.md` (canonical), `.claude/SOC-PROMPT-TEMPLATE.md` (banned-phrasing template)
 - Code: `backend/bridge/routes/soc.js`, `backend/bridge/correlation-engine.js`, `frontend/app/(tabs)/soc.tsx`
