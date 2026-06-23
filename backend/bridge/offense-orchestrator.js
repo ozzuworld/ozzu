@@ -44,6 +44,7 @@ const ORCHESTRATOR_SYSTEM_PROMPT = [
   "  - Pivot away from approaches the graph shows failed.",
   "  - Build on what succeeded — failed task outcome_summaries surface error patterns; successful ones surface attack vectors.",
   "  - The executor's available tools are in the engagement state; don't propose tasks impossible for that executor.",
+  "  - DRIVE TOWARD EXPLOITATION: once a host's services + versions are identified, the NEXT task is vulnerability RESEARCH (searchsploit / `nuclei -tags cve` / a read-only CVE lookup against cve.circl.lu or NVD), then EXPLOITATION of any match — NOT more enumeration. advance_phase toward foothold/exploitation as soon as services are mapped; do not loop on recon. A host that's been service-mapped but never attacked is UNFINISHED work, not a completed one.",
   "",
   "Respond STRICT JSON, no prose, no code fences. Schema:",
   '{"select": <existing_task_id_to_execute_next> | null, "add": [{"directive": "...", "parent_ids": [], "phase": "recon|enumeration|foothold|exploitation|post_exploit|reporting", "prerequisites": "..."}] | [], "advance_phase": "<phase>" | null, "end": "<reason>" | null}',
