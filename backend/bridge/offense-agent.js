@@ -368,6 +368,13 @@ async function runAgent(engagementId, opts = {}) {
   // Human-in-loop callers pass wait_timeout_sec=1800 explicitly.
   const waitTimeoutSec = Number(opts.wait_timeout_sec) > 0 ? Number(opts.wait_timeout_sec) : DEFAULT_WAIT_TIMEOUT_SEC;
 
+  // dir_1782242371780: halt-detection wall clock — if no new step has been queued
+  // for this many milliseconds while agent_status='running', the loop is dark and
+  // must conclude rather than idle silently. 5 minutes is generous; watchdog fires
+  // at 2min on pending steps, so this catches the "no pending step, no new queues"
+  // dark-loop case that the watchdog cannot reach.
+  const HALT_TIMEOUT_MS = 300000; // 5 minutes
+
   // Initial state push so the operator sees status=running immediately
   // dir_1780832189054: persist intent + max_iter so the bridge-startup
   // auto-resume can re-invoke with the same params after a restart.
@@ -449,6 +456,11 @@ async function runAgent(engagementId, opts = {}) {
   // detect when the orchestrator is cycling the same phase without advancing.
   let consecutivePhaseStreak = 0;
   let lastSeenPhase = null;
+
+  // dir_1782242371780: halt-detection — track the wall-clock time of the last
+  // step queued. If no step is queued for HALT_TIMEOUT_MS while we're running,
+  // conclude with 'loop_halted' telemetry instead of staying stuck at 'running'.
+  let lastStepQueuedAt = Date.now();
 
   while (iter < maxIter) {
     iter++;
@@ -572,6 +584,22 @@ async function runAgent(engagementId, opts = {}) {
           // Inject mentor hint so the orchestrator knows why we advanced
           mentorGuidance = `[LOOP-BREAKER dir_1782234450321] Phase '${currentPhase}' repeated ${MAX_CONSECUTIVE_INTENT}+ times with no advance — automatically advanced to '${nextPhase}'. DO NOT return to '${currentPhase}' or earlier phases. Focus exclusively on '${nextPhase}' tasks: ${nextPhase === "foothold" ? "gaining initial access via confirmed attack vectors from enumeration" : nextPhase === "exploitation" ? "extending the foothold — privesc, additional service exploitation" : nextPhase === "enumeration" ? "version probes and attack-vector identification" : "post-access actions per phase guidance"}.`;
           ctx.mentor_guidance = mentorGuidance;
+        } else {
+          // dir_1782242371780: Fix 1 — terminal phase reached, loop-breaker has nowhere to advance.
+          // Conclude cleanly instead of idling at 'running' indefinitely.
+          // This happens when phase = 'reporting' (last in PHASE_ORDER) and the orchestrator
+          // keeps cycling it without calling end_engagement. Force-conclude so the operator
+          // sees a terminal status instead of a silent dark loop.
+          console.log(`[offense-agent] loop-breaker: phase '${currentPhase}' is terminal (no next phase) and repeated ${consecutivePhaseStreak}× — force-concluding engagement (dir_1782242371780)`);
+          endReason = `loop-breaker: terminal phase '${currentPhase}' repeated ${consecutivePhaseStreak}× with no end_engagement call — auto-concluded (dir_1782242371780)`;
+          try {
+            await db.query(
+              `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+               VALUES ($1, NULL, 'loop_breaker', 'terminal_phase', 0, 0, false, true, 0, 0, 'engagement_concluded', $2)`,
+              [engagementId, `phase=${currentPhase}; streak=${consecutivePhaseStreak}; iter=${iter}; steps_queued=${stepsQueued}`]);
+          } catch (_) {}
+          endedByOrchestrator = true; // treat as clean conclusion so finalStatus → 'completed'
+          break;
         }
       }
     }
@@ -695,8 +723,25 @@ async function runAgent(engagementId, opts = {}) {
         `SELECT COUNT(*)::int AS n FROM soc_queue_items WHERE engagement_id = $1 AND status IN ('pending','running')`,
         [engagementId]).catch(() => ({ rows: [{ n: 0 }] }));
       const haveWork = !!(workRow.rows[0] && workRow.rows[0].n > 0);
-      if ((stallStreak >= 3 && !haveWork) || stallStreak >= 30) {
-        endReason = `orchestrator gave no task ${stallStreak}× (work in flight: ${haveWork}) — engagement exhausted`;
+      // dir_1782242371780: Fix 3 (halt detection) — if no step has been queued for
+      // HALT_TIMEOUT_MS AND there's no pending work, the loop is dark. Conclude with
+      // a distinct 'loop_halted' telemetry outcome so analyze_engagement_telemetry
+      // surfaces it as a WARNING. This catches the case where the watchdog cannot
+      // fire (no pending step) but the loop is also not making progress.
+      const haltTimeoutExpired = (Date.now() - lastStepQueuedAt) > HALT_TIMEOUT_MS;
+      if ((stallStreak >= 3 && !haveWork) || stallStreak >= 30 || (haltTimeoutExpired && !haveWork)) {
+        const haltedByTimeout = haltTimeoutExpired && !haveWork && stallStreak < 30;
+        endReason = haltedByTimeout
+          ? `loop dark for ${Math.round((Date.now()-lastStepQueuedAt)/1000)}s with no pending work — loop_halted (dir_1782242371780)`
+          : `orchestrator gave no task ${stallStreak}× (work in flight: ${haveWork}) — engagement exhausted`;
+        if (haltedByTimeout) {
+          try {
+            await db.query(
+              `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+               VALUES ($1, NULL, 'halt_detector', 'loop_health', 0, 0, false, true, 0, 0, 'loop_halted', $2)`,
+              [engagementId, `halt_timeout=${Math.round((Date.now()-lastStepQueuedAt)/1000)}s; stall_streak=${stallStreak}; iter=${iter}; steps_queued=${stepsQueued}`]);
+          } catch (_) {}
+        }
         break;
       }
       // transient empty, or sub-agents still scanning — wait, then re-orchestrate. A pure wait must
@@ -767,6 +812,7 @@ async function runAgent(engagementId, opts = {}) {
     }
     await orchestrator.linkQueueItem(task.id, queueResult.queue_id);
     stepsQueued++;
+    lastStepQueuedAt = Date.now(); // dir_1782242371780: reset halt-detection clock on every successful queue
     await setAgentStatus(engagementId, "running", { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, last_action: `queued ${queueResult.queue_id}` });
 
     // (9) Wait for PA to run the queue item
@@ -837,16 +883,41 @@ async function runAgent(engagementId, opts = {}) {
     }
   }
 
-  // Final state
-  const finalStatus = endedByOrchestrator ? "completed" : (iter >= maxIter ? "idle" : "error");
-  await setAgentStatus(engagementId, finalStatus, { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, end_reason: endReason || `hit max_iter=${maxIter}` });
+  // dir_1782242371780: Fix 3 — halt detection. If the loop broke without a
+  // model-driven end AND without hitting the iter cap AND without a prior
+  // endReason (i.e. the loop exited via the stall-streak break at stallStreak>=30),
+  // emit a distinct 'loop_halted' telemetry outcome so analyze_engagement_telemetry
+  // surfaces it as a WARNING. The loop_halted signal is also emitted when
+  // HALT_TIMEOUT_MS elapsed since the last queued step (caught below).
+  const haltedByStall = !endedByOrchestrator && iter < maxIter && endReason && endReason.includes("engagement exhausted");
+  if (haltedByStall) {
+    try {
+      await db.query(
+        `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+         VALUES ($1, NULL, 'halt_detector', 'loop_health', 0, 0, false, true, 0, 0, 'loop_halted', $2)`,
+        [engagementId, `stall_streak_exhaustion; iter=${iter}; steps_queued=${stepsQueued}; end_reason=${(endReason||"").slice(0,200)}`]);
+    } catch (_) {}
+  }
+
+  // dir_1782242371780: Fix 2 — iteration-budget exhaustion must set a TERMINAL
+  // non-'running' status. Previously 'idle' was used, which was easy to confuse
+  // with a stalled 'running'. Now 'paused' with a clear end_reason so the operator
+  // knows they need to re-call start_engagement_run to continue.
+  // 'completed' = model cleanly ended | 'paused' = budget hit (resumable) |
+  // 'error' = unexpected stall | all three are non-'running' (loop is gone).
+  const finalStatus = endedByOrchestrator
+    ? "completed"
+    : (iter >= maxIter ? "paused" : "error");
+  const finalEndReason = endReason
+    || (iter >= maxIter ? `hit max_iter=${maxIter} cap — re-call start_engagement_run to continue` : "(unknown)");
+  await setAgentStatus(engagementId, finalStatus, { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, end_reason: finalEndReason });
 
   return {
     engagement_id: engagementId,
     ok: true,
     iter,
     ended_by_orchestrator: endedByOrchestrator,
-    end_reason: endReason || (iter >= maxIter ? `hit max_iter=${maxIter} cap — re-call start_engagement_run to continue` : "(unknown)"),
+    end_reason: finalEndReason,
     steps_queued: stepsQueued,
     tasks_added: tasksAdded,
     last_decision: lastDecision,
