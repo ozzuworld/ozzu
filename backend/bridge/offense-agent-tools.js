@@ -198,6 +198,11 @@ async function probeExecutorTool(args) {
 
 const VALID_PHASES = ["recon", "enumeration", "foothold", "exploitation", "post_exploit", "reporting"];
 
+// dir_1782234450321: ONE-WAY PHASE RATCHET. The phase can only move forward.
+// Once a forward phase is reached it cannot regress to an earlier one —
+// prevents the model from cycling back to 'recon' after reaching 'foothold'.
+const PHASE_RANK = Object.fromEntries(VALID_PHASES.map((p, i) => [p, i]));
+
 async function advancePhase(args) {
   const { engagement_id, new_phase } = args || {};
   if (!engagement_id) return { error: "engagement_id required" };
@@ -210,6 +215,27 @@ async function advancePhase(args) {
     `SELECT engagement_phase FROM pentest_engagements WHERE id = $1`,
     [engagement_id]);
   const oldPhase = prev.rows[0] && prev.rows[0].engagement_phase;
+
+  // dir_1782234450321: ratchet guard — silently reject regressions.
+  // Returning a non-error result so the caller doesn't crash; include
+  // a 'ratchet_blocked' flag so telemetry can catch it.
+  if (oldPhase && PHASE_RANK[new_phase] !== undefined && PHASE_RANK[oldPhase] !== undefined) {
+    if (PHASE_RANK[new_phase] < PHASE_RANK[oldPhase]) {
+      console.warn(`[advance_phase] ratchet: blocked regression ${oldPhase} → ${new_phase} for engagement ${engagement_id}`);
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'ratchet', 'phase_advance', 0, 0, false, true, 0, 0, 'phase_regression_blocked', $2)`,
+          [engagement_id, `blocked: ${oldPhase} → ${new_phase}`]);
+      } catch (_) {}
+      return {
+        engagement_id, phase: oldPhase, ok: true,
+        ratchet_blocked: true,
+        note: `Phase regression ${oldPhase} → ${new_phase} blocked by one-way ratchet (dir_1782234450321). Current phase stays '${oldPhase}'.`,
+      };
+    }
+  }
+
   const r = await db.query(
     `UPDATE pentest_engagements
         SET engagement_phase = $1

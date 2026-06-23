@@ -552,23 +552,122 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       return { autoExecuted: false, reason: `autoverify:${autoVerifyHit.rule}`, hint: autoVerifyHit.hint };
     }
 
-    const preflightCheck = lintCommandPreflight(item.command, { executor_host: item.executor_host });
+    let commandForExecution = item.command;
+    const preflightCheck = lintCommandPreflight(commandForExecution, { executor_host: item.executor_host });
     if (preflightCheck) {
-      const diag = `[PREFLIGHT_LINT_BLOCKED — dir_1780794595572]\nrule=${preflightCheck.rule}\nmatched=${preflightCheck.match}\nhint=${preflightCheck.hint}`;
-      await db.withBypass("autonomous_preflight_block", (client) => client.query(
-        `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
-        [diag, item.id]));
-      try {
-        await db.query(
-          `INSERT INTO offense_telemetry
-             (engagement_id, queue_item_id, model_used, intent_category,
-              n_hosts, n_findings, step_queued, in_scope, n_references,
-              latency_ms, outcome, outcome_notes)
-           VALUES ($1, $2, 'lint', 'cmd_preflight', 0, 0, false, true, 0, 0,
-                   'preflight_lint_fail', $3)`,
-          [item.engagement_id, item.id, `rule=${preflightCheck.rule}; matched=${preflightCheck.match}`]);
-      } catch (_) { /* telemetry never breaks lint */ }
-      return { autoExecuted: false, reason: `preflight_lint:${preflightCheck.rule}`, hint: preflightCheck.hint };
+      // dir_1782234450321: LINT AUTO-REPAIR — for KNOWN mechanical failures, fix
+      // the command in-place and retry the preflight once instead of just rejecting.
+      // Only two categories are auto-repaired:
+      //   1. nmap missing -Pn -sT on bridge/Linux executor (the executor IS Linux,
+      //      so the tablet rule only fires when applies_when=tablet; but if somehow
+      //      the flag is missing for any executor, inject -Pn -sT after 'nmap').
+      //   2. curl with a bogus flag like --requests (common model typo for -X
+      //      or --request) — strip the unrecognized flag.
+      // Android-only commands (dumpsys, getprop, pm, settings, adb shell app_process)
+      // are NOT auto-repaired — they are fundamentally wrong on the Linux bridge and
+      // a clean rejection with a clear note is more useful.
+      const ANDROID_ONLY_RE = /\b(dumpsys|getprop|am\s+start|pm\s+install|pm\s+list|settings\s+(?:get|put|list)|app_process\b)/;
+      let repairedCommand = null;
+      let repairNote = null;
+
+      if (preflightCheck.rule === "nmap_missing_pn_st_on_tablet") {
+        // Inject -Pn -sT immediately after 'nmap' (with any leading sudo).
+        const fixed = commandForExecution.replace(/\bnmap\b/, "nmap -Pn -sT");
+        if (fixed !== commandForExecution) {
+          repairedCommand = fixed;
+          repairNote = "auto-repaired: injected -Pn -sT after nmap (dir_1782234450321)";
+        }
+      } else if (preflightCheck.rule === "ssh_quoted_empty_user") {
+        // Not safe to auto-repair SSH syntax — the host intent is ambiguous.
+        // Fall through to the rejection path so the model gets the full hint.
+      } else if (ANDROID_ONLY_RE.test(commandForExecution)) {
+        // Android-only command on the Linux bridge — don't auto-repair, but give
+        // a clear rejection note rather than the generic preflight hint.
+        const androidDiag = `[PREFLIGHT_LINT_BLOCKED — dir_1780794595572]\nrule=android_only_command_on_linux_bridge\nmatched=${commandForExecution.match(ANDROID_ONLY_RE)[0]}\nhint=This command is Android-only (dumpsys/getprop/pm/settings). The executor is a Linux bridge — use standard Linux tools instead (e.g. nmap, curl, ssh). Do NOT wrap in adb shell here; adb commands run on a different path.`;
+        await db.withBypass("autonomous_preflight_block", (client) => client.query(
+          `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+          [androidDiag, item.id]));
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry
+               (engagement_id, queue_item_id, model_used, intent_category,
+                n_hosts, n_findings, step_queued, in_scope, n_references,
+                latency_ms, outcome, outcome_notes)
+             VALUES ($1, $2, 'lint', 'cmd_preflight', 0, 0, false, true, 0, 0,
+                     'preflight_lint_fail', $3)`,
+            [item.engagement_id, item.id, `rule=android_only_on_linux; matched=${commandForExecution.match(ANDROID_ONLY_RE)[0]}`]);
+        } catch (_) {}
+        return { autoExecuted: false, reason: "preflight_lint:android_only_command_on_linux_bridge", hint: "Android-only command rejected on Linux bridge executor" };
+      }
+
+      // Curl flag typo: --requests is not a valid curl flag (should be -X or --request).
+      // Strip it so the rest of the command runs. (Must not be in Android-only path.)
+      if (!repairedCommand && /\bcurl\b.*--requests\b/i.test(commandForExecution)) {
+        const fixed = commandForExecution.replace(/\s*--requests\s+\S+/gi, "");
+        if (fixed !== commandForExecution) {
+          repairedCommand = fixed;
+          repairNote = "auto-repaired: removed invalid --requests flag from curl (dir_1782234450321)";
+        }
+      }
+
+      if (repairedCommand) {
+        // Retry the preflight on the repaired command
+        const recheck = lintCommandPreflight(repairedCommand, { executor_host: item.executor_host });
+        if (!recheck) {
+          // Repair worked — persist the fixed command and log the repair
+          await db.withBypass("autonomous_lint_autorepair", (client) => client.query(
+            `UPDATE soc_queue_items SET command=$1 WHERE id=$2`,
+            [repairedCommand, item.id]));
+          try {
+            await db.query(
+              `INSERT INTO offense_telemetry
+                 (engagement_id, queue_item_id, model_used, intent_category,
+                  n_hosts, n_findings, step_queued, in_scope, n_references,
+                  latency_ms, outcome, outcome_notes)
+               VALUES ($1, $2, 'lint', 'cmd_autorepair', 0, 0, true, true, 0, 0,
+                       'preflight_autorepaired', $3)`,
+              [item.engagement_id, item.id, `${repairNote}; original_rule=${preflightCheck.rule}`]);
+          } catch (_) {}
+          console.log(`[autonomous-executor] lint auto-repair: ${repairNote} for q#${item.id}`);
+          item.command = repairedCommand; // use repaired command for execution below
+          commandForExecution = repairedCommand;
+          // Continue past the preflight block — repair succeeded
+        } else {
+          // Even repaired command fails — fall through to normal rejection
+          const diag = `[PREFLIGHT_LINT_BLOCKED — dir_1780794595572 + auto-repair attempted]\nrule=${recheck.rule}\nmatched=${recheck.match}\nhint=${recheck.hint}\nauto_repair_note=${repairNote} (repair did not fully fix the command)`;
+          await db.withBypass("autonomous_preflight_block", (client) => client.query(
+            `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+            [diag, item.id]));
+          try {
+            await db.query(
+              `INSERT INTO offense_telemetry
+                 (engagement_id, queue_item_id, model_used, intent_category,
+                  n_hosts, n_findings, step_queued, in_scope, n_references,
+                  latency_ms, outcome, outcome_notes)
+               VALUES ($1, $2, 'lint', 'cmd_preflight', 0, 0, false, true, 0, 0,
+                       'preflight_lint_fail', $3)`,
+              [item.engagement_id, item.id, `rule=${recheck.rule}; matched=${recheck.match}; repair_attempted=${repairNote}`]);
+          } catch (_) {}
+          return { autoExecuted: false, reason: `preflight_lint:${recheck.rule}`, hint: recheck.hint };
+        }
+      } else {
+        // No auto-repair possible — original rejection path
+        const diag = `[PREFLIGHT_LINT_BLOCKED — dir_1780794595572]\nrule=${preflightCheck.rule}\nmatched=${preflightCheck.match}\nhint=${preflightCheck.hint}`;
+        await db.withBypass("autonomous_preflight_block", (client) => client.query(
+          `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+          [diag, item.id]));
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry
+               (engagement_id, queue_item_id, model_used, intent_category,
+                n_hosts, n_findings, step_queued, in_scope, n_references,
+                latency_ms, outcome, outcome_notes)
+             VALUES ($1, $2, 'lint', 'cmd_preflight', 0, 0, false, true, 0, 0,
+                     'preflight_lint_fail', $3)`,
+            [item.engagement_id, item.id, `rule=${preflightCheck.rule}; matched=${preflightCheck.match}`]);
+        } catch (_) { /* telemetry never breaks lint */ }
+        return { autoExecuted: false, reason: `preflight_lint:${preflightCheck.rule}`, hint: preflightCheck.hint };
+      }
     }
 
     // Step-level intent classifier (dir_1780784990563 + dir_1780786024387 fallback).

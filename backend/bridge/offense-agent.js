@@ -31,6 +31,17 @@ const MODEL_KEY  = process.env.OFFENSE_MODEL_KEY  || "";
 
 const DEFAULT_MAX_ITER = 15;
 
+// ─────────── loop-breaker constants (dir_1782234450321) ───────────────────────
+// When the orchestrator picks tasks that map to the same engagement phase
+// MAX_CONSECUTIVE_INTENT times in a row, it's stuck in a loop. Force-advance
+// the phase instead of asking the model again.
+const MAX_CONSECUTIVE_INTENT = 3;
+
+// Phase order for the one-way ratchet (change 2 is enforced at the advance_phase
+// call site in offense-agent-tools.js; this order is also used here when the
+// loop-breaker forces an advance).
+const PHASE_ORDER = ["recon", "enumeration", "foothold", "exploitation", "post_exploit", "reporting"];
+
 // ─────────────────────────────── shared prompts ───────────────────────────────
 
 const AGENT_SYSTEM_PROMPT_BASE = [
@@ -423,6 +434,12 @@ async function runAgent(engagementId, opts = {}) {
   }
 
   let stallStreak = 0; // consecutive empty orchestrator decisions — don't quit on the first one
+
+  // dir_1782234450321: loop-breaker — track consecutive engagement phases to
+  // detect when the orchestrator is cycling the same phase without advancing.
+  let consecutivePhaseStreak = 0;
+  let lastSeenPhase = null;
+
   while (iter < maxIter) {
     iter++;
 
@@ -507,6 +524,47 @@ async function runAgent(engagementId, opts = {}) {
     // dir_1780838519357: inject Planner plan + Mentor guidance into orchestrator context
     if (plannerPlan) ctx.planner_plan = plannerPlan;
     if (mentorGuidance) ctx.mentor_guidance = mentorGuidance;
+
+    // dir_1782234450321 — LOOP-BREAKER: detect consecutive same-phase iters.
+    // The orchestrator's `task.phase` tells us which engagement phase the chosen
+    // task belongs to. We approximate this from `ctx.engagement.engagement_phase`
+    // (updated by advance_phase calls) which reflects the current phase at loop
+    // entry. When MAX_CONSECUTIVE_INTENT iters fire in the same phase without
+    // any advance, force the phase forward via the advance_phase tool.
+    {
+      const currentPhase = (ctx.engagement && ctx.engagement.engagement_phase) || "recon";
+      if (currentPhase === lastSeenPhase) {
+        consecutivePhaseStreak++;
+      } else {
+        consecutivePhaseStreak = 1;
+        lastSeenPhase = currentPhase;
+      }
+      if (consecutivePhaseStreak >= MAX_CONSECUTIVE_INTENT) {
+        const currentIdx = PHASE_ORDER.indexOf(currentPhase);
+        const nextPhase = currentIdx >= 0 && currentIdx < PHASE_ORDER.length - 1
+          ? PHASE_ORDER[currentIdx + 1]
+          : null;
+        if (nextPhase) {
+          console.log(`[offense-agent] loop-breaker: phase '${currentPhase}' repeated ${consecutivePhaseStreak}× — forcing advance to '${nextPhase}'`);
+          try {
+            await dispatch("advance_phase", { engagement_id: engagementId, new_phase: nextPhase });
+            try {
+              await db.query(
+                `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+                 VALUES ($1, NULL, 'loop_breaker', 'phase_advance', 0, 0, false, true, 0, 0, 'forced_phase_advance', $2)`,
+                [engagementId, `phase=${currentPhase} → ${nextPhase}; streak=${consecutivePhaseStreak}; iter=${iter}`]);
+            } catch (_) {}
+          } catch (e) {
+            console.error(`[offense-agent] loop-breaker advance_phase failed:`, e.message);
+          }
+          consecutivePhaseStreak = 0;
+          lastSeenPhase = nextPhase;
+          // Inject mentor hint so the orchestrator knows why we advanced
+          mentorGuidance = `[LOOP-BREAKER dir_1782234450321] Phase '${currentPhase}' repeated ${MAX_CONSECUTIVE_INTENT}+ times with no advance — automatically advanced to '${nextPhase}'. DO NOT return to '${currentPhase}' or earlier phases. Focus exclusively on '${nextPhase}' tasks: ${nextPhase === "foothold" ? "gaining initial access via confirmed attack vectors from enumeration" : nextPhase === "exploitation" ? "extending the foothold — privesc, additional service exploitation" : nextPhase === "enumeration" ? "version probes and attack-vector identification" : "post-access actions per phase guidance"}.`;
+          ctx.mentor_guidance = mentorGuidance;
+        }
+      }
+    }
 
     // (1) Orchestrator decides
     let decision;
@@ -599,6 +657,9 @@ async function runAgent(engagementId, opts = {}) {
     // (3) Phase advance?
     if (decision.advance_phase) {
       await dispatch("advance_phase", { engagement_id: engagementId, new_phase: decision.advance_phase });
+      // dir_1782234450321: a normal model-driven phase advance resets the streak
+      consecutivePhaseStreak = 0;
+      lastSeenPhase = decision.advance_phase;
     }
 
     // (4) End?
