@@ -257,13 +257,45 @@ function classifyContextual(token, fullCommand) {
     // Script file invocation (bash /path/to/script.sh)
     if (/\s[\w./~-]*\.(sh|bash)(?:\s|$)/.test(cmdStr))
       return { intent: "exploit_test", matched_rule: `${token}_script_file` };
-    // -c "..." command runner: payload determines intent but we stay at exploit_test
-    // since we cannot reliably parse the -c payload after the pipe-split in classifyCommand.
-    // Over-approximating toward exploit_test rather than exploit_rce prevents the
-    // blanket permission_denied seen in 353. The workspace_jail + ROE blocklist
-    // still gate any out-of-scope or destructive payloads.
-    if (/(^|\s)-c\s/.test(cmdStr))
+    // -c "..." command runner: inspect the payload for listener / reverse-shell forms
+    // before defaulting to exploit_test.
+    //
+    // adversarial-review fix (dir_1782251824781 adversarial pass):
+    //   `bash -c "nc -lvp 4444"` was passing as exploit_test (exploitation_auto OK)
+    //   even though the payload is a bind listener — one permission tier too low.
+    //   We extract the -c payload and re-scan it for the same listener signatures
+    //   that the standalone nc/socat/bash checks already catch.
+    //
+    // Patterns that escalate to exploit_rce inside a -c payload:
+    //   - nc/ncat with -l/-L/-lvp/-lvnp/-e flags (listener/exec)
+    //   - socat with EXEC:, SYSTEM:, SHELL:, or *-LISTEN: address (listener or exec)
+    //   - bash -i / sh -i inside the payload (nested interactive shell)
+    //   - /dev/tcp/ redirect (reverse-shell via bash TCP)
+    if (/(^|\s)-c\s/.test(cmdStr)) {
+      // Extract the payload: everything after `-c ` up to end of token (quoted or unquoted).
+      const payloadMatch = cmdStr.match(/(?:^|\s)-c\s+(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/);
+      const payload = payloadMatch ? (payloadMatch[1] ?? payloadMatch[2] ?? payloadMatch[3] ?? "") : cmdStr;
+      // nc/ncat listener or exec flags inside payload
+      if (/\bnc(at)?\b/.test(payload)) {
+        const hasListenFlag = /(^|\s)-[a-zA-Z]*[lL][a-zA-Z]*(\b|\s|$)|(^|\s)--listen\b/.test(payload);
+        const hasExecFlag   = /(^|\s)-[a-zA-Z]*e[a-zA-Z]*(\b|\s|$)|(^|\s)(?:--exec|--sh-exec)\b/.test(payload);
+        const hasLvp        = /(^|\s)-lvp\b|(^|\s)-lvnp\b/.test(payload);
+        if (hasListenFlag || hasExecFlag || hasLvp)
+          return { intent: "exploit_rce", matched_rule: `${token}_c_payload_nc_listener` };
+      }
+      // socat listener or exec inside payload
+      if (/\bsocat\b/.test(payload)) {
+        if (/(EXEC|SYSTEM|SHELL):/.test(payload) || /(TCP[46]?-LISTEN|UDP[46]?-LISTEN|OPENSSL-LISTEN|UNIX-LISTEN)/.test(payload))
+          return { intent: "exploit_rce", matched_rule: `${token}_c_payload_socat_listener` };
+      }
+      // nested interactive shell or /dev/tcp reverse-shell inside payload
+      if (/(^|\s)(?:bash|sh)\s+-i\b/.test(payload))
+        return { intent: "exploit_rce", matched_rule: `${token}_c_payload_interactive_shell` };
+      if (/\/dev\/tcp\//.test(payload) && /(>>&?|0>&1|>&\s*\/dev\/tcp)/.test(payload))
+        return { intent: "exploit_rce", matched_rule: `${token}_c_payload_devtcp` };
+      // Payload looks safe — plain tool-runner (the 353 pattern we must NOT re-gate)
       return { intent: "exploit_test", matched_rule: `${token}_command_runner` };
+    }
     return { intent: "exploit_test",   matched_rule: `${token}_default` };
   }
   return { intent: "unknown", matched_rule: `contextual_unhandled:${token}` };

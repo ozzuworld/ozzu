@@ -535,7 +535,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
                 latency_ms, outcome, outcome_notes)
              VALUES ($1, $2, 'sploitus', 'autoenrich', 0, 0, false, true, 0, 0,
                      'sploitus_pocs_enriched', $3)`,
-            [item.engagement_id, item.id, sploitusEnrich.hint.slice(0, 200)]);
+            [item.engagement_id, item.id, sanitizeOutcomeNotes(sploitusEnrich.hint.slice(0, 200), "outcome_notes", item.engagement_id)]);
         } catch (e) { console.error(`[autonomous-executor] sploitus enrich failed:`, e.message); }
       }
     } catch (e) {
@@ -659,14 +659,39 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       // -Pn because it reaches lab targets over the WG relay — ICMP pings never
       // cross the relay and always cause nmap host-discovery to silently skip hosts.
       // Detect the pattern ourselves and inject -Pn when nmap has -sT but no -Pn.
+      //
+      // adversarial-review fix: prior code used replace(/\bnmap\b/, "nmap -Pn") on the
+      // whole string — in a pipe like `echo nmap | nmap -sT ...` it patches "echo nmap"
+      // first, producing "echo nmap -Pn | nmap -sT ..." (wrong token). Fix: split on
+      // pipe/semicolon/newline boundaries, find the segment where nmap is the LEADING
+      // command, and patch only that segment.
       if (!repairedCommand && /\bnmap\b/.test(commandForExecution)) {
-        const hasPN    = /\bnmap\b[^;\n|]*-Pn\b/.test(commandForExecution);
-        const hasST    = /\bnmap\b[^;\n|]*(-sT|-sV|--open)\b/.test(commandForExecution);
+        const hasPN = /\bnmap\b[^;\n|]*-Pn\b/.test(commandForExecution);
+        const hasST = /\bnmap\b[^;\n|]*(-sT|-sV|--open)\b/.test(commandForExecution);
         if (!hasPN && hasST) {
-          const fixed = commandForExecution.replace(/\bnmap\b/, "nmap -Pn");
-          if (fixed !== commandForExecution) {
-            repairedCommand = fixed;
-            repairNote = "auto-repaired: injected -Pn into nmap (WG-relay host discovery; dir_1782251824781 Fix 4)";
+          // Split on pipe/semicolons/newlines, patch only the segment whose LEADING
+          // command is nmap (i.e. nmap is the first non-whitespace non-flag token).
+          const SEP_RE = /([|;&\n])/;
+          const parts = commandForExecution.split(SEP_RE);
+          let patched = false;
+          const patchedParts = parts.map(seg => {
+            if (patched) return seg;
+            // Skip separator tokens (single |, ;, &, \n chars)
+            if (SEP_RE.test(seg) && seg.trim().length <= 1) return seg;
+            // Does nmap lead this segment? (after optional sudo/env-prefix)
+            const leadToken = seg.trimStart().replace(/^(sudo\s+|nice\s+|timeout\s+\S+\s+)*/, "").split(/\s+/)[0];
+            if (leadToken === "nmap" || leadToken.endsWith("/nmap")) {
+              patched = true;
+              return seg.replace(/\bnmap\b/, "nmap -Pn");
+            }
+            return seg;
+          });
+          if (patched) {
+            const fixed = patchedParts.join("");
+            if (fixed !== commandForExecution) {
+              repairedCommand = fixed;
+              repairNote = "auto-repaired: injected -Pn into nmap invocation segment (WG-relay host discovery; dir_1782251824781 Fix 4)";
+            }
           }
         }
       }
@@ -885,7 +910,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
               latency_ms, outcome, outcome_notes)
            VALUES ($1, $2, 'auto_executor', 'run_endpoint', 0, 0, false, true, 0, 0,
                    'run_endpoint_error', $3)`,
-          [item.engagement_id, item.id, e.message.slice(0, 200)]);
+          [item.engagement_id, item.id, sanitizeOutcomeNotes(e.message.slice(0, 200), "outcome_notes", item.engagement_id)]);
       } catch (dbErr) {
         console.error(`[autonomous-executor] failed to mark item ${item.id} failed after fetch error:`, dbErr.message);
       }

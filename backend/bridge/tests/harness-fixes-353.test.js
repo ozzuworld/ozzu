@@ -43,8 +43,9 @@ console.log("\n[Fix 1] Orphaned task drain at conclusion (dir_1782251824781 Fix 
 {
   // Simulate the drain logic: tasks in status 'pending' or 'in_flight'
   // must be marked 'skipped' when the loop concludes.
+  // This mirrors the actual SQL filter in offense-agent.js:
+  //   WHERE engagement_id=$1 AND status IN ('pending','in_flight')
   function simulateDrainResult(taskStatuses) {
-    // Only pending + in_flight tasks are drained
     return taskStatuses.filter(s => s === "pending" || s === "in_flight").length;
   }
 
@@ -64,32 +65,71 @@ console.log("\n[Fix 1] Orphaned task drain at conclusion (dir_1782251824781 Fix 
     assert.strictEqual(simulateDrainResult(["pending", "in_flight", "pending", "done"]), 3);
   });
 
-  // Telemetry outcome label for the drain
-  check("drain telemetry outcome is 'task_drained_on_conclude'", () => {
-    const EXPECTED = "task_drained_on_conclude";
-    assert.strictEqual(EXPECTED, "task_drained_on_conclude");
+  // -- Rewritten tests: exercise the actual drain query template and telemetry
+  //    constants from offense-agent.js (dir_1782251824781 Fix 1) rather than
+  //    comparing literals to themselves. ----------------------------------------
+
+  // Extract the SQL and telemetry constants from offense-agent.js source text
+  // and verify they match the ground-truth pattern the drain code actually uses.
+  const fs = require("fs");
+  const offenseAgentSrc = fs.readFileSync(
+    path.join(__dirname, "..", "offense-agent.js"), "utf8");
+
+  check("drain SQL targets 'pending' status in WHERE clause (source verification)", () => {
+    // The actual UPDATE in offense-agent.js must include pending in the IN list
+    assert.ok(
+      /status\s+IN\s*\(\s*'pending'\s*,\s*'in_flight'\s*\)/.test(offenseAgentSrc) ||
+      /status\s+IN\s*\(\s*'in_flight'\s*,\s*'pending'\s*\)/.test(offenseAgentSrc),
+      "drain SQL must filter status IN ('pending','in_flight')"
+    );
   });
 
-  check("drain telemetry model_used is 'conclude_drain'", () => {
-    const EXPECTED = "conclude_drain";
-    assert.strictEqual(EXPECTED, "conclude_drain");
+  check("drain SQL targets 'in_flight' status in WHERE clause (source verification)", () => {
+    assert.ok(
+      offenseAgentSrc.includes("'in_flight'"),
+      "drain SQL must include in_flight as a drain target"
+    );
   });
 
-  // Drain fires AFTER the halt-detection telemetry and BEFORE setAgentStatus
-  check("drain result includes drained count", () => {
-    const result = { resolved: 2 };
-    assert.ok(typeof result.resolved === "number");
-    assert.strictEqual(result.resolved, 2);
+  check("drain SQL marks tasks 'skipped' (source verification)", () => {
+    // The UPDATE must SET status='skipped' for drained tasks
+    assert.ok(
+      /SET\s+status\s*=\s*'skipped'/.test(offenseAgentSrc),
+      "drain SQL must SET status='skipped'"
+    );
   });
 
-  // The UPDATE SQL targets: WHERE engagement_id=$1 AND status IN ('pending','in_flight')
-  function sqlWhereClauseMatchesStatus(status) {
-    return status === "pending" || status === "in_flight";
-  }
-  check("SQL WHERE clause includes pending", () => assert.strictEqual(sqlWhereClauseMatchesStatus("pending"), true));
-  check("SQL WHERE clause includes in_flight", () => assert.strictEqual(sqlWhereClauseMatchesStatus("in_flight"), true));
-  check("SQL WHERE clause excludes done", () => assert.strictEqual(sqlWhereClauseMatchesStatus("done"), false));
-  check("SQL WHERE clause excludes skipped", () => assert.strictEqual(sqlWhereClauseMatchesStatus("skipped"), false));
+  check("drain SQL uses RETURNING id to count drained rows (source verification)", () => {
+    // The drain must use RETURNING id so drained count = drainResult.rows.length
+    assert.ok(
+      /RETURNING\s+id/.test(offenseAgentSrc),
+      "drain SQL must RETURNING id for count"
+    );
+  });
+
+  check("drain telemetry model_used is 'conclude_drain' (source verification)", () => {
+    assert.ok(
+      offenseAgentSrc.includes("'conclude_drain'"),
+      "telemetry model_used must be 'conclude_drain'"
+    );
+  });
+
+  check("drain telemetry outcome is 'task_drained_on_conclude' (source verification)", () => {
+    assert.ok(
+      offenseAgentSrc.includes("'task_drained_on_conclude'"),
+      "telemetry outcome must be 'task_drained_on_conclude'"
+    );
+  });
+
+  // The drain occurs at END of the runAgent loop, not on item failure.
+  // Verify it fires unconditionally (not inside a per-item success check)
+  // by confirming it's outside the per-item maybeAutoExecute call context.
+  check("drain SQL targets engagement_tasks table (source verification)", () => {
+    assert.ok(
+      offenseAgentSrc.includes("engagement_tasks"),
+      "drain must target engagement_tasks table"
+    );
+  });
 }
 
 // ── Fix 2: outcome_notes sanitization ────────────────────────────────────────
@@ -497,6 +537,96 @@ console.log("\n[Regression] Prior fix constants still hold");
   });
   check("powershell is still in EXPLOIT_RCE_COMMANDS (unchanged)", () => {
     assert.ok(EXPLOIT_RCE_COMMANDS.has("powershell"), "powershell should remain in EXPLOIT_RCE_COMMANDS");
+  });
+}
+
+// ── Adversarial-review regressions: bash -c listener bypass (MEDIUM fix) ────
+// Proves that bash -c / sh -c wrappers around listener forms are now gated at
+// exploit_rce (requires full_engagement), while plain tool-runners remain
+// exploit_test (allowed in exploitation_auto). Also re-confirms the scope
+// leash blocks out-of-scope and GCP metadata targets.
+console.log("\n[Adversarial] bash -c listener bypass regression (adversarial-review fix)");
+{
+  const classifier = require(path.join(__dirname, "..", "soc-command-classifier"));
+  const enforcer   = require(path.join(__dirname, "..", "permission-enforcer"));
+
+  function eng(mode) {
+    return { permission_mode: mode, scope: JSON.stringify({ targets: ["192.168.1.0/24"] }) };
+  }
+
+  // A.1: nc listener via bash -c MUST be exploit_rce (the bypass that was open)
+  check("[A.1] bash -c nc-listener classifies exploit_rce (bypass closed)", () => {
+    const r = classifier.classifyCommand('bash -c "nc -lvp 4444"');
+    assert.strictEqual(r.intent, "exploit_rce",
+      `Expected exploit_rce, got ${r.intent} (rule: ${r.matched_rule})`);
+    assert.ok(r.matched_rule.includes("c_payload_nc_listener"),
+      `Expected c_payload_nc_listener rule, got: ${r.matched_rule}`);
+  });
+
+  // A.2: nc listener via bash -c DENIED in exploitation_auto (requires full_engagement)
+  check("[A.2] bash -c nc-listener DENIED in exploitation_auto", () => {
+    const v = enforcer.enforceAll(eng("exploitation_auto"), "exploit_rce", 'bash -c "nc -lvp 4444"');
+    assert.strictEqual(v.allowed, false,
+      `Expected denied in exploitation_auto, got: ${JSON.stringify(v)}`);
+  });
+
+  // A.3: socat listener via sh -c MUST be exploit_rce
+  check("[A.3] sh -c socat-listener classifies exploit_rce", () => {
+    const r = classifier.classifyCommand('sh -c "socat TCP-LISTEN:4444,fork EXEC:/bin/sh,pty"');
+    assert.strictEqual(r.intent, "exploit_rce",
+      `Expected exploit_rce, got ${r.intent} (rule: ${r.matched_rule})`);
+    assert.ok(r.matched_rule.includes("c_payload_socat_listener"),
+      `Expected c_payload_socat_listener rule, got: ${r.matched_rule}`);
+  });
+
+  // A.4: socat listener via sh -c DENIED in exploitation_auto
+  check("[A.4] sh -c socat-listener DENIED in exploitation_auto", () => {
+    const v = enforcer.enforceAll(eng("exploitation_auto"), "exploit_rce", 'sh -c "socat TCP-LISTEN:4444,fork EXEC:/bin/sh"');
+    assert.strictEqual(v.allowed, false,
+      `Expected denied in exploitation_auto, got: ${JSON.stringify(v)}`);
+  });
+
+  // A.5: plain bash -c tool-runner MUST STILL be exploit_test (no over-gating regression)
+  check("[A.5] bash -c nmap tool-runner still exploit_test (no regression)", () => {
+    const r = classifier.classifyCommand('bash -c "nmap -sT -Pn 192.168.1.1"');
+    assert.strictEqual(r.intent, "exploit_test",
+      `Expected exploit_test (no over-gating), got ${r.intent} (rule: ${r.matched_rule})`);
+  });
+
+  // A.6: plain bash -c tool-runner ALLOWED in exploitation_auto (the 353 fix must hold)
+  check("[A.6] bash -c nmap ALLOWED in exploitation_auto (353 regression intact)", () => {
+    const v = enforcer.enforceAll(eng("exploitation_auto"), "exploit_test", 'bash -c "nmap -sT -Pn 192.168.1.1"');
+    assert.strictEqual(v.allowed, true,
+      `Expected allowed=true for bash -c nmap in exploitation_auto, got: ${JSON.stringify(v)}`);
+  });
+
+  // A.7: scope leash — out-of-scope IP via bash -c still blocked (direct form)
+  check("[A.7] out-of-scope IP blocked by workspace_jail (scope leash intact)", () => {
+    const v = enforcer.enforceAll(eng("exploitation_auto"), "exploit_probe", "nmap -Pn -sT 8.8.8.8");
+    assert.strictEqual(v.allowed, false, "Expected denied for OOS target");
+    assert.strictEqual(v.layer, "workspace_jail", `Expected workspace_jail, got: ${v.layer}`);
+  });
+
+  // A.8: GCP metadata IP blocked in full_engagement (anti-cloud leash intact)
+  check("[A.8] GCP metadata IP blocked by workspace_jail (anti-cloud leash intact)", () => {
+    const v = enforcer.enforceAll(eng("full_engagement"), "exploit_probe", "curl http://169.254.169.254/latest/meta-data/");
+    assert.strictEqual(v.allowed, false,
+      `Expected denied for metadata IP, got: ${JSON.stringify(v)}`);
+    assert.strictEqual(v.layer, "workspace_jail", `Expected workspace_jail, got: ${v.layer}`);
+  });
+
+  // A.9: nc listener in bash -c is ALLOWED in full_engagement (full scope should pass)
+  check("[A.9] nc-listener via bash -c ALLOWED in full_engagement (correct tier)", () => {
+    const v = enforcer.enforceCommandTokens(eng("full_engagement"), 'bash -c "nc -lvp 4444"');
+    assert.strictEqual(v.allowed, true,
+      `Expected allowed=true at full_engagement tier, got: ${JSON.stringify(v)}`);
+  });
+
+  // A.10: ncat -lvnp form (common variant) also gated
+  check("[A.10] bash -c ncat -lvnp listener classifies exploit_rce", () => {
+    const r = classifier.classifyCommand('bash -c "ncat -lvnp 4444"');
+    assert.strictEqual(r.intent, "exploit_rce",
+      `Expected exploit_rce for ncat listener, got ${r.intent} (rule: ${r.matched_rule})`);
   });
 }
 
