@@ -15,6 +15,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # toolkit host (2026-06-23): SOC execution runs LOCAL here, routing the lab /24 via wg0 → tablet
 # relay → EDIFICIO. dev-01 is OUT of the offense pipeline (host-networked → wg0 already routes it).
 
+# SOC offense vuln-research layer (Phase 1, 2026-06-23): nuclei (CVE template scans) + searchsploit
+# (ExploitDB). Mapping a discovered service version → CVE → exploit is the field's #1 missing
+# capability — it's what turns "enumerate" into "exploit". Installed live too for immediate use;
+# this bakes it durably on the next image rebuild.
+RUN curl -sL https://github.com/projectdiscovery/nuclei/releases/download/v3.9.0/nuclei_3.9.0_linux_amd64.zip -o /tmp/nuclei.zip && \
+    unzip -oq /tmp/nuclei.zip nuclei -d /usr/local/bin/ && chmod +x /usr/local/bin/nuclei && rm /tmp/nuclei.zip && \
+    git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb && \
+    ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
+
 # Python OSINT tools in isolated venv (light — heavy tools live in osint-tools container)
 RUN python3 -m venv /opt/osint-venv --system-site-packages && \
     /opt/osint-venv/bin/pip install --no-cache-dir \
