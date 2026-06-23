@@ -195,6 +195,21 @@ function targetMatchesScope(target, scopeTargets) {
   return false;
 }
 
+// 2026-06-23: read-only vuln-RESEARCH allowlist. The offense agent must look up CVEs/exploits for the
+// services it enumerates (the field's #1 missing capability — RapidPen-style version→exploit mapping;
+// this is exactly the cve.circl.lu lookup the jail used to block). These are research DBs, NOT attack
+// targets, so they're allowed regardless of engagement scope. ATTACK traffic still stays jailed to
+// scope.targets, and the anti-cloud preflight still blocks the GCP metadata IP / *.internal separately.
+const RESEARCH_HOSTS = [
+  "cve.circl.lu", "nvd.nist.gov", "services.nvd.nist.gov", "cve.mitre.org", "cveawg.mitre.org",
+  "exploit-db.com", "www.exploit-db.com", "vulners.com", "cvedetails.com", "www.cvedetails.com",
+  "github.com", "api.github.com", "raw.githubusercontent.com", "objects.githubusercontent.com",
+];
+function isResearchHost(target) {
+  const h = String(target || "").split(":")[0].toLowerCase().replace(/^https?:\/\//, "");
+  return RESEARCH_HOSTS.some(d => h === d || h.endsWith("." + d));
+}
+
 function enforceWorkspaceJail(engagement, command) {
   if (!engagement) return { allowed: true };
   let scope = engagement.scope;
@@ -210,7 +225,7 @@ function enforceWorkspaceJail(engagement, command) {
     // Command has no extractable target (e.g. "echo hello"). Allow.
     return { allowed: true, note: "no_target_in_command" };
   }
-  const oos = found.filter(t => !targetMatchesScope(t, targets));
+  const oos = found.filter(t => !targetMatchesScope(t, targets) && !isResearchHost(t));
   if (oos.length === 0) {
     return { allowed: true, scope_targets: targets, found_targets: found };
   }
