@@ -89,6 +89,23 @@ function chatCompletion(messages, modelOverride) {
   });
 }
 
+// DeepSeek V4 intermittently returns an empty plan (reasoning model — sometimes no content survives
+// the <think>, or a transient safety deflection). One blank used to END a healthy run ("likely
+// stuck"). Re-roll a few times before giving up; only empties retry, real errors bubble. 2026-06-23.
+async function chatCompletionWithRetry(messages, modelOverride, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await chatCompletion(messages, modelOverride);
+    } catch (e) {
+      lastErr = e;
+      if (!/no content/i.test(e.message || "")) throw e;
+      console.warn(`[orchestrator] empty response (attempt ${i + 1}/${attempts}) — re-rolling`);
+    }
+  }
+  throw lastErr;
+}
+
 // dir_1780965304265: reasoning-model aware JSON extraction. Reasoning models
 // (DeepSeek-R1, Qwen3.5/3.6 thinking, o1/o3, Claude thinking) emit their
 // scratchpad before the actual answer:
@@ -488,7 +505,7 @@ async function decide(engagementCtx, modelOverride) {
     "Pick the next move as strict JSON per the schema above.",
   ].join("\n");
 
-  const raw = await chatCompletion([
+  const raw = await chatCompletionWithRetry([
     { role: "system", content: ORCHESTRATOR_SYSTEM_PROMPT },
     { role: "user", content: userMsg },
   ], modelOverride);
