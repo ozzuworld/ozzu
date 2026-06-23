@@ -60,6 +60,10 @@
           {
             "type": "command",
             "command": "/home/gcp/ozzu/.claude/hooks/inject-context.sh"
+          },
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/soc-isolation-guard.sh"
           }
         ]
       }
