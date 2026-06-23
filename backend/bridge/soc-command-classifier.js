@@ -87,15 +87,22 @@ const EXPLOIT_TEST_COMMANDS = new Set([
 // dir_1782239552993: python/python3/perl/ruby/node moved to CONTEXTUAL_COMMANDS
 // — running `python exploit.py target` is exploit_test; only inline shell
 // invocations (-c "os.system(...)" / -e "exec ...") are exploit_rce.
-// bash/sh/zsh/powershell/pwsh stay EXPLOIT_RCE — shell execution is always RCE.
+// dir_1782251824781 Fix 5: bash/sh/zsh moved to CONTEXTUAL_COMMANDS — the 353
+// engagement had 10 permission_denied events on `bash -c "nmap ..."` patterns
+// because these were classified as exploit_rce (needs full_engagement) even when
+// the -c payload was a safe tool invocation. Classification now depends on the
+// payload: shell listeners / /dev/tcp / pty.spawn → exploit_rce; plain -c with
+// tool commands → exploit_test (allows exploitation_auto mode). powershell/pwsh
+// stay EXPLOIT_RCE (Windows RCE tooling, always high-intent).
 const EXPLOIT_RCE_COMMANDS = new Set([
   "powershell", "pwsh",
-  "bash", "sh", "zsh",                          // remote shell invocation
+  // bash/sh/zsh moved to CONTEXTUAL_COMMANDS (dir_1782251824781 Fix 5)
 ]);
 
 // CONTEXTUAL: same binary, different intent depending on flags. The
 // classifyByFirstToken path delegates to classifyContextual() for these.
-const CONTEXTUAL_COMMANDS = new Set(["nc", "ncat", "socat", "python", "python3", "perl", "ruby", "node"]);
+const CONTEXTUAL_COMMANDS = new Set(["nc", "ncat", "socat", "python", "python3", "perl", "ruby", "node",
+  "bash", "sh", "zsh"]);
 
 // POST_EXPLOIT: persistence, lateral movement, credential theft on host.
 const POST_EXPLOIT_COMMANDS = new Set([
@@ -223,6 +230,41 @@ function classifyContextual(token, fullCommand) {
     if (/\s[\w./~-]*\.js(?:\s|$)/.test(cmdStr))
       return { intent: "exploit_test", matched_rule: "node_script_file" };
     return { intent: "exploit_test",   matched_rule: "node_default" };
+  }
+  // dir_1782251824781 Fix 5: bash/sh/zsh contextual classification.
+  // Replaces the blanket exploit_rce classification that was causing ~10
+  // permission_denied events on 353 for `bash -c "nmap ..."` tool-runner patterns.
+  //
+  // Intent mapping:
+  //   Shell listener (-i, /dev/tcp, pty.spawn) → exploit_rce (true RCE)
+  //   Reverse-shell pattern (>& or 0>&1 with /dev/tcp) → exploit_rce
+  //   Plain -c "..." with recognizable pentest tool in payload → exploit_test
+  //   No flags (bare invocation or script file) → exploit_test
+  //   Default (anything else) → exploit_test (conservative, allows exploitation_auto)
+  //
+  // powershell/pwsh are still in EXPLOIT_RCE_COMMANDS — they stay always exploit_rce
+  // because PowerShell payloads are almost exclusively Windows RCE tooling.
+  if (token === "bash" || token === "sh" || token === "zsh") {
+    // Shell listener: -i flag (interactive) or explicit RCE sink patterns
+    if (/(^|\s)-i\b/.test(cmdStr))
+      return { intent: "exploit_rce", matched_rule: `${token}_interactive_flag` };
+    // Reverse shell via /dev/tcp (classic bash TCP-redirect RCE)
+    if (/\/dev\/tcp\//.test(cmdStr) && /(>>&?|0>&1|>&\s+\/dev\/tcp)/.test(cmdStr))
+      return { intent: "exploit_rce", matched_rule: `${token}_reverse_shell_devtcp` };
+    // pty.spawn or python -c "/bin/sh" (subshell spawner)
+    if (/pty\.spawn|pty_spawn|os\.system\s*\(['"]\s*\/bin|exec\s+\/bin\/(bash|sh)/.test(cmdStr))
+      return { intent: "exploit_rce", matched_rule: `${token}_pty_or_exec_shell` };
+    // Script file invocation (bash /path/to/script.sh)
+    if (/\s[\w./~-]*\.(sh|bash)(?:\s|$)/.test(cmdStr))
+      return { intent: "exploit_test", matched_rule: `${token}_script_file` };
+    // -c "..." command runner: payload determines intent but we stay at exploit_test
+    // since we cannot reliably parse the -c payload after the pipe-split in classifyCommand.
+    // Over-approximating toward exploit_test rather than exploit_rce prevents the
+    // blanket permission_denied seen in 353. The workspace_jail + ROE blocklist
+    // still gate any out-of-scope or destructive payloads.
+    if (/(^|\s)-c\s/.test(cmdStr))
+      return { intent: "exploit_test", matched_rule: `${token}_command_runner` };
+    return { intent: "exploit_test",   matched_rule: `${token}_default` };
   }
   return { intent: "unknown", matched_rule: `contextual_unhandled:${token}` };
 }

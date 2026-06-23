@@ -330,10 +330,41 @@ async function synthesizeCommand(task, ctx, modelOverride) {
     "Translate the directive into the exact shell command as strict JSON.",
   ].join("\n");
 
-  const raw = await chatJSON([
-    { role: "system", content: SYNTHESIZER_SYSTEM_PROMPT },
-    { role: "user",   content: userMsg },
-  ], modelOverride);
+  // dir_1782251824781 Fix 3 — inference-hang retry.
+  // On a 120s synthesis timeout (synthesizer timeout error from chatJSON), do ONE
+  // bounded retry with a short backoff before counting the iteration wasted. This
+  // converts a transient DeepSeek latency spike from a full iter loss into a ≤4s
+  // extra wait. Only ONE retry so the total synthesis budget stays bounded; a
+  // second successive timeout escalates to a hard failure as before.
+  const SYNTH_RETRY_BACKOFF_MS = 4000;
+  let raw;
+  try {
+    raw = await chatJSON([
+      { role: "system", content: SYNTHESIZER_SYSTEM_PROMPT },
+      { role: "user",   content: userMsg },
+    ], modelOverride);
+  } catch (firstErr) {
+    const isHang = firstErr && (
+      /timeout/i.test(firstErr.message) ||
+      /ETIMEDOUT|ECONNRESET|socket hang up/i.test(firstErr.message)
+    );
+    if (isHang) {
+      console.warn(`[offense-agent] synthesizer hang on first attempt (${firstErr.message.slice(0,80)}) — retrying after ${SYNTH_RETRY_BACKOFF_MS}ms (dir_1782251824781 Fix 3)`);
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'synthesizer', 'synthesis', 0, 0, false, true, 0, 0, 'inference_hung_retry', $2)`,
+          [ctx.engagement && ctx.engagement.id, `first_attempt_timeout; backoff=${SYNTH_RETRY_BACKOFF_MS}ms; err=${firstErr.message.slice(0,80)}`]);
+      } catch (_) {}
+      await new Promise(r => setTimeout(r, SYNTH_RETRY_BACKOFF_MS));
+      raw = await chatJSON([
+        { role: "system", content: SYNTHESIZER_SYSTEM_PROMPT },
+        { role: "user",   content: userMsg },
+      ], modelOverride);
+    } else {
+      throw firstErr;
+    }
+  }
   try { return parseJSON(raw); }
   catch (e) {
     // dir_1780841672508: Reflector recovery for synthesizer prose
@@ -910,6 +941,46 @@ async function runAgent(engagementId, opts = {}) {
          VALUES ($1, NULL, 'halt_detector', 'loop_health', 0, 0, false, true, 0, 0, 'loop_halted', $2)`,
         [engagementId, `stall_streak_exhaustion; iter=${iter}; steps_queued=${stepsQueued}; end_reason=${(endReason||"").slice(0,200)}`]);
     } catch (_) {}
+  }
+
+  // dir_1782251824781 Fix 1 — orphaned task drain at conclusion.
+  // When the loop concludes for any terminal reason (model called end_engagement,
+  // loop-breaker fired on terminal phase, halt-detector broke the loop), drain
+  // any engagement_tasks that are still 'pending' or 'in_flight'. These are
+  // tasks the orchestrator selected but never reached synthesis/execution — they
+  // would silently linger and mislead re-runs. Mark them 'skipped' with
+  // reason='engagement concluded' and emit 'task_drained_on_conclude' telemetry
+  // so analyze_engagement_telemetry can surface the count as a WARNING.
+  try {
+    const drainResult = await db.query(
+      `UPDATE engagement_tasks
+          SET status='skipped',
+              result = COALESCE(result, '{}'::jsonb) || jsonb_build_object(
+                'skipped_reason', 'engagement concluded',
+                'drained_at', NOW()::text,
+                'iter', $2::int
+              )
+        WHERE engagement_id = $1
+          AND status IN ('pending','in_flight')
+        RETURNING id`,
+      [engagementId, iter]);
+    const drained = drainResult.rows.length;
+    if (drained > 0) {
+      console.log(`[offense-agent] task drain: ${drained} orphaned task(s) drained at conclusion for engagement ${engagementId} (dir_1782251824781 Fix 1)`);
+      try {
+        await db.query(
+          `INSERT INTO offense_telemetry
+             (engagement_id, queue_item_id, model_used, intent_category,
+              n_hosts, n_findings, step_queued, in_scope, n_references,
+              latency_ms, outcome, outcome_notes)
+           VALUES ($1, NULL, 'conclude_drain', 'task_lifecycle', 0, 0, false, true, 0, 0,
+                   'task_drained_on_conclude', $2)`,
+          [engagementId,
+           `drained=${drained}; reason=engagement_concluded; iter=${iter}; end_reason=${(endReason||"").slice(0,120)}`]);
+      } catch (_) { /* telemetry never breaks drain */ }
+    }
+  } catch (e) {
+    console.error(`[offense-agent] task drain at conclusion failed:`, e.message);
   }
 
   // dir_1782242371780: Fix 2 — iteration-budget exhaustion must set a TERMINAL

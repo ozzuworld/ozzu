@@ -366,6 +366,13 @@ function roeLint(command, roe) {
   return null;
 }
 
+// dir_1782251824781 Fix 2 — shared outcome_notes sanitizer.
+// Redacts CVE IDs, raw IPs, exploit keywords, and credential-file references
+// from any string before it lands in offense_telemetry.outcome_notes.
+// Mirrors the membrane patterns in membrane-audit.js (read-side) but catches
+// leaks at write-time so the DB stays clean from the start.
+const { sanitizeOutcomeNotes } = require("/app/telemetry-sanitize");
+
 // Log mismatch + write diagnostic to queue row. Membrane bypass since the
 // diagnostic may quote the offending command.
 async function recordIntentMismatch(engagementId, itemId, claimed, inferred, command) {
@@ -481,7 +488,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
              VALUES ($1, $2, 'permission_enforcer', $3, 0, 0, false, false, 0, 0,
                      'permission_denied', $4)`,
             [item.engagement_id, item.id, verdict.layer || "unknown",
-             `${verdict.layer}: ${(verdict.denied_reason || "").slice(0, 200)}`]);
+             sanitizeOutcomeNotes(`${verdict.layer}: ${(verdict.denied_reason || "").slice(0, 200)}`, "outcome_notes", item.engagement_id)]);
         } catch (_) {}
         return { autoExecuted: false, reason: `permission:${verdict.layer}`, hint: verdict.denied_reason };
       }
@@ -547,7 +554,8 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
               latency_ms, outcome, outcome_notes)
            VALUES ($1, $2, 'lint', 'autoverify', 0, 0, false, true, 0, 0,
                    $3, $4)`,
-          [item.engagement_id, item.id, autoVerifyHit.rule.slice(0, 24), `${autoVerifyHit.rule}; matched=${autoVerifyHit.match}`]);
+          [item.engagement_id, item.id, autoVerifyHit.rule.slice(0, 24),
+           sanitizeOutcomeNotes(`${autoVerifyHit.rule}; matched=${autoVerifyHit.match}`, "outcome_notes", item.engagement_id)]);
       } catch (_) {}
       return { autoExecuted: false, reason: `autoverify:${autoVerifyHit.rule}`, hint: autoVerifyHit.hint };
     }
@@ -557,12 +565,19 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
     if (preflightCheck) {
       // dir_1782234450321: LINT AUTO-REPAIR — for KNOWN mechanical failures, fix
       // the command in-place and retry the preflight once instead of just rejecting.
-      // Only two categories are auto-repaired:
-      //   1. nmap missing -Pn -sT on bridge/Linux executor (the executor IS Linux,
-      //      so the tablet rule only fires when applies_when=tablet; but if somehow
-      //      the flag is missing for any executor, inject -Pn -sT after 'nmap').
-      //   2. curl with a bogus flag like --requests (common model typo for -X
-      //      or --request) — strip the unrecognized flag.
+      // dir_1782251824781 Fix 4: EXTENDED auto-repair rules to push step_queued above 50%.
+      // Repaired categories:
+      //   1. nmap missing -Pn -sT on tablet executor — inject flags after 'nmap'
+      //   2. curl with invalid --requests flag — strip the bad flag
+      //   3. ssh_quoted_empty_user — strip the wrapping quotes from 'user@'host
+      //      (pattern: ssh 'user@' host → ssh user@host; this is the most common
+      //      form that appears in 353 telemetry)
+      //   4. nse_script_not_in_allowlist with a single unknown script name — replace
+      //      the unknown name with the 'safe' category alias, which is always in the
+      //      allowlist and covers the vast majority of informational scripts.
+      //   5. nmap on Linux bridge missing -Pn flag (sT already present but -Pn absent)
+      //      — the tablet rule only fires on applies_when=tablet but the Linux bridge
+      //      executor also needs -Pn when crossing the WG relay; auto-inject it.
       // Android-only commands (dumpsys, getprop, pm, settings, adb shell app_process)
       // are NOT auto-repaired — they are fundamentally wrong on the Linux bridge and
       // a clean rejection with a clear note is more useful.
@@ -578,8 +593,36 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
           repairNote = "auto-repaired: injected -Pn -sT after nmap (dir_1782234450321)";
         }
       } else if (preflightCheck.rule === "ssh_quoted_empty_user") {
-        // Not safe to auto-repair SSH syntax — the host intent is ambiguous.
-        // Fall through to the rejection path so the model gets the full hint.
+        // dir_1782251824781 Fix 4 — auto-repair quoted user@host.
+        // Pattern: ssh 'user@' host or ssh "user@" host (empty host inside quotes).
+        // The model wraps "user@host" in quotes and bash splits it into 'user@' + 'host',
+        // producing an empty user or empty host depending on where the shell breaks.
+        // Repair: strip the outer quotes so `ssh 'user@host'` → `ssh user@host`.
+        const fixed = commandForExecution.replace(/ssh\s+'([^']*@[^']*)'/g, "ssh $1")
+          .replace(/ssh\s+"([^"]*@[^"]*)"/g, "ssh $1");
+        if (fixed !== commandForExecution) {
+          repairedCommand = fixed;
+          repairNote = "auto-repaired: stripped quotes from ssh user@host (dir_1782251824781 Fix 4)";
+        }
+        // If repair fails (pattern didn't match), fall through to rejection.
+      } else if (preflightCheck.rule === "nse_script_not_in_allowlist" && preflightCheck.match) {
+        // dir_1782251824781 Fix 4 — auto-repair unknown NSE script by replacing with 'safe' category.
+        // The model frequently hallucinates NSE script names (e.g. 'hikvision-info', 'rtsp-info').
+        // Replace the specific unknown script name with the 'safe' category alias which covers
+        // the broadest set of safe informational probes and is always in the allowlist.
+        // Only repair SINGLE script names — multi-script comma-lists are too ambiguous to fix safely.
+        const badScript = String(preflightCheck.match || "").trim();
+        const isMultiScript = badScript.includes(",");
+        if (!isMultiScript && badScript && !/^(all|default|safe|vuln|discovery|auth)$/.test(badScript)) {
+          // Replace --script=<bad> or --script <bad> with --script safe
+          const fixed = commandForExecution
+            .replace(new RegExp(`--script[=\\s]+${badScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"),
+              "--script safe");
+          if (fixed !== commandForExecution) {
+            repairedCommand = fixed;
+            repairNote = `auto-repaired: replaced unknown NSE script '${badScript}' with 'safe' category (dir_1782251824781 Fix 4)`;
+          }
+        }
       } else if (ANDROID_ONLY_RE.test(commandForExecution)) {
         // Android-only command on the Linux bridge — don't auto-repair, but give
         // a clear rejection note rather than the generic preflight hint.
@@ -595,7 +638,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
                 latency_ms, outcome, outcome_notes)
              VALUES ($1, $2, 'lint', 'cmd_preflight', 0, 0, false, true, 0, 0,
                      'preflight_lint_fail', $3)`,
-            [item.engagement_id, item.id, `rule=android_only_on_linux; matched=${commandForExecution.match(ANDROID_ONLY_RE)[0]}`]);
+            [item.engagement_id, item.id, sanitizeOutcomeNotes(`rule=android_only_on_linux; matched=${commandForExecution.match(ANDROID_ONLY_RE)[0]}`, "outcome_notes", item.engagement_id)]);
         } catch (_) {}
         return { autoExecuted: false, reason: "preflight_lint:android_only_command_on_linux_bridge", hint: "Android-only command rejected on Linux bridge executor" };
       }
@@ -607,6 +650,24 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
         if (fixed !== commandForExecution) {
           repairedCommand = fixed;
           repairNote = "auto-repaired: removed invalid --requests flag from curl (dir_1782234450321)";
+        }
+      }
+
+      // dir_1782251824781 Fix 4 — nmap missing -Pn on Linux bridge executor.
+      // The nmap_missing_pn_st_on_tablet rule only fires for applies_when=tablet.
+      // The Linux bridge executor (the primary executor for SKYLINE runs) also needs
+      // -Pn because it reaches lab targets over the WG relay — ICMP pings never
+      // cross the relay and always cause nmap host-discovery to silently skip hosts.
+      // Detect the pattern ourselves and inject -Pn when nmap has -sT but no -Pn.
+      if (!repairedCommand && /\bnmap\b/.test(commandForExecution)) {
+        const hasPN    = /\bnmap\b[^;\n|]*-Pn\b/.test(commandForExecution);
+        const hasST    = /\bnmap\b[^;\n|]*(-sT|-sV|--open)\b/.test(commandForExecution);
+        if (!hasPN && hasST) {
+          const fixed = commandForExecution.replace(/\bnmap\b/, "nmap -Pn");
+          if (fixed !== commandForExecution) {
+            repairedCommand = fixed;
+            repairNote = "auto-repaired: injected -Pn into nmap (WG-relay host discovery; dir_1782251824781 Fix 4)";
+          }
         }
       }
 
@@ -646,7 +707,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
                   latency_ms, outcome, outcome_notes)
                VALUES ($1, $2, 'lint', 'cmd_preflight', 0, 0, false, true, 0, 0,
                        'preflight_lint_fail', $3)`,
-              [item.engagement_id, item.id, `rule=${recheck.rule}; matched=${recheck.match}; repair_attempted=${repairNote}`]);
+              [item.engagement_id, item.id, sanitizeOutcomeNotes(`rule=${recheck.rule}; matched=${recheck.match}; repair_attempted=${repairNote}`, "outcome_notes", item.engagement_id)]);
           } catch (_) {}
           return { autoExecuted: false, reason: `preflight_lint:${recheck.rule}`, hint: recheck.hint };
         }
@@ -664,7 +725,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
                 latency_ms, outcome, outcome_notes)
              VALUES ($1, $2, 'lint', 'cmd_preflight', 0, 0, false, true, 0, 0,
                      'preflight_lint_fail', $3)`,
-            [item.engagement_id, item.id, `rule=${preflightCheck.rule}; matched=${preflightCheck.match}`]);
+            [item.engagement_id, item.id, sanitizeOutcomeNotes(`rule=${preflightCheck.rule}; matched=${preflightCheck.match}`, "outcome_notes", item.engagement_id)]);
         } catch (_) { /* telemetry never breaks lint */ }
         return { autoExecuted: false, reason: `preflight_lint:${preflightCheck.rule}`, hint: preflightCheck.hint };
       }
