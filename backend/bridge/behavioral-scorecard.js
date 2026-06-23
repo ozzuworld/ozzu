@@ -1,5 +1,6 @@
 "use strict";
 // behavioral-scorecard.js — dir_1782255739233
+const { VERIFY_GATE_FAIL } = require("./verify-gate-constants");
 //
 // Membrane-safe per-engagement behavioral scorecard. Returns ONLY numbers,
 // enums, and booleans — never command text, IPs, CVE IDs, tool names, port
@@ -127,7 +128,7 @@ async function getBehavioralScorecard(engagementId, db) {
     fired:           verifyRows.length,
     passed:          verifyRows.filter(r => r.outcome === "verify_pass").length,
     failed:          verifyRows.filter(r => r.outcome === "verify_fail").length,
-    gated_a_finding: telemetry.filter(r => r.outcome === "verify_gate_fail").length,
+    gated_a_finding: telemetry.filter(r => r.outcome === VERIFY_GATE_FAIL).length,
   };
 
   // ── findings_by_severity ──────────────────────────────────────────────────

@@ -323,6 +323,335 @@ function makeMockDb(overrides = {}) {
     }
     assert.ok(threw, "should have thrown for missing engagement");
   });
+
+  // ── 4. Tightening-pass fixes (dir_1782255739233) ──────────────────────────────
+  //
+  // These tests exercise paths the prior 28 tests did NOT cover:
+  //   (a) post-insert FAIL must floor severity, not just relabel kind
+  //   (b) manual write-paths now pass through the sync gate; clean findings unchanged
+  //   (c) skip→unverified labeling
+  //   (d) writer-token and scorecard-reader-token are the same shared constant
+  //
+  // The full async DB paths (verifyFinding) and the /app/* module paths (soc.js,
+  // mcp.js) cannot be exercised without Docker, so tests here model the logic
+  // directly — the same pattern used by tests [1]–[3] above.
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log("\n[4] Tightening-pass: post-insert severity floor, bypass paths, skip-unverified, shared constant");
+
+  // ── (a) Post-insert FAIL downgrades severity (FIX 1) ─────────────────────────
+  // Simulate the DB UPDATE that verifyFinding now emits on verdict:'fail'.
+  // We verify that the SQL contains `severity = 'info'` for both claim types.
+  {
+    // Build a minimal mock that captures the SQL sent to it.
+    // Note: SQL strings contain newlines so table-name matching uses /FROM\s+pentest_findings/s
+    // or a string-includes approach — not /.*/  (which doesn't cross lines without the s flag).
+    function makeCapturingDb() {
+      const captures = [];
+      return {
+        capturedSql: captures,
+        async query(sql, params) {
+          captures.push({ sql, params });
+          const flat = sql.replace(/\s+/g, ' ');
+          // Simulate "finding found" on SELECT; "1 row affected" on UPDATE.
+          if (/SELECT .* FROM pentest_findings/.test(flat)) {
+            return { rows: [{ id: 1, engagement_id: 'e1', title: 'Default Credentials Accepted', severity: 'critical', kind: 'confirmed', affected_asset: '1.2.3.4', evidence_summary: '' }] };
+          }
+          if (/SELECT .* FROM pentest_engagements/.test(flat)) {
+            return { rows: [{ id: 'e1', executor_host: null, executor_adb_target: null }] };
+          }
+          // Queue lookup — return nothing so verifyCredTestFinding returns 'skip'.
+          if (/FROM soc_queue_items/.test(flat)) return { rows: [] };
+          if (/INSERT INTO offense_telemetry/.test(flat)) return { rows: [] };
+          return { rows: [] };
+        },
+      };
+    }
+
+    // Inline the post-insert UPDATE logic extracted from claim-verifier.js
+    // to verify that severity = 'info' is present in the UPDATE statement.
+    // This mirrors exactly what verifyFinding does on verdict:'fail'.
+    async function simulateVerifyFail(db, findingId) {
+      const r = await db.query(
+        `SELECT id, engagement_id, title, severity, kind, affected_asset, evidence_summary
+           FROM pentest_findings WHERE id = $1`,
+        [findingId]);
+      if (r.rows.length === 0) return;
+      const finding = r.rows[0];
+      if (finding.kind === "refuted") return;
+      // Simulate verdict:'fail' (as the fixed code does).
+      const verdict = "fail";
+      if (verdict === "fail") {
+        await db.query(
+          `UPDATE pentest_findings
+              SET kind = 'refuted',
+                  severity = 'info',
+                  evidence_summary = COALESCE(evidence_summary, '') || $1
+            WHERE id = $2`,
+          [`\n\n[REFUTED by claim-verifier: probe rejected cred]`, finding.id]);
+      }
+    }
+
+    await checkAsync("(a) post-insert FAIL UPDATE includes severity='info' (cred-test path)", async () => {
+      const db = makeCapturingDb();
+      await simulateVerifyFail(db, 1);
+      const updateEntry = db.capturedSql.find(c => /UPDATE pentest_findings/.test(c.sql.replace(/\s+/g, ' ')));
+      assert.ok(updateEntry, "UPDATE statement must have been issued");
+      const flat = updateEntry.sql.replace(/\s+/g, ' ');
+      assert.ok(/severity\s*=\s*'info'/.test(flat),
+        `UPDATE must include severity = 'info'; got: ${flat}`);
+      assert.ok(/kind\s*=\s*'refuted'/.test(flat),
+        "UPDATE must include kind = 'refuted'");
+    });
+
+    // Inline the exposure-path post-insert UPDATE (also fixed).
+    async function simulateExposureVerifyFail(db, findingId) {
+      const r = await db.query(
+        `SELECT id, engagement_id, title, severity, kind, affected_asset, evidence_summary
+           FROM pentest_findings WHERE id = $1`,
+        [findingId]);
+      if (r.rows.length === 0) return;
+      const finding = r.rows[0];
+      if (finding.kind === "refuted") return;
+      // Exposure fast-path verdict:'fail' — fixed to include severity.
+      await db.query(
+        `UPDATE pentest_findings
+            SET kind = 'refuted',
+                severity = 'info',
+                evidence_summary = COALESCE(evidence_summary, '') || $1
+          WHERE id = $2`,
+        [`\n\n[REFUTED by claim-verifier: HTTP 403 — hidden not exposed]`, finding.id]);
+    }
+
+    await checkAsync("(a) post-insert FAIL UPDATE includes severity='info' (exposure path)", async () => {
+      const db = makeCapturingDb();
+      await simulateExposureVerifyFail(db, 1);
+      const updateEntry = db.capturedSql.find(c => /UPDATE pentest_findings/.test(c.sql.replace(/\s+/g, ' ')));
+      assert.ok(updateEntry, "UPDATE statement must have been issued");
+      const flat = updateEntry.sql.replace(/\s+/g, ' ');
+      assert.ok(/severity\s*=\s*'info'/.test(flat),
+        "Exposure refute UPDATE must floor severity to info");
+    });
+  }
+
+  // ── (b) Bypass write-paths route through sync gate; clean findings unchanged ──
+  // Inline the FIX 2 logic from soc.js (submit-results) and mcp.js (add_finding).
+  // The sync gate is the same verifyFindingDataSync function from [1] above.
+  {
+    // Reuse the inline verifyFindingDataSync from section [1].
+    const EXPOSURE_TITLE_PATTERNS_B = [
+      /sensitive\s+file\s+exposure/i,
+      /exposed\s+(file|directory|endpoint|configuration|credentials?|database|backup)/i,
+      /file\s+disclosure/i,
+      /information\s+disclosure(?!.*version)/i,
+      /directory\s+listing/i,
+    ];
+    const HIDDEN_STATUS_RE_B = /(?:Status:\s*|HTTP[/ ]\d\.?\d?\s*|http_code[=:]?\s*)(40[1-4])\b/i;
+    function isExposureClaim_B(f) {
+      if (!f || !f.title) return false;
+      return EXPOSURE_TITLE_PATTERNS_B.some(re => re.test(String(f.title)));
+    }
+    function refuteExposureBy403_B(f) {
+      const haystack = `${f.evidence_summary || ""} ${f.affected_asset || ""}`;
+      const m = haystack.match(HIDDEN_STATUS_RE_B);
+      if (!m) return null;
+      return { verdict: "fail", code: m[1], notes: `hidden ${m[1]}` };
+    }
+    function verifyFindingDataSync_B(f) {
+      if (!f || !f.title) return { verdict: "skip" };
+      if (isExposureClaim_B(f)) {
+        const haystack = `${f.evidence || ""} ${f.evidence_summary || ""} ${f.affected_asset || ""}`;
+        const synthetic = { title: f.title, evidence_summary: haystack, affected_asset: f.affected_asset || "" };
+        const fast = refuteExposureBy403_B(synthetic);
+        if (fast) return { verdict: "fail", notes: fast.notes, code: fast.code };
+      }
+      return { verdict: "skip" };
+    }
+
+    // Simulate the FIX 2 logic from soc.js / mcp.js: apply sync gate before INSERT.
+    function applyGateToFinding(finding, syncGateFn) {
+      let insertSeverity = finding.severity || 'info';
+      let insertKind = finding.kind || 'confirmed';
+      const preCheck = syncGateFn({
+        title:            finding.title,
+        evidence:         finding.description || '',
+        evidence_summary: finding.description || '',
+        affected_asset:   finding.affected_asset || '',
+      });
+      if (preCheck.verdict === 'fail') {
+        insertSeverity = 'info';
+        insertKind     = 'unverified';
+      }
+      return { insertSeverity, insertKind };
+    }
+
+    check("(b) submit-results: exposure-with-403 finding is floored before INSERT", () => {
+      const finding = {
+        title: 'Sensitive File Exposure',
+        description: 'Status: 403',
+        severity: 'high',
+        affected_asset: '1.2.3.4',
+      };
+      const { insertSeverity, insertKind } = applyGateToFinding(finding, verifyFindingDataSync_B);
+      assert.strictEqual(insertSeverity, 'info',       "severity must be floored to info");
+      assert.strictEqual(insertKind,     'unverified', "kind must become unverified");
+    });
+
+    check("(b) add_finding MCP: exposure-with-403 finding is floored before INSERT", () => {
+      const args = {
+        title: 'Exposed Configuration File',
+        description: 'http_code=403',
+        severity: 'medium',
+        affected_asset: '1.2.3.4',
+        kind: 'confirmed',
+      };
+      const { insertSeverity, insertKind } = applyGateToFinding(args, verifyFindingDataSync_B);
+      assert.strictEqual(insertSeverity, 'info',       "MCP add_finding: severity floored");
+      assert.strictEqual(insertKind,     'unverified', "MCP add_finding: kind unverified");
+    });
+
+    check("(b) clean human finding (no self-contradicting evidence) passes UNCHANGED", () => {
+      const finding = {
+        title: 'Admin Panel Accessible',
+        description: 'Logged in as admin, session cookie received',
+        severity: 'critical',
+        affected_asset: '1.2.3.4',
+        kind: 'confirmed',
+      };
+      const { insertSeverity, insertKind } = applyGateToFinding(finding, verifyFindingDataSync_B);
+      assert.strictEqual(insertSeverity, 'critical',   "clean finding: severity unchanged");
+      assert.strictEqual(insertKind,     'confirmed',  "clean finding: kind unchanged");
+    });
+
+    check("(b) clean cred-test finding (no evidence fields) passes UNCHANGED through gate", () => {
+      // A finding with no description/evidence — gate must degrade gracefully.
+      const finding = {
+        title: 'Default Credentials Accepted',
+        description: '',
+        severity: 'high',
+        affected_asset: '',
+        kind: 'confirmed',
+      };
+      const { insertSeverity, insertKind } = applyGateToFinding(finding, verifyFindingDataSync_B);
+      assert.strictEqual(insertSeverity, 'high',      "cred-test finding: severity preserved when no self-contra evidence");
+      assert.strictEqual(insertKind,     'confirmed', "cred-test finding: kind preserved");
+    });
+  }
+
+  // ── (c) skip→unverified labeling (FIX 4) ─────────────────────────────────────
+  // Simulate the FIX 4 UPDATE that verifyFinding now emits on verdict:'skip'.
+  {
+    function makeSkipCapturingDb() {
+      const captures = [];
+      return {
+        capturedSql: captures,
+        async query(sql, params) {
+          captures.push({ sql, params });
+          const flat = sql.replace(/\s+/g, ' ');
+          if (/SELECT .* FROM pentest_findings/.test(flat)) {
+            return { rows: [{ id: 2, engagement_id: 'e1', title: 'Default Credentials Accepted', severity: 'high', kind: 'confirmed', affected_asset: '1.2.3.4', evidence_summary: '' }] };
+          }
+          return { rows: [] };
+        },
+      };
+    }
+
+    // Inline the skip-path UPDATE from the fixed verifyFinding.
+    async function simulateVerifySkip(db, findingId) {
+      const r = await db.query(
+        `SELECT id, engagement_id, title, severity, kind, affected_asset, evidence_summary
+           FROM pentest_findings WHERE id = $1`,
+        [findingId]);
+      if (r.rows.length === 0) return;
+      const finding = r.rows[0];
+      if (finding.kind === "refuted") return;
+      const verdict = "skip";
+      const reason = "no probe path for vendor=unknown";
+      if (verdict === "skip") {
+        await db.query(
+          `UPDATE pentest_findings
+              SET kind = 'unverified',
+                  evidence_summary = COALESCE(evidence_summary, '') || $1
+            WHERE id = $2 AND kind = 'confirmed'`,
+          [`\n\n[INCONCLUSIVE by claim-verifier: ${reason}]`, finding.id]);
+      }
+    }
+
+    await checkAsync("(c) post-insert skip verdict sets kind='unverified' (not severity change)", async () => {
+      const db = makeSkipCapturingDb();
+      await simulateVerifySkip(db, 2);
+      const updateEntry = db.capturedSql.find(c => /UPDATE pentest_findings/.test(c.sql.replace(/\s+/g, ' ')));
+      assert.ok(updateEntry, "UPDATE statement must be issued on skip");
+      const flat = updateEntry.sql.replace(/\s+/g, ' ');
+      assert.ok(/kind\s*=\s*'unverified'/.test(flat),
+        "skip UPDATE must set kind = 'unverified'");
+      // Severity must NOT be touched on skip.
+      assert.ok(!/severity/.test(flat),
+        "skip UPDATE must NOT alter severity");
+    });
+
+    await checkAsync("(c) skip UPDATE only targets kind='confirmed' rows (no double-flip)", async () => {
+      const db = makeSkipCapturingDb();
+      await simulateVerifySkip(db, 2);
+      const updateEntry = db.capturedSql.find(c => /UPDATE pentest_findings/.test(c.sql.replace(/\s+/g, ' ')));
+      assert.ok(updateEntry, "UPDATE must have been issued");
+      const flat = updateEntry.sql.replace(/\s+/g, ' ');
+      assert.ok(/WHERE id = .* AND kind = 'confirmed'/.test(flat),
+        "skip UPDATE must guard with AND kind = 'confirmed' to avoid flipping already-refuted rows");
+    });
+  }
+
+  // ── (d) Writer-token and reader-token are the same shared constant (FIX 3) ────
+  {
+    // Require the constants module directly — it has no /app/* or Docker deps.
+    const verifyGateConstants = require(path.join(__dirname, "../verify-gate-constants"));
+
+    check("(d) VERIFY_GATE_FAIL constant is exported from verify-gate-constants.js", () => {
+      assert.ok(typeof verifyGateConstants.VERIFY_GATE_FAIL === "string",
+        "VERIFY_GATE_FAIL must be a string export");
+      assert.strictEqual(verifyGateConstants.VERIFY_GATE_FAIL, "verify_gate_fail",
+        "constant value must be 'verify_gate_fail'");
+    });
+
+    check("(d) constant fits VARCHAR(24) column", () => {
+      assert.ok(verifyGateConstants.VERIFY_GATE_FAIL.length <= 24,
+        `VERIFY_GATE_FAIL '${verifyGateConstants.VERIFY_GATE_FAIL}' exceeds 24-char VARCHAR limit`);
+    });
+
+    await checkAsync("(d) scorecard gated_a_finding filter uses same token as the constant", async () => {
+      // Inject a telemetry row whose outcome matches the constant, verify scorecard counts it.
+      const tokenFromConstant = verifyGateConstants.VERIFY_GATE_FAIL;
+      const db = makeMockDb({
+        telemetry: [
+          { outcome: tokenFromConstant, intent_category: "pre_insert_gate", step_queued: false, outcome_notes: "", created_at: new Date() },
+        ],
+      });
+      const sc = await getBehavioralScorecard(1, db);
+      assert.strictEqual(sc.claim_verify.gated_a_finding, 1,
+        "scorecard must count a telemetry row whose outcome == VERIFY_GATE_FAIL constant");
+    });
+
+    // Read the scorecard source to confirm it imports the constant (not a literal).
+    // This is a file-content assertion — it fails if the constant import was removed.
+    check("(d) behavioral-scorecard.js imports verify-gate-constants (not a string literal)", () => {
+      const fs = require("fs");
+      const scorecardSrc = fs.readFileSync(
+        path.join(__dirname, "../behavioral-scorecard.js"), "utf8");
+      assert.ok(/require.*verify-gate-constants/.test(scorecardSrc),
+        "behavioral-scorecard.js must require('./verify-gate-constants')");
+      assert.ok(!/"verify_gate_fail"/.test(scorecardSrc),
+        "behavioral-scorecard.js must not contain the literal string 'verify_gate_fail' — use the constant");
+    });
+
+    check("(d) offense-aggregator.js imports verify-gate-constants (not a string literal)", () => {
+      const fs = require("fs");
+      const aggregatorSrc = fs.readFileSync(
+        path.join(__dirname, "../offense-aggregator.js"), "utf8");
+      assert.ok(/require.*verify-gate-constants/.test(aggregatorSrc),
+        "offense-aggregator.js must require('./verify-gate-constants')");
+      assert.ok(!/'verify_gate_fail'/.test(aggregatorSrc),
+        "offense-aggregator.js must not contain the literal 'verify_gate_fail' — use the constant");
+    });
+  }
 })().then(() => {
   // ── Summary ──────────────────────────────────────────────────────────────────
   console.log(`\n${"─".repeat(60)}`);

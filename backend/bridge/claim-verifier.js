@@ -210,6 +210,7 @@ async function verifyFinding(findingId) {
         await db.query(
           `UPDATE pentest_findings
               SET kind = 'refuted',
+                  severity = 'info',
                   evidence_summary = COALESCE(evidence_summary, '') || $1
             WHERE id = $2`,
           [`\n\n[REFUTED by claim-verifier dir_1780854805127 at ${new Date().toISOString()}: ${fast.notes}]`, finding.id]);
@@ -239,6 +240,7 @@ async function verifyFinding(findingId) {
       await db.query(
         `UPDATE pentest_findings
             SET kind = 'refuted',
+                severity = 'info',
                 evidence_summary = COALESCE(evidence_summary, '') || $1
           WHERE id = $2`,
         [
@@ -252,6 +254,17 @@ async function verifyFinding(findingId) {
             SET evidence_summary = COALESCE(evidence_summary, '') || $1
           WHERE id = $2`,
         [`\n\n[VERIFIED by claim-verifier at ${new Date().toISOString()}: ${result.notes}]`, finding.id]);
+    } else if (result.verdict === "skip") {
+      // FIX 4: inconclusive probe — mark the finding explicitly unverified so it
+      // is distinguishable from a genuinely-verified 'confirmed' finding in the
+      // scorecard's claim_verify / false_positive descriptor. Severity is NOT
+      // floored — inconclusive means "can't tell", not "wrong".
+      await db.query(
+        `UPDATE pentest_findings
+            SET kind = 'unverified',
+                evidence_summary = COALESCE(evidence_summary, '') || $1
+          WHERE id = $2 AND kind = 'confirmed'`,
+        [`\n\n[INCONCLUSIVE by claim-verifier at ${new Date().toISOString()}: ${result.reason}]`, finding.id]);
     }
 
     try {

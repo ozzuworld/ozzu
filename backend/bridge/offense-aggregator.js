@@ -24,6 +24,7 @@ const http = require("http");
 const https = require("https");
 const { URL } = require("url");
 const db = require("./db");
+const { VERIFY_GATE_FAIL } = require("./verify-gate-constants");
 
 const MODEL_URL  = process.env.OFFENSE_MODEL_URL  || "http://127.0.0.1:11434/v1";
 const MODEL_NAME = process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
@@ -228,8 +229,8 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
                   n_hosts, n_findings, step_queued, in_scope, n_references,
                   latency_ms, outcome, outcome_notes)
                VALUES ($1, NULL, 'claim-verifier', 'pre_insert_gate',
-                       0, 1, false, true, 0, 0, 'verify_gate_fail', $2)`,
-              [engagementId, `title="${String(f.title).slice(0,80)}"; code=${preCheck.code || "?"}; floored_to=info`]);
+                       0, 1, false, true, 0, 0, $2, $3)`,
+              [engagementId, VERIFY_GATE_FAIL, `title="${String(f.title).slice(0,80)}"; code=${preCheck.code || "?"}; floored_to=info`]);
           } catch (_) {}
         }
       } catch (_) { /* verifier module load failure — continue with original values */ }

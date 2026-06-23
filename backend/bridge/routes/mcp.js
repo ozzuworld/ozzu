@@ -2099,7 +2099,25 @@ ${result.narrative}
       case "add_finding": {
         // Attack-graph fields (dir_1780781999942): informed_by/enables/kind are optional;
         // backward-compatible for callers that don't pass them. kind defaults to 'confirmed'.
-        const kind = ["confirmed", "hypothesis", "refuted"].includes(args.kind) ? args.kind : "confirmed";
+        // FIX 2 (dir_1782255739233): run the synchronous pre-insert gate before writing so
+        // this strategist/manual path cannot bypass verification. Only the stateless
+        // exposure-with-403 check applies (no active probe). A legitimate human/strategist
+        // finding with no self-contradicting evidence passes through UNCHANGED (verdict:'skip').
+        let addFindingKind = ["confirmed", "hypothesis", "refuted"].includes(args.kind) ? args.kind : "confirmed";
+        let addFindingSeverity = args.severity;
+        try {
+          const { verifyFindingDataSync } = require("/app/claim-verifier");
+          const preCheck = verifyFindingDataSync({
+            title:            args.title,
+            evidence:         args.description || '',
+            evidence_summary: args.description || '',
+            affected_asset:   args.affected_asset || '',
+          });
+          if (preCheck.verdict === 'fail') {
+            addFindingSeverity = 'info';
+            addFindingKind     = 'unverified';
+          }
+        } catch (_) { /* gate failure is never fatal for strategist submissions */ }
         await db.query(`
           INSERT INTO pentest_findings (
             engagement_id, severity, title, description, cvss_score, cvss_vector,
@@ -2108,7 +2126,7 @@ ${result.narrative}
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         `, [
           args.engagement_id,
-          args.severity,
+          addFindingSeverity,
           args.title,
           args.description,
           args.cvss_score || null,
@@ -2123,13 +2141,13 @@ ${result.narrative}
           'cipher',
           JSON.stringify(args.informed_by || []),
           JSON.stringify(args.enables || []),
-          kind
+          addFindingKind
         ]);
 
         return {
           content: [{
             type: "text",
-            text: `✅ Finding recorded\n\n**Severity:** ${args.severity.toUpperCase()}\n**Title:** ${args.title}\n**Asset:** ${args.affected_asset || 'N/A'}\n**Kind:** ${kind}\n**Engagement:** ${args.engagement_id}\n\nFinding added to engagement report.`
+            text: `Finding recorded\n\n**Severity:** ${addFindingSeverity.toUpperCase()}\n**Title:** ${args.title}\n**Asset:** ${args.affected_asset || 'N/A'}\n**Kind:** ${addFindingKind}\n**Engagement:** ${args.engagement_id}\n\nFinding added to engagement report.`
           }]
         };
       }

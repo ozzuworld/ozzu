@@ -820,18 +820,41 @@ module.exports = function socRoutes(ctx) {
         return true;
       }
 
-      // Parse findings and create records
+      // Parse findings and create records.
+      // FIX 2 (dir_1782255739233): run the synchronous pre-insert gate so this
+      // path cannot bypass verification. Only the stateless exposure-with-403
+      // check is applied here (no active probe — that needs a DB id). A clean
+      // human-authored finding with no self-contradicting evidence passes through
+      // unchanged (gate returns verdict:'skip').
+      let _syncGate = null;
+      try { _syncGate = require('/app/claim-verifier').verifyFindingDataSync; } catch (_) {}
       const createdFindings = [];
       for (const finding of findings) {
+        let insertSeverity = finding.severity || 'info';
+        let insertKind     = 'confirmed';
+        if (_syncGate) {
+          try {
+            const preCheck = _syncGate({
+              title:            finding.title,
+              evidence:         finding.description || '',
+              evidence_summary: finding.description || '',
+              affected_asset:   finding.affected_asset || '',
+            });
+            if (preCheck.verdict === 'fail') {
+              insertSeverity = 'info';
+              insertKind     = 'unverified';
+            }
+          } catch (_) { /* gate failure is never fatal for manual submissions */ }
+        }
         const result = await db.query(`
           INSERT INTO pentest_findings (
             engagement_id, severity, title, description, cvss_score, cvss_vector,
-            affected_asset, affected_assets, refs, mitre_attack, reproduction, remediation, evidence_files, discovered_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            affected_asset, affected_assets, refs, mitre_attack, reproduction, remediation, evidence_files, discovered_by, kind
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
           RETURNING id
         `, [
           engagement_id,
-          finding.severity || 'info',
+          insertSeverity,
           finding.title,
           finding.description,
           finding.cvss_score || null,
@@ -843,7 +866,8 @@ module.exports = function socRoutes(ctx) {
           JSON.stringify(finding.reproduction || {}),
           finding.remediation || null,
           JSON.stringify(finding.evidence_files || []),
-          'pa_engineer'
+          'pa_engineer',
+          insertKind,
         ]);
 
         const findingId = result.rows[0].id;
@@ -852,7 +876,7 @@ module.exports = function socRoutes(ctx) {
           type: 'socFindingAdded',
           engagement_id,
           finding_id: findingId,
-          severity: finding.severity || 'info',
+          severity: insertSeverity,
           title: finding.title,
           ts: Date.now(),
         });
