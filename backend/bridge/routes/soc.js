@@ -1092,7 +1092,11 @@ module.exports = function socRoutes(ctx) {
               result = { exit_code: -1, stdout: '', stderr: `[exec-agent invalid JSON: ${e.message}]`, timed_out: false };
             }
             const fullOutput = (result.stdout || '') + (result.stderr ? `\n[stderr]\n${result.stderr}` : '');
-            const finalStatus = (result.exit_code === 0 && !result.timed_out) ? 'done' : 'failed';
+            // dir_1782316000000: recon sweeps exit non-zero even on success — a step that
+            // parsed live hosts did its job → 'done', not 'failed'-by-exit-code.
+            let reconFound = 0;
+            try { reconFound = parseReconOutput(fullOutput).length; } catch (_) {}
+            const finalStatus = (!result.timed_out && (result.exit_code === 0 || reconFound > 0)) ? 'done' : 'failed';
             const appendMsg = result.timed_out ? `\n\n[TIMEOUT after ${timeoutSec}s — exec-agent killed]` : '';
             const safeOutput = sanitizeOutput(fullOutput + appendMsg);
             try {
@@ -1197,7 +1201,13 @@ module.exports = function socRoutes(ctx) {
           clearTimeout(entry.timeoutHandle);
           runningProcs.delete(sessionId);
           const timedOut = entry.timedOut;
-          const finalStatus = (code === 0 && !timedOut) ? 'done' : 'failed';
+          // dir_1782316000000: recon sweeps routinely exit NON-ZERO even when they succeed
+          // (a /24 ping-sweep's last host is down → last ping exits 1; grep matches nothing
+          // on some hosts; a pipe leg fails). Exit code ALONE wrongly stamps successful
+          // discovery 'failed'. If the output parsed into live hosts, the step did its job.
+          let reconFound = 0;
+          try { reconFound = parseReconOutput(fullOutput).length; } catch (_) {}
+          const finalStatus = (!timedOut && (code === 0 || reconFound > 0)) ? 'done' : 'failed';
           const appendMsg = timedOut ? `\n\n[TIMEOUT after ${timeoutSec}s — process killed]` : '';
           const rawLen = fullOutput.length;
           const safeOutput = sanitizeOutput(fullOutput + appendMsg);
