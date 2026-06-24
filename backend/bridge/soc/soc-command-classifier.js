@@ -189,12 +189,16 @@ function classifyContextual(token, fullCommand) {
   //   (e.g. `python3 -c "import os; os.system('/bin/sh')"`)
   // Default: exploit_test (any script execution is at minimum exploit scope)
   if (token === "python" || token === "python3") {
-    // -c "..." inline code execution is always exploit_rce — the payload is arbitrary
-    // Python code that can trivially spawn shells. Note: the pipe-split in classifyCommand
-    // may truncate the -c payload at ';' so we cannot reliably inspect its content;
-    // the mere presence of -c is sufficient to classify as exploit_rce.
-    if (/(^|\s)-c\s/.test(cmdStr))
-      return { intent: "exploit_rce", matched_rule: `${token}_inline_exec` };
+    // dir_1782333116988: python3 -c payload inspection (same pattern as bash -c).
+    // Blanket exploit_rce was blocking legitimate HTTP requests and data parsing.
+    // Only escalate to exploit_rce when the payload spawns a shell or listener.
+    if (/(^|\s)-c\s/.test(cmdStr)) {
+      if (/pty\.spawn|os\.system\s*\(\s*['"]\/bin|os\.popen|subprocess\.call.*\/bin\/(sh|bash)|exec\s*\(\s*['"]\/bin/.test(cmdStr))
+        return { intent: "exploit_rce", matched_rule: `${token}_inline_shell_spawn` };
+      if (/socket\.socket.*connect.*makefile|socket\.socket.*recv/.test(cmdStr) && /\/bin\/(sh|bash)/.test(cmdStr))
+        return { intent: "exploit_rce", matched_rule: `${token}_inline_reverse_shell` };
+      return { intent: "exploit_test", matched_rule: `${token}_inline_exec` };
+    }
     // Running a script file: positional argument ending in .py OR a path (contains /)
     if (/\s[\w./~-]*\.py(?:\s|$)/.test(cmdStr) || /\s\/\S+\.py(?:\s|$)/.test(cmdStr))
       return { intent: "exploit_test", matched_rule: `${token}_script_file` };
