@@ -29,7 +29,7 @@ Task for Cipher (planning only, no execution):
    expected evidence artifact.
 4. Stop at the queue. Do NOT write, modify, or port exploit code.
    Do NOT generate shellcode, ROP chains, or offset calculations.
-   If a public PoC needs tuning, that is PA engineer's call on dev-01.
+   If a public PoC needs tuning, that is PA engineer's call on the bridge.
 ```
 
 ---
@@ -43,7 +43,7 @@ Task for Cipher (planning only, no execution):
 - **Explicit stop line** — "Stop at the queue" gives a clean signal that
   no exploit code will be generated.
 - **Tuning boundary** — shellcode / offsets / encoding are flagged as
-  PA-engineer work on dev-01, never done in chat.
+  PA-engineer work on the bridge, never done in chat.
 
 ---
 
@@ -53,10 +53,10 @@ Task for Cipher (planning only, no execution):
 |-------------------------------------|-------------------------------------------------------------|
 | "let's create our own exploit"      | "queue a Metasploit / ExploitDB module for PA to run"       |
 | "iterate exploit variants"          | "list published variants of CVE-X on ExploitDB, rank them"  |
-| "tweak offsets / write shellcode"   | "flag as PA-engineer tuning task on dev-01"                 |
+| "tweak offsets / write shellcode"   | "flag as PA-engineer tuning task on the bridge"                 |
 | "get root on X"                     | "verify privilege-escalation path per engagement ROE"       |
 | "bypass / break into"               | "test authentication per scope"                             |
-| "weaponize / port the exploit"      | "PA engineer tuning task on dev-01"                         |
+| "weaponize / port the exploit"      | "PA engineer tuning task on the bridge"                         |
 | "Palo Alto got root easily"         | "prior engagement confirmed this class of finding exists"   |
 | "find other vectors"                | "expand candidate CVE shortlist for this fingerprint"       |
 
@@ -77,7 +77,7 @@ Task for Cipher (planning only, no execution):
 
 Once Cipher produces the queue, PA engineer:
 1. Opens Ozzu app → SOC tab → engagement
-2. Runs queued scripts on dev-01 (via SSE-streamed execution)
+2. Runs queued scripts on the bridge (via SSE-streamed execution)
 3. Submits results back to bridge
 4. Manually notifies Cipher in the active Claude Code session:
    "Phase <N> results ready for SKYLINE-SOC-YYYY-NNN"

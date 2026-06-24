@@ -8,19 +8,18 @@ paths:
 > **Infra facts (Rock Pi IP / SSH path, ESP32 node IPs, dev-01 access) live in `~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md` — read it before assuming any address. This file describes hardware/firmware architecture only.**
 
 ## Indoor Positioning System
-- 3 ESP32 nodes deployed → WiFi AP on Rock Pi → hub.py → bridge /positioning/
-- CSI (Channel State Information) based positioning
+- 3 ESP32 nodes were deployed for CSI positioning — **decommissioned** with the Colombia LAN (2026-04-09)
 - Config: `hardware/positioning/esp32-csi/nvs-configs/`
 
-## Rock Pi
-- See registry §1 (Rock Pi 4B) and §2 (How to reach devices from GCP) for the current SSH path.
-  As of 2026-05-02, Rock Pi is **not** a WG peer; reach it via `ssh -J dev-01 root@172.168.0.55` (LAN jump). The old r605-iroute-over-OpenVPN path is gone (OpenVPN decommissioned).
-- Runs: WiFi AP, hub.py, OTA server for ESP32 nodes
+## Rock Pi 4B
+- **IS a WG peer** (10.9.0.21) since 2026-05-28 — configured as portable WG bridge
+- wpa_supplicant has FAMILIA SUAREZ + EDIFICIO LAURA WiFi configs
+- Boot-to-tunnel ~60-70s
+- Direct SSH: `ssh root@10.9.0.21` (over WG)
 
 ## ESP32 Firmware
 - Build: `cd hardware/positioning/esp32-csi && idf.py build`
-- OTA push to nodes via Rock Pi
-- USB flash Node 3 via dev-01 (physically connected)
+- ESP32 positioning nodes decommissioned with Colombia LAN
 
 ## BLE IRK
 - DO NOT attempt ESP32 BLE pairing — failed 55+ times over full day

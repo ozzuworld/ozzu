@@ -23,7 +23,7 @@ The repo is too big for any single LLM context window. Use the indexes, do NOT p
 ## Build & Test
 
 - **Bridge backend**: `docker compose -f backend/docker-compose.yml up -d`. Restart after backend code changes: `docker restart bridge` (but only if smartDeploy didn't already handle it).
-- **Frontend (Expo)**: builds via GitHub Actions CI for both Android + iOS. Local dev: `cd frontend && npm install && npx expo start`.
+- **Frontend (Expo)**: **iOS-only** — builds via GitHub Actions CI. JS changes deploy OTA; native changes build an IPA. Local dev: `cd frontend && npm install && npx expo start`.
 - **Deploy**: `merge-and-deploy` MCP tool (or `POST /directives/<id>/merge-and-deploy`) — auto-detects HOT/WARM/STAGING tier and runs the right pipeline. **Never** run `./scripts/ota-deploy.sh`, `./scripts/deploy.sh`, or `gh workflow run build-*.yml` manually after a merge. See `.claude/rules/pipeline.md`.
 - **Codebase analysis**: `scripts/cipher-analyze.sh {layer1|layer2|layer3|layer3-llm|all}`. Layer 1+3 auto-refresh on every commit via post-commit hook.
 
@@ -64,7 +64,7 @@ The repo is too big for any single LLM context window. Use the indexes, do NOT p
 - **Format helpers**: `frontend/lib/format.ts` (`formatBytes`, `formatCOP`, `formatShortDate`, `formatTrackTime`, etc.). Don't reimplement.
 - **No comments unless WHY is non-obvious.** No "added for X feature" / "called from Y" — those go in PR descriptions.
 - **Trailing questions**: don't end replies with "want me to X?" — execute the obvious next step within scope.
-- **iPhone is the primary device.** Every frontend deploy auto-builds iOS in parallel with Android OTA. User installs the IPA manually via AltStore on a Windows PC.
+- **iPhone is the primary device.** App is iOS-only. JS changes go OTA (expo-updates); native changes build an IPA cached to `artifacts/ozzu-latest.ipa` for sideload via SideStore/AltStore.
 
 ## Three things this agent is NOT
 
