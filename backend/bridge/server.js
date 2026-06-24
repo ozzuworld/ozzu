@@ -111,7 +111,6 @@ const dashboardRoutes = require("./routes/dashboard");
 const directiveRoutes = require("./routes/directives");
 const spotifyRoutes = require("./routes/spotify");
 const osintRoutes = require("./routes/osint");
-const knowledgeGraphRoutes = require("./routes/knowledge-graph");
 const pipelineRoutes = require("./routes/pipeline");
 const epicRoutes = require("./routes/epics");
 const cedulaRoutes = require("./routes/cedula");
@@ -136,7 +135,6 @@ const businessEmailRoutes = require("./routes/business-email");
 const vaultRoutes = require("./routes/vault");
 const financeRoutes = require("./routes/finance");
 const whatsappRoutes = require("./routes/whatsapp");
-const influenceRoutes = require("./routes/influence");
 const octoprintRoutes = require("./routes/octoprint");
 const socRoutes = require("./routes/soc");
 const watchdog = require("./watchdog");
@@ -1671,9 +1669,7 @@ function getRouteHandlers() {
       vault: vaultRoutes(routeCtx),
       finance: financeRoutes(routeCtx),
       whatsapp: whatsappRoutes(routeCtx),
-      influence: influenceRoutes(routeCtx),
       octoprint: octoprintRoutes(routeCtx),
-      knowledgeGraph: knowledgeGraphRoutes(routeCtx),
       soc: socRoutes(routeCtx),
       ozzuSource: ozzuSourceRoutes(routeCtx),
     };
@@ -1813,9 +1809,7 @@ async function handleRequest(req, res) {
   if (await r.vault(req, res, pathname, url)) return;
   if (await r.finance(req, res, pathname, url)) return;
   if (await r.whatsapp(req, res, pathname, url)) return;
-  if (await r.influence(req, res, pathname, url)) return;
   if (await r.octoprint(req, res, pathname, url)) return;
-  if (await r.knowledgeGraph(req, res, pathname, url)) return;
   if (await r.soc(req, res, pathname, url)) return;
   if (await r.ozzuSource(req, res, pathname, url)) return;
 
