@@ -6,9 +6,9 @@
 // green. This version imports the REAL production functions and every test is
 // mutation-provable: reverting its named production line turns THAT test red.
 //
-//   computeFinalStatus      ← offense-agent.js
-//   detectLoopHalt          ← telemetry-analyze.js
-//   ACTIVE_AGENT_STATUSES   ← telemetry-analyze.js
+//   computeFinalStatus      ← offense-agent.js (via offense-final-status.js)
+//   detectLoopHalt          ← tools/diagnostics/telemetry-analyze.js (the copy PROD loads)
+//   ACTIVE_AGENT_STATUSES   ← tools/diagnostics/telemetry-analyze.js (the copy PROD loads)
 //   getBehavioralScorecard  ← behavioral-scorecard.js
 //   checkHaltedEngagements  ← watchdog.js
 //
@@ -28,7 +28,12 @@ const path   = require("path");
 // outside the bridge container; a source-text check below pins that offense-agent.js
 // actually USES this function (so the wiring can't silently regress).
 const { computeFinalStatus }              = require(path.join(__dirname, "../offense-final-status"));
-const { detectLoopHalt, ACTIVE_AGENT_STATUSES } = require(path.join(__dirname, "../telemetry-analyze"));
+// detectLoopHalt + ACTIVE_AGENT_STATUSES MUST come from the copy PRODUCTION loads —
+// routes/mcp.js requires "/home/gcp/ozzu/tools/diagnostics/telemetry-analyze.js" for both
+// analyze_engagement_telemetry and diagnose_all_engagements. The old "../telemetry-analyze"
+// (backend/bridge copy) was loaded by NOTHING at runtime, so its mutation proof was worthless.
+// Path: tests/ → bridge/ → backend/ → ozzu/ → tools/diagnostics/. (dir_1782242371780 correction)
+const { detectLoopHalt, ACTIVE_AGENT_STATUSES } = require(path.join(__dirname, "../../../tools/diagnostics/telemetry-analyze"));
 const { getBehavioralScorecard }          = require(path.join(__dirname, "../behavioral-scorecard"));
 const watchdog                            = require(path.join(__dirname, "../watchdog"));
 const fs                                  = require("fs");

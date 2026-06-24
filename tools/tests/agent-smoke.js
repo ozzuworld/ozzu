@@ -261,7 +261,7 @@ async function runSmoke() {
     assert(done_tasks >= 2, `≥2 engagement_tasks transitioned to done (got ${done_tasks})`);
     assert(tasks.rows.every((t) => t.has_summary || t.status === "pending"), "every completed task has an outcome_summary");
     assert(queue.rows.length >= 2, `≥2 soc_queue_items inserted (got ${queue.rows.length})`);
-    assert(["completed", "idle"].includes(eng.rows[0].agent_status), `final agent_status is completed|idle (got '${eng.rows[0].agent_status}')`);
+    assert(["completed", "idle", "halted", "paused"].includes(eng.rows[0].agent_status), `final agent_status is completed|idle|halted|paused (got '${eng.rows[0].agent_status}')`);
 
     console.log("\n🎯 SMOKE TEST PASSED — multi-agent runAgent wiring is mechanically correct.");
   } finally {

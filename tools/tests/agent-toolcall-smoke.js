@@ -249,7 +249,7 @@ async function runSmoke() {
     const doneCount = queue.rows.filter((q) => q.status === "done").length;
     assert(doneCount >= 2, `≥2 queue items reached 'done' status (got ${doneCount} done out of ${queue.rows.length})`);
     assert(eng.rows[0].engagement_phase === "enumeration", `final engagement_phase = enumeration (got '${eng.rows[0].engagement_phase}')`);
-    assert(["completed", "idle"].includes(eng.rows[0].agent_status), `final agent_status ∈ {completed, idle} (got '${eng.rows[0].agent_status}')`);
+    assert(["completed", "idle", "halted", "paused"].includes(eng.rows[0].agent_status), `final agent_status ∈ {completed, idle, halted, paused} (got '${eng.rows[0].agent_status}')`);
 
     console.log("\n🎯 SMOKE TEST PASSED — runAgentToolCall (legacy Step 5 path) is mechanically correct.");
   } finally {

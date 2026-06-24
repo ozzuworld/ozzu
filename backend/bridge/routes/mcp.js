@@ -849,7 +849,7 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "diagnose_all_engagements",
-      description: "Fleet-wide health check — runs analyze_engagement_telemetry over every active engagement (status='in_progress' OR agent_status in {running, error}) and returns a summary table + detail for engagements with issues. Use to find which engagements need attention without per-id polling. Membrane-safe (same as per-engagement analyzer).",
+      description: "Fleet-wide health check — runs analyze_engagement_telemetry over every active engagement (status='in_progress' OR agent_status in {running, error, halted}) and returns a summary table + detail for engagements with issues. Use to find which engagements need attention without per-id polling. Membrane-safe (same as per-engagement analyzer).",
       inputSchema: { type: "object", properties: {} },
     },
     {

@@ -20,7 +20,25 @@
 
 "use strict";
 
-const db = require("/app/db");
+// dir_1782242371780 (correction): resilient db require so this module — which is
+// what mcp.js loads in production (require("/home/gcp/ozzu/tools/diagnostics/...")) —
+// ALSO loads in the host test suite. In the bridge image WORKDIR=/app === backend/bridge
+// (compose `./bridge:/app`), so '/app/db' is backend/bridge/db.js. On the host '/app'
+// doesn't exist, but the repo is mounted at its real path, so the canonical
+// '/home/gcp/ozzu/backend/bridge/db.js' resolves in BOTH places. Production behavior is
+// unchanged (it still resolves /app/db first); the fallback only fires off-container.
+// The exported pure functions (detectLoopHalt / ACTIVE_AGENT_STATUSES) never touch db —
+// this require just must not throw at module-load so the test can import them.
+let db;
+try {
+  db = require("/app/db");
+} catch (e) {
+  if (e && e.code === "MODULE_NOT_FOUND") {
+    db = require("/home/gcp/ozzu/backend/bridge/db.js");
+  } else {
+    throw e;
+  }
+}
 
 // arg parsing — deferred into cliMain() so require() from MCP doesn't exit
 
@@ -29,6 +47,17 @@ const LOOP_RUN_THRESHOLD     = 3;      // same intent ≥3 in a row → loop
 const EMPTY_OUTPUT_THRESHOLD = 3;      // ≥3 consecutive empty queue outputs → executor dead
 const STEP_QUEUE_FLOOR       = 0.5;    // < 50% step-queued → model can't tool-use
 const STALL_MIN              = 10;     // task pending+unblocked > 10 min → stalled
+
+// dir_1782242371780 (correction): the agent_status values the FLEET diagnostic
+// (analyzeAllActive) treats as "needs attention". 'halted' was added so a
+// harness-forced abnormal halt (loop-breaker terminal phase / dark-loop / stall),
+// which is invisible to the boot scanner (it resumes 'running' only), still surfaces
+// here. Exported so a test can assert the real array rather than an inline copy.
+const ACTIVE_AGENT_STATUSES = ["running", "error", "halted"];
+
+// dir_1782242371780 (correction): a telemetry row outcome that marks the loop's
+// terminal moment. detectLoopHalt flags it only when the engagement is also abnormal.
+const LOOP_HALT_OUTCOMES = new Set(["loop_halted", "engagement_concluded"]);
 
 // Patterns that should NEVER appear in telemetry text fields (membrane rule):
 //   - raw CVE IDs (CVE-YYYY-NNNN)
@@ -220,6 +249,35 @@ function detectPhaseRegression(history) {
   return issues;
 }
 
+// dir_1782242371780 (correction): detect a SILENT harness-forced halt.
+// The loop-breaker (terminal phase), the dark-loop halt-timeout, and stall
+// exhaustion all conclude the run WITHOUT a pending queue step — so the watchdog
+// (which keys on pending steps) can't see it, and the run goes dark. Those paths
+// emit a telemetry row with outcome 'loop_halted' or 'engagement_concluded'. We
+// raise an issue when such a marker exists AND the engagement is ABNORMAL —
+// 0 confirmed findings AND ≥1 failed step — so a clean "nothing exploitable"
+// model conclusion (0 findings, no failed step) is NEVER flagged. The failed-step
+// requirement is the discriminator that keeps a legitimate empty result quiet.
+//
+// `engagementRow` carries the precomputed counts {confirmed_findings, failed_steps}
+// so this detector stays pure (no DB) and unit-testable.
+function detectLoopHalt(telemetry, engagementRow) {
+  const marker = (telemetry || []).find((t) => LOOP_HALT_OUTCOMES.has(t.outcome));
+  if (!marker) return [];
+  const confirmedFindings = Number(engagementRow && engagementRow.confirmed_findings) || 0;
+  const failedSteps       = Number(engagementRow && engagementRow.failed_steps) || 0;
+  // Abnormal = produced nothing confirmed AND something failed. A clean 0-finding
+  // model end (no failures) is a legitimate "nothing exploitable" verdict — skip it.
+  if (confirmedFindings > 0 || failedSteps < 1) return [];
+  return [{
+    kind: "loop_halted",
+    severity: "warn",
+    message: `engagement halted without a clean conclusion (${marker.outcome}) — 0 confirmed findings and ${failedSteps} failed step(s); the loop went dark with no pending step (no watchdog coverage)`,
+    outcome: marker.outcome,
+    failed_steps: failedSteps,
+  }];
+}
+
 // ───────────────────── data fetch ─────────────────────
 
 async function fetchAll() {
@@ -339,6 +397,22 @@ async function analyzeEngagement(engagementId) {
     }
   } catch { /* engagement_tasks may not exist on legacy engagements */ }
 
+  // dir_1782242371780 (correction): counts for the silent-halt detector. A
+  // confirmed finding = pentest_findings.kind='confirmed'; a failed step =
+  // soc_queue_items.status='failed'. Best-effort — findings table may be absent on
+  // legacy engagements; default to 0 (which makes detectLoopHalt skip, never crash).
+  let confirmedFindings = 0;
+  try {
+    const fr = await db.query(
+      `SELECT COUNT(*)::int AS n FROM pentest_findings WHERE engagement_id = $1 AND kind = 'confirmed'`,
+      [engagementId]);
+    confirmedFindings = (fr.rows[0] && fr.rows[0].n) || 0;
+  } catch { /* findings table may not exist on legacy engagements */ }
+  const failedSteps = queueItems.filter((q) => q.status === "failed").length;
+  // engagementRow for detectLoopHalt: the engagement record plus the two precomputed
+  // counts the detector keys on (keeps the detector pure / DB-free / unit-testable).
+  const haltEngagementRow = { ...eng.rows[0], confirmed_findings: confirmedFindings, failed_steps: failedSteps };
+
   const nowMs = Date.now();
   const issues = [
     ...detectLoops(telemetry),
@@ -347,6 +421,7 @@ async function analyzeEngagement(engagementId) {
     ...detectMembraneBreach(telemetry),
     ...detectStalledTasks(tasks, unblocked, nowMs),
     ...detectSlowInference(telemetry),
+    ...detectLoopHalt(telemetry, haltEngagementRow),
   ];
   const data = { engagement: eng.rows[0], telemetry, queueItems, tasks, unblocked };
   const report_md = renderMarkdown({ ...data, issues });
@@ -361,13 +436,19 @@ async function analyzeEngagement(engagementId) {
   };
 }
 
-// Fleet-wide: analyze every active engagement (in_progress OR agent_status
-// in {running, error}). Returns one summary plus per-engagement reports.
+// Fleet-wide: analyze every active engagement (in_progress OR agent_status in
+// ACTIVE_AGENT_STATUSES = {running, error, halted}). Returns one summary plus
+// per-engagement reports.
 async function analyzeAllActive() {
+  // dir_1782242371780 (correction): use the exported ACTIVE_AGENT_STATUSES so
+  // 'halted' engagements (harness-forced abnormal halts the boot scanner won't
+  // resume) appear in the fleet diagnostic. Parameterized to keep the real array
+  // the single source of truth a test can assert.
   const r = await db.query(
     `SELECT id FROM pentest_engagements
-      WHERE status = 'in_progress' OR agent_status IN ('running', 'error')
-      ORDER BY updated_at DESC NULLS LAST, id DESC`);
+      WHERE status = 'in_progress' OR agent_status = ANY($1::text[])
+      ORDER BY updated_at DESC NULLS LAST, id DESC`,
+    [ACTIVE_AGENT_STATUSES]);
   const ids = r.rows.map((row) => row.id);
   const reports = [];
   let totalIssues = 0, totalErrors = 0, totalWarns = 0;
@@ -389,7 +470,7 @@ async function analyzeAllActive() {
   lines.push(`**Totals:** ${totalIssues} issues across the fleet (${totalErrors} errors, ${totalWarns} warnings)`);
   lines.push("");
   if (ids.length === 0) {
-    lines.push("_(no engagements with status='in_progress' or agent_status in {running, error})_");
+    lines.push(`_(no engagements with status='in_progress' or agent_status in {${ACTIVE_AGENT_STATUSES.join(", ")}})_`);
   } else {
     lines.push("## Per-engagement summary");
     lines.push("| engagement | agent_status | phase | issues | errors | warnings |");
@@ -423,7 +504,7 @@ async function analyzeAllActive() {
   };
 }
 
-module.exports = { analyzeEngagement, analyzeAllActive };
+module.exports = { analyzeEngagement, analyzeAllActive, detectLoopHalt, ACTIVE_AGENT_STATUSES };
 
 // ───────────────────── CLI main ─────────────────────
 

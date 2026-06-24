@@ -1295,8 +1295,9 @@ async function init() {
     // engagement_phase: where the agent thinks it is in the kill chain.
     // agent_run_state: full conversation transcript (system+user+assistant+tool messages)
     //   so a bridge restart mid-run doesn't lose conversation history.
-    // agent_status: idle | running | completed | error — drives the SOC app's
-    //   "agent running" badge in Step 6.
+    // agent_status: idle | running | completed | error | halted | paused — drives the
+    //   SOC app's "agent running" badge in Step 6. (halted = harness-forced abnormal
+    //   halt, dir_1782242371780; paused = iteration-budget exhaustion, resumable.)
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS engagement_phase VARCHAR(32) DEFAULT 'recon'`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS agent_run_state JSONB DEFAULT '{}'::jsonb`);
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS agent_status VARCHAR(16) DEFAULT 'idle'`);
