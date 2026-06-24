@@ -1164,6 +1164,21 @@ async function runAgent(engagementId, opts = {}) {
     console.error(`[offense-agent] task drain at conclusion failed:`, e.message);
   }
 
+  // dir_1782336880206: mark any queue items still 'running' as failed at conclusion.
+  // The process driving them is gone; leaving them 'running' creates ghost state.
+  try {
+    const qOrphans = await db.query(
+      `UPDATE soc_queue_items
+          SET status = 'failed', completed_at = NOW()
+        WHERE engagement_id = $1 AND status = 'running'
+        RETURNING id, seq`, [engagementId]);
+    if (qOrphans.rows.length > 0)
+      console.log(`[offense-agent] conclusion: marked ${qOrphans.rows.length} ghost-running queue item(s) as failed:`,
+        qOrphans.rows.map(r => `Q${r.seq}`).join(", "));
+  } catch (e) {
+    console.error(`[offense-agent] orphan queue cleanup at conclusion failed:`, e.message);
+  }
+
   // dir_1782242371780: final-status mapping extracted to the exported
   // computeFinalStatus() pure helper so it can be unit-tested against the real code
   // (the prior tests asserted an inline COPY and hid the mislabel bug). Mapping:
@@ -1303,13 +1318,21 @@ async function runAgentToolCall(engagementId, opts = {}) {
 // ───────────────────────────── reset (clears both transcript + DAG) ─────────────────────────────
 
 async function resetAgent(engagementId) {
+  const orphans = await db.query(
+    `UPDATE soc_queue_items
+        SET status = 'failed', completed_at = NOW()
+      WHERE engagement_id = $1 AND status = 'running'
+      RETURNING id, seq`, [engagementId]);
+  if (orphans.rows.length > 0)
+    console.log(`[offense-agent] resetAgent: marked ${orphans.rows.length} ghost-running item(s) as failed:`,
+      orphans.rows.map(r => `Q${r.seq}`).join(", "));
   await db.query(
     `UPDATE pentest_engagements
         SET agent_run_state = '{}'::jsonb, agent_status = 'idle'
       WHERE id = $1`,
     [engagementId]);
   await orchestrator.resetGraph(engagementId);
-  return { engagement_id: engagementId, ok: true };
+  return { engagement_id: engagementId, ok: true, orphans_cleaned: orphans.rows.length };
 }
 
 module.exports = { runAgent, runAgentToolCall, resetAgent, synthesizeCommand, computeFinalStatus };

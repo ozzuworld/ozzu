@@ -88,6 +88,23 @@ module.exports = function socRoutes(ctx) {
      ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS timeout_seconds INTEGER NOT NULL DEFAULT 300;`
   ).catch((err) => console.error('[soc] schema migration failed:', err.message));
 
+  // dir_1782336880206: startup sweep — any queue item stuck 'running' from a prior
+  // bridge crash/restart has no process behind it. Mark failed + reset ghost agent_status.
+  db.query(
+    `UPDATE soc_queue_items SET status = 'failed', completed_at = NOW()
+      WHERE status = 'running' RETURNING id, engagement_id, seq`
+  ).then(r => {
+    if (r.rows.length > 0) {
+      console.log(`[soc] startup: cleaned ${r.rows.length} ghost-running queue item(s):`,
+        r.rows.map(x => `${x.engagement_id}/Q${x.seq}`).join(", "));
+      const eids = [...new Set(r.rows.map(x => x.engagement_id))];
+      return db.query(
+        `UPDATE pentest_engagements SET agent_status = 'idle'
+          WHERE id = ANY($1) AND agent_status = 'running'`, [eids]);
+    }
+  }).then(r => { if (r && r.rowCount > 0) console.log(`[soc] startup: reset ${r.rowCount} ghost-running engagement(s) to idle`); })
+    .catch(err => console.error('[soc] startup ghost cleanup failed:', err.message));
+
   // Step 2 of OFFENSE-AGENT-DESIGN.md (dir_1780588442941) — when a queue item
   // finalizes, sync the outcome onto the most recent offense_telemetry row
   // pointing at that queue_item_id. Closes the audit loop and gives the next
