@@ -1,4 +1,33 @@
 "use strict";
+const { execSync } = require("child_process");
+
+// ── Bridge network identity (read once at startup) ─────────────────
+// Gives the offense model concrete ground truth about its execution host
+// so it can distinguish its own output from the target's.
+let _bridgeNetId = null;
+function getBridgeNetworkIdentity() {
+  if (_bridgeNetId) return _bridgeNetId;
+  try {
+    const raw = execSync("ip -4 -o addr show | awk '{print $2, $4}'", { encoding: "utf8", timeout: 3000 });
+    const ifaces = {};
+    for (const line of raw.trim().split("\n")) {
+      const [name, cidr] = line.split(/\s+/);
+      if (name && cidr) ifaces[name] = cidr;
+    }
+    const myIPs = Object.values(ifaces).map(c => c.split("/")[0]);
+    const hostname = execSync("hostname", { encoding: "utf8", timeout: 1000 }).trim();
+    _bridgeNetId = {
+      hostname,
+      interfaces: ifaces,
+      my_ips: myIPs,
+      warning: "These are YOUR host's addresses. If you see any of these IPs in scan/command output, you are looking at YOUR OWN machine, NOT the target. Commands like ifconfig, ip addr, hostname run locally on this host — to inspect a REMOTE target, you must scan it over the network (nmap, curl, etc.).",
+    };
+  } catch {
+    _bridgeNetId = { error: "could not read host network identity" };
+  }
+  return _bridgeNetId;
+}
+
 // offense-agent-tools.js — Step 4 of OFFENSE-AGENT-DESIGN.md (dir_1780588998478)
 // dir_1782238863765: OUTCOME_TIMEOUT_MS watchdog — no single step can freeze the loop.
 // When a step is stuck 'pending' (e.g. gated for human approval, or executor offline)
@@ -95,6 +124,7 @@ async function getEngagementState(args) {
     hosts: hosts.rows,
     findings: findings.rows,
     queue_history: queue.rows,
+    executor_identity: getBridgeNetworkIdentity(),
   };
 }
 
