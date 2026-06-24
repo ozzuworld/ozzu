@@ -213,7 +213,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
         </Pressable>
       </View>
 
-      {/* Executor health */}
+      {/* Network relay health */}
       {executor ? (
         <View style={{ backgroundColor: colors.bg.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border.subtle }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
@@ -225,7 +225,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
           </View>
           {(!executor.online || !executor.wg_up) ? (
             <Text style={{ color: colors.warning, fontSize: fontSize.xs, marginTop: 4 }}>
-              ⚠ executor {!executor.online ? "offline" : "WG stale"} — the run will stall until it recovers
+              ⚠ relay {!executor.online ? "offline" : "WG tunnel stale"} — traffic can't reach the target network
             </Text>
           ) : null}
         </View>

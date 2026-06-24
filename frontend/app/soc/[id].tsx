@@ -272,10 +272,10 @@ function EngagementDetailInner() {
   // DeepSeek run via the bridge; stop sets the abort flag the loop honors after the current step.
   const launchRun = useCallback(() => {
     const targets = ((engagement as any)?.scope?.target_networks || []).map((t: any) => t.ssid).filter(Boolean).join(", ");
-    const execName = (engagement as any)?.executor_host || "the executor";
+    const relayName = (engagement as any)?.executor_host || "the bridge";
     Alert.alert(
       "Launch run",
-      `DeepSeek will autonomously run this engagement${targets ? ` against ${targets}` : ""} via ${execName}, up to 50 steps. You can stop it anytime. Launch?`,
+      `DeepSeek will autonomously run this engagement${targets ? ` against ${targets}` : ""} via ${relayName}, up to 50 steps. You can stop it anytime. Launch?`,
       [
         { text: "Cancel", style: "cancel" },
         {

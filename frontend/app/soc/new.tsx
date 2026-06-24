@@ -42,11 +42,12 @@ const ENGAGEMENT_TYPES = [
 
 const AUTONOMY = [
   { key: "recon_only", label: "Recon only", hint: "Discovery + enumeration, no exploitation" },
-  { key: "exploitation_auto", label: "Autonomous", hint: "Full autonomous run — recon → exploit" },
-  { key: "full_engagement", label: "Full + post-exploit", hint: "Everything, including post-exploitation" },
+  { key: "exploitation_auto", label: "Autonomous", hint: "Full autonomous run — recon through exploit" },
+  { key: "exploitation_prompt", label: "Guided exploit", hint: "Autonomous recon, each exploit needs your approval" },
+  { key: "full_engagement", label: "Full + post-exploit", hint: "Everything including post-exploitation" },
 ];
 
-const STEPS = ["Basics", "Executor", "Wi-Fi", "Gate", "Autonomy", "Review"];
+const STEPS = ["Basics", "Access point", "Wi-Fi", "Autonomy", "Review"];
 
 function deviceColor(e: Executor): string {
   if (!e.online) return colors.error;
@@ -138,8 +139,7 @@ export default function SOCNewScreen() {
   const canNext = useMemo(() => {
     if (step === 0) return client.trim().length > 0;
     if (step === 1) return !!selected;
-    if (step === 2) return !!pickedSsid;
-    if (step === 3) return verdict.kind === "ready" || verdict.kind === "wifi";
+    if (step === 2) return !!pickedSsid && (verdict.kind === "ready" || verdict.kind === "wifi");
     return true;
   }, [step, client, selected, pickedSsid, verdict]);
 
@@ -208,9 +208,10 @@ export default function SOCNewScreen() {
         {step === 1 && (
           <>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={styles.fieldLabel}>Choose the physical executor</Text>
+              <Text style={styles.fieldLabel}>Network access point</Text>
               <Pressable onPress={fetchExecutors} hitSlop={8}><Text style={{ color: colors.accent, fontSize: fs.sm }}>↻ refresh</Text></Pressable>
             </View>
+            <Text style={{ color: colors.text.tertiary, fontSize: fs.xs, marginTop: -spacing.sm }}>The device physically connected to the target network. Commands run on the bridge — this device relays traffic.</Text>
             {loadingExec ? <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.lg }} /> : null}
             {executors.map((e) => (
               <ExecutorCard
@@ -254,25 +255,20 @@ export default function SOCNewScreen() {
                 ))}
               </View>
             )}
+            {pickedNet && (
+              <View style={[styles.verdictCard, { borderLeftColor: verdict.color, marginTop: spacing.sm }]}>
+                <Text style={{ color: verdict.color, fontSize: fs.base, fontWeight: fw.semibold }}>{verdict.title}</Text>
+                <Text style={{ color: colors.text.secondary, fontSize: fs.sm, marginTop: 4, lineHeight: 18 }}>{verdict.detail}</Text>
+                <View style={{ marginTop: spacing.sm, gap: 4 }}>
+                  <Meta k="Security" v={pickedNet.security} />
+                  <Meta k="Joined?" v={pickedNet.current ? "yes — on it" : "not yet"} highlight={pickedNet.current ? colors.success : colors.warning} />
+                </View>
+              </View>
+            )}
           </>
         )}
 
         {step === 3 && (
-          <View style={[styles.verdictCard, { borderLeftColor: verdict.color }]}>
-            <Text style={{ color: verdict.color, fontSize: fs.lg, fontWeight: fw.semibold }}>{verdict.title}</Text>
-            <Text style={{ color: colors.text.secondary, fontSize: fs.md, marginTop: spacing.sm, lineHeight: 18 }}>{verdict.detail}</Text>
-            {pickedNet && (
-              <View style={{ marginTop: spacing.md, gap: 4 }}>
-                <Meta k="Executor" v={selected || "—"} />
-                <Meta k="Target Wi-Fi" v={pickedNet.ssid} />
-                <Meta k="Joined?" v={pickedNet.current ? "yes — on it" : "not yet"} highlight={pickedNet.current ? colors.success : colors.warning} />
-                <Meta k="Security" v={pickedNet.security} />
-              </View>
-            )}
-          </View>
-        )}
-
-        {step === 4 && (
           <Field label="Autonomy level">
             <View style={{ gap: spacing.sm }}>
               {AUTONOMY.map((a) => (
@@ -285,13 +281,13 @@ export default function SOCNewScreen() {
           </Field>
         )}
 
-        {step === 5 && (
+        {step === 4 && (
           <View style={{ gap: spacing.sm }}>
             <Text style={styles.fieldLabel}>Review</Text>
             <View style={styles.reviewCard}>
               <Meta k="Client" v={client} />
               <Meta k="Type" v={ENGAGEMENT_TYPES.find((t) => t.key === type)?.label || type} />
-              <Meta k="Executor" v={selected || "—"} />
+              <Meta k="Access point" v={selected || "—"} />
               <Meta k="Target Wi-Fi" v={pickedSsid || "—"} />
               <Meta k="Autonomy" v={AUTONOMY.find((a) => a.key === autonomy)?.label || autonomy} />
               <Meta k="Objective #1" v={verdict.kind === "wifi" ? "Gain Wi-Fi access" : "Recon the target"} highlight={verdict.kind === "wifi" ? colors.warning : undefined} />
