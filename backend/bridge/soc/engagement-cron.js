@@ -12,7 +12,7 @@
 
 "use strict";
 
-const db = require("./db");
+const db = require("../db");
 
 // ── Cron parser (5-field, minute precision) ───────────────────────────────
 //

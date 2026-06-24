@@ -17,7 +17,7 @@
 const http = require("http");
 const https = require("https");
 const { URL } = require("url");
-const db = require("./db");
+const db = require("../db");
 const orchestrator = require("./offense-orchestrator");
 const aggregator   = require("./offense-aggregator");
 const { TOOL_SCHEMAS, dispatch } = require("./offense-agent-tools");

@@ -23,7 +23,7 @@
 // TOOL_SCHEMAS is the JSON array suitable for the `tools` param of an Ollama
 // /v1/chat/completions request when calling qwen3:32b / deepseek-r1:32b.
 
-const db = require("./db");
+const db = require("../db");
 const executorProbe = require("./executor-probe");
 
 // dir_1782238863765 Part 2 — watchdog timeout for wait_for_outcome.

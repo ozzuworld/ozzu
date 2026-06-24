@@ -6,7 +6,7 @@
 const { execSync } = require("child_process");
 const http = require("http");
 const https = require("https");
-const { getDevice } = require("./lib/devices");
+const { getDevice } = require("../lib/devices");
 
 // ── Service definitions ──
 

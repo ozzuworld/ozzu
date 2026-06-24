@@ -12,7 +12,7 @@
 const { EventEmitter } = require("events");
 const { createClient, LiveTranscriptionEvents, LiveTTSEvents } = require("@deepgram/sdk");
 
-const metrics = require("./metrics-tracker");
+const metrics = require("../metrics-tracker");
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY || "";
 const CIPHER_VOICE = process.env.CIPHER_VOICE || "aura-2-orion-en"; // Approachable, Comfortable, Calm
 

@@ -17,7 +17,7 @@
 "use strict";
 
 const { spawn } = require("child_process");
-const db = require("./db");
+const db = require("../db");
 
 const HOOK_EVENTS = {
   PRE_QUEUE_DISPATCH:  "pre_queue_dispatch",

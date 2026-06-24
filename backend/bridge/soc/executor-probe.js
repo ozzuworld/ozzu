@@ -13,7 +13,7 @@
 // installed list crosses any boundary.
 
 const { spawn } = require("child_process");
-const db = require("./db");
+const db = require("../db");
 
 // Candidate list — broad enough to cover both kali (dev-01) and stock-Android-root
 // (tablet) executors. Stays under shell-arg/length limits. To extend, append here

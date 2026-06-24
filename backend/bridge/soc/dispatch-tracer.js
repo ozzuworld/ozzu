@@ -17,7 +17,7 @@
 
 "use strict";
 
-const db = require("./db");
+const db = require("../db");
 
 async function traceDispatch(engagementId, command, intentClass) {
   if (!engagementId || !command) {

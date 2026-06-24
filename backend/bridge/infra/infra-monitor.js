@@ -8,7 +8,7 @@
 
 const { execSync } = require("child_process");
 const fs = require("fs");
-const { getDevice, getEsp32Nodes } = require("./lib/devices");
+const { getDevice, getEsp32Nodes } = require("../lib/devices");
 
 // ── Device & service definitions ──
 // Addresses + SSH paths come from infra/devices.json via getDevice().

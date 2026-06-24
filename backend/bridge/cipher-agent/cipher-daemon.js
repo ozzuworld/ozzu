@@ -267,7 +267,7 @@ function start(ctx) {
   _paused = false;
 
   // Capture action queue for pushing suppressed events
-  try { _actionQueue = require("./action-queue"); } catch {}
+  try { _actionQueue = require("../action-queue"); } catch {}
 
   // Subscribe to watchdog state transitions
   if (ctx.watchdog?.onStateTransition) {
@@ -688,7 +688,7 @@ async function buildKairosSnapshot() {
 
   // Check service health via watchdog
   try {
-    const watchdog = require("./watchdog");
+    const watchdog = require("../infra/watchdog");
     const status = watchdog.getStatus();
     const down = Object.entries(status).filter(([, v]) => v?.status === "down").map(([k]) => k);
     if (down.length > 0) issues.push({ type: "services_down", services: down });
@@ -761,7 +761,7 @@ async function kairosPush(urgent) {
     _lastPushAt[urgent.type] = now;
 
     // Use Person.owner() — the OZ Account model
-    const { Person } = require("./person");
+    const { Person } = require("../person");
     const owner = await Person.owner(_ctx.db);
     if (!owner) return;
 
