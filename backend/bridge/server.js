@@ -16,104 +16,13 @@ const buildVerifier = require("./build-verifier");
 const createLogger = require("./logger");
 const metrics = require("./metrics-tracker");
 const anthropicUsage = require("./anthropic-usage");
-const osintEngine = require("./osint-engine");
-osintEngine.registerModule(require("./osint-modules/hibp-password"));
-osintEngine.registerModule(require("./osint-modules/username-enum"));
-osintEngine.registerModule(require("./osint-modules/email-domain"));
-osintEngine.registerModule(require("./osint-modules/gravatar-lookup"));
-osintEngine.registerModule(require("./osint-modules/hibp-email"));
-osintEngine.registerModule(require("./osint-modules/data-broker"));
-osintEngine.registerModule(require("./osint-modules/paste-monitor"));
-osintEngine.registerModule(require("./osint-modules/phone-lookup"));
-osintEngine.registerModule(require("./osint-modules/domain-recon"));
-osintEngine.registerModule(require("./osint-modules/social-deep"));
-osintEngine.registerModule(require("./osint-modules/image-search"));
-osintEngine.registerModule(require("./osint-modules/document-meta"));
-osintEngine.registerModule(require("./osint-modules/shodan-lookup"));
-osintEngine.registerModule(require("./osint-modules/web-crawler"));
-osintEngine.registerModule(require("./osint-modules/secret-scanner"));
-osintEngine.registerModule(require("./osint-modules/exif-extract"));
-osintEngine.registerModule(require("./osint-modules/reverse-image"));
-osintEngine.registerModule(require("./osint-modules/avatar-compare"));
-osintEngine.registerModule(require("./osint-modules/face-match"));
-// CLI-based modules (Epic 6) — run in osint-tools Docker container
-osintEngine.registerModule(require("./osint-modules/sherlock-cli"));
-osintEngine.registerModule(require("./osint-modules/maigret-cli"));
-osintEngine.registerModule(require("./osint-modules/holehe-cli"));
-osintEngine.registerModule(require("./osint-modules/phoneinfoga-cli"));
-osintEngine.registerModule(require("./osint-modules/amass-cli"));
-osintEngine.registerModule(require("./osint-modules/nuclei-cli"));
-osintEngine.registerModule(require("./osint-modules/exiftool-cli"));
-osintEngine.registerModule(require("./osint-modules/h8mail-cli"));
-osintEngine.registerModule(require("./osint-modules/theharvester-cli"));
-// Threat intel feeds (Epic 6)
-osintEngine.registerModule(require("./osint-modules/virustotal-lookup"));
-osintEngine.registerModule(require("./osint-modules/abuseipdb-lookup"));
-osintEngine.registerModule(require("./osint-modules/otx-lookup"));
-osintEngine.registerModule(require("./osint-modules/urlhaus-check"));
-// Defensive intelligence (Epic 7)
-osintEngine.registerModule(require("./osint-modules/ghunt-email"));
-osintEngine.registerModule(require("./osint-modules/dnstwist-scan"));
-osintEngine.registerModule(require("./osint-modules/crtsh-monitor"));
-osintEngine.registerModule(require("./osint-modules/darkweb-search"));
-osintEngine.registerModule(require("./osint-modules/leak-search"));
-// Colombian OSINT modules (CO Epic)
-osintEngine.registerModule(require("./osint-modules/co-secop"));
-osintEngine.registerModule(require("./osint-modules/co-adres"));
-osintEngine.registerModule(require("./osint-modules/co-simit"));
-osintEngine.registerModule(require("./osint-modules/co-rues"));
-osintEngine.registerModule(require("./osint-modules/co-sigep"));
-osintEngine.registerModule(require("./osint-modules/co-dian"));
-osintEngine.registerModule(require("./osint-modules/co-registraduria"));
-osintEngine.registerModule(require("./osint-modules/co-redam"));
-osintEngine.registerModule(require("./osint-modules/co-procuraduria"));
-osintEngine.registerModule(require("./osint-modules/co-contraloria"));
-osintEngine.registerModule(require("./osint-modules/co-policia"));
-osintEngine.registerModule(require("./osint-modules/co-rama-judicial"));
-osintEngine.registerModule(require("./osint-modules/co-fiscalia"));
-osintEngine.registerModule(require("./osint-modules/co-libreta-militar"));
-osintEngine.registerModule(require("./osint-modules/co-risk-score"));
-// Social media intelligence modules (Intelligence Tab Epic)
-osintEngine.registerModule(require("./osint-modules/bluesky-intel"));
-osintEngine.registerModule(require("./osint-modules/youtube-intel"));
-osintEngine.registerModule(require("./osint-modules/reddit-intel"));
-osintEngine.registerModule(require("./osint-modules/mastodon-intel"));
-osintEngine.registerModule(require("./osint-modules/telegram-intel"));
-osintEngine.registerModule(require("./osint-modules/instagram-intel"));
-osintEngine.registerModule(require("./osint-modules/tiktok-intel"));
-osintEngine.registerModule(require("./osint-modules/facebook-intel"));
-osintEngine.registerModule(require("./osint-modules/linkedin-intel"));
-osintEngine.registerModule(require("./osint-modules/twitter-intel"));
-// Deep intelligence modules (name-based + username)
-osintEngine.registerModule(require("./osint-modules/wikipedia-intel"));
-osintEngine.registerModule(require("./osint-modules/news-intel"));
-osintEngine.registerModule(require("./osint-modules/github-intel"));
-// Photo intelligence pipeline modules
-osintEngine.registerModule(require("./osint-modules/face-search"));
-osintEngine.registerModule(require("./osint-modules/scene-analysis"));
-osintEngine.registerModule(require("./osint-modules/identity-resolver"));
-osintEngine.registerModule(require("./osint-modules/social-network-mapper"));
-osintEngine.registerModule(require("./osint-modules/fullcontact-lookup"));
-osintEngine.registerModule(require("./osint-modules/hunter-lookup"));
-osintEngine.registerModule(require("./osint-modules/pimeyes-search"));
-// GEOINT — runs last to harvest location signals from all other modules
-osintEngine.registerModule(require("./osint-modules/photo-forensics"));
-osintEngine.registerModule(require("./osint-modules/movement-intel"));
-osintEngine.registerModule(require("./osint-modules/satellite-intel"));
-osintEngine.registerModule(require("./osint-modules/surveillance-intel"));
-osintEngine.registerModule(require("./osint-modules/geoint-collector"));
-// OSINT monitoring + CLI runner
-const osintMonitor = require("./osint-monitor");
-const cliRunner = require("./osint-cli-runner");
 
 // ── Extracted route modules ──
 const dashboardRoutes = require("./routes/dashboard");
 const directiveRoutes = require("./routes/directives");
 const spotifyRoutes = require("./routes/spotify");
-const osintRoutes = require("./routes/osint");
 const pipelineRoutes = require("./routes/pipeline");
 const epicRoutes = require("./routes/epics");
-const cedulaRoutes = require("./routes/cedula");
 const cipherRoutes = require("./routes/cipher");
 const businessRoutes = require("./routes/business");
 const businessContactRoutes = require("./routes/business-contacts");
@@ -1560,7 +1469,7 @@ const routeCtx = {
   // Utilities
   sendJSON, parseBody, requireAuth, requireAuthIfPublic, isPublicRequest, escapeHtml, escapeJsString, cosineSimilarity,
   // Database + external modules
-  db, redis, log, metrics, osintEngine, osintMonitor, cliRunner, buildVerifier, anthropicUsage,
+  db, redis, log, metrics, buildVerifier, anthropicUsage,
   // Agent spawner
   getRunningAgents, killAgent, smartDeploy, mergeWorktreeToMain, cleanupWorktree, getConfig, setConfig,
   routeDirective,
@@ -1645,10 +1554,8 @@ function getRouteHandlers() {
       dashboard: dashboardRoutes(routeCtx),
       directives: directiveRoutes(routeCtx),
       spotify: spotifyRoutes(routeCtx),
-      osint: osintRoutes(routeCtx),
       pipeline: pipelineRoutes(routeCtx),
       epics: epicRoutes(routeCtx),
-      cedula: cedulaRoutes(routeCtx),
       cipher: cipherRoutes(routeCtx),
       business: businessRoutes(routeCtx),
       businessContacts: businessContactRoutes(routeCtx),
@@ -1788,8 +1695,6 @@ async function handleRequest(req, res) {
   if (await r.spotify(req, res, pathname, url)) return;
   if (await r.pipeline(req, res, pathname, url)) return;
   if (await r.epics(req, res, pathname, url)) return;
-  if (await r.osint(req, res, pathname, url)) return;
-  if (await r.cedula(req, res, pathname, url)) return;
   if (await r.businessContacts(req, res, pathname, url)) return;
   if (await r.businessShipments(req, res, pathname, url)) return;
   if (await r.businessInvoices(req, res, pathname, url)) return;
@@ -4875,8 +4780,6 @@ function broadcastToAll(msg) {
 
 // Wire up broadcast function for agent-spawner to emit agentUpdate events
 setBroadcast(broadcastToAll);
-// Wire up OSINT monitor broadcast for push alerts
-osintMonitor.setBroadcast(broadcastToAll);
 
 function broadcastToRole(role, msg) {
   const data = JSON.stringify(msg);
@@ -6909,13 +6812,6 @@ wss.on("connection", (ws, req) => {
     require("./person").ensureTables(db).catch(e => log.bridge.error("person ensureTables:", e.message));
     // wa-service proxies to Android agent — no local connection needed on start
     metrics.startFlushTimer();
-    // Initialize OSINT persistent scheduler + alert broadcast + monitoring
-    osintEngine.setAlertBroadcast(broadcastToAll);
-    osintMonitor.loadSchedules(osintEngine.runScan).catch((e) => log.bridge.error("OSINT monitor init error:", e.message));
-    cliRunner.healthCheck().then((status) => {
-      log.bridge.info(`OSINT CLI tools: container=${status.containerRunning ? "running" : "not running"}, tools=${Object.entries(status.tools).filter(([,v]) => v.available).length} available`);
-    }).catch(() => {});
-
     // Notify June about restart if this isn't the first boot
     if (_restartCount > 0 && _previousStartedAt) {
       const prevUptime = Math.round((new Date(_serverStartedAt).getTime() - new Date(_previousStartedAt).getTime()) / 1000);

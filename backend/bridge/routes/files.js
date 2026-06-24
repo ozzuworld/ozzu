@@ -200,22 +200,7 @@ module.exports = function createFileRoutes(ctx) {
           [fname, buf.length, savePath, JSON.stringify({ label: label || "unknown", status: "pending" })]
         );
 
-        // Trigger OSINT face scan — upload to OSINT profiles + start scan
-        let scanResult = null;
-        try {
-          // Upload as OSINT profile image
-          const osint = ctx.osintEngine;
-          if (osint && typeof osint.uploadImage === "function") {
-            const profile = await osint.uploadImage(label || "VIP Capture", data, fname);
-            if (profile && profile.id) {
-              scanResult = await osint.triggerScan(profile.id, "face-search");
-            }
-          }
-        } catch (osintErr) {
-          log.bridge.warn(`Intel OSINT scan failed: ${osintErr.message}`);
-        }
-
-        // Also try direct face search via Qdrant
+        // Direct face search via Qdrant
         let faceMatches = [];
         try {
           const faceApiUrl = "http://127.0.0.1:5555";
@@ -256,7 +241,6 @@ module.exports = function createFileRoutes(ctx) {
         return sendJSON(res, 200, {
           ok: true,
           matches: faceMatches,
-          osintScan: scanResult,
           message: faceMatches.length > 0
             ? `Found ${faceMatches.length} potential matches`
             : "No matches found — face saved for future identification",
