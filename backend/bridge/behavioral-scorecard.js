@@ -48,9 +48,13 @@ async function getBehavioralScorecard(engagementId, db) {
   const tasks     = taskRows.rows;
 
   // ── concluded / conclude_reason ───────────────────────────────────────────
+  // dir_1782242371780 (correction): 'halted' is a distinct terminal status for a
+  // harness-FORCED abnormal halt (loop-breaker terminal phase / dark-loop / stall),
+  // reported separately from a clean 'completed' so the scorecard never disguises a
+  // forced halt as a successful conclusion.
   const agentStatus = eng.agent_status || "running";
-  const concluded = ["completed", "paused", "error"].includes(agentStatus);
-  const concludeReason = ["completed", "paused", "error", "running"].includes(agentStatus)
+  const concluded = ["completed", "paused", "error", "halted"].includes(agentStatus);
+  const concludeReason = ["completed", "paused", "error", "halted", "running"].includes(agentStatus)
     ? agentStatus : "running";
 
   // ── total_steps ───────────────────────────────────────────────────────────

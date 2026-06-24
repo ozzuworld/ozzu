@@ -21,6 +21,10 @@ const db = require("./db");
 const orchestrator = require("./offense-orchestrator");
 const aggregator   = require("./offense-aggregator");
 const { TOOL_SCHEMAS, dispatch } = require("./offense-agent-tools");
+// dir_1782242371780 (correction): final-status mapping lives in a dependency-free
+// module so it is the single source of truth AND unit-testable without this file's
+// Docker-absolute require tree. Re-exported below for callers that import from here.
+const { computeFinalStatus } = require("./offense-final-status");
 
 // dir_1780969435006: dual-model SOTA. Synthesizer (compact JSON + bash) uses
 // SYNTH_MODEL_*; falls back to OFFENSE_MODEL_* when not set so legacy
@@ -421,6 +425,12 @@ async function runAgent(engagementId, opts = {}) {
   let stepsQueued = 0;
   let tasksAdded  = 0;
   let endedByOrchestrator = false;
+  // dir_1782242371780 (correction): a harness-FORCED abnormal halt (loop-breaker on
+  // a terminal phase, dark-loop halt-timeout, or stall exhaustion) is NOT a clean
+  // model-driven conclusion. The prior fix stamped these 'completed', which hid them
+  // from the boot scanner (resumes 'running' only) and the fleet diagnostic. Track
+  // them distinctly so computeFinalStatus() maps them to 'halted'.
+  let haltedAbnormally = false;
   let endReason = null;
   let lastDecision = null;
 
@@ -629,20 +639,22 @@ async function runAgent(engagementId, opts = {}) {
           mentorGuidance = `[LOOP-BREAKER dir_1782234450321] Phase '${currentPhase}' repeated ${MAX_CONSECUTIVE_INTENT}+ times with no advance — automatically advanced to '${nextPhase}'. DO NOT return to '${currentPhase}' or earlier phases. Focus exclusively on '${nextPhase}' tasks: ${nextPhase === "foothold" ? "gaining initial access via confirmed attack vectors from enumeration" : nextPhase === "exploitation" ? "extending the foothold — privesc, additional service exploitation" : nextPhase === "enumeration" ? "version probes and attack-vector identification" : "post-access actions per phase guidance"}.`;
           ctx.mentor_guidance = mentorGuidance;
         } else {
-          // dir_1782242371780: Fix 1 — terminal phase reached, loop-breaker has nowhere to advance.
-          // Conclude cleanly instead of idling at 'running' indefinitely.
-          // This happens when phase = 'reporting' (last in PHASE_ORDER) and the orchestrator
-          // keeps cycling it without calling end_engagement. Force-conclude so the operator
-          // sees a terminal status instead of a silent dark loop.
-          console.log(`[offense-agent] loop-breaker: phase '${currentPhase}' is terminal (no next phase) and repeated ${consecutivePhaseStreak}× — force-concluding engagement (dir_1782242371780)`);
-          endReason = `loop-breaker: terminal phase '${currentPhase}' repeated ${consecutivePhaseStreak}× with no end_engagement call — auto-concluded (dir_1782242371780)`;
+          // dir_1782242371780 (correction): terminal phase reached, loop-breaker has
+          // nowhere to advance. This is a HARNESS-FORCED abnormal halt — the model never
+          // called end_engagement, the loop-breaker hit the end of PHASE_ORDER and forced a
+          // stop. The prior fix stamped this 'completed', which hid it from the boot scanner
+          // (resumes 'running' only) and the fleet diagnostic. Mark it haltedAbnormally so
+          // computeFinalStatus() maps it to the distinct 'halted' status, and keep
+          // endedByOrchestrator FALSE (a model end is the only thing that may set it).
+          console.log(`[offense-agent] loop-breaker: phase '${currentPhase}' is terminal (no next phase) and repeated ${consecutivePhaseStreak}× — force-halting engagement (dir_1782242371780)`);
+          endReason = `loop-breaker: terminal phase '${currentPhase}' repeated ${consecutivePhaseStreak}× with no end_engagement call — auto-halted (dir_1782242371780)`;
           try {
             await db.query(
               `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
                VALUES ($1, NULL, 'loop_breaker', 'terminal_phase', 0, 0, false, true, 0, 0, 'engagement_concluded', $2)`,
               [engagementId, `phase=${currentPhase}; streak=${consecutivePhaseStreak}; iter=${iter}; steps_queued=${stepsQueued}`]);
           } catch (_) {}
-          endedByOrchestrator = true; // treat as clean conclusion so finalStatus → 'completed'
+          haltedAbnormally = true; // harness-forced halt → finalStatus 'halted' (NOT 'completed')
           break;
         }
       }
@@ -789,6 +801,10 @@ async function runAgent(engagementId, opts = {}) {
         endReason = haltedByTimeout
           ? `loop dark for ${Math.round((Date.now()-lastStepQueuedAt)/1000)}s with no pending work — loop_halted (dir_1782242371780)`
           : `orchestrator gave no task ${stallStreak}× (work in flight: ${haveWork}) — engagement exhausted`;
+        // dir_1782242371780 (correction): EVERY path through this break is a harness-forced
+        // dark-loop/stall halt — the model never ended and the iter cap wasn't hit. Mark it
+        // haltedAbnormally so the final status is 'halted', not 'error' (and never 'completed').
+        haltedAbnormally = true;
         if (haltedByTimeout) {
           try {
             await db.query(
@@ -988,13 +1004,12 @@ async function runAgent(engagementId, opts = {}) {
     }
   }
 
-  // dir_1782242371780: Fix 3 — halt detection. If the loop broke without a
-  // model-driven end AND without hitting the iter cap AND without a prior
-  // endReason (i.e. the loop exited via the stall-streak break at stallStreak>=30),
-  // emit a distinct 'loop_halted' telemetry outcome so analyze_engagement_telemetry
-  // surfaces it as a WARNING. The loop_halted signal is also emitted when
-  // HALT_TIMEOUT_MS elapsed since the last queued step (caught below).
-  const haltedByStall = !endedByOrchestrator && iter < maxIter && endReason && endReason.includes("engagement exhausted");
+  // dir_1782242371780: halt detection. The stall-exhaustion break (stallStreak>=3
+  // with no work, or the >=30 hard cap) is a harness-forced halt (haltedAbnormally
+  // is already true). Emit a distinct 'loop_halted' telemetry outcome so
+  // detectLoopHalt / analyze_engagement_telemetry surfaces it as a WARNING. (The
+  // dark-loop halt-timeout sub-case already emitted its own loop_halted above.)
+  const haltedByStall = haltedAbnormally && iter < maxIter && endReason && endReason.includes("engagement exhausted");
   if (haltedByStall) {
     try {
       await db.query(
@@ -1044,15 +1059,14 @@ async function runAgent(engagementId, opts = {}) {
     console.error(`[offense-agent] task drain at conclusion failed:`, e.message);
   }
 
-  // dir_1782242371780: Fix 2 — iteration-budget exhaustion must set a TERMINAL
-  // non-'running' status. Previously 'idle' was used, which was easy to confuse
-  // with a stalled 'running'. Now 'paused' with a clear end_reason so the operator
-  // knows they need to re-call start_engagement_run to continue.
-  // 'completed' = model cleanly ended | 'paused' = budget hit (resumable) |
-  // 'error' = unexpected stall | all three are non-'running' (loop is gone).
-  const finalStatus = endedByOrchestrator
-    ? "completed"
-    : (iter >= maxIter ? "paused" : "error");
+  // dir_1782242371780: final-status mapping extracted to the exported
+  // computeFinalStatus() pure helper so it can be unit-tested against the real code
+  // (the prior tests asserted an inline COPY and hid the mislabel bug). Mapping:
+  // 'halted' = harness-forced abnormal halt (loop-breaker terminal / dark-loop /
+  // stall) | 'completed' = model cleanly ended (even with 0 findings) | 'paused' =
+  // iter-cap budget hit (resumable via start_engagement_run) | 'error' = unexpected
+  // early exit. All four are non-'running' (the loop is gone).
+  const finalStatus = computeFinalStatus({ haltedAbnormally, endedByOrchestrator, iter, maxIter });
   const finalEndReason = endReason
     || (iter >= maxIter ? `hit max_iter=${maxIter} cap — re-call start_engagement_run to continue` : "(unknown)");
   await setAgentStatus(engagementId, finalStatus, { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, end_reason: finalEndReason });
@@ -1193,4 +1207,4 @@ async function resetAgent(engagementId) {
   return { engagement_id: engagementId, ok: true };
 }
 
-module.exports = { runAgent, runAgentToolCall, resetAgent, synthesizeCommand };
+module.exports = { runAgent, runAgentToolCall, resetAgent, synthesizeCommand, computeFinalStatus };

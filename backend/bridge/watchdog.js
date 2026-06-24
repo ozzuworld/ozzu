@@ -50,6 +50,15 @@ let _recoveryAttempts = 0;
 const HEARTBEAT_STALE_MS = 5 * 60 * 1000;  // 5 min without heartbeat = stale
 const MAX_RECOVERY_ATTEMPTS = 3;
 
+// dir_1782242371780 (correction): silent-halt visibility. A harness-FORCED abnormal
+// halt sets agent_status='halted' but queues NO pending step, so the per-step
+// reaper/watchdog can't see it and the engagement goes dark. We extend THIS watchdog
+// (rather than add a new always-on server.js poller — one was just removed) to flag
+// 'halted' engagements once, on the running→halted transition. The set is the dedup:
+// an id is added when first alerted and removed when the engagement leaves 'halted'
+// (re-run/reset), so a later halt re-alerts but an already-flagged one never does.
+const _haltedAlerted = new Set();
+
 function recordHeartbeat() {
   _lastHeartbeat = Date.now();
   _recoveryAttempts = 0; // reset on successful heartbeat
@@ -483,6 +492,70 @@ async function runCheck(service) {
 async function runAllChecks() {
   const standardServices = Object.keys(SERVICES).filter((s) => s !== "vast-gpu");
   await Promise.allSettled(standardServices.map((s) => runCheck(s)));
+  // dir_1782242371780 (correction): piggy-back the silent-halt sweep on the same
+  // 30s cadence. Best-effort and isolated — its own try/catch inside, never blocks
+  // or fails the service checks.
+  await checkHaltedEngagements();
+}
+
+// dir_1782242371780 (correction): flag engagements that the offense loop force-halted.
+// These set agent_status='halted' with no pending queue step, so they are invisible to
+// the per-step reaper and to the boot scanner (which resumes 'running' only). Alert ONCE
+// per halt, gated on the running→halted transition via the _haltedAlerted dedup set.
+// Membrane-safe: surfaces only the engagement id, status, and a count — never command,
+// finding, or target text. Idempotent and fully try/catch'd; never throws into the loop.
+async function checkHaltedEngagements() {
+  if (!_ctx?.db) return;
+  let rows = [];
+  try {
+    const r = await _ctx.db.query(
+      `SELECT id FROM pentest_engagements WHERE agent_status = 'halted'`);
+    rows = r.rows || [];
+  } catch (err) {
+    console.error("[watchdog] halt sweep query failed:", err.message);
+    return;
+  }
+  const currentlyHalted = new Set(rows.map((row) => String(row.id)));
+
+  // Clear acks for engagements that have LEFT 'halted' (re-run / reset) so a future
+  // halt of the same engagement alerts again — mirrors the per-service transition reset.
+  for (const id of [..._haltedAlerted]) {
+    if (!currentlyHalted.has(id)) _haltedAlerted.delete(id);
+  }
+
+  // Alert only on the running→halted transition (id not yet acked) — never re-fire.
+  for (const id of currentlyHalted) {
+    if (_haltedAlerted.has(id)) continue;
+    _haltedAlerted.add(id);
+    try {
+      broadcastHaltAlert(id);
+    } catch (err) {
+      console.error("[watchdog] halt alert failed:", err.message);
+    }
+  }
+}
+
+// Reuses the same alert hooks as broadcastAlert (WS broadcast + June notification +
+// external listeners) so the halt rides the existing alert path, not a new one.
+function broadcastHaltAlert(engagementId) {
+  if (!_ctx) return;
+  const msg = {
+    type: "opsAlert",
+    service: "offense-engagement",
+    status: "halted",
+    previousStatus: "running",
+    severity: "high",
+    engagementId,
+    ts: new Date().toISOString(),
+    details: { message: `Offense engagement ${engagementId} halted abnormally (no clean conclusion, no pending step).` },
+  };
+  if (typeof _ctx.broadcastToAll === "function") _ctx.broadcastToAll(msg);
+  if (typeof _ctx.sendNotification === "function") {
+    _ctx.sendNotification(`Alert: offense engagement ${engagementId} halted abnormally and needs review.`);
+  }
+  for (const fn of _listeners) {
+    try { fn({ type: "engagementHalted", engagementId, status: "halted", previousStatus: "running", ts: msg.ts }); } catch {}
+  }
 }
 
 async function runGpuCheck() {
@@ -547,4 +620,16 @@ function onStateTransition(fn) {
   return () => { const i = _listeners.indexOf(fn); if (i >= 0) _listeners.splice(i, 1); };
 }
 
-module.exports = { start, stop, getStatus, getIncidents, forceCheck, recordHeartbeat, onStateTransition };
+// dir_1782242371780 (correction): test hook — inject a mock _ctx and reset the
+// dedup set so the silent-halt sweep can be unit-tested WITHOUT start()'s service
+// timers (which would make real network/db calls). Production callers never use this.
+function __setTestContext(ctx) {
+  _ctx = ctx;
+  _haltedAlerted.clear();
+}
+
+module.exports = {
+  start, stop, getStatus, getIncidents, forceCheck, recordHeartbeat, onStateTransition,
+  // dir_1782242371780: exported for the silent-halt visibility test.
+  checkHaltedEngagements, __setTestContext,
+};

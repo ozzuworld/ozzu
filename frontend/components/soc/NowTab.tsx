@@ -48,9 +48,10 @@ function stalledLabel(engagement: any): string {
  * PAUSED   = paused.
  * DONE     = completed.
  * FAILED   = error.
+ * HALTED   = halted (harness force-halted the loop — dir_1782242371780).
  * IDLE     = idle / null / anything else.
  */
-export type RunStatus = "running" | "stalled" | "paused" | "completed" | "failed" | "idle";
+export type RunStatus = "running" | "stalled" | "paused" | "completed" | "failed" | "halted" | "idle";
 
 function computeRunStatus(engagement: any): RunStatus {
   const s: string = engagement?.agent_status || "idle";
@@ -58,6 +59,9 @@ function computeRunStatus(engagement: any): RunStatus {
     if (s === "paused") return "paused";
     if (s === "completed") return "completed";
     if (s === "error") return "failed";
+    // dir_1782242371780 (correction): a harness-forced abnormal halt. Surface it
+    // distinctly so it doesn't masquerade as a never-started 'idle' engagement.
+    if (s === "halted") return "halted";
     return "idle";
   }
   // agent_status === "running" — check for staleness
@@ -130,6 +134,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
   const statusColor: string =
     runStatus === "running"   ? colors.success
     : runStatus === "stalled"  ? colors.warning
+    : runStatus === "halted"   ? colors.warning
     : runStatus === "failed"   ? colors.error
     : runStatus === "completed" ? colors.accent
     : runStatus === "paused"   ? colors.status.in_progress
@@ -139,6 +144,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
     runStatus === "running"   ? "DeepSeek is running"
     : runStatus === "stalled"  ? stalledLabel(engagement)
     : runStatus === "failed"   ? "Run errored"
+    : runStatus === "halted"   ? "Run halted — no clean conclusion"
     : runStatus === "completed" ? "Run complete"
     : runStatus === "paused"   ? "Paused"
     : "Idle — not launched yet";
@@ -180,7 +186,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
             <RunBtn label="■  Stop run" tone="stop" onPress={onStop} />
           ) : (
             <RunBtn
-              label={runStatus === "paused" ? "▶  Continue run" : runStatus === "completed" ? "↻  Run again" : "▶  Launch run"}
+              label={runStatus === "paused" ? "▶  Continue run" : (runStatus === "completed" || runStatus === "halted") ? "↻  Run again" : "▶  Launch run"}
               tone="go"
               onPress={onLaunch}
             />

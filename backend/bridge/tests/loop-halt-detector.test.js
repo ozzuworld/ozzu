@@ -1,243 +1,231 @@
-// loop-halt-detector.test.js — dir_1782242371780
-// Unit tests for the three loop-halt fixes:
-//   Fix 1: terminal-phase loop-breaker → engagement_concluded (not silent skip)
-//   Fix 2: iter-budget exhaustion → 'paused' (not 'idle') status
-//   Fix 3: halt-timeout detection → 'loop_halted' telemetry outcome
-// No DB, no bridge process required. Tests pure logic.
+// loop-halt-detector.test.js — dir_1782242371780 (CORRECTION)
+//
+// REWRITE of the prior green-suite-theater version. The old file (a) asserted the BUG
+// as correct (terminal-phase halt → 'completed') and (b) tested INLINE COPIES of the
+// logic, never importing the real modules — so reverting the real code left the suite
+// green. This version imports the REAL production functions and every test is
+// mutation-provable: reverting its named production line turns THAT test red.
+//
+//   computeFinalStatus      ← offense-agent.js
+//   detectLoopHalt          ← telemetry-analyze.js
+//   ACTIVE_AGENT_STATUSES   ← telemetry-analyze.js
+//   getBehavioralScorecard  ← behavioral-scorecard.js
+//   checkHaltedEngagements  ← watchdog.js
+//
+// No bridge process required: computeFinalStatus / detectLoopHalt / ACTIVE_AGENT_STATUSES
+// are pure; getBehavioralScorecard + checkHaltedEngagements take a mock db / ctx.
+//
 // Run with: node tests/loop-halt-detector.test.js
 "use strict";
 
 const assert = require("assert");
+const path   = require("path");
+
+// REAL production modules — NOT inline copies.
+// computeFinalStatus lives in the dependency-free offense-final-status.js (offense-agent.js
+// requires + re-exports it). We import the real function from there because requiring
+// offense-agent.js directly pulls its Docker-absolute (/app/*) tree that doesn't resolve
+// outside the bridge container; a source-text check below pins that offense-agent.js
+// actually USES this function (so the wiring can't silently regress).
+const { computeFinalStatus }              = require(path.join(__dirname, "../offense-final-status"));
+const { detectLoopHalt, ACTIVE_AGENT_STATUSES } = require(path.join(__dirname, "../telemetry-analyze"));
+const { getBehavioralScorecard }          = require(path.join(__dirname, "../behavioral-scorecard"));
+const watchdog                            = require(path.join(__dirname, "../watchdog"));
+const fs                                  = require("fs");
 
 let passed = 0;
 let failed = 0;
 function check(name, fn) {
-  try {
-    fn();
-    console.log(`  ✓ ${name}`);
-    passed++;
-  } catch (e) {
-    console.error(`  ✗ ${name}: ${e.message}`);
-    failed++;
-  }
+  try { fn(); console.log(`  ✓ ${name}`); passed++; }
+  catch (e) { console.error(`  ✗ ${name}: ${e.message}`); failed++; }
+}
+async function checkAsync(name, fn) {
+  try { await fn(); console.log(`  ✓ ${name}`); passed++; }
+  catch (e) { console.error(`  ✗ ${name}: ${e.message}`); failed++; }
 }
 
-// ── Fix 1: Terminal phase reached → engagement_concluded, not silent skip ────
-console.log("\n[1] Terminal-phase loop-breaker concludes engagement (dir_1782242371780 Fix 1)");
-{
-  const PHASE_ORDER = ["recon", "enumeration", "foothold", "exploitation", "post_exploit", "reporting"];
-
-  // Mirrors the loop-breaker nextPhase computation in offense-agent.js
-  function computeNextPhase(currentPhase) {
-    const idx = PHASE_ORDER.indexOf(currentPhase);
-    return (idx >= 0 && idx < PHASE_ORDER.length - 1) ? PHASE_ORDER[idx + 1] : null;
-  }
-
-  check("nextPhase from 'post_exploit' is 'reporting' (one before terminal)", () => {
-    assert.strictEqual(computeNextPhase("post_exploit"), "reporting");
-  });
-
-  check("nextPhase from 'reporting' is null (terminal phase)", () => {
-    assert.strictEqual(computeNextPhase("reporting"), null);
-  });
-
-  // Simulate the loop-breaker branch decision
-  function loopBreakerDecision(currentPhase, streak, MAX_CONSECUTIVE_INTENT) {
-    if (streak < MAX_CONSECUTIVE_INTENT) return { action: "none" };
-    const nextPhase = computeNextPhase(currentPhase);
-    if (nextPhase) {
-      return { action: "advance", to: nextPhase };
-    } else {
-      // Fix 1: was a silent skip (if (nextPhase) { ... } — no else), now concludes
-      return { action: "conclude", outcome: "engagement_concluded", phase: currentPhase };
-    }
-  }
-
-  check("loop-breaker in 'reporting' with streak ≥ 3 → conclude, not skip", () => {
-    const r = loopBreakerDecision("reporting", 3, 3);
-    assert.strictEqual(r.action, "conclude");
-    assert.strictEqual(r.outcome, "engagement_concluded");
-  });
-
-  check("loop-breaker in 'reporting' with streak < 3 → no action yet", () => {
-    const r = loopBreakerDecision("reporting", 2, 3);
-    assert.strictEqual(r.action, "none");
-  });
-
-  check("loop-breaker in 'post_exploit' with streak ≥ 3 → advance to 'reporting' (not conclude)", () => {
-    const r = loopBreakerDecision("post_exploit", 3, 3);
-    assert.strictEqual(r.action, "advance");
-    assert.strictEqual(r.to, "reporting");
-  });
-
-  check("loop-breaker in 'exploitation' with streak ≥ 3 → advance to 'post_exploit'", () => {
-    const r = loopBreakerDecision("exploitation", 3, 3);
-    assert.strictEqual(r.action, "advance");
-    assert.strictEqual(r.to, "post_exploit");
-  });
-
-  check("loop-breaker conclusion sets endedByOrchestrator=true → finalStatus='completed'", () => {
-    // Mirrors the code: endedByOrchestrator = true; break; → finalStatus = 'completed'
-    let endedByOrchestrator = false;
-    const r = loopBreakerDecision("reporting", 4, 3);
-    if (r.action === "conclude") {
-      endedByOrchestrator = true; // as coded
-    }
-    const finalStatus = endedByOrchestrator ? "completed" : "error";
-    assert.strictEqual(finalStatus, "completed");
-  });
-
-  check("prior behavior (no Fix 1): terminal phase was silently skipped", () => {
-    // Reproduce what USED to happen (the bug): if (nextPhase) { ... } with nextPhase=null → nothing
-    function oldLoopBreaker(currentPhase, streak) {
-      if (streak < 3) return { action: "none" };
-      const nextPhase = computeNextPhase(currentPhase);
-      if (nextPhase) return { action: "advance", to: nextPhase };
-      // OLD CODE: no else branch — falls through silently
-      return { action: "none" }; // <-- the bug: silent skip
-    }
-    const r = oldLoopBreaker("reporting", 3);
-    assert.strictEqual(r.action, "none", "Old code: terminal phase was silent skip");
-  });
+// Mock db mirroring tests/scorecard-instrumentation.test.js's pattern: dispatch by the
+// table named in the SQL. Lets us drive the real getBehavioralScorecard / watchdog
+// queries without a live database.
+function makeScorecardDb(overrides = {}) {
+  const data = {
+    engagement: { status: "in_progress", agent_status: "halted", engagement_phase: "reporting", agent_run_state: {} },
+    telemetry: [], findings: [], tasks: [], queue: [],
+    ...overrides,
+  };
+  return {
+    async query(sql) {
+      if (/FROM pentest_engagements/.test(sql)) return { rows: [data.engagement] };
+      if (/FROM offense_telemetry/.test(sql))   return { rows: data.telemetry };
+      if (/FROM pentest_findings/.test(sql))    return { rows: data.findings };
+      if (/FROM engagement_tasks/.test(sql))    return { rows: data.tasks };
+      if (/FROM soc_queue_items/.test(sql))     return { rows: data.queue };
+      return { rows: [] };
+    },
+  };
 }
 
-// ── Fix 2: Iter-budget exhaustion → 'paused', not 'idle' ─────────────────────
-console.log("\n[2] Iteration-budget exhaustion produces terminal 'paused' status (dir_1782242371780 Fix 2)");
-{
-  // Mirrors the finalStatus computation in offense-agent.js (post-fix)
-  function computeFinalStatus(endedByOrchestrator, iter, maxIter) {
-    return endedByOrchestrator ? "completed"
-      : (iter >= maxIter ? "paused" : "error");
-  }
-
-  // Old behavior for comparison
-  function computeFinalStatusOld(endedByOrchestrator, iter, maxIter) {
-    return endedByOrchestrator ? "completed"
-      : (iter >= maxIter ? "idle" : "error");
-  }
-
-  check("budget hit → new finalStatus is 'paused' (not 'idle')", () => {
-    const status = computeFinalStatus(false, 50, 50);
-    assert.strictEqual(status, "paused");
+(async () => {
+  // ── Test 1: terminal-phase halt → 'halted' ──────────────────────────────────
+  // PROD LINE: offense-agent.js computeFinalStatus `if (haltedAbnormally) return "halted";`
+  // Revert (drop the halted arm / its precedence) → this goes red.
+  console.log("\n[1] terminal-phase (harness-forced) halt → finalStatus 'halted'");
+  check("haltedAbnormally=true → 'halted' (not 'completed', not 'error')", () => {
+    const s = computeFinalStatus({ haltedAbnormally: true, endedByOrchestrator: false, iter: 3, maxIter: 50 });
+    assert.strictEqual(s, "halted");
+  });
+  check("halt takes precedence even if iter hit the cap", () => {
+    // A forced halt must still read 'halted', never 'paused', when both could apply.
+    const s = computeFinalStatus({ haltedAbnormally: true, endedByOrchestrator: false, iter: 50, maxIter: 50 });
+    assert.strictEqual(s, "halted");
+  });
+  check("WIRING: offense-agent.js uses computeFinalStatus + sets haltedAbnormally on the terminal-phase halt (not the old endedByOrchestrator=true)", () => {
+    const src = fs.readFileSync(path.join(__dirname, "..", "offense-agent.js"), "utf8");
+    assert.ok(/computeFinalStatus\(\{\s*haltedAbnormally/.test(src),
+      "runAgent must call computeFinalStatus({ haltedAbnormally, ... }) — the extracted mapping");
+    assert.ok(src.includes('require("./offense-final-status")'),
+      "offense-agent.js must require the pure offense-final-status module");
+    // The terminal-phase loop-breaker branch must set haltedAbnormally, NOT the old
+    // `endedByOrchestrator = true; // treat as clean conclusion` that caused the mislabel.
+    assert.ok(!/endedByOrchestrator = true;\s*\/\/ treat as clean conclusion/.test(src),
+      "the old 'treat as clean conclusion' mislabel on the terminal-phase halt must be gone");
+    assert.ok(/haltedAbnormally = true; \/\/ harness-forced halt/.test(src),
+      "the terminal-phase halt must set haltedAbnormally = true");
   });
 
-  check("budget hit → old finalStatus was 'idle' (the bug being fixed)", () => {
-    const status = computeFinalStatusOld(false, 50, 50);
-    assert.strictEqual(status, "idle"); // confirms what the old code did
+  // ── Test 2: genuine model end → 'completed' (even with 0 findings) ───────────
+  // PROD LINE: offense-agent.js computeFinalStatus `if (endedByOrchestrator) return "completed";`
+  // Mutation: mis-order so the 'halted' arm swallows a clean end → this goes red.
+  console.log("\n[2] genuine model end → 'completed' (discriminator: a clean end is legitimate)");
+  check("endedByOrchestrator=true, haltedAbnormally=false → 'completed'", () => {
+    const s = computeFinalStatus({ haltedAbnormally: false, endedByOrchestrator: true, iter: 4, maxIter: 50 });
+    assert.strictEqual(s, "completed");
+  });
+  check("clean model end stays 'completed' even at iter cap (not 'paused')", () => {
+    const s = computeFinalStatus({ haltedAbnormally: false, endedByOrchestrator: true, iter: 50, maxIter: 50 });
+    assert.strictEqual(s, "completed");
   });
 
-  check("budget hit → 'paused' is a non-'running' terminal status", () => {
-    const status = computeFinalStatus(false, 15, 15);
-    assert.notStrictEqual(status, "running");
-    assert.notStrictEqual(status, "idle");
-    assert.strictEqual(status, "paused");
+  // ── Test 3: max_iter budget hit → 'paused' (resumable, NOT a halt) ───────────
+  // PROD LINE: offense-agent.js computeFinalStatus `if (iter >= maxIter) return "paused";`
+  // Revert the paused arm → this goes red.
+  console.log("\n[3] iteration-budget exhaustion → 'paused' (resumable, not a halt)");
+  check("iter>=maxIter, no end, no halt → 'paused'", () => {
+    const s = computeFinalStatus({ haltedAbnormally: false, endedByOrchestrator: false, iter: 50, maxIter: 50 });
+    assert.strictEqual(s, "paused");
+  });
+  check("unexpected early exit (iter<maxIter, no end, no halt) → 'error'", () => {
+    const s = computeFinalStatus({ haltedAbnormally: false, endedByOrchestrator: false, iter: 5, maxIter: 50 });
+    assert.strictEqual(s, "error");
   });
 
-  check("model ended cleanly → still 'completed' (unchanged behavior)", () => {
-    const status = computeFinalStatus(true, 10, 50);
-    assert.strictEqual(status, "completed");
+  // ── Test 4: scorecard reports conclude_reason='halted' distinctly ────────────
+  // PROD LINE: behavioral-scorecard.js the 'halted' token in the concluded /
+  // conclude_reason enum arrays. Revert (drop 'halted') → this goes red.
+  console.log("\n[4] behavioral scorecard surfaces conclude_reason='halted'");
+  await checkAsync("agent_status='halted' → concluded=true AND conclude_reason='halted'", async () => {
+    const sc = await getBehavioralScorecard(1, makeScorecardDb({
+      engagement: { status: "in_progress", agent_status: "halted", engagement_phase: "reporting", agent_run_state: {} },
+    }));
+    assert.strictEqual(sc.conclude_reason, "halted", `expected 'halted', got '${sc.conclude_reason}'`);
+    assert.strictEqual(sc.concluded, true, "halted engagement must count as concluded");
+  });
+  await checkAsync("a 'running' engagement is still NOT concluded (control)", async () => {
+    const sc = await getBehavioralScorecard(1, makeScorecardDb({
+      engagement: { status: "in_progress", agent_status: "running", engagement_phase: "recon", agent_run_state: {} },
+    }));
+    assert.strictEqual(sc.concluded, false);
+    assert.strictEqual(sc.conclude_reason, "running");
   });
 
-  check("unexpected early exit → 'error' (unchanged behavior)", () => {
-    // iter < maxIter AND endedByOrchestrator = false
-    const status = computeFinalStatus(false, 5, 50);
-    assert.strictEqual(status, "error");
+  // ── Test 5: detectLoopHalt surfaces the dark-loop marker ─────────────────────
+  // PROD LINE: telemetry-analyze.js detectLoopHalt body (the marker find + the
+  // abnormal-discriminator return of the issue). Revert (return [] / drop the push)
+  // → this goes red. Also pins the discriminator (no false-positive on a clean end).
+  console.log("\n[5] detectLoopHalt raises a 'loop_halted' issue on an abnormal halt");
+  check("loop_halted marker + 0 confirmed findings + 1 failed step → 1 issue (warn)", () => {
+    const telemetry = [{ outcome: "loop_halted" }];
+    const issues = detectLoopHalt(telemetry, { confirmed_findings: 0, failed_steps: 1 });
+    assert.strictEqual(issues.length, 1, `expected 1 issue, got ${issues.length}`);
+    assert.strictEqual(issues[0].kind, "loop_halted");
+    assert.strictEqual(issues[0].severity, "warn");
+  });
+  check("engagement_concluded marker is also detected when abnormal", () => {
+    const issues = detectLoopHalt([{ outcome: "engagement_concluded" }], { confirmed_findings: 0, failed_steps: 2 });
+    assert.strictEqual(issues.length, 1);
+  });
+  check("DISCRIMINATOR: clean model end (marker, 0 findings, 0 failed steps) → NO issue", () => {
+    // The failed-step requirement keeps a legitimate 'nothing exploitable' verdict quiet.
+    const issues = detectLoopHalt([{ outcome: "engagement_concluded" }], { confirmed_findings: 0, failed_steps: 0 });
+    assert.strictEqual(issues.length, 0);
+  });
+  check("DISCRIMINATOR: confirmed findings present → NO issue (real result, not a dark halt)", () => {
+    const issues = detectLoopHalt([{ outcome: "loop_halted" }], { confirmed_findings: 2, failed_steps: 3 });
+    assert.strictEqual(issues.length, 0);
+  });
+  check("no marker row → NO issue", () => {
+    const issues = detectLoopHalt([{ outcome: "step_queued" }], { confirmed_findings: 0, failed_steps: 5 });
+    assert.strictEqual(issues.length, 0);
   });
 
-  check("'paused' is resumable by re-calling start_engagement_run (semantic check)", () => {
-    // Verify the end_reason message includes the re-call instruction
-    const maxIter = 15;
-    const endReason = `hit max_iter=${maxIter} cap — re-call start_engagement_run to continue`;
-    assert.ok(endReason.includes("re-call start_engagement_run"));
-    assert.ok(endReason.includes(`max_iter=${maxIter}`));
+  // ── Test 6: fleet scan includes 'halted' ─────────────────────────────────────
+  // PROD VALUE: telemetry-analyze.js ACTIVE_AGENT_STATUSES array. Revert (remove
+  // 'halted') → this goes red. analyzeAllActive selects ANY($1) over this exact
+  // array, so the constant is the real fleet filter, not a copy.
+  console.log("\n[6] fleet diagnostic status set includes 'halted'");
+  check("ACTIVE_AGENT_STATUSES contains 'halted'", () => {
+    assert.ok(Array.isArray(ACTIVE_AGENT_STATUSES), "ACTIVE_AGENT_STATUSES must be an array");
+    assert.ok(ACTIVE_AGENT_STATUSES.includes("halted"), `missing 'halted' in [${ACTIVE_AGENT_STATUSES.join(", ")}]`);
   });
-}
-
-// ── Fix 3: Halt-detection timeout emits 'loop_halted' telemetry outcome ───────
-console.log("\n[3] Halt-timeout detection emits 'loop_halted' telemetry (dir_1782242371780 Fix 3)");
-{
-  const HALT_TIMEOUT_MS = 300000; // 5 minutes, matches offense-agent.js
-
-  check("HALT_TIMEOUT_MS is 300 000ms (5 minutes)", () => {
-    assert.strictEqual(HALT_TIMEOUT_MS, 300000);
+  check("ACTIVE_AGENT_STATUSES still includes the pre-existing running + error", () => {
+    assert.ok(ACTIVE_AGENT_STATUSES.includes("running"));
+    assert.ok(ACTIVE_AGENT_STATUSES.includes("error"));
   });
 
-  check("HALT_TIMEOUT_MS > OUTCOME_TIMEOUT_MS (5min > 2min — fires after watchdog)", () => {
-    const OUTCOME_TIMEOUT_MS = 120000;
-    assert.ok(HALT_TIMEOUT_MS > OUTCOME_TIMEOUT_MS);
+  // ── Test 7: watchdog de-dup — no second alert on an already-flagged halt ─────
+  // PROD LINE: watchdog.js checkHaltedEngagements transition guard
+  // `if (_haltedAlerted.has(id)) continue; _haltedAlerted.add(id);`. Remove the
+  // guard (always alert) → the second sweep fires again → this goes red.
+  console.log("\n[7] watchdog alerts a halt ONCE (running→halted transition dedup)");
+  await checkAsync("two sweeps over the same halted engagement → exactly ONE alert", async () => {
+    let alerts = 0;
+    const mockCtx = {
+      db: { async query(sql) {
+        if (/agent_status = 'halted'/.test(sql)) return { rows: [{ id: "SKYLINE-SOC-TEST-1" }] };
+        return { rows: [] };
+      } },
+      broadcastToAll(msg) { if (msg && msg.status === "halted") alerts++; },
+    };
+    watchdog.__setTestContext(mockCtx);   // inject ctx + clear the dedup set
+    await watchdog.checkHaltedEngagements();
+    await watchdog.checkHaltedEngagements();
+    assert.strictEqual(alerts, 1, `expected exactly 1 alert across 2 sweeps, got ${alerts}`);
+    watchdog.__setTestContext(null);      // teardown
+  });
+  await checkAsync("a halt that LEAVES 'halted' then returns re-alerts (ack cleared)", async () => {
+    let alerts = 0;
+    let halted = true;
+    const mockCtx = {
+      db: { async query(sql) {
+        if (/agent_status = 'halted'/.test(sql)) return { rows: halted ? [{ id: "SKYLINE-SOC-TEST-2" }] : [] };
+        return { rows: [] };
+      } },
+      broadcastToAll(msg) { if (msg && msg.status === "halted") alerts++; },
+    };
+    watchdog.__setTestContext(mockCtx);
+    await watchdog.checkHaltedEngagements();   // alert (1)
+    halted = false;
+    await watchdog.checkHaltedEngagements();   // engagement left halted → ack cleared, no alert
+    halted = true;
+    await watchdog.checkHaltedEngagements();   // halted again → re-alert (2)
+    assert.strictEqual(alerts, 2, `expected 2 alerts (re-halt re-fires), got ${alerts}`);
+    watchdog.__setTestContext(null);
   });
 
-  // Simulate the halt-detection condition in the stall path
-  function shouldHalt(stallStreak, haveWork, lastStepQueuedAt, now) {
-    const haltTimeoutExpired = (now - lastStepQueuedAt) > HALT_TIMEOUT_MS;
-    return (stallStreak >= 3 && !haveWork) || stallStreak >= 30 || (haltTimeoutExpired && !haveWork);
-  }
-
-  function haltReason(stallStreak, haveWork, lastStepQueuedAt, now) {
-    const haltTimeoutExpired = (now - lastStepQueuedAt) > HALT_TIMEOUT_MS;
-    const haltedByTimeout = haltTimeoutExpired && !haveWork && stallStreak < 30;
-    return haltedByTimeout
-      ? `loop dark for ${Math.round((now-lastStepQueuedAt)/1000)}s with no pending work — loop_halted (dir_1782242371780)`
-      : `orchestrator gave no task ${stallStreak}× (work in flight: ${haveWork}) — engagement exhausted`;
-  }
-
-  const now = Date.now();
-  const longAgo = now - HALT_TIMEOUT_MS - 1000; // 5min+1s ago — expired
-  const recentTs = now - 60000; // 1min ago — not expired
-
-  check("halt fires when timeout expired AND no pending work", () => {
-    assert.ok(shouldHalt(1, false, longAgo, now));
-  });
-
-  check("halt does NOT fire when timeout expired but work IS in flight", () => {
-    assert.ok(!shouldHalt(1, true, longAgo, now));
-  });
-
-  check("halt does NOT fire within timeout even with no work (normal stall patience)", () => {
-    // 1 stall, no work, but recent — should wait, not halt
-    assert.ok(!shouldHalt(1, false, recentTs, now));
-  });
-
-  check("existing stall-streak check (stallStreak>=3 && !haveWork) still fires", () => {
-    assert.ok(shouldHalt(3, false, recentTs, now));
-  });
-
-  check("existing hard cap (stallStreak>=30) still fires regardless", () => {
-    assert.ok(shouldHalt(30, true, recentTs, now));
-  });
-
-  check("halt-timeout end_reason includes 'loop_halted' and directive ref", () => {
-    const reason = haltReason(1, false, longAgo, now);
-    assert.ok(reason.includes("loop_halted"), `Missing 'loop_halted' in: ${reason}`);
-    assert.ok(reason.includes("dir_1782242371780"), `Missing directive ref in: ${reason}`);
-  });
-
-  check("stall-exhaustion end_reason is unchanged (engagement exhausted path)", () => {
-    const reason = haltReason(3, false, recentTs, now);
-    assert.ok(reason.includes("engagement exhausted"), `Expected 'engagement exhausted' in: ${reason}`);
-    assert.ok(!reason.includes("loop_halted"), `Should not include 'loop_halted' for stall path`);
-  });
-
-  check("telemetry outcome for halt-timeout is 'loop_halted'", () => {
-    const TELEMETRY_OUTCOME = "loop_halted";
-    assert.strictEqual(TELEMETRY_OUTCOME, "loop_halted");
-  });
-
-  check("telemetry model_used for halt-detector is 'halt_detector'", () => {
-    const TELEMETRY_MODEL = "halt_detector";
-    assert.strictEqual(TELEMETRY_MODEL, "halt_detector");
-  });
-
-  check("lastStepQueuedAt resets on every successful queue_step", () => {
-    // Simulate: initial = now - 400s (would trigger halt), reset on queue
-    let lastStepQueuedAt = now - 400000;
-    // queue_step succeeds → reset
-    lastStepQueuedAt = now;
-    assert.ok((now - lastStepQueuedAt) <= 0, "Should be reset to now");
-    assert.ok(!shouldHalt(0, false, lastStepQueuedAt, now), "Should not halt after reset");
-  });
-}
-
-// ── Summary ───────────────────────────────────────────────────────────────────
-console.log(`\nResults: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+  // ── Summary ─────────────────────────────────────────────────────────────────
+  console.log(`\nResults: ${passed} passed, ${failed} failed`);
+  if (failed > 0) process.exit(1);
+})().catch((e) => {
+  console.error("Async test runner crashed:", e.message);
+  process.exit(1);
+});
