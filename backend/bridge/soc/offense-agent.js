@@ -96,6 +96,11 @@ const AGENT_SYSTEM_PROMPT_BASE = [
   "  - search_sploitus(query) for CVE→PoC and product→PoC mappings. Aggregates ExploitDB + Packet Storm + Vulners + GitHub PoCs + Metasploit — broader than search_exploits. Use when verify_cve confirms a CVE exists and you want a working PoC reference.",
   "  - When you don't recall a fact, CALL THE TOOL. Don't guess. Guessing wastes iters and pollutes the dataset.",
   "",
+  "PHASE MANAGEMENT (mandatory):",
+  "  - Call advance_phase as SOON as the current phase's goals are met (see PHASE GUIDANCE below). Do NOT stay in recon while doing enumeration work — the phase determines your system prompt.",
+  "  - When you confirm a vulnerability, exposed service, or credential — call add_finding IMMEDIATELY. Findings are the deliverable; an engagement with 0 findings recorded is a failure even if you did good work.",
+  "  - When you exhaust the scope or have no further productive avenues, call end_engagement with a clear summary.",
+  "",
   "Output style: USE TOOLS. Don't narrate at length.",
 ].join("\n");
 
@@ -1421,9 +1426,12 @@ async function runAgentV2(engagementId, opts = {}) {
     // Tool-calling mode generates ~3-5 messages per iter. At 50 iters that's 150-250.
     // Compress older turns once we pass 80 messages, keeping system + last 40.
     if (messages.length > 80) {
+      // dir_1782341906478: use safeTailSlice to keep assistant+tool pairs intact
+      const keepTail = safeTailSlice(messages, 40);
+      const cutIdx = messages.length - keepTail.length;
       try {
         const { performSummarizer } = require("/app/soc/execution-monitor");
-        const middle = messages.slice(1, messages.length - 40);
+        const middle = messages.slice(1, cutIdx);
         const summaryInput = middle.map(m =>
           `[${m.role}${m.name ? `:${m.name}` : ""}] ${String(m.content || "").slice(0, 200)}`
         ).join("\n");
@@ -1436,14 +1444,13 @@ async function runAgentV2(engagementId, opts = {}) {
           messages = [
             messages[0],
             { role: "user", content: `[CONTEXT SUMMARY — prior iterations compressed]\n${summary}\n\n(Full history above has been summarized to save context. Recent messages follow.)` },
-            ...messages.slice(messages.length - 40),
+            ...keepTail,
           ];
           console.log(`[offense-agent-v2] compressed ${middle.length} messages into summary (${summary.length} chars)`);
         }
       } catch (e) {
-        // Fallback: hard trim
         console.warn(`[offense-agent-v2] Summarizer failed (${e.message}), hard-trimming`);
-        messages = [messages[0], ...messages.slice(messages.length - 50)];
+        messages = [messages[0], ...safeTailSlice(messages, 50)];
       }
     }
 
@@ -1504,8 +1511,25 @@ async function loadOrInitState(engagementId) {
   };
 }
 
+// dir_1782341906478: safe tail-slice that never orphans tool-result messages
+// from their parent assistant message. Walks backward from the cut point until
+// the first message that is NOT role:'tool', so the kept tail always starts
+// with a user or assistant message (never a dangling tool result).
+function safeTailSlice(msgs, keepCount) {
+  if (msgs.length <= keepCount) return msgs;
+  let cut = msgs.length - keepCount;
+  // Walk backward past any tool messages at the cut boundary
+  while (cut < msgs.length && msgs[cut] && msgs[cut].role === "tool") cut--;
+  // If we walked all the way back, try forward instead
+  if (cut <= 0) {
+    cut = msgs.length - keepCount;
+    while (cut < msgs.length && msgs[cut] && msgs[cut].role === "tool") cut++;
+  }
+  return msgs.slice(cut);
+}
+
 async function saveStateToolCall(engagementId, messages, iter, status) {
-  const capped = messages.slice(-60);
+  const capped = safeTailSlice(messages, 60);
   await db.query(
     `UPDATE pentest_engagements SET agent_run_state = $1::jsonb, agent_status = $2 WHERE id = $3`,
     [JSON.stringify({ messages: capped, iter }), status, engagementId]);
