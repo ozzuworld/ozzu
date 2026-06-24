@@ -316,10 +316,12 @@ async function autoCheckNseNames(body) {
     }
   }
   if (names.size === 0) return null;
-  // Check against nse_script_catalog
+  // Check against nse_script_catalog — strip nmap glob chars (* ?) before lookup
   for (const name of names) {
+    const clean = name.replace(/[*?]/g, "");
+    if (!clean) continue;
     try {
-      const r = await db.query("SELECT 1 FROM nse_script_catalog WHERE name=$1 LIMIT 1", [name]);
+      const r = await db.query("SELECT 1 FROM nse_script_catalog WHERE name LIKE $1 LIMIT 1", [clean + "%"]);
       if (r.rows.length === 0) {
         return {
           rule: "auto_nse_not_found",

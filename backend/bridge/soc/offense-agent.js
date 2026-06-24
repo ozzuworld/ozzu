@@ -1051,12 +1051,12 @@ async function runAgent(engagementId, opts = {}) {
     await orchestrator.completeTask(task.id, taskOutcome, summary);
 
     // dir_1782332848586: reset loop-breaker streak on productive iterations.
-    // The streak should track consecutive UNPRODUCTIVE same-phase iterations,
-    // not just consecutive same-phase iterations. A successful recon step
-    // (found hosts, scanned ports) or a completed negative result (cred test
-    // returned 401 = useful data) is productive work — don't count it toward
-    // the forced phase advance.
+    // dir_1782335468003: also undo the streak increment for steps that were
+    // blocked before execution (autoverify, lint reject) — they never ran,
+    // so they shouldn't count toward the forced phase advance threshold.
     if (taskOutcome === "done") {
+      consecutivePhaseStreak = Math.max(0, consecutivePhaseStreak - 1);
+    } else if (!outcome.started_at && status !== "timeout") {
       consecutivePhaseStreak = Math.max(0, consecutivePhaseStreak - 1);
     }
 
