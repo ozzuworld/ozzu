@@ -1033,31 +1033,6 @@ module.exports = function directiveRoutes(ctx) {
       return true;
     }
 
-    // POST /api/artifacts/:artifactId/deploy — Download artifact and deploy to devices
-    const artifactDeployMatch = pathname.match(/^\/api\/artifacts\/(\d+)\/deploy$/);
-    if (req.method === "POST" && artifactDeployMatch) {
-      if (!requireAuth(req, res)) return true;
-      const artifactId = artifactDeployMatch[1];
-      const { exec } = require("child_process");
-      // Download artifact via gh, then deploy
-      const scriptDir = path.resolve(__dirname, "../../scripts");
-      exec(
-        `cd ${scriptDir} && gh api repos/ozzuworld/ozzu/actions/artifacts/${artifactId}/zip > /tmp/artifact-${artifactId}.zip && ` +
-        `unzip -o /tmp/artifact-${artifactId}.zip -d /tmp/artifact-${artifactId}/ && ` +
-        `ls /tmp/artifact-${artifactId}/*.apk 2>/dev/null && ./deploy.sh --local /tmp/artifact-${artifactId}/*.apk`,
-        { timeout: 120000 },
-        (err, stdout, stderr) => {
-          if (err) {
-            log.bridge.warn(`[artifact-deploy] Failed: ${err.message}`);
-            sendJSON(res, 500, { ok: false, error: err.message });
-          } else {
-            sendJSON(res, 200, { ok: true, message: `Artifact ${artifactId} deployed`, output: stdout.slice(-500) });
-          }
-        }
-      );
-      return true;
-    }
-
     // GET /api/artifacts/:artifactId/download — Download artifact file directly (IPA/APK)
     const artifactDownloadMatch = pathname.match(/^\/api\/artifacts\/(\d+)\/download$/);
     if (req.method === "GET" && artifactDownloadMatch) {
