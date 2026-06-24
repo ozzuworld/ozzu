@@ -129,6 +129,12 @@ function isLikelyFilePath(s) {
   // almost certainly a loop variable or short var, not a hostname
   const headFirst = head.split(".")[0];
   if (headFirst.length === 1 && /[a-z]/.test(headFirst)) return true;
+  // dir_1782343161076: XML/SOAP/XPath method patterns — service.get,
+  // device.getSystemDateAndTime, etc. If any dot-segment is a common
+  // method verb, it's code not a hostname.
+  const METHOD_VERBS = new Set(["get","set","put","delete","post","select","insert","update","create","find","parse","split","join","replace","match","check","test","run","exec","call","send","read","write","list","add","remove","start","stop"]);
+  const segs = s.toLowerCase().split(".");
+  if (segs.some(seg => METHOD_VERBS.has(seg))) return true;
   return false;
 }
 
