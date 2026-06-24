@@ -252,16 +252,45 @@ function parseNcSweep(text) {
 // A single fullOutput blob may contain nmap output, nc output, or both (a script
 // can run several tools). Detect what's present, run the applicable parsers, and
 // merge the results by host so the caller gets one row per IP.
+// ── bash ping-sweep / liveness loop ──────────────────────────────────────────
+// The model frequently falls back to a shell loop instead of nmap, e.g.
+//   for i in $(seq 1 254); do ping -c1 -W1 192.168.1.$i && echo "192.168.1.$i is up"; done
+// emitting "192.168.1.24 is up" / "192.168.1.24 UP" / "192.168.1.24 is alive". The
+// nmap/nc parsers don't recognize that, so genuinely-discovered hosts were silently
+// dropped and the step marked failed (dir_1782315000000). Recognize it: a line that
+// starts with an IP and says up/alive = a live host (status up, no ports yet).
+function parsePingSweep(text) {
+  if (typeof text !== "string" || !text) return [];
+  const records = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*(?:host\s+)?(\d{1,3}(?:\.\d{1,3}){3})\b.*?\b(?:is\s+up|is\s+alive|alive|up)\b/i);
+    if (m) {
+      const rec = emptyRecord();
+      rec.ip = m[1];
+      rec.status = "up";
+      rec.raw = line.slice(0, 200);
+      records.push(rec);
+    }
+  }
+  return mergeRecords(records);
+}
+
+// ── dispatcher ────────────────────────────────────────────────────────────────
+// A single fullOutput blob may contain nmap output, nc output, a bash ping-sweep,
+// or several. Detect what's present, run the applicable parsers, merge by host.
 function parseReconOutput(text) {
   if (typeof text !== "string" || !text) return [];
   const hasNmap = /Nmap scan report for|^Host:\s+\d|Starting Nmap|Nmap done/m.test(text);
   const hasNc = /Connection to \S+ \d+ port \[|\) open\b|nc: connect to/m.test(text);
+  // bash ping-loop liveness lines: "<IP> is up" / "<IP> UP" / "<IP> is alive"
+  const hasPingSweep = /^\s*(?:host\s+)?\d{1,3}(?:\.\d{1,3}){3}\b.*?\b(?:is\s+up|is\s+alive|alive|up)\b/im.test(text);
 
   const all = [];
   if (hasNmap) all.push(...parseNmap(text));
   if (hasNc) all.push(...parseNcSweep(text));
+  if (hasPingSweep) all.push(...parsePingSweep(text));
   if (!all.length) return [];
   return mergeRecords(all);
 }
 
-module.exports = { parseNmap, parseNcSweep, parseReconOutput };
+module.exports = { parseNmap, parseNcSweep, parsePingSweep, parseReconOutput };

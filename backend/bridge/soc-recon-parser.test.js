@@ -12,7 +12,7 @@
 
 const assert = require("assert");
 const { parseNmap, parseNcSweep, parseReconOutput } = require("./soc-recon-parser");
-const { NMAP_SN, NMAP_SV, NC_OPENBSD, NC_GNU, NMAP_OG, NC_8443, NMAP_COMBINED } = require("./__fixtures__/soc-recon-samples");
+const { NMAP_SN, NMAP_SV, NC_OPENBSD, NC_GNU, NMAP_OG, NC_8443, NMAP_COMBINED, PING_SWEEP } = require("./__fixtures__/soc-recon-samples");
 
 let passed = 0;
 function check(name, fn) {
@@ -20,6 +20,15 @@ function check(name, fn) {
   passed++;
   console.log(`  ok  ${name}`);
 }
+
+// ── bash ping-sweep (the model's nmap fallback) — dir_1782315000000 ──
+check("parsePingSweep: 4 live hosts from 'IP is up/UP/alive'; ignores 'setup' + port lines", () => {
+  const r = parseReconOutput(PING_SWEEP);
+  assert.strictEqual(r.length, 4, `should find 4 ping-sweep hosts, got ${r.length}`);
+  assert.ok(r.every((h) => h.status === "up"), "all status up");
+  assert.ok(r.find((h) => h.ip === "192.168.56.26"), "alive host present");
+  assert.ok(!r.find((h) => h.ip === "192.168.56.99"), "'setup complete' must NOT match");
+});
 
 // ── nmap -sn host discovery ───────────────────────────────────────────────────
 

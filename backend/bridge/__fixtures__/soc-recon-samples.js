@@ -11,5 +11,9 @@ const NC_GNU = "192.168.56.11 [192.168.56.11] 22 (ssh) open\n192.168.56.11 [192.
 const NMAP_OG = "# Nmap 7.94 scan initiated\nHost: 192.168.56.20 (web.lan)\\tStatus: Up\nHost: 192.168.56.20 (web.lan)\\tPorts: 22/open/tcp//ssh///, 80/open/tcp//http//nginx 1.18.0/\\tIgnored State: closed (998)";
 const NC_8443 = "Connection to 192.168.56.10 8443 port [tcp/https-alt] succeeded!";
 const NMAP_COMBINED = NMAP_SN + "\n" + NMAP_SV.replace("192.168.56.10", "192.168.56.1").replace("AA:BB:CC:DD:EE:10", "AA:BB:CC:DD:EE:01");
+// Bash ping-loop liveness output (the model's nmap fallback) — synthetic. Two
+// NEGATIVES that must NOT match: "setup complete" ('up' is inside 'setup', no word
+// boundary) and a bare port line.
+const PING_SWEEP = "192.168.56.1 is up\n192.168.56.24 is up\n192.168.56.25 UP\nhost 192.168.56.26 is alive\n192.168.56.99 setup complete\n22/tcp open ssh";
 
-module.exports = { NMAP_SN, NMAP_SV, NC_OPENBSD, NC_GNU, NMAP_OG, NC_8443, NMAP_COMBINED };
+module.exports = { NMAP_SN, NMAP_SV, NC_OPENBSD, NC_GNU, NMAP_OG, NC_8443, NMAP_COMBINED, PING_SWEEP };
