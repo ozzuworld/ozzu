@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { View, Text, Pressable, Alert, Linking } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
-import { fetchDirectiveArtifacts, deployArtifact, getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
+import { fetchDirectiveArtifacts, getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
 import { relativeTime } from "../../lib/directive-constants";
 import { colors, radius, fontSize, fontWeight, withAlpha } from "../../lib/design-tokens";
 
@@ -64,9 +64,7 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
         const canShare = await Sharing.isAvailableAsync();
         if (canShare) {
           await Sharing.shareAsync(result.uri, {
-            mimeType: fileName.endsWith(".ipa")
-              ? "application/octet-stream"
-              : "application/vnd.android.package-archive",
+            mimeType: "application/octet-stream",
             dialogTitle: `Save ${fileName}`,
           });
           return;
@@ -104,46 +102,20 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
       const artifact = matching[0];
       const sizeMB = (artifact.sizeBytes / 1048576).toFixed(1);
 
-      if (run.platform === "ios") {
-        Alert.alert(
-          "\u{1F34E} Download IPA",
-          `${artifact.name}\n${sizeMB} MB\n\nDownload to this device? After download, save to Files and install via AltStore.`,
-          [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Download",
-              onPress: () => {
-                const url = `${getBridgeUrl()}/api/artifacts/${artifact.artifactId}/download`;
-                downloadInApp(url, "ozzu-latest.ipa");
-              },
+      Alert.alert(
+        "\u{1F34E} Download IPA",
+        `${artifact.name}\n${sizeMB} MB\n\nDownload to this device? After download, save to Files and install via AltStore.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Download",
+            onPress: () => {
+              const url = `${getBridgeUrl()}/api/artifacts/${artifact.artifactId}/download`;
+              downloadInApp(url, "ozzu-latest.ipa");
             },
-          ]
-        );
-      } else {
-        // Android: deploy to devices via server-side ADB
-        Alert.alert(
-          "\u{1F4F1} Deploy Android",
-          `${artifact.name}\n${sizeMB} MB\n\nDeploy to all Android devices?`,
-          [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Deploy",
-              onPress: async () => {
-                try {
-                  const result = await deployArtifact(artifact.artifactId);
-                  if (result.ok) {
-                    Alert.alert("Deployed", result.message || "Artifact deployed to devices");
-                  } else {
-                    Alert.alert("Failed", result.error || "Deploy failed");
-                  }
-                } catch (err: any) {
-                  Alert.alert("Error", err.message);
-                }
-              },
-            },
-          ]
-        );
-      }
+          },
+        ]
+      );
     } catch (err: any) {
       Alert.alert("Error", err.message);
     } finally {
@@ -173,7 +145,7 @@ export function BuildRunBadge({ run, directiveId }: BuildRunBadgeProps) {
           fontWeight: fontWeight.bold,
         }}
       >
-        {run.platform === "android" ? "Android" : run.platform === "ios" ? "iOS" : run.platform}:
+        {run.platform === "ios" ? "iOS" : run.platform}:
       </Text>
       <Text style={{ fontSize: fontSize.xs }}>{statusEmoji}</Text>
       <Text

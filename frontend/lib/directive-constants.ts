@@ -35,22 +35,6 @@ export const TYPE_EMOJI: Record<string, string> = {
   epic: "📦",
 };
 
-export const PRIORITY_EMOJI: Record<number, string> = {
-  1: "🔴",
-  2: "🟠",
-  3: "🟡",
-  4: "⚪",
-};
-
-export const CATEGORY_INFO: Record<string, { label: string; emoji: string; color: string }> = {
-  all: { label: "All", emoji: "🌍", color: "#06B6D4" },
-  dev: { label: "Dev", emoji: "💻", color: "#3B82F6" },
-  business: { label: "Business", emoji: "💼", color: "#F59E0B" },
-  hardware: { label: "Hardware", emoji: "🔧", color: "#A855F7" },
-  ops: { label: "Ops", emoji: "📡", color: "#22C55E" },
-  planning: { label: "Planning", emoji: "📋", color: "#8B5CF6" },
-};
-
 export const HUMAN_STATUS: Record<string, string> = {
   pending: "Queued",
   planning: "Planning",
@@ -65,37 +49,8 @@ export const HUMAN_STATUS: Record<string, string> = {
   deploy_failed: "Deploy failed",
 };
 
-export const ACTOR_COLORS: Record<string, string> = {
-  "King Kazuma": "#A78BFA",
-  June: "#67E8F9",
-  Cipher: "#6EE7B7",
-  system: "#9CA3AF",
-};
-
-export const AUDIT_TYPE_EMOJIS: Record<string, string> = {
-  status_change: "🔄",
-  verification_started: "🔍",
-  verification_success: "✅",
-  verification_failure: "❌",
-  completion_blocked: "🛑",
-  build_triggered: "🏗️",
-  deploy_started: "🚀",
-  deploy_success: "✅",
-  deploy_failed: "💥",
-  comment: "💬",
-  escalation: "⚡",
-  commit: "📝",
-  work_update: "🔧",
-  session_handoff: "🔀",
-  merged: "🔗",
-  ci_build: "🏗️",
-  agent_status: "🤖",
-};
-
 // Status groupings
 export const ACTIVE_STATUSES = ["pending", "planning", "planned", "approved", "in_progress", "blocked"];
-export const FAILED_STATUSES = ["failed", "stale", "deploy_failed"];
-export const NEEDS_ACTION_STATUSES = ["planned", "blocked", "deploy_failed"];
 
 // Sort order for status-based sorting
 export const STATUS_ORDER: Record<string, number> = {
@@ -167,9 +122,3 @@ export function humanDuration(ms: number): string {
   return `${days}d ${hrs % 24}h`;
 }
 
-export function priorityLabel(p: number): string {
-  if (p <= 1) return "P1";
-  if (p <= 2) return "P2";
-  if (p <= 3) return "P3";
-  return "P4";
-}
