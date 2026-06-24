@@ -67,29 +67,28 @@ async function getEngagementState(args) {
                 FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [id]),
     db.query(
       `SELECT seq, title, status,
-              LEFT(COALESCE(command, ''), 240) AS command_preview,
-              LEFT(COALESCE(output, ''),  600) AS output_preview,
+              LEFT(COALESCE(command, ''), 400) AS command_preview,
+              LEFT(COALESCE(output, ''),  2000) AS output_preview,
               completed_at
          FROM soc_queue_items
         WHERE engagement_id = $1
           AND status IN ('done', 'failed', 'cancelled')
-        ORDER BY seq DESC LIMIT 10`, [id]),
+        ORDER BY seq DESC LIMIT 20`, [id]),
   ]);
-  // Surface known executor capability limits so the agent doesn't burn iterations
-  // rediscovering them (dir_1780759239313). When commands run inside the Kali
-  // chroot via `nh -s`, raw-socket syscalls (netlink RTM_GETROUTE, AF_PACKET) are
-  // blocked by Samsung's kernel + SELinux even with CAP_NET_RAW in CapEff —
-  // magiskpolicy live-patches don't help. TCP-connect works natively.
+  // dir_1782331356896: populate executor_tools when empty. Execution is LOCAL on
+  // the bridge container (soc-command-execution.md) — tools are baked into the
+  // Dockerfile. The old probe_executor delegated to executor-probe.js which used
+  // dead ssh dev-01, so tools were always []. Populate from ground truth.
   const engRow = eng.rows[0];
   const tools = Array.isArray(engRow.executor_tools) ? engRow.executor_tools : [];
-  if (tools.includes("nh")) {
+  if (tools.length === 0) {
+    const BRIDGE_TOOLS = ["nmap","masscan","hydra","sqlmap","curl","wget","ssh","python3",
+                          "gobuster","nikto","searchsploit","tcpdump","ncat","openssl",
+                          "nuclei","httpx","whatweb","ffuf","netcat","dig","whois"];
+    engRow.executor_tools = BRIDGE_TOOLS;
     engRow.executor_caps_note =
-      "Executor: Kali ARM64 chroot on rooted Android tablet, reached via `nh -s` " +
-      "(stdin pipe into chroot bash). TCP-connect scans work natively. Raw sockets " +
-      "do NOT work (Samsung kernel/SELinux blocks netlink RTM_GETROUTE and AF_PACKET " +
-      "even with CAP_NET_RAW); use `nmap -sT -Pn` for port scans, `nmap -sn -PS<port>` " +
-      "with a TCP-connect target list for host discovery, and `nc -z`/`curl` over `nmap " +
-      "-sP`/`-sS`. Avoid ICMP-only host discovery — prefer TCP probes to known ports.";
+      "Executor: Linux bridge container (local bash). Full TCP/ICMP/raw-socket support. " +
+      "Lab subnet reached via WireGuard L3 relay (~240ms RTT). All listed tools are pre-installed.";
   }
   return {
     engagement: engRow,

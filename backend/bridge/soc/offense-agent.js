@@ -33,7 +33,7 @@ const MODEL_URL  = process.env.OFFENSE_SYNTH_MODEL_URL  || process.env.OFFENSE_M
 const MODEL_NAME = process.env.OFFENSE_SYNTH_MODEL_NAME || process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
 const MODEL_KEY  = process.env.OFFENSE_MODEL_KEY  || "";
 
-const DEFAULT_MAX_ITER = 15;
+const DEFAULT_MAX_ITER = 30;
 
 // dir_1782238863765 Part 2 — watchdog default for wait_for_outcome in the
 // autonomous loop. 120 seconds: if a queued step hasn't started executing
@@ -46,7 +46,7 @@ const DEFAULT_WAIT_TIMEOUT_SEC = 120; // 2 minutes
 // When the orchestrator picks tasks that map to the same engagement phase
 // MAX_CONSECUTIVE_INTENT times in a row, it's stuck in a loop. Force-advance
 // the phase instead of asking the model again.
-const MAX_CONSECUTIVE_INTENT = 3;
+const MAX_CONSECUTIVE_INTENT = 6;
 
 // Phase order for the one-way ratchet (change 2 is enforced at the advance_phase
 // call site in offense-agent-tools.js; this order is also used here when the
@@ -268,9 +268,9 @@ async function loadEngagementContext(engagementId) {
     db.query(`SELECT ip, hostname, status, ports FROM recon_hosts WHERE engagement_id = $1 ORDER BY ip`, [engagementId]),
     db.query(`SELECT id, title, severity, status, affected_asset, affected_assets, refs, kind, informed_by, enables, sub_agent_id
                 FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]),
-    db.query(`SELECT seq, title, status, LEFT(COALESCE(command,''),240) AS command_preview, LEFT(COALESCE(output,''),200) AS output_preview
+    db.query(`SELECT seq, title, status, LEFT(COALESCE(command,''),400) AS command_preview, LEFT(COALESCE(output,''),2000) AS output_preview
                 FROM soc_queue_items WHERE engagement_id = $1 AND status IN ('done','failed','cancelled')
-                ORDER BY seq DESC LIMIT 10`, [engagementId]),
+                ORDER BY seq DESC LIMIT 20`, [engagementId]),
     // dir_1780848456715: sub-agent inventory for coordinator's global view
     db.query(`SELECT id, target_host, target_role, status, iter, max_iter, objective,
                      permission_mode_override, last_action,
@@ -665,13 +665,28 @@ async function runAgent(engagementId, opts = {}) {
       }
     }
 
-    // (1) Orchestrator decides
+    // (1) Orchestrator decides — retry with reflector on parse failure (dir_1782331356896)
     let decision;
-    try {
-      decision = await orchestrator.decide(ctx, modelOverride);
-    } catch (e) {
-      await setAgentStatus(engagementId, "error", { iter, error: e.message });
-      return { engagement_id: engagementId, ok: false, iter, reason: `orchestrator failed: ${e.message}`, steps_queued: stepsQueued, tasks_added: tasksAdded, elapsed_sec: Math.round((Date.now()-startMs)/1000) };
+    {
+      const MAX_ORCH_RETRIES = 3;
+      let orchErr;
+      for (let attempt = 0; attempt < MAX_ORCH_RETRIES; attempt++) {
+        try {
+          decision = await orchestrator.decide(ctx, modelOverride);
+          orchErr = null;
+          break;
+        } catch (e) {
+          orchErr = e;
+          if (attempt < MAX_ORCH_RETRIES - 1) {
+            console.log(`[offense-agent] orchestrator.decide() failed (attempt ${attempt+1}/${MAX_ORCH_RETRIES}): ${e.message} — retrying`);
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+      }
+      if (orchErr) {
+        await setAgentStatus(engagementId, "error", { iter, error: orchErr.message });
+        return { engagement_id: engagementId, ok: false, iter, reason: `orchestrator failed after ${MAX_ORCH_RETRIES} attempts: ${orchErr.message}`, steps_queued: stepsQueued, tasks_added: tasksAdded, elapsed_sec: Math.round((Date.now()-startMs)/1000) };
+      }
     }
     lastDecision = decision;
 
@@ -868,24 +883,30 @@ async function runAgent(engagementId, opts = {}) {
       } catch (_) {}
       continue;
     }
+    // dir_1782331356896: retry synthesis once on empty command before giving up
     if (!step || typeof step.command !== "string" || !step.command.trim()) {
-      await orchestrator.completeTask(task.id, "skipped", {
-        success: false,
-        key_signals: ["synthesizer returned no command"],
-        new_findings: [], new_hosts: [], followup: [], error_category: null,
-      });
-      // Non-productive turn attribution: synthesizer returned no command → prose_only
+      console.log(`[offense-agent] synthesizer returned no command for task ${task.id} — retrying once`);
       try {
-        await db.query(
-          `INSERT INTO offense_telemetry
-             (engagement_id, queue_item_id, model_used, intent_category,
-              n_hosts, n_findings, step_queued, in_scope, n_references,
-              latency_ms, outcome, outcome_notes)
-           VALUES ($1, NULL, 'harness', 'non_productive_turn',
-                   0, 0, false, true, 0, 0, 'prose_only', $2)`,
-          [engagementId, `iter=${iter}; task=${task.id}; no_command_from_synthesizer`]);
-      } catch (_) {}
-      continue;
+        step = await synthesizeCommand(task, ctx, modelOverride);
+      } catch (_) { step = null; }
+      if (!step || typeof step.command !== "string" || !step.command.trim()) {
+        await orchestrator.completeTask(task.id, "skipped", {
+          success: false,
+          key_signals: ["synthesizer returned no command (after retry)"],
+          new_findings: [], new_hosts: [], followup: [], error_category: null,
+        });
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry
+               (engagement_id, queue_item_id, model_used, intent_category,
+                n_hosts, n_findings, step_queued, in_scope, n_references,
+                latency_ms, outcome, outcome_notes)
+             VALUES ($1, NULL, 'harness', 'non_productive_turn',
+                     0, 0, false, true, 0, 0, 'prose_only', $2)`,
+            [engagementId, `iter=${iter}; task=${task.id}; no_command_after_retry`]);
+        } catch (_) {}
+        continue;
+      }
     }
 
     // dir_1780854966869: register synthesized command's canonical shape so
@@ -976,6 +997,38 @@ async function runAgent(engagementId, opts = {}) {
       }
     } catch (e) {
       console.error(`[offense-agent] contradiction pass failed:`, e.message);
+    }
+
+    // dir_1782331356896: immediate re-synthesis on fixable command errors.
+    // Instead of burning a full orchestrator round-trip, retry the same task
+    // directive once with the error output as context. Only for syntax/argument
+    // errors, not timeouts or infra hangs.
+    const RETRIABLE_ERRORS = new Set(["syntax_error", "argument_error", "parse_error"]);
+    if (!summary.success && RETRIABLE_ERRORS.has(summary.error_category) && !task._retried) {
+      console.log(`[offense-agent] task ${task.id} failed with retriable '${summary.error_category}' — immediate re-synthesis`);
+      task._retried = true;
+      task.directive = `${task.directive}\n\nPREVIOUS ATTEMPT FAILED:\nCommand: ${(step.command || "").slice(0,300)}\nError: ${(rawOutput || "").slice(0,500)}\nFix the command and try again.`;
+      let retryStep;
+      try { retryStep = await synthesizeCommand(task, ctx, modelOverride); } catch (_) { retryStep = null; }
+      if (retryStep && typeof retryStep.command === "string" && retryStep.command.trim()) {
+        const retryQueue = await dispatch("queue_step", {
+          engagement_id: engagementId,
+          title: `[retry] ${(retryStep.title || task.directive).slice(0, 70)}`,
+          command: retryStep.command,
+          references: Array.isArray(retryStep.references) ? retryStep.references : [],
+          model_override: modelOverride,
+        });
+        if (retryQueue.queue_id) {
+          stepsQueued++;
+          let retryOutcome = await dispatch("wait_for_outcome", { queue_item_id: retryQueue.queue_id, timeout_sec: waitTimeoutSec });
+          const retryOutput = retryOutcome.output_preview || "";
+          const retrySummary = await aggregator.fold(engagementId, task.directive, "", retryOutput, modelOverride);
+          if (retryOutcome.status === "timeout") { retrySummary.error_category = "timeout"; retrySummary.success = false; }
+          await orchestrator.completeTask(task.id, retrySummary.success ? "done" : "failed", retrySummary);
+          await setAgentStatus(engagementId, "running", { iter, last_action: `retry task ${task.id} (${retrySummary.success ? "recovered" : "still_failed"})` });
+          continue;
+        }
+      }
     }
 
     await orchestrator.completeTask(task.id, summary.success ? "done" : "failed", summary);
