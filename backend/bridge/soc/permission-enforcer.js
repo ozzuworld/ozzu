@@ -91,6 +91,8 @@ const FILE_EXT_BLOCKLIST = new Set([
   "exe", "dll", "so", "dylib", "elf", "bin", "img", "iso", "deb", "rpm", "apk",
   // dir_1782331844373: nmap script extensions + misc tool extensions
   "nse", "nasl", "perf", "rc",
+  // dir_1782343394794: nmap output file extensions (port-scan-all.nmap, scan.gnmap)
+  "nmap", "gnmap",
   // dir_1782331844373: Linux directory-name conventions (conf.d, cron.d, etc.)
   "d",
 ]);

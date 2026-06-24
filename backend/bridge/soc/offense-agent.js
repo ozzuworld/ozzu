@@ -77,6 +77,7 @@ const AGENT_SYSTEM_PROMPT_BASE = [
   "    • Use `-sT` (TCP connect scan) for port scanning — raw SYN (`-sS`) may not work across the relay.",
   "    • Do NOT combine `-sn` (ping sweep, no ports) with any port-scan flag (`-sT`, `-sS`, `-sV`, etc.) — nmap rejects it.",
   "    • ICMP ping DOES cross the relay (~240ms RTT). Host discovery works; just disable ARP.",
+  "    • Do NOT use `-oN /dev/stdout` — commands run via stdin pipe, /dev/stdout doesn't exist. Nmap prints to stdout by default; just omit -oN. To save output AND see it, use `-oN /tmp/scan.nmap` then `cat /tmp/scan.nmap`.",
   "    • Scans take longer over the relay. A /24 sweep may take 3-5 minutes. This is normal.",
   "",
   "VULNERABILITY RESEARCH → EXPLOITATION (you have a local exploit DB + active CVE scanner + read-only CVE internet access):",
