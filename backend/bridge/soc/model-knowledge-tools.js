@@ -415,4 +415,89 @@ async function listExecutorWordlists(args) {
   return { ...result, cached: false };
 }
 
-module.exports = { verifyCve, listNseScripts, searchExploits, searchSploitus, listExecutorWordlists };
+// ──────────────── lookup_attack_playbook (dir_1782343685585) ────────────────
+// Searches HackTricks + PayloadsAllTheThings for attack techniques relevant
+// to a service, device, or vulnerability. Returns the top matching pages
+// with content trimmed to fit model context.
+
+const PLAYBOOK_DIRS = [
+  { root: "/opt/hacktricks/src", label: "HackTricks" },
+  { root: "/opt/payloads",       label: "PayloadsAllTheThings" },
+];
+const PLAYBOOK_MAX_RESULTS = 5;
+const PLAYBOOK_MAX_CHARS_PER_PAGE = 4000;
+
+function grepCount(root, terms) {
+  return new Promise((resolve) => {
+    // OR match across all terms, count per file
+    const allTerms = terms.map(t => `-e '${t}'`).join(" ");
+    const script = `grep -r -i -c --include='*.md' --exclude-dir=images ${allTerms} '${root}' 2>/dev/null || true`;
+    const proc = spawn("bash", ["-c", script], { stdio: ["pipe", "pipe", "pipe"], timeout: 15000 });
+    let out = "";
+    proc.stdout.on("data", d => { out += d; if (out.length > 200000) proc.kill(); });
+    proc.stderr.on("data", () => {});
+    proc.on("close", () => resolve(out));
+    proc.on("error", () => resolve(""));
+  });
+}
+
+// Boost score for files in pentest-relevant directories
+const PENTEST_PATH_BOOST = ["network-services-pentesting", "pentesting-web", "generic-hacking"];
+
+async function lookupAttackPlaybook(args) {
+  const { query, max_results } = args || {};
+  if (!query || typeof query !== "string") return { error: "query required — service name, device type, CVE, or attack technique" };
+
+  const cap = Math.min(max_results || PLAYBOOK_MAX_RESULTS, 8);
+  const results = [];
+  const terms = query.trim().split(/\s+/).map(t => t.replace(/[^a-zA-Z0-9_.-]/g, "")).filter(Boolean);
+  if (terms.length === 0) return { error: "query is empty after sanitization" };
+
+  for (const { root, label } of PLAYBOOK_DIRS) {
+    try {
+      const raw = await grepCount(root, terms);
+      if (!raw.trim()) continue;
+
+      const hits = raw.trim().split("\n").map(line => {
+        const sep = line.lastIndexOf(":");
+        if (sep <= 0) return null;
+        const file = line.slice(0, sep);
+        const count = parseInt(line.slice(sep + 1), 10) || 0;
+        if (count === 0) return null;
+        const relPath = file.replace(root + "/", "");
+        // Boost: filename contains a query term → +100; pentest path → +50
+        let score = count;
+        const lower = relPath.toLowerCase();
+        if (terms.some(t => lower.includes(t.toLowerCase()))) score += 100;
+        if (PENTEST_PATH_BOOST.some(p => lower.startsWith(p))) score += 50;
+        return { file, relPath, count, score };
+      }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, cap);
+
+      for (const hit of hits) {
+        if (results.length >= cap) break;
+        try {
+          const fs = require("fs");
+          const content = fs.readFileSync(hit.file, "utf8");
+          const titleMatch = content.match(/^#+\s+(.+)/m);
+          const title = titleMatch ? titleMatch[1].trim() : hit.relPath;
+          results.push({
+            source: label,
+            path: hit.relPath,
+            title,
+            matches: hit.count,
+            content: content.length > PLAYBOOK_MAX_CHARS_PER_PAGE
+              ? content.slice(0, PLAYBOOK_MAX_CHARS_PER_PAGE) + "\n\n[... truncated — " + Math.round(content.length / 1024) + "KB total]"
+              : content,
+          });
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  if (results.length === 0) {
+    return { query, results: [], note: "No playbook pages found. Try broader terms (e.g. 'http' instead of 'hikvision http-server')." };
+  }
+  return { query, results, total: results.length };
+}
+
+module.exports = { verifyCve, listNseScripts, searchExploits, searchSploitus, listExecutorWordlists, lookupAttackPlaybook };

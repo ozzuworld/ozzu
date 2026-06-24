@@ -26,7 +26,9 @@ RUN curl -sL https://github.com/projectdiscovery/nuclei/releases/download/v3.9.0
     curl -sL https://github.com/projectdiscovery/httpx/releases/download/v1.9.0/httpx_1.9.0_linux_amd64.zip -o /tmp/httpx.zip && \
     unzip -oq /tmp/httpx.zip httpx -d /usr/local/bin/ && chmod +x /usr/local/bin/httpx && rm /tmp/httpx.zip && \
     git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb && \
-    ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
+    ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit && \
+    git clone --depth 1 https://github.com/HackTricks-wiki/hacktricks.git /opt/hacktricks && \
+    git clone --depth 1 https://github.com/swisskyrepo/PayloadsAllTheThings.git /opt/payloads
 
 # Python OSINT tools in isolated venv (light — heavy tools live in osint-tools container)
 RUN python3 -m venv /opt/osint-venv --system-site-packages && \

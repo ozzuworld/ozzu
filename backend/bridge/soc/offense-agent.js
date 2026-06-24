@@ -104,6 +104,7 @@ const AGENT_SYSTEM_PROMPT_BASE = [
   "  - list_nse_scripts(category) BEFORE you write `nmap --script <name>`. Fake script names cause guaranteed failures.",
   "  - search_exploits(product, version) BEFORE claiming exploitation is possible. Fabricated EDB-IDs / module paths get findings refuted.",
   "  - search_sploitus(query) for CVE→PoC and product→PoC mappings. Aggregates ExploitDB + Packet Storm + Vulners + GitHub PoCs + Metasploit — broader than search_exploits. Use when verify_cve confirms a CVE exists and you want a working PoC reference.",
+  "  - lookup_attack_playbook(query) — CALL THIS when you identify a service, device vendor, or protocol. Returns attack playbooks from HackTricks + PayloadsAllTheThings with exact techniques, default credentials, and exploitation steps. Examples: 'hikvision camera', 'zkteco', 'snmp', 'onvif', 'rtsp streaming'. This is your MOST IMPORTANT research tool — it tells you exactly what to try instead of guessing.",
   "  - When you don't recall a fact, CALL THE TOOL. Don't guess. Guessing wastes iters and pollutes the dataset.",
   "",
   "PHASE MANAGEMENT (mandatory):",

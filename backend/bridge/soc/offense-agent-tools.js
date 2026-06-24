@@ -443,8 +443,9 @@ const TOOL_IMPLS = {
   verify_cve:           mkTools.verifyCve,
   list_nse_scripts:     mkTools.listNseScripts,
   search_exploits:      mkTools.searchExploits,
-  search_sploitus:      mkTools.searchSploitus,
-  add_finding:          addFinding,
+  search_sploitus:        mkTools.searchSploitus,
+  add_finding:            addFinding,
+  lookup_attack_playbook: mkTools.lookupAttackPlaybook,
 };
 
 // Central router. Returns the tool's result as a JSON-serializable object the
@@ -633,6 +634,21 @@ const TOOL_SCHEMAS = [
         type: "object",
         properties: {
           query: { type: "string", description: "Search query — CVE ID, product name, or product+version (e.g. 'Hikvision CVE-2021-36260')" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "lookup_attack_playbook",
+      description: "Search the HackTricks and PayloadsAllTheThings knowledge bases for attack techniques, default credentials, and exploitation steps for a specific service, device, or vulnerability. Call this IMMEDIATELY after identifying a service in recon/enumeration — it returns the exact attack playbook so you don't have to guess. Examples: 'hikvision camera', 'zkteco access control', 'snmp default community', 'rtsp', 'onvif', 'default credentials http'.",
+      parameters: {
+        type: "object",
+        properties: {
+          query:       { type: "string", description: "Search terms — service name, device vendor, protocol, CVE ID, or attack technique" },
+          max_results: { type: "integer", description: "Max pages to return (default 5, max 8)" },
         },
         required: ["query"],
       },
