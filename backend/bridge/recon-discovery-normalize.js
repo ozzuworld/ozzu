@@ -36,10 +36,15 @@ function normalizeSegment(seg) {
   let s = seg;
   // 1. Re-enable host discovery (ICMP crosses the relay; -Pn forced an all-254 scan that timed out).
   s = s.replace(/\s-Pn\b/g, "");
+  const isPingSweep = /\s-sn\b/.test(s);
+  // dir_1782311308515 fix-2: -sn (ping scan, no ports) is INVALID combined with any
+  // port-scan type. The tablet autorepair injects -sT, producing `-sT -sn` → nmap
+  // "-sL and -sn ... not valid with any other scan types. QUITTING!" → 0 hosts.
+  // When -sn is present, strip every -s<Capital> scan-type flag (lowercase -sn is kept).
+  if (isPingSweep) s = s.replace(/\s-s[A-Z]\b/g, "");
   // 2/3. Build the flags to inject right after the leading `nmap`.
   const flags = [];
   if (!/--disable-arp-ping\b/.test(s)) flags.push("--disable-arp-ping"); // ICMP/L3 discovery, not ARP
-  const isPingSweep = /\s-sn\b/.test(s);
   const hasScanType = /\s(-sT|-sS|-sU|-sV|-sA|-sW|-sn|--open)\b/.test(s);
   if (!isPingSweep && !hasScanType) flags.push("-sT"); // connect scan works over L3
   if (flags.length) s = s.replace(/\bnmap\b/, "nmap " + flags.join(" "));

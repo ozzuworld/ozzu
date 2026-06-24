@@ -52,6 +52,14 @@ check("8. non-nmap command unchanged", () => {
   const cmd = "curl -s http://192.168.1.5/";
   assert.strictEqual(normalizeNmapDiscovery(cmd), cmd);
 });
+check("9. REGRESSION: tablet-mangled '-Pn -sT -sn' → valid ICMP ping-sweep (no -sT, keeps -sn)", () => {
+  // The exact command that produced nmap 'QUITTING!' on SKYLINE-SOC-2026-871 seq1.
+  const out = normalizeNmapDiscovery("nmap -Pn -sT -sn 192.168.1.0/24");
+  assert.ok(/\s-sn\b/.test(out), `lost -sn: ${out}`);
+  assert.ok(!/\s-sT\b/.test(out), `-sT NOT stripped — nmap will QUITTING!: ${out}`);
+  assert.ok(!/\s-Pn\b/.test(out), `-Pn not stripped: ${out}`);
+  assert.ok(/--disable-arp-ping\b/.test(out), `no --disable-arp-ping: ${out}`);
+});
 
 console.log(`\nResults: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
