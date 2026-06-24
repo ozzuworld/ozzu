@@ -7,7 +7,7 @@
 import { useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import {
-  colors, fontSize, fontWeight, spacing, radius,
+  colors, fontSize, fontWeight, spacing, radius, withAlpha,
 } from "../../lib/design-tokens";
 import { FindingRow, type FindingRowData } from "./FindingRow";
 import { SEVERITY_ORDER } from "./phaseColors";
@@ -92,9 +92,11 @@ interface NowTabProps {
   queue: any[];
   findings: FindingRowData[];
   onFindingPress: (finding: FindingRowData) => void;
+  onStepPress?: (item: any) => void;
   onLaunch?: () => void;
   onStop?: () => void;
   onToggleAuto?: (enabled: boolean) => void;
+  onSwitchTab?: (tab: string) => void;
 }
 
 function sevRank(s: string): number {
@@ -102,7 +104,7 @@ function sevRank(s: string): number {
   return i < 0 ? 99 : i;
 }
 
-export function NowTab({ engagement, executor, queue, findings, onFindingPress, onLaunch, onStop, onToggleAuto }: NowTabProps) {
+export function NowTab({ engagement, executor, queue, findings, onFindingPress, onStepPress, onLaunch, onStop, onToggleAuto, onSwitchTab }: NowTabProps) {
   const autoEnabled = !!engagement?.autonomous_execution_enabled;
   const phase: string = engagement?.engagement_phase || "—";
   const ars = (engagement?.agent_run_state && typeof engagement.agent_run_state === "object") ? engagement.agent_run_state : {};
@@ -231,14 +233,15 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
         </View>
       ) : null}
 
-      {/* Live activity (read-only) */}
-      <SectionTitle title="⚡ Activity" empty={activity.length === 0 ? (live ? "waiting for the first step to run…" : "nothing yet — launch a run to watch it here") : undefined} />
+      {/* Live activity */}
+      <SectionTitle
+        title="⚡ Activity"
+        rightLabel={queue.length > activity.length ? `${queue.length} total` : undefined}
+        onRightPress={queue.length > activity.length ? () => onSwitchTab?.("queue") : undefined}
+        empty={activity.length === 0 ? (live ? "waiting for the first step to run…" : "nothing yet — launch a run to watch it here") : undefined}
+      />
       {activity.map((item) => (
-        <View key={item.id} style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.xs }}>
-          <Text style={{ fontSize: fontSize.sm }}>{item.status === "running" ? "▶" : item.status === "failed" ? "✗" : "✓"}</Text>
-          <Text style={{ color: item.status === "failed" ? colors.error : colors.text.secondary, fontSize: fontSize.sm, flex: 1 }} numberOfLines={1}>{item.title}</Text>
-          {item.intent_class ? <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, fontFamily: "monospace" }}>{item.intent_class}</Text> : null}
-        </View>
+        <ActivityRow key={item.id} item={item} onPress={() => onStepPress?.(item)} />
       ))}
 
       {/* Findings */}
@@ -282,12 +285,47 @@ function Stat({ k, v }: { k: string; v: string }) {
   );
 }
 
-function SectionTitle({ title, rightLabel, empty }: { title: string; rightLabel?: string; empty?: string }) {
+function ActivityRow({ item, onPress }: { item: any; onPress: () => void }) {
+  const failed = item.status === "failed";
+  const running = item.status === "running";
+  const statusColor = failed ? colors.error : running ? colors.success : colors.accent;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row", alignItems: "center", gap: spacing.sm,
+        backgroundColor: colors.bg.elevated, borderRadius: radius.md,
+        paddingVertical: spacing.sm + 2, paddingHorizontal: spacing.md,
+        borderLeftWidth: 3, borderLeftColor: statusColor,
+        opacity: pressed ? 0.85 : 1,
+      })}
+    >
+      <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: statusColor }} />
+      <Text style={{ color: failed ? colors.error : colors.text.primary, fontSize: fontSize.sm, fontWeight: fontWeight.medium, flex: 1 }} numberOfLines={1}>{item.title}</Text>
+      {item.intent_class ? (
+        <View style={{ backgroundColor: withAlpha(colors.text.tertiary, 0.12), borderRadius: radius.sm, paddingHorizontal: spacing.xs + 2, paddingVertical: 1 }}>
+          <Text style={{ color: colors.text.disabled, fontSize: 9, fontFamily: "monospace" }}>{item.intent_class}</Text>
+        </View>
+      ) : null}
+      <Text style={{ color: colors.text.disabled, fontSize: fontSize.sm }}>›</Text>
+    </Pressable>
+  );
+}
+
+function SectionTitle({ title, rightLabel, onRightPress, empty }: { title: string; rightLabel?: string; onRightPress?: () => void; empty?: string }) {
   return (
     <View style={{ marginTop: spacing.sm }}>
       <View style={{ flexDirection: "row", alignItems: "center" }}>
         <Text style={{ flex: 1, color: colors.text.secondary, fontSize: fontSize.sm, fontWeight: fontWeight.semibold, textTransform: "uppercase", letterSpacing: 0.5 }}>{title}</Text>
-        {rightLabel ? <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, fontFamily: "monospace" }}>{rightLabel}</Text> : null}
+        {rightLabel ? (
+          onRightPress ? (
+            <Pressable onPress={onRightPress} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+              <Text style={{ color: colors.accent, fontSize: fontSize.xs }}>{rightLabel} →</Text>
+            </Pressable>
+          ) : (
+            <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, fontFamily: "monospace" }}>{rightLabel}</Text>
+          )
+        ) : null}
       </View>
       {empty ? <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, marginTop: spacing.xs }}>{empty}</Text> : null}
     </View>

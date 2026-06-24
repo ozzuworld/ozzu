@@ -80,6 +80,7 @@ export function QueueRow({ item, onRun, onCancel, onSkip, onPress, busyId }: Que
         >
           {item.title}
         </Text>
+        <Text style={{ color: colors.text.disabled, fontSize: fontSize.md, marginLeft: spacing.xs }}>›</Text>
       </View>
 
       {/* Description */}

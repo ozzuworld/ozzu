@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -32,6 +33,7 @@ import { QueueTab } from "../../components/soc/QueueTab";
 import { FindingsTab } from "../../components/soc/FindingsTab";
 import { DetailTab, type EngagementMeta, type ReconHostRow, type AuditLogRow, type TaskGraphNode } from "../../components/soc/DetailTab";
 import { LiveExecModal } from "../../components/soc/LiveExecModal";
+import { StepDetailModal, type StepDetail } from "../../components/soc/StepDetailModal";
 import { SocErrorBoundary } from "../../components/soc/SocErrorBoundary";
 import { safe } from "../../components/soc/safe";
 import type { QueueItemRow } from "../../components/soc/QueueRow";
@@ -88,6 +90,7 @@ function EngagementDetailInner() {
   const [tab, setTab] = useState<Tab>("now");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [execItem, setExecItem] = useState<RunningItem | null>(null);
+  const [stepDetail, setStepDetail] = useState<StepDetail | null>(null);
   const [executor, setExecutor] = useState<ExecutorLite>(null);
 
   const mountedRef = useRef(true);
@@ -349,8 +352,8 @@ function EngagementDetailInner() {
           borderBottomColor: colors.border.subtle,
         }}
       >
-        <Pressable onPress={() => router.back()} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, marginBottom: spacing.xs })}>
-          <Text style={{ color: colors.accent, fontSize: fs.sm }}>← Back</Text>
+        <Pressable onPress={() => router.back()} hitSlop={16} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, marginBottom: spacing.xs, paddingVertical: spacing.xs, alignSelf: "flex-start" })}>
+          <Text style={{ color: colors.accent, fontSize: fs.lg, fontWeight: fw.medium }}>← Back</Text>
         </Pressable>
         <Text
           style={{ color: colors.text.primary, fontSize: fs.xxl, fontWeight: fw.bold }}
@@ -368,13 +371,11 @@ function EngagementDetailInner() {
       </View>
 
       {/* Tab nav */}
-      <View
-        style={{
-          flexDirection: "row",
-          backgroundColor: colors.bg.elevated,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border.subtle,
-        }}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ backgroundColor: colors.bg.elevated, borderBottomWidth: 1, borderBottomColor: colors.border.subtle }}
+        contentContainerStyle={{ paddingHorizontal: spacing.sm }}
       >
         {TABS.map((t) => {
           const active = tab === t.key;
@@ -392,9 +393,9 @@ function EngagementDetailInner() {
               <Text
                 numberOfLines={1}
                 style={{
-                  color: active ? colors.accent : colors.text.secondary,
+                  color: active ? colors.accent : colors.text.tertiary,
                   fontSize: fs.sm,
-                  fontWeight: active ? fw.semibold : fw.medium,
+                  fontWeight: active ? fw.bold : fw.medium,
                 }}
               >
                 {t.label}
@@ -402,15 +403,15 @@ function EngagementDetailInner() {
               {badge != null && badge > 0 ? (
                 <View
                   style={{
-                    minWidth: 17,
+                    minWidth: 18,
                     paddingHorizontal: 5,
                     paddingVertical: 1,
                     borderRadius: 9,
-                    backgroundColor: colors.gray[700],
+                    backgroundColor: active ? withAlpha(colors.accent, 0.15) : colors.gray[700],
                     alignItems: "center",
                   }}
                 >
-                  <Text style={{ color: active ? colors.accent : colors.text.secondary, fontSize: 10, fontFamily: "monospace", fontWeight: fw.semibold }}>
+                  <Text style={{ color: active ? colors.accent : colors.text.tertiary, fontSize: 10, fontFamily: "monospace", fontWeight: fw.semibold }}>
                     {badge}
                   </Text>
                 </View>
@@ -418,7 +419,7 @@ function EngagementDetailInner() {
             </Pressable>
           );
         })}
-      </View>
+      </ScrollView>
 
       {/* Active tab body */}
       {tab === "now" ? (
@@ -428,9 +429,11 @@ function EngagementDetailInner() {
           queue={queue}
           findings={findings}
           onFindingPress={onFindingPress}
+          onStepPress={(item) => setStepDetail(item)}
           onLaunch={launchRun}
           onStop={stopRun}
           onToggleAuto={toggleAuto}
+          onSwitchTab={(t) => setTab(t as Tab)}
         />
       ) : null}
       {tab === "queue" ? (
@@ -440,6 +443,7 @@ function EngagementDetailInner() {
           onRun={runQueueItem}
           onCancel={cancelQueueItem}
           onSkip={skipQueueItem}
+          onItemPress={(item) => setStepDetail(item as any)}
         />
       ) : null}
       {tab === "findings" ? (
@@ -454,6 +458,13 @@ function EngagementDetailInner() {
           taskGraph={taskGraph}
         />
       ) : null}
+
+      {/* Step detail modal */}
+      <StepDetailModal
+        visible={stepDetail != null}
+        step={stepDetail}
+        onClose={() => setStepDetail(null)}
+      />
 
       {/* Full exec modal */}
       <LiveExecModal
@@ -474,13 +485,12 @@ function countForTab(key: Tab, queue: QueueItem[], findings: FindingRowData[]): 
 
 const styles = StyleSheet.create({
   tab: {
-    flex: 1,
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
     gap: 3,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: 2,
+    paddingVertical: spacing.sm + 4,
+    paddingHorizontal: spacing.md,
     borderBottomWidth: 2,
     borderBottomColor: "transparent",
   },

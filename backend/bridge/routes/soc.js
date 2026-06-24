@@ -905,7 +905,8 @@ module.exports = function socRoutes(ctx) {
       const id = pathname.split("/")[3];
       const result = await db.query(
         `SELECT id, engagement_id, seq, title, description, command, expected_artifact,
-                status, session_id, output, created_at, started_at, completed_at
+                status, session_id, output, created_at, started_at, completed_at,
+                intent_class, auto_executed
          FROM soc_queue_items
          WHERE engagement_id = $1
          ORDER BY seq ASC`,
