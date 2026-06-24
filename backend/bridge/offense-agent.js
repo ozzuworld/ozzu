@@ -923,7 +923,24 @@ async function runAgent(engagementId, opts = {}) {
     await setAgentStatus(engagementId, "running", { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, last_action: `queued ${queueResult.queue_id}` });
 
     // (9) Wait for PA to run the queue item
-    const outcome = await dispatch("wait_for_outcome", { queue_item_id: queueResult.queue_id, timeout_sec: waitTimeoutSec });
+    let outcome = await dispatch("wait_for_outcome", { queue_item_id: queueResult.queue_id, timeout_sec: waitTimeoutSec });
+    // dir_1782308369939: a step still 'running' at the wait timeout is a long scan
+    // PROGRESSING over the high-latency lab relay (~240ms RTT), NOT a frozen step. The
+    // 120s leash was abandoning live recon → 0 hosts → loop-breaker force-advance → dead
+    // end (e.g. SKYLINE-SOC-2026-431). Keep waiting (bounded) while it stays 'running'.
+    // A 'pending'-at-timeout step never started (synthesis hung) and is NOT extended —
+    // that stays a real fast-fail, preserving the dir_1782238863765 watchdog intent.
+    let _runningReWaits = 0;
+    const MAX_RUNNING_REWAITS = 4; // up to ~5×waitTimeout total for a genuinely long scan
+    while (
+      outcome.status === "timeout" &&
+      outcome.item_status_at_timeout === "running" &&
+      _runningReWaits < MAX_RUNNING_REWAITS
+    ) {
+      _runningReWaits++;
+      console.log(`[offense-agent] q=${queueResult.queue_id} still running at ${waitTimeoutSec}s — extending wait (${_runningReWaits}/${MAX_RUNNING_REWAITS})`);
+      outcome = await dispatch("wait_for_outcome", { queue_item_id: queueResult.queue_id, timeout_sec: waitTimeoutSec });
+    }
     const rawOutput = outcome.output_preview || "";
     const status = outcome.status || "timeout";
 
