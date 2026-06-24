@@ -219,12 +219,20 @@ async function searchExploits(args) {
   const query = [product, version].filter(Boolean).join(" ").replace(/[`$"';|&]/g, "");
   if (!query.trim()) return { error: "empty query after sanitization" };
 
-  // searchsploit --json is well-supported and parseable.
-  // dev-01 version is older — no --colour flag; --json suffices.
+  // dir_1782339906899: run searchsploit LOCALLY on the bridge (dev-01 is out of
+  // the offense pipeline). searchsploit is installed via Dockerfile.
   const cmd = `searchsploit --json ${JSON.stringify(query)}`;
   let raw;
   try {
-    raw = await runOnDev01(cmd, 30000);
+    raw = await new Promise((resolve, reject) => {
+      const proc = spawn("bash", ["-c", cmd], { stdio: ["pipe", "pipe", "pipe"] });
+      let out = "", err = "";
+      const t = setTimeout(() => { try { proc.kill("SIGKILL"); } catch (_) {} reject(new Error("searchsploit timeout")); }, 30000);
+      proc.stdout.on("data", d => out += d.toString());
+      proc.stderr.on("data", d => err += d.toString());
+      proc.on("close", code => { clearTimeout(t); code === 0 ? resolve(out) : reject(new Error(`searchsploit exit ${code}: ${err.slice(0, 200)}`)); });
+      proc.on("error", e => { clearTimeout(t); reject(e); });
+    });
   } catch (e) {
     return { error: `searchsploit failed: ${e.message}` };
   }
@@ -248,7 +256,7 @@ async function searchExploits(args) {
     platform: r["Platform"],
     port: r["Port"] || null,
     codes: r["Codes"] || null,             // CVE refs
-    source_path: r["Path"],                 // reference path on filesystem, not the body
+    source_path: String(r["Path"] || "").replace(/^\/usr\/share\/exploitdb/, "/opt/exploitdb"),
   }));
 
   // Optional port filter
