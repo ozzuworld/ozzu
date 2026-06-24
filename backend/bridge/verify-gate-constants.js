@@ -8,4 +8,11 @@
 
 const VERIFY_GATE_FAIL = "verify_gate_fail";
 
-module.exports = { VERIFY_GATE_FAIL };
+// dir_1782260457892: audit token written by the contradiction-detection /
+// finding-revision trigger (finding-revision.js) BEFORE it re-invokes the
+// verifier. Audit-only — the scorecard counts the integrity event via the
+// reused verifyFinding row, so this token is intentionally not read there.
+// offense_telemetry.outcome is VARCHAR(24) — keep it ≤24 chars.
+const REVISION_TRIGGERED = "revision_triggered";
+
+module.exports = { VERIFY_GATE_FAIL, REVISION_TRIGGERED };

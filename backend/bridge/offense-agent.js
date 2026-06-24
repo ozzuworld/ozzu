@@ -923,6 +923,20 @@ async function runAgent(engagementId, opts = {}) {
     if (status !== "done") summary.success = false;
     if (status === "timeout" && !summary.error_category) summary.error_category = "timeout";
 
+    // (10b) dir_1782260457892: contradiction-detection / finding-revision.
+    // Placed after the queue-truth correction above so the failed-step guard
+    // sees the corrected summary.success. ctx.findings is the set recorded BEFORE
+    // this iteration — i.e. findings a LATER step can now contradict.
+    try {
+      const { detectContradictions, reverifyContradicted } = require("/app/finding-revision");
+      const contradictions = detectContradictions(summary, ctx.findings || []);
+      if (contradictions.length > 0) {
+        await reverifyContradicted(engagementId, contradictions, { db });
+      }
+    } catch (e) {
+      console.error(`[offense-agent] contradiction pass failed:`, e.message);
+    }
+
     await orchestrator.completeTask(task.id, summary.success ? "done" : "failed", summary);
 
     // (11) Heartbeat status for live monitoring
