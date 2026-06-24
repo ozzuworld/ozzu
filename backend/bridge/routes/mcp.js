@@ -215,7 +215,7 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "get_infra_state",
-      description: "Get live infrastructure state. TOPOLOGY: Rock Pi (172.168.0.55) is the ESP32 hub — it runs the ozzu-nodes WiFi AP and the positioning service. ESP32 nodes connect to the Rock Pi, NOT to dev-01. dev-01 (172.168.0.57) is a separate x86 Linux workstation. Sections: network (VPN, routes, LAN), devices (Rock Pi, dev-01 with reachability/services/resources), esp32 (nodes connected to Rock Pi AP), gcp (Docker, disk, memory), hub (positioning service status), router (ER605 DHCP/WAN/VPN). Cached 60s, use refresh=true for fresh probe.",
+      description: "Get live infrastructure state. TOPOLOGY: GCP VM (bridge, postgres, redis, qdrant, nginx, face-recognition, browser) + WireGuard mesh (10.9.0.0/24) connecting kazuma-pc, orangepi5, ozzu-tab (pentest relay), Rock Pi (WG bridge 10.9.0.21). Sections: network (VPN, routes), devices (reachability/services/resources), gcp (Docker, disk, memory). Cached 60s, use refresh=true for fresh probe.",
       inputSchema: {
         type: "object",
         properties: {

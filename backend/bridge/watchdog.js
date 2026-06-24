@@ -213,21 +213,6 @@ async function checkQdrant() {
   }
 }
 
-async function checkHomeAssistant() {
-  const start = Date.now();
-  const token = process.env.HA_TOKEN || "";
-  try {
-    const res = await fetchWithTimeout("http://127.0.0.1:8123/api/", {
-      timeout: 5000,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    // 200 = authenticated, 401 = running but no/bad token — both mean HA is up
-    return { ok: res.status === 200 || res.status === 401, latencyMs: Date.now() - start, details: { statusCode: res.status } };
-  } catch (err) {
-    return { ok: false, latencyMs: Date.now() - start, details: { error: err.message } };
-  }
-}
-
 async function checkFaceRecognition() {
   const start = Date.now();
   try {
@@ -309,7 +294,6 @@ const CHECK_FNS = {
   nginx: checkNginx,
   wireguard: checkWireguard,
   qdrant: checkQdrant,
-  homeassistant: checkHomeAssistant,
   "face-recognition": checkFaceRecognition,
   "osint-tools": checkOsintTools,
   browser: checkBrowser,

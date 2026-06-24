@@ -108,25 +108,9 @@ module.exports = function createPipelineRoutes(ctx) {
     const fields = "databaseId,status,conclusion,createdAt,headBranch,name,url";
     const ghArgs = (workflow) => ["run", "list", "--workflow=" + workflow, "-R", "ozzuworld/ozzu", "--limit", "3", "--json", fields];
 
-    const results = { android: [], ios: [], cachedAt: Date.now() };
+    const results = { ios: [], cachedAt: Date.now() };
     try {
-      const [androidResult, iosResult] = await Promise.all([
-        execFileAsync("gh", ghArgs("build-android.yml"), { timeout: 15000 }).catch(err => ({ error: err.message })),
-        execFileAsync("gh", ghArgs("build-ios.yml"), { timeout: 15000 }).catch(err => ({ error: err.message })),
-      ]);
-      if (androidResult.error) {
-        log.bridge.warn(`[build-status] Failed to fetch android CI status: ${androidResult.error}`);
-      } else {
-        results.android = JSON.parse(androidResult.stdout).map(r => ({
-          databaseId: r.databaseId,
-          status: r.status,
-          conclusion: r.conclusion || null,
-          createdAt: r.createdAt,
-          headBranch: r.headBranch,
-          name: r.name,
-          url: r.url,
-        }));
-      }
+      const iosResult = await execFileAsync("gh", ghArgs("build-ios.yml"), { timeout: 15000 }).catch(err => ({ error: err.message }));
       if (iosResult.error) {
         log.bridge.warn(`[build-status] Failed to fetch ios CI status: ${iosResult.error}`);
       } else {
