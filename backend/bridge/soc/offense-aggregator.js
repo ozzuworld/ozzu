@@ -23,7 +23,7 @@
 const http = require("http");
 const https = require("https");
 const { URL } = require("url");
-const db = require("./db");
+const db = require("../db");
 const { VERIFY_GATE_FAIL } = require("./verify-gate-constants");
 
 const MODEL_URL  = process.env.OFFENSE_MODEL_URL  || "http://127.0.0.1:11434/v1";

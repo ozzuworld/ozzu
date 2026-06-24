@@ -10,7 +10,7 @@
 
 "use strict";
 
-const db = require("./db");
+const db = require("../db");
 const orchestrator = require("./offense-orchestrator");
 const aggregator = require("./offense-aggregator");
 

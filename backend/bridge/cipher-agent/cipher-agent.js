@@ -464,7 +464,7 @@ function start(ctx) {
   _ctx = ctx;
   _paused = false;
 
-  try { _actionQueue = require("./action-queue"); } catch {}
+  try { _actionQueue = require("../action-queue"); } catch {}
 
   // Subscribe to watchdog events (non-recoverable services only — see serviceTransition filter)
   if (ctx.watchdog?.onStateTransition) {

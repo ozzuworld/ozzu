@@ -189,7 +189,7 @@ async function buildSummary() {
 
   // 5. Action queue
   try {
-    const actionQueue = require("./action-queue");
+    const actionQueue = require("../action-queue");
     const actions = await actionQueue.pull({ limit: 5 });
     if (actions.length > 0) {
       parts.push(`${actions.length} pending action${actions.length > 1 ? "s" : ""} in the queue`);

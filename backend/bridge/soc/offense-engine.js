@@ -15,7 +15,7 @@
 const http = require("http");
 const https = require("https");
 const { URL } = require("url");
-const db = require("./db");
+const db = require("../db");
 
 // Configurable so we can benchmark Qwen-3.x-32B vs DeepSeek in-harness with no code
 // change. Endpoint is the OpenAI-compatible base of a self-hosted server (Ollama/vLLM)

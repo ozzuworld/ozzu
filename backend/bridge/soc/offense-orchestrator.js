@@ -17,7 +17,7 @@
 const http = require("http");
 const https = require("https");
 const { URL } = require("url");
-const db = require("./db");
+const db = require("../db");
 
 // dir_1780969435006: dual-model SOTA. Orchestrator (strategic reasoning) uses
 // REASONING_MODEL_*; falls back to OFFENSE_MODEL_* when not set so legacy
@@ -318,7 +318,7 @@ function renderSubAgentsForPrompt(subAgents) {
 // last 2 denial reasons so the model can read and pivot.
 async function renderLastDenials(engagementId) {
   try {
-    const db = require("./db");
+    const db = require("../db");
     const r = await db.query(
       `SELECT queue_item_id, outcome_notes
          FROM offense_telemetry
