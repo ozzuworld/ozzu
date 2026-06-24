@@ -80,7 +80,7 @@ async function printSTL(stlPath, options = {}) {
 
   const startedAt = new Date().toISOString();
 
-  // Step 1: slice on dev-01
+  // Step 1: slice locally on bridge
   const sliceResult = await sliceLocal(stlPath, options.slicer || {});
 
   // Step 2: ensure printer connection

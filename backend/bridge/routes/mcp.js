@@ -215,7 +215,7 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "get_infra_state",
-      description: "Get live infrastructure state. TOPOLOGY: Rock Pi (172.168.0.55) is the ESP32 hub — it runs the ozzu-nodes WiFi AP and the positioning service. ESP32 nodes connect to the Rock Pi, NOT to dev-01. dev-01 (172.168.0.57) is a separate x86 Linux workstation. Sections: network (VPN, routes, LAN), devices (Rock Pi, dev-01 with reachability/services/resources), esp32 (nodes connected to Rock Pi AP), gcp (Docker, disk, memory), hub (positioning service status), router (ER605 DHCP/WAN/VPN). Cached 60s, use refresh=true for fresh probe.",
+      description: "Get live infrastructure state. TOPOLOGY: GCP VM (bridge, postgres, redis, qdrant, nginx, face-recognition, browser) + WireGuard mesh (10.9.0.0/24) connecting kazuma-pc, orangepi5, ozzu-tab (pentest relay), Rock Pi (WG bridge 10.9.0.21). Sections: network (VPN, routes), devices (reachability/services/resources), gcp (Docker, disk, memory). Cached 60s, use refresh=true for fresh probe.",
       inputSchema: {
         type: "object",
         properties: {
@@ -765,7 +765,7 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "probe_executor",
-      description: "Probe an engagement's executor for actually-installed tools (replaces the seeded executor_tools list with ground truth). Runs a non-offensive `command -v <tool>` discovery loop over ~40 candidates via the same SSH→dev-01 + adb-wrap path as queue items, then writes the installed list back to pentest_engagements.executor_tools so future advance_offense calls only see real tools. Idempotent: skips if probed_at is < 24h old unless force:true. Call once per engagement before the first advance_offense, or after installing new tools on the executor. Returns added/removed diff for visibility.",
+      description: "Probe an engagement's executor for actually-installed tools (replaces the seeded executor_tools list with ground truth). Runs a non-offensive `command -v <tool>` discovery loop over ~40 candidates via the same local execution path as queue items, then writes the installed list back to pentest_engagements.executor_tools so future advance_offense calls only see real tools. Idempotent: skips if probed_at is < 24h old unless force:true. Call once per engagement before the first advance_offense, or after installing new tools on the executor. Returns added/removed diff for visibility.",
       inputSchema: {
         type: "object",
         properties: {
@@ -832,11 +832,6 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
-      name: "finetune_status",
-      description: "Read-only one-call view of the Qwen3-32B LoRA fine-tune pipeline state. Reports: dataset corpora at /tmp/finetune/ (existence + size + line count), active DigitalOcean droplets (ozzu-finetune-prefixed only), trained adapters under /home/gcp/ozzu/private/finetune/, and whether ozzu-soc-v1 is registered in the live Ollama. Use to figure out 'where am I in the training workflow' without re-deriving from tools/finetune/README.md.",
-      inputSchema: { type: "object", properties: {} },
-    },
-    {
       name: "analyze_engagement_telemetry",
       description: "Diagnose the health of a live L3 multi-agent engagement run. Reads offense_telemetry + engagement_tasks + soc_queue_items for the given engagement_id and surfaces actionable problems: orchestrator loops (same intent ≥3× consecutively), executor dead (consecutive empty queue outputs), low step_queued rate (model can't tool-use), membrane breach (sanitization failed — HARD error), stalled tasks (unblocked + pending too long). MEMBRANE-SAFE: returns issue kinds + counts + row IDs, never the offending text. Use during live runs to spot agent dysfunction immediately.",
       inputSchema: {
@@ -864,7 +859,7 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "soc_queue_steps",
-      description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command to run on dev-01. By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
+      description: "Push one or more orchestration steps to the SOC app for a pentest engagement. Prefer the atomic single-item form (`item:{...}`) — call once per step. `items:[...]` array form is still accepted for batches. PA engineer runs each step from the app; output streams back and is visible to Cipher in the same session. Each step is a single shell command executed locally on the bridge (lab reached via wg0). By default, existing pending items are replaced on the first call of a batch — set replace_pending:false for subsequent calls in the same batch.",
       inputSchema: {
         type: "object",
         properties: {
@@ -875,7 +870,7 @@ module.exports = function mcpRoutes(ctx) {
             properties: {
               title: { type: "string", description: "Short human-readable title (e.g. 'Kernel fingerprint capture')" },
               description: { type: "string", description: "Why this step, what it produces" },
-              command: { type: "string", description: "Shell command to run on dev-01" },
+              command: { type: "string", description: "Shell command to run locally on the bridge" },
               expected_artifact: { type: "string", description: "Expected evidence file path or summary" },
             },
             required: ["title", "command"],
@@ -888,7 +883,7 @@ module.exports = function mcpRoutes(ctx) {
               properties: {
                 title: { type: "string", description: "Short human-readable title (e.g. 'Kernel fingerprint capture')" },
                 description: { type: "string", description: "Why this step, what it produces" },
-                command: { type: "string", description: "Shell command to run on dev-01" },
+                command: { type: "string", description: "Shell command to run locally on the bridge" },
                 expected_artifact: { type: "string", description: "Expected evidence file path or summary" },
               },
               required: ["title", "command"],
@@ -2672,45 +2667,6 @@ ${result.narrative}
         }
       }
 
-      case "finetune_status": {
-        const ft = require("../finetune-status");
-        try {
-          const s = await ft.status();
-          const lines = [
-            "# Fine-tune pipeline status",
-            "",
-            "## Summary",
-            ...s.summary.map((x) => "- " + x),
-            "",
-            "## Dataset corpora (" + s.dataset_dir + ")",
-          ];
-          for (const [name, info] of Object.entries(s.corpora)) {
-            if (info) lines.push(`- ${name}: ${info.lines ?? "?"} examples · ${info.size_mb} MB · mtime ${info.mtime}`);
-            else      lines.push(`- ${name}: _missing_`);
-          }
-          lines.push("", "## DigitalOcean droplets");
-          if (!s.do_droplets.available) lines.push("- _unavailable: " + (s.do_droplets.reason || "?") + "_");
-          else if ((s.do_droplets.ozzu_finetune_droplets || []).length === 0) lines.push("- (no ozzu-finetune droplets — $0/hr)");
-          else for (const d of s.do_droplets.ozzu_finetune_droplets) {
-            lines.push(`- id=${d.id} name=${d.name} status=${d.status} size=${d.size} ip=${d.ip || "—"} price=$${d.price_hourly}/hr created=${d.created_at}`);
-          }
-          lines.push("", "## Local adapters (" + "/home/gcp/ozzu/private/finetune/" + ")");
-          if (s.local_adapters.length === 0) lines.push("- (none)");
-          else for (const a of s.local_adapters) {
-            const v = a.manifest ? ` model=${a.manifest.base_model} rank=${a.manifest.rank}` : "";
-            lines.push(`- ${a.name} adapter_present=${a.adapter_present}${v}`);
-          }
-          lines.push("", "## Ollama");
-          if (!s.ollama.reachable) lines.push("- _unreachable: " + s.ollama.reason + "_");
-          else {
-            lines.push(`- reachable; models: ${s.ollama.models.join(", ") || "(none)"}`);
-            lines.push(`- ozzu-soc-v1 registered: ${s.ollama.ozzu_soc_v1_registered}`);
-          }
-          return { content: [{ type: "text", text: lines.join("\n") }] };
-        } catch (e) {
-          return { content: [{ type: "text", text: `finetune_status failed: ${e.message}` }], isError: true };
-        }
-      }
 
       case "get_behavioral_scorecard": {
         try {

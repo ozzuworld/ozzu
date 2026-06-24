@@ -1,8 +1,0 @@
-services:
-  web:
-    build: ./web
-    container_name: ozzulab-ssti-i1-web
-    networks: { labnet: { ipv4_address: 10.10.32.20 } }
-networks:
-  labnet:
-    ipam: { config: [ { subnet: 10.10.32.0/24 } ] }

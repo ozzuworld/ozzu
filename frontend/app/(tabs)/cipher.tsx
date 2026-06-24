@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { View, Text, Animated, Easing, useWindowDimensions, PermissionsAndroid, Platform, Pressable } from "react-native";
+import { View, Text, Animated, Easing, useWindowDimensions, Platform, Pressable } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -239,12 +239,6 @@ export default function LandingScreen() {
         // iPhone with cipher-voice: use on-device STT instead of MicRecorder
         startCipherVoiceListening();
         return;
-      }
-      if (Platform.OS === "android") {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
-        );
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) return;
       }
       if (cancelled) return;
       micRef.current.start((pcmBase64) => {

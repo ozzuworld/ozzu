@@ -79,19 +79,11 @@ async function findSourceQueueItem(engagementId, db) {
   return null;
 }
 
-// Run the verification request through the engagement's executor. Mirrors the
-// shape of offense-engine.wrapForExecutor — for the tablet executor case we
-// adb-wrap; for dev-01 we ssh directly.
+// Run the verification command locally on the bridge (lab reached via wg0 → tablet relay).
+// dev-01 is removed from the offense pipeline (2026-06-23).
 async function runViaExecutor(engagement, innerCmd) {
   return new Promise((resolve) => {
-    const b64 = Buffer.from(innerCmd).toString("base64");
-    let cmd;
-    if (engagement.executor_host && engagement.executor_host !== "dev-01") {
-      const adbTarget = engagement.executor_adb_target || "10.9.0.10:5555";
-      cmd = `adb -s ${adbTarget} shell 'echo ${b64} | base64 -d | su -c "/data/local/nhsystem/nh -s"' </dev/null`;
-    } else {
-      cmd = `echo ${b64} | base64 -d | ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 dev-01 'bash -s'`;
-    }
+    let cmd = innerCmd;
     const proc = spawn("bash", ["-s"], { stdio: ["pipe", "pipe", "pipe"] });
     let out = "";
     proc.stdout.on("data", d => out += d.toString());

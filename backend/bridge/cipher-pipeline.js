@@ -150,10 +150,8 @@ class CipherPipeline extends EventEmitter {
           "SideStore:3",
           "Cipher:2",
           "ozzu:3",
-          "dev-01:2",
           "King Kazuma:2",
           "directive:2",
-          "Home Assistant:2",
           "sideload:2",
         ],
       });

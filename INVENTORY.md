@@ -23,11 +23,12 @@ Primary compute — always on. All services run here via Docker. See registry §
 | nginx | 80/443 | SSL proxy (home.ozzu.world) | ✅ running |
 | anisette | 6969 | Apple auth for iOS sideloading | ✅ running |
 | face-recognition | 5555 | Face embedding + search API | ✅ running |
-| osint-tools | internal | OSINT scan engine | ✅ running |
 | browser | 3334 | Headless browser for web tasks | ✅ running |
-| whatsapp-bridge | 8180 | WhatsApp MCP — whatsmeow Go bridge (41 tools) | ✅ running |
-| whatsapp-mcp | 8081 | WhatsApp MCP — Python MCP server (SSE) | ✅ running |
-| whatsapp-web-ui | 8090 | WhatsApp MCP — QR pairing + webhook UI | ✅ running |
+| obico-server-web | 3334 | Obico (Spaghetti Detective) print failure detection | ✅ running |
+| obico-server-ml_api | — | Obico ML inference | ✅ running |
+| whatsapp-bridge | 8180 | WhatsApp MCP — whatsmeow Go bridge (41 tools) | ⚠️ check `docker ps` |
+| whatsapp-mcp | 8081 | WhatsApp MCP — Python MCP server (SSE) | ⚠️ check `docker ps` |
+| whatsapp-web-ui | 8090 | WhatsApp MCP — QR pairing + webhook UI | ⚠️ check `docker ps` |
 
 WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a container. OpenVPN was decommissioned 2026-05-02 — see registry §4.
 
@@ -46,8 +47,9 @@ WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a contain
 | Auth | Saved to `~/wa-auth/` — survives restarts |
 
 ### iPhone (King Kazuma)
-- Ozzu app installed via AltStore (sideload from Windows laptop)
-- **NEVER receives OTA** — all iOS changes require native build + sideload
+- Ozzu app installed via SideStore (self-service sideload, no PC needed for refresh)
+- **JS changes deploy OTA** via expo-updates (~30s, no reinstall; download on launch N, apply on N+1)
+- **Native changes** → iOS CI build → `artifacts/ozzu-latest.ipa` → SideStore one-tap update
 - Push notifications: APNs via bridge `push-notifications.js`
 
 ---
@@ -62,17 +64,19 @@ WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a contain
 | embed-hf-dataset.py | Any HuggingFace WebDataset → Qdrant | `<dataset_name> [start] [end]` |
 | embed-parquet-dataset.py | Parquet format datasets → Qdrant | |
 | face-clusterer.py | Identity clustering (Union-Find) | `--incremental`, `--stats` |
-| deploy.sh | Android APK deploy from CI | `[device-names]`, `--local` |
-| ota-deploy.sh | OTA JS update (Android ONLY) | `--restart` |
+| ota-deploy.sh | OTA JS update (iOS + Android bundle) | `--restart` (restarts Android tablets) |
 | ota-deploy-tv.sh | OTA JS update (TV app) | Separate runtimeVersion `tv-1.0.0` |
 | deploy-ios.sh | iOS IPA via AltStore on Windows laptop | `--local /path`, `--check` |
 | cipher.sh | Launch Cipher with memory context | Loads from bridge /cipher/context |
 | cipher-guard.sh | PreToolUse hook — enforce pipeline | Blocks edits without directive |
 | cipher-session-save.sh | SessionEnd hook — save to postgres | |
-| inject-last-conversation.sh | UserPromptSubmit hook — inject context | Pre-flight checklist on first msg |
+| cipher-analyze.sh | Layer 1-3 codebase analysis | `{layer1\|layer2\|layer3\|all}` |
 | backup.sh | Encrypted backup of all data | `--no-encrypt` |
 | gpu-orchestrator.sh | Unattended multi-dataset GPU runner | Auto-recovery, heartbeat |
-| start-gmail-mcp.sh | Launch Gmail MCP servers (both accounts) | Requires `backend/.env.gmail` OAuth creds |
+| monitor-eng.js | SOC engagement live monitor | Takes engagement ID as arg |
+| heartbeat-reporter.sh | Device heartbeat to bridge | systemd timer |
+| wg-state-poller.sh | WireGuard state to bridge | systemd timer |
+| start-gmail-mcp.sh | Launch Gmail MCP servers (both accounts) | Requires `backend/.env.gmail` OAuth creds (DOWN) |
 
 ---
 
@@ -105,11 +109,11 @@ These took 1 week to build and tune on embed-pipeline-v2.py:
 
 | Change type | Command |
 |-------------|---------|
-| Ozzu app (any change) | `merge-and-deploy` → iOS IPA in CI → `artifacts/ozzu-latest.ipa` → SideStore/AltStore. NO Android. |
+| Ozzu app JS/TSX only | `merge-and-deploy` → **OTA** (~30s, no reinstall). expo-updates downloads on launch N, applies on N+1. |
+| Ozzu app native change | `merge-and-deploy` → iOS CI build → `artifacts/ozzu-latest.ipa` → SideStore one-tap update |
 | Ozzu app iOS rebuild (recovery) | `stage_ios` MCP tool |
 | TV app OTA (JS only) | `./scripts/ota-deploy-tv.sh` (Android TV — SEPARATE from the app) |
 | TV app APK (native) | CI auto-triggers on `tv/` push to main → self-installs via Device Owner |
-| ~~Android app OTA/APK~~ | **DECOMMISSIONED — app is iOS-only** |
 | Bridge restart | `docker compose restart bridge` (in `/home/gcp/ozzu/backend/`) |
 | Full redeploy | `POST /directives/{id}/merge-and-deploy` via MCP |
 
@@ -221,18 +225,21 @@ sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
 
 | Item | Date | Reason |
 |------|------|--------|
-| ER606 router | 2026-04-05 | Replaced / decomissioned |
-| agrovision container | 2026-04-09 | Feature cancelled |
-| homeassistant container | 2026-04-09 | LAN offline, moving to Spain |
-| Rock Pi 4B (172.168.0.55) | 2026-04-09 | LAN decomissioned, moving to Spain |
-| dev-01 workstation (172.168.0.57) | 2026-04-09 | LAN decomissioned, moving to Spain |
-| ESP32 nodes 1-3 (living/master/office) | 2026-04-09 | Hub (Rock Pi) offline |
-| ESP32 node 4 (rooftop) | 2026-04-09 | Never deployed, project paused |
-| Samsung tablets (tab-roaming, tab-lroom) | 2026-04-09 | LAN offline |
-| Smart TV (tv-lroom) | 2026-04-09 | LAN offline |
+| ER606 router | 2026-04-05 | Replaced / decommissioned |
+| agrovision container + app + scripts | 2026-04-09 | Feature cancelled. Code deleted 2026-06-24 (dir_1782317757637). |
+| homeassistant container | 2026-04-09 | Colombia LAN offline |
+| ESP32 positioning nodes 1-4 | 2026-04-09 | Hub offline, Colombia LAN decommissioned |
+| Samsung tablets (tab-roaming, tab-lroom) | 2026-04-09 | Colombia LAN offline |
+| Smart TV (tv-lroom) | 2026-04-09 | Colombia LAN offline |
 | data/ms1mv2-embeddings (12GB) | 2026-04-09 | Already ingested into Qdrant |
-| data/agrovision (1.8GB) | 2026-04-09 | Agrovision decommissioned |
-| agrovision-app/ repo (476MB) | 2026-04-09 | Agrovision decommissioned |
+| OpenVPN | 2026-05-02 | Replaced by WireGuard. Code deleted 2026-06-24. |
+| Android app build/APK/mirror | 2026-06-22 | App is iOS-only. build-android.yml deleted 2026-06-24. |
+| Distillation pipeline (oracle, finetune, grpo, sft-train) | 2026-06-24 | Abandoned — superseded by DeepSeek V4 + harness. Code + ~15GB artifacts deleted. |
+| executor-agent (dev-01 HTTP shim) | 2026-06-24 | dev-01 out of offense pipeline |
+
+**NOT decommissioned (corrected):**
+- **Rock Pi 4B** — reactivated 2026-05-28 as WG bridge (10.9.0.21). Was wrongly listed as decommissioned.
+- **dev-01** — out of the OFFENSE pipeline, but still a WG peer used for device pairing and SSH jump.
 
 ---
 
@@ -240,26 +247,25 @@ sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
 
 | Server | URL | Purpose |
 |--------|-----|---------|
-| ozzu-bridge | http://localhost:3333/mcp | Main bridge — directives, pipeline, services, WhatsApp (legacy text-only), email (legacy send-only) |
-| whatsapp-mcp | http://localhost:8081/mcp | WhatsApp Extended — 41 tools: media, groups, reactions, polls, presence, newsletters |
-| gmail-personal | http://localhost:8000/mcp | Gmail (eng.hsuarezp) — read inbox, search, send, labels, threads, drafts, attachments |
-| gmail-ozzu | http://localhost:8001/mcp | Gmail (eng.ozzu) — same as above for ozzu account |
+| ozzu-bridge | http://localhost:3333/mcp | Main bridge — directives, pipeline, SOC, services, infra |
+| whatsapp-mcp | http://localhost:8081/mcp | WhatsApp Extended — 41 tools. **Containers DOWN — check `docker ps` before use.** |
+| gmail-personal | http://localhost:8000/mcp | Gmail (eng.hsuarezp). **DOWN since 2026-06-03 — creds wiped, parked.** |
+| gmail-ozzu | http://localhost:8001/mcp | Gmail (eng.ozzu). **DOWN since 2026-06-03 — same.** |
 
 **WhatsApp MCP**: `cd whatsapp-mcp && docker compose up -d` (separate compose, not in backend/)
-**Gmail MCP**: `./scripts/start-gmail-mcp.sh` (requires Google OAuth credentials in `backend/.env.gmail`)
+**Gmail MCP**: `./scripts/start-gmail-mcp.sh` — **DOWN, requires re-setup of Google OAuth credentials**
 
 ---
 
 ## Key Facts
 
 - **Ozzu is a React Native app — NO website.** "dashboard" = the RN app in `frontend/`
-- **iPhone NEVER receives OTA** — always native build + sideload via AltStore
-- **Ozzu app is iOS-ONLY (dir_1782138428827, 2026-06-22)** — no Android build/OTA/mirror for the app; the Redroid screenshot loop is decommissioned. TV app (`tv/`, Android TV), pentest tablet, WhatsApp phone are SEPARATE Android infra, NOT the app.
-- **Host Node = current LTS (20+)** — upgraded from 18 (Metro 0.83 needs Node 20+ for local/TV bundling; iOS CI uses its own cloud Node)
+- **Ozzu app is iOS-ONLY** (dir_1782138428827). JS changes → OTA via expo-updates (~30s). Native changes → iOS CI build → IPA. No Android build/mirror.
+- **Host Node = current LTS (20+)** — Metro needs Node 20+ for local/TV bundling; iOS CI uses its own cloud Node
 - **Face count**: query Qdrant live — NEVER state from memory
-- **Moving to Spain soon** — no persistent LAN. Only always-on devices: iPhone, Android (3226033350), Windows laptop (sometimes)
-- **Disk**: 82% used after 2026-04-09 cleanup (44GB free, 111GB is Qdrant face DB)
-- **git-crypt**: repo uses git-crypt for secrets. `ca.key` (OpenVPN CA) is NOT encrypted — security gap, noted.
+- **Located in Spain** (EDIFICIO LAURA). Lab /24 reached via wg0 → tablet relay.
+- **Disk**: check `df -h /` live — was 90% used as of 2026-06-24, ~26GB free (111GB is Qdrant face DB)
+- **git-crypt**: repo uses git-crypt for secrets.
 
 ---
 
@@ -272,18 +278,18 @@ sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
 - **Kazuma-PC**: `PasswordAuthentication no`, `PubkeyAuthentication yes` set in
   `C:\ProgramData\ssh\sshd_config`. Backup: `sshd_config.bak-20260516`.
 - **orangepi5**: cloud-init seeded key, NOPASSWD sudo (unchanged).
-- **GCP VM**: SSH on port 22 is currently `0.0.0.0/0` via `default-allow-ssh` — FLAGGED but not yet restricted.
+- **GCP VM**: SSH restricted to IAP tunnel IPs only (`allow-iap-ssh`, tcp:22 from 35.235.240.0/20). `default-allow-ssh` was **deleted**.
 
-### GCP firewall (post-2026-05-16)
+### GCP firewall (updated 2026-06-24)
 | Rule | Allowed | Source |
 |---|---|---|
-| allow-ozzu-public | tcp:80, 443, 3333 | 0.0.0.0/0 — nginx HTTPS + bridge API |
+| allow-ozzu-public | tcp:80, 443 | 0.0.0.0/0 — nginx HTTPS (port 3333 removed from public) |
+| allow-iap-ssh | tcp:22 | 35.235.240.0/20 — IAP tunnel only |
 | wireguard | udp:51820 | 0.0.0.0/0 — VPN |
-| default-allow-ssh | tcp:22 | 0.0.0.0/0 — **FLAGGED, restrict in next pass** |
-| default-allow-rdp | tcp:3389 | 0.0.0.0/0 — **FLAGGED, no RDP service runs on VM, can delete** |
 | default-allow-internal | all | 10.128.0.0/9 (GCP VPC) |
 | default-allow-icmp | icmp | 0.0.0.0/0 |
-- **Removed from public**: tcp:6333 (qdrant) + tcp:6969 (anisette). Reach via WG only at `10.9.0.1:6333` / `10.9.0.1:6969`.
+- **Deleted rules**: `default-allow-ssh` (0.0.0.0/0), `default-allow-rdp` (no RDP service)
+- **Removed from public**: tcp:3333 (bridge), tcp:6333 (qdrant), tcp:6969 (anisette). Reach via WG only.
 
 ### Secrets — what's where
 - `/root/.ozzu-secrets` (chmod 600, root:root) — universal sudo, web admin passwords, Wyze creds, web-admin rotation key (`OZZU_WEB_ADMIN_PASS`).

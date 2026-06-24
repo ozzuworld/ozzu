@@ -21,7 +21,7 @@ const MODEL = "opus";                         // Max subscription — use best m
 
 const SERVICES_SEVERITY = {
   postgres: "critical", redis: "critical", nginx: "critical",
-  openvpn: "high", qdrant: "medium", homeassistant: "medium",
+  qdrant: "medium",
   "face-recognition": "medium", "osint-tools": "low",
   browser: "low", "vast-gpu": "critical",
 };
@@ -29,8 +29,8 @@ const SERVICES_SEVERITY = {
 // Services that recovery-engine handles first (Tier 1 docker restart).
 // cipher-agent only handles these on 'recoveryFailed' events.
 const DOCKER_RECOVERABLE = new Set([
-  "postgres", "redis", "nginx", "openvpn", "qdrant",
-  "homeassistant", "face-recognition", "osint-tools", "browser",
+  "postgres", "redis", "nginx", "qdrant",
+  "face-recognition", "osint-tools", "browser",
 ]);
 
 // ── State ──

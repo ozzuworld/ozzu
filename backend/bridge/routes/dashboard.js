@@ -467,11 +467,6 @@ ${approvalBannerItems.map(item => `<div class="approval-item">
 <div id="build-status-section">
 <h2>CI Build Status</h2>
 <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px;">
-  <div class="stat-card" id="build-android" style="flex:1;min-width:260px;border-left:3px solid #6b7280;">
-    <div class="label">Android CI Build</div>
-    <div class="value" id="build-android-status" style="font-size:16px;">Loading...</div>
-    <div id="build-android-meta" style="font-size:11px;color:#64748b;margin-top:4px;"></div>
-  </div>
   <div class="stat-card" id="build-ios" style="flex:1;min-width:260px;border-left:3px solid #6b7280;">
     <div class="label">iOS CI Build</div>
     <div class="value" id="build-ios-status" style="font-size:16px;">Loading...</div>

@@ -123,7 +123,6 @@ const businessInvoiceRoutes = require("./routes/business-invoices");
 const businessInvestmentRoutes = require("./routes/business-investments");
 const backupRoutes = require("./routes/backup");
 const ozzuSourceRoutes = require("./routes/ozzu-source");
-const designerRoutes = require("./routes/designer");
 const fileRoutes = require("./routes/files");
 const scheduleRoutes = require("./routes/schedules");
 const profileRoutes = require("./routes/profile");
@@ -134,14 +133,11 @@ const mcpRoutes = require("./routes/mcp");
 const infraRoutes = require("./routes/infra");
 const heartbeatRoutes = require("./routes/heartbeat");
 const businessEmailRoutes = require("./routes/business-email");
-const agrovisionRoutes = require("./routes/agrovision");
 const vaultRoutes = require("./routes/vault");
 const financeRoutes = require("./routes/finance");
 const whatsappRoutes = require("./routes/whatsapp");
 const influenceRoutes = require("./routes/influence");
-const fleetRoutes = require("./routes/fleet");
 const octoprintRoutes = require("./routes/octoprint");
-const devDashboardRoutes = require("./routes/dev-dashboard");
 const socRoutes = require("./routes/soc");
 const watchdog = require("./watchdog");
 const recoveryEngine = require("./recovery-engine");
@@ -452,11 +448,9 @@ const ENTITY_CONFIG = [
 
 // ── Camera config ──
 
-// Cameras live behind go2rtc on dev-01. Dev-01 is reachable on two paths:
-//   - 192.168.1.14 (home LAN — direct, no GCP hop, no egress)
-//   - 10.9.0.5     (WG VPN  — works from anywhere on the WG mesh, but bytes relay through GCP)
-// We expose BOTH to clients; the app races them and uses the first reachable one.
-// See backend/docker-compose.yml comment block for the full deployment story.
+// Wyze camera streams via wyze-bridge (Frigate NVR planned — dir_1779131862830).
+// Two paths: LAN-direct (192.168.1.14) and WG fallback (10.9.0.5).
+// App races both and uses the first reachable one.
 const WYZE_BRIDGE_HOST = "10.9.0.5";
 const WYZE_BRIDGE_LAN_HOST = "192.168.1.14";
 const CAMERAS = [
@@ -1138,7 +1132,7 @@ async function initStorage() {
         const ef2Async = p2(ef2);
 
         // Get recent iOS builds
-        for (const workflow of ["build-ios.yml", "build-android.yml"]) {
+        for (const workflow of ["build-ios.yml"]) {
           const platform = workflow.includes("ios") ? "ios" : "android";
           const result = await ef2Async("gh", ["run", "list", "--workflow=" + workflow, "--limit", "3", "--json", "databaseId,status,conclusion,createdAt,headBranch", "-R", "ozzuworld/ozzu"], { timeout: 15000 });
           const runs = JSON.parse(result.stdout);
@@ -1674,18 +1668,14 @@ function getRouteHandlers() {
       infra: infraRoutes(routeCtx),
       heartbeat: heartbeatRoutes(routeCtx),
       businessEmail: businessEmailRoutes(routeCtx),
-      agrovision: agrovisionRoutes(routeCtx),
       vault: vaultRoutes(routeCtx),
       finance: financeRoutes(routeCtx),
       whatsapp: whatsappRoutes(routeCtx),
       influence: influenceRoutes(routeCtx),
-      fleet: fleetRoutes(routeCtx),
       octoprint: octoprintRoutes(routeCtx),
-      devDashboard: devDashboardRoutes(routeCtx),
       knowledgeGraph: knowledgeGraphRoutes(routeCtx),
       soc: socRoutes(routeCtx),
       ozzuSource: ozzuSourceRoutes(routeCtx),
-      designer: designerRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1820,111 +1810,14 @@ async function handleRequest(req, res) {
   if (await r.infra(req, res, pathname, url)) return;
   if (await r.heartbeat(req, res, pathname, url)) return;
   if (await r.businessEmail(req, res, pathname, url)) return;
-  if (await r.agrovision(req, res, pathname, url)) return;
   if (await r.vault(req, res, pathname, url)) return;
   if (await r.finance(req, res, pathname, url)) return;
   if (await r.whatsapp(req, res, pathname, url)) return;
   if (await r.influence(req, res, pathname, url)) return;
-  if (await r.fleet(req, res, pathname, url)) return;
   if (await r.octoprint(req, res, pathname, url)) return;
-  if (await r.devDashboard(req, res, pathname, url)) return;
   if (await r.knowledgeGraph(req, res, pathname, url)) return;
   if (await r.soc(req, res, pathname, url)) return;
   if (await r.ozzuSource(req, res, pathname, url)) return;
-  if (await r.designer(req, res, pathname, url)) return;
-
-  // ── AgroVisión training state poller (SSH to GPU, parse training log) ──
-  async function refreshAgrovisionState(vastInstance) {
-    if (!vastInstance || vastInstance.actual_status !== "running") return;
-    const { execSync } = require("child_process");
-    const fs = require("fs");
-    // Get direct SSH port from instance
-    const ports = vastInstance.ports || {};
-    const sshMapping = ports["22/tcp"];
-    let sshHost, sshPort;
-    if (vastInstance.public_ipaddr && sshMapping && sshMapping[0]) {
-      sshHost = vastInstance.public_ipaddr;
-      sshPort = sshMapping[0].HostPort;
-    } else {
-      sshHost = vastInstance.ssh_host;
-      sshPort = vastInstance.ssh_port;
-    }
-    try {
-      const sshCmd = `tail -50 /root/training.log 2>/dev/null; echo ___NVIDIA___; nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader 2>/dev/null; echo ___FILES___; ls /root/models/*.onnx /root/models/class_map.json 2>/dev/null; true`;
-      const raw = execSync(
-        `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p ${sshPort} root@${sshHost} ${JSON.stringify(sshCmd)} 2>/dev/null`,
-        { timeout: 10000, maxBuffer: 1024 * 1024 }
-      ).toString();
-      const [logPart, nvPart, filesPart] = raw.split(/___NVIDIA___|___FILES___/);
-      // Parse training log for epoch/batch progress
-      const lines = (logPart || "").trim().split("\n").filter(l => l.trim());
-      let epoch = null, totalEpochs = null, batch = null, totalBatches = null;
-      let loss = null, acc = null, rate = null;
-      let valLoss = null, valAcc = null, bestAcc = null;
-      let phase = "unknown"; // downloading, training, exporting, complete
-      for (const line of lines) {
-        // Epoch summary: [Epoch 2/30] train_loss: 0.6388 train_acc: 93.4% | val_loss: 0.5880 val_acc: 94.4% | 153s
-        const epochMatch = line.match(/\[Epoch (\d+)\/(\d+)\] train_loss: ([\d.]+) train_acc: ([\d.]+)%.*val_loss: ([\d.]+) val_acc: ([\d.]+)%/);
-        if (epochMatch) {
-          epoch = parseInt(epochMatch[1]);
-          totalEpochs = parseInt(epochMatch[2]);
-          loss = parseFloat(epochMatch[3]);
-          acc = parseFloat(epochMatch[4]);
-          valLoss = parseFloat(epochMatch[5]);
-          valAcc = parseFloat(epochMatch[6]);
-          phase = "training";
-        }
-        // Batch progress: [1/30] batch 350/819 | loss: 0.7910 | acc: 66.6% | 360 img/s
-        const batchMatch = line.match(/\[(\d+)\/(\d+)\] batch (\d+)\/(\d+) \| loss: ([\d.]+) \| acc: ([\d.]+)% \| (\d+) img\/s/);
-        if (batchMatch) {
-          epoch = parseInt(batchMatch[1]);
-          totalEpochs = parseInt(batchMatch[2]);
-          batch = parseInt(batchMatch[3]);
-          totalBatches = parseInt(batchMatch[4]);
-          loss = parseFloat(batchMatch[5]);
-          acc = parseFloat(batchMatch[6]);
-          rate = parseInt(batchMatch[7]);
-          phase = "training";
-        }
-        // Best model: ★ New best! val_acc=94.4%
-        const bestMatch = line.match(/New best!.*val_acc=([\d.]+)%/);
-        if (bestMatch) bestAcc = parseFloat(bestMatch[1]);
-        // Export phase
-        if (line.includes("Exporting ONNX") || line.includes("export")) phase = "exporting";
-        if (line.includes("Training complete") || line.includes("ONNX saved")) phase = "complete";
-        // Download phase
-        if (line.includes("Downloading") && !line.includes("dinov2")) phase = "downloading";
-        // Class count
-      }
-      // Parse nvidia-smi
-      let gpuUtil = null, gpuMemUsed = null, gpuMemTotal = null, gpuTemp = null;
-      if (nvPart && nvPart.trim()) {
-        const nvParts = nvPart.trim().split(",").map(s => s.trim());
-        if (nvParts.length >= 4) {
-          gpuUtil = parseInt(nvParts[0]);
-          gpuMemUsed = parseInt(nvParts[1]);
-          gpuMemTotal = parseInt(nvParts[2]);
-          gpuTemp = parseInt(nvParts[3]);
-        }
-      }
-      // Check if model files exist
-      const modelReady = (filesPart || "").includes(".onnx");
-      const state = {
-        phase, epoch, totalEpochs, batch, totalBatches,
-        loss, acc, valLoss, valAcc, bestAcc, rate,
-        gpuUtil, gpuMemUsed, gpuMemTotal, gpuTemp,
-        modelReady, timestamp: Date.now(),
-      };
-      fs.writeFileSync("/home/gcp/ozzu/data/state/agrovision-training-state.json", JSON.stringify(state));
-    } catch (e) {
-      // SSH failed — write error state
-      try {
-        fs.writeFileSync("/home/gcp/ozzu/data/state/agrovision-training-state.json", JSON.stringify({
-          phase: "unreachable", error: e.message, timestamp: Date.now(),
-        }));
-      } catch {}
-    }
-  }
 
   // GET /api/training-stats — Face DB training pipeline stats
   if (req.method === "GET" && pathname === "/api/training-stats") {
@@ -2038,25 +1931,6 @@ async function handleRequest(req, res) {
         : null;
       const heartbeatAlive = heartbeatAge !== null && heartbeatAge < 30;
 
-      // AgroVisión training state — read cached state file (updated by SSH poll)
-      let agrovision = null;
-      try {
-        const fs = require("fs");
-        const avFile = "/home/gcp/ozzu/data/state/agrovision-training-state.json";
-        if (fs.existsSync(avFile)) {
-          const av = JSON.parse(fs.readFileSync(avFile, "utf8"));
-          const age = (Date.now() - (av.timestamp || 0)) / 1000;
-          agrovision = { ...av, stale: age > 30 };
-          // Trigger async refresh if stale (>15s)
-          if (age > 15) {
-            refreshAgrovisionState(vastInstance).catch(() => {});
-          }
-        } else if (vastInstance?.actual_status === "running") {
-          // First load — trigger async refresh
-          refreshAgrovisionState(vastInstance).catch(() => {});
-        }
-      } catch {}
-
       sendJSON(res, 200, {
         qdrant: {
           status: qdrantResult.status || "unknown",
@@ -2107,7 +1981,6 @@ async function handleRequest(req, res) {
           disk_space_gb: vastInstance.disk_space || null,
           geolocation: vastInstance.geolocation || null,
         } : null,
-        agrovision,
         timestamp: Date.now(),
       });
     } catch (e) {
@@ -2830,13 +2703,12 @@ const CODEBASE_SNAPSHOT =
   "device relay (audio routing from tablets to Gemini), approval/directive workflow, " +
   "camera overlay control, memory system (Redis). " +
   "docker-compose.yml orchestrates all services. config/configuration.yaml is HA config.\n\n" +
-  "Scripts: deploy.sh (build + install APK to devices), ota-deploy.sh (OTA updates), " +
-  "adb-discover.sh (find device ADB ports), cipher-watcher.sh (service monitor).\n\n" +
+  "Scripts: ota-deploy.sh (JS OTA updates), cipher-watcher.sh (service monitor).\n\n" +
   "Data: PostgreSQL for structured persistent state (memories with full-text search, conversations, " +
   "directives with audit trail, entity snapshots). Redis for ephemeral state (session cache, pub/sub). " +
   "Both running as Docker services.\n\n" +
-  "Deployment: Push to main triggers GitHub Actions CI build (~10 min), then deploy.sh " +
-  "downloads artifact and installs via ADB. Local build also supported via Gradle.\n" +
+  "Deployment: iOS-only app. JS changes deploy via OTA (ota-deploy.sh). Native changes trigger " +
+  "GitHub Actions CI build (~10 min) → IPA → sideload via SideStore.\n" +
   "You can use the read_file tool to examine any source file in detail.";
 
 const INFRA_MAP =
@@ -3989,28 +3861,6 @@ async function handleToolCall(name, args) {
         // Respond to tool call before shutting down
         setTimeout(() => gracefulShutdown("TOOL_RESTART"), 1000);
         return { success: true, message: "Bridge is restarting. Docker will bring it back up in ~5 seconds." };
-      }
-
-      if (name === "deploy_to_devices") {
-        try {
-          const { execFile } = require("child_process");
-          const util = require("util");
-          const execFileAsync = util.promisify(execFile);
-          log.bridge.info("Starting deploy to all devices...");
-          const deployId = await db.addDeployment("apk", null, ["all"]);
-          const { stdout: output } = await execFileAsync("/home/gcp/ozzu/scripts/deploy.sh", [], {
-            cwd: "/home/gcp/ozzu",
-            timeout: 300000,
-            encoding: "utf8",
-          });
-          const successes = (output.match(/SUCCESS/g) || []).length;
-          log.bridge.info(`Done, ${successes} device(s) updated`);
-          if (deployId) db.completeDeployment(deployId, "completed", `${successes} device(s)`).catch(err => log.pg.warn("deploy completion:", err.message));
-          return { success: true, message: `Deployed to ${successes} device(s). ${output.split("\n").slice(-5).join(". ")}` };
-        } catch (err) {
-          log.bridge.error("Failed:", err.message);
-          return { success: false, message: `Deploy failed: ${err.message}` };
-        }
       }
 
       if (name === "confirm_understanding") {

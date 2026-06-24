@@ -1685,32 +1685,9 @@ function smartDeploy(directive) {
 
   if (native.any) {
     // WARM tier — native changes, full CI rebuild for the platforms that changed
-    const platforms = [native.android && "Android", native.ios && "iOS"].filter(Boolean).join(" + ");
-    log(`WARM deploy: ${platforms} native CI builds`);
-    notify(`Native update — full rebuild for ${platforms}, ~10 minutes.`);
+    log(`WARM deploy: iOS native CI build`);
+    notify(`Native update — full iOS rebuild, ~10 minutes.`);
 
-    if (native.android) {
-      spawnDetachedDeploy("android", [
-        `cd ${WORKDIR}`,
-        `gh workflow run build-android.yml`,
-        `sleep 20`,
-        `RUN_ID=$(gh run list --workflow=build-android.yml --limit 1 --json databaseId --jq '.[0].databaseId')`,
-        `gh run watch "$RUN_ID" --exit-status`,
-        `rm -rf /tmp/ozzu-apk-verify`,
-        `gh run download "$RUN_ID" --name ozzu-android --dir /tmp/ozzu-apk-verify -R ozzuworld/ozzu`,
-        `test -f /tmp/ozzu-apk-verify/app-release.apk || { echo "ERROR: APK artifact not found"; exit 1; }`,
-        `APK_SIZE=$(stat -c%s /tmp/ozzu-apk-verify/app-release.apk 2>/dev/null || echo 0)`,
-        `test "$APK_SIZE" -gt 1000000 || { echo "ERROR: APK too small ($APK_SIZE bytes)"; exit 1; }`,
-        `rm -rf /tmp/ozzu-apk-verify`,
-        `./scripts/deploy.sh`,
-        `echo "Caching APK artifact locally..."`,
-        `gh run download "$RUN_ID" --name ozzu-android --dir /tmp/ozzu-apk-cache -R ozzuworld/ozzu`,
-        `test -f /tmp/ozzu-apk-cache/app-release.apk && cp /tmp/ozzu-apk-cache/app-release.apk ${WORKDIR}/artifacts/ozzu-latest.apk && echo "APK cached" || echo "APK cache skipped"`,
-        `rm -rf /tmp/ozzu-apk-cache`,
-      ].join(" && "));
-    }
-
-    // iOS WARM — only fire when iOS native files actually changed (was unconditional, fired even on android-only native changes)
     if (native.ios) {
       spawnDetachedDeploy("ios", buildIosDeployCommand(directive));
     }
