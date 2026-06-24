@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -371,11 +370,14 @@ function EngagementDetailInner() {
       </View>
 
       {/* Tab nav */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ backgroundColor: colors.bg.elevated, borderBottomWidth: 1, borderBottomColor: colors.border.subtle }}
-        contentContainerStyle={{ paddingHorizontal: spacing.sm }}
+      <View
+        style={{
+          flexDirection: "row",
+          backgroundColor: colors.bg.elevated,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border.subtle,
+          paddingHorizontal: spacing.xs,
+        }}
       >
         {TABS.map((t) => {
           const active = tab === t.key;
@@ -419,7 +421,7 @@ function EngagementDetailInner() {
             </Pressable>
           );
         })}
-      </ScrollView>
+      </View>
 
       {/* Active tab body */}
       {tab === "now" ? (
@@ -485,12 +487,13 @@ function countForTab(key: Tab, queue: QueueItem[], findings: FindingRowData[]): 
 
 const styles = StyleSheet.create({
   tab: {
+    flex: 1,
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
     gap: 3,
     paddingVertical: spacing.sm + 4,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.xs,
     borderBottomWidth: 2,
     borderBottomColor: "transparent",
   },

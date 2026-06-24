@@ -1,4 +1,5 @@
 import { Modal, Pressable, ScrollView, Share, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   colors, fontSize, fontWeight, radius, spacing, withAlpha,
 } from "../../lib/design-tokens";
@@ -62,6 +63,7 @@ function intentLabel(cls: string): string {
 }
 
 export function StepDetailModal({ visible, step, onClose }: Props) {
+  const insets = useSafeAreaInsets();
   if (!step) return null;
 
   const vis = statusVis(step.status);
@@ -81,41 +83,44 @@ export function StepDetailModal({ visible, step, onClose }: Props) {
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} transparent={false}>
-      <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
+      <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
         {/* Header */}
         <View style={{
           flexDirection: "row", alignItems: "center",
-          paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+          paddingHorizontal: spacing.md, paddingVertical: spacing.md + 2,
           backgroundColor: colors.bg.elevated,
           borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
         }}>
           <Pressable onPress={onClose} hitSlop={16} style={({ pressed }) => ({
             opacity: pressed ? 0.6 : 1,
-            paddingVertical: spacing.xs, paddingRight: spacing.md,
+            paddingVertical: spacing.sm, paddingRight: spacing.md,
           })}>
-            <Text style={{ color: colors.accent, fontSize: fontSize.lg, fontWeight: fontWeight.medium }}>← Back</Text>
+            <Text style={{ color: colors.accent, fontSize: fontSize.lg, fontWeight: fontWeight.semibold }}>← Back</Text>
           </Pressable>
           <View style={{ flex: 1 }} />
-          <Pressable onPress={shareOutput} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
-            <Text style={{ color: colors.accent, fontSize: fontSize.sm, fontWeight: fontWeight.semibold }}>Share</Text>
+          <Pressable onPress={shareOutput} hitSlop={12} style={({ pressed }) => ({
+            opacity: pressed ? 0.6 : 1,
+            paddingVertical: spacing.sm, paddingLeft: spacing.md,
+          })}>
+            <Text style={{ color: colors.accent, fontSize: fontSize.base, fontWeight: fontWeight.semibold }}>Share</Text>
           </Pressable>
         </View>
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.md }}>
           {/* Title + status */}
           <View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.xs }}>
-              <Text style={{ color: colors.text.tertiary, fontFamily: "monospace", fontSize: fontSize.sm }}>#{step.seq}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm }}>
+              <Text style={{ color: colors.text.tertiary, fontFamily: "monospace", fontSize: fontSize.base, fontWeight: fontWeight.semibold }}>#{step.seq}</Text>
               <View style={{
                 flexDirection: "row", alignItems: "center",
                 backgroundColor: withAlpha(vis.color, 0.14), borderRadius: radius.sm,
-                paddingHorizontal: spacing.sm, paddingVertical: 2,
+                paddingHorizontal: spacing.sm + 2, paddingVertical: 3,
               }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: vis.color, marginRight: spacing.xs }} />
-                <Text style={{ color: vis.color, fontSize: fontSize.xs, fontWeight: fontWeight.semibold }}>{vis.label}</Text>
+                <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: vis.color, marginRight: spacing.xs }} />
+                <Text style={{ color: vis.color, fontSize: fontSize.sm, fontWeight: fontWeight.bold }}>{vis.label}</Text>
               </View>
             </View>
-            <Text style={{ color: colors.text.primary, fontSize: fontSize.xl, fontWeight: fontWeight.bold, lineHeight: 26 }}>{step.title}</Text>
+            <Text style={{ color: colors.text.primary, fontSize: fontSize.xxl, fontWeight: fontWeight.bold, lineHeight: 30 }}>{step.title}</Text>
           </View>
 
           {/* Description */}
