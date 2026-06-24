@@ -41,7 +41,11 @@ let _watchdogUnsub = null;
 let _recoveryUnsub = null;
 let _actionQueue = null;
 let _workQueueTimer = null;
-let _workQueueEnabled = true;    // toggle via API
+// Directive-auto-implement work-queue. DISABLED by default: every spawn died in ~1s
+// (exit 1) across unrelated directives and the churn stalled the bridge listener ~6s/60s.
+// The intended model is "Cipher handles directives directly" (see agent-spawner.js). Opt
+// in with CIPHER_WORK_QUEUE=on. Runtime toggle (POST /cipher/daemon/work-queue) still works.
+let _workQueueEnabled = /^(1|true|on|yes)$/i.test(process.env.CIPHER_WORK_QUEUE || "");
 let _workQueueBusy = false;      // prevent concurrent work queue runs
 let _currentRun = null;          // { runId, eventKey, reason, startedAt }
 
@@ -482,8 +486,11 @@ function start(ctx) {
     });
   }
 
-  // Start work queue polling
-  _workQueueTimer = setInterval(checkWorkQueue, WORK_QUEUE_CHECK_INTERVAL_MS);
+  // Start work queue polling only when enabled (default OFF — see _workQueueEnabled).
+  // When disabled, no 60s interval runs at all, so the broken spawner stays fully silent.
+  if (_workQueueEnabled) {
+    _workQueueTimer = setInterval(checkWorkQueue, WORK_QUEUE_CHECK_INTERVAL_MS);
+  }
 
   ensureTable();
 
@@ -511,6 +518,13 @@ function resume() {
 
 function setWorkQueue(enabled) {
   _workQueueEnabled = !!enabled;
+  // Arm/disarm the poller so the runtime toggle works without a restart.
+  if (_workQueueEnabled && !_workQueueTimer) {
+    _workQueueTimer = setInterval(checkWorkQueue, WORK_QUEUE_CHECK_INTERVAL_MS);
+  } else if (!_workQueueEnabled && _workQueueTimer) {
+    clearInterval(_workQueueTimer);
+    _workQueueTimer = null;
+  }
   log(`Work queue ${_workQueueEnabled ? "enabled" : "disabled"}`);
 }
 
