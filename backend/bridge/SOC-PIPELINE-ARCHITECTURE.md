@@ -26,7 +26,7 @@ the VPN; the membrane is split into a kept observation half and a de-fanged exec
 
 - **The offense model is DeepSeek-V4 via OpenRouter** (config in `backend/.env`). It is an
   off-the-shelf frontier reasoning model, untrained on our labs.
-- It runs inside the bridge in the multi-agent `runAgent` loop (`backend/bridge/offense-agent.js`):
+- It runs inside the bridge in the multi-agent `runAgent` loop (`backend/bridge/soc/offense-agent.js`):
   orchestrator picks the next task → synthesize command → SOC queue → execute → fold the
   outcome back into structured state → repeat. (The PentestGPT-style reasoning / generation /
   parsing role split and the AutoPenBench SUMMARY→THOUGHT→ACTION loop that this design was
@@ -96,7 +96,7 @@ converged on this; see `reference_membrane_architecture_decision`.)
 |---|---|---|---|
 | L0 Execution | **Bridge LOCAL bash** (`spawn('bash',['-s'])`) + (optional) human PA via app | command + rationale | raw stdout, XML, binaries, screenshots |
 | L1 System-of-record | Postgres | raw output | server-side evidence keyed to engagement/host |
-| **L2 Membrane** | `soc-recon-parser.js` (+ observation-half sanitizers) | raw evidence | structured rows: `recon_hosts` + `pentest_findings` |
+| **L2 Membrane** | `soc/soc-recon-parser.js` (+ observation-half sanitizers) | raw evidence | structured rows: `recon_hosts` + `pentest_findings` |
 | L3 Offense-synthesis | **DeepSeek-V4 via OpenRouter** (the `runAgent` loop) | structured rows + retained raw | candidate PoCs **by ID**, queued server-side |
 | L4 Strategist | **Claude** (frontier) | **ONLY** L2 structured rows / aggregates | scoping, methodology, CVE-by-ID, report; queues command+rationale |
 
@@ -113,7 +113,7 @@ mitre_attack[], reproduction, remediation, evidence_files[], discovered_by}`.
 Flags live in the DB (`db.js`):
 
 - **Autonomous** (`autonomous_execution_enabled=true`, `autonomous_paused=false`): `queueStep` →
-  `maybeAutoExecute` (`autonomous-executor.js`) → `POST /soc/queue/:id/run` → local bash. No
+  `maybeAutoExecute` (`soc/autonomous-executor.js`) → `POST /soc/queue/:id/run` → local bash. No
   human touch. **This is the default for SKYLINE ops.**
 - **Manual** (`autonomous_execution_enabled=false`): item stays `status='pending'` until a human
   taps Run in the Ozzu app SOC tab; output streams via SSE; the PA notifies Cipher in the active
@@ -216,7 +216,7 @@ The original design was validated by deep research (2026-06-04, adversarially ve
 PTES, NIST SP 800-115, PentestGPT (USENIX Security 2024), Pentest Copilot (arXiv 2409.09493), and
 AutoPenBench (arXiv 2410.03225). The 3-role separation (Reasoning / Generation / Parsing) and the
 SUMMARY→THOUGHT→ACTION loop come from PentestGPT + AutoPenBench respectively, and are implemented
-in `offense-agent.js` / `offense-engine.js` / `offense-orchestrator.js`.
+in `soc/offense-agent.js` / `soc/offense-engine.js` / `soc/offense-orchestrator.js`.
 
 ### Verified sources
 - PTES — http://www.pentest-standard.org

@@ -106,20 +106,6 @@ services:
     volumes:
       - redis-data:/data
 
-  osint-tools:
-    build: ./osint-tools
-    container_name: osint-tools
-    network_mode: host
-    volumes:
-      - /tmp/osint-data:/tmp/osint-data
-    deploy:
-      resources:
-        limits:
-          memory: 1536M
-          cpus: '2.0'
-    restart: unless-stopped
-    command: tail -f /dev/null
-
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qdrant

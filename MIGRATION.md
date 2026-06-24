@@ -28,7 +28,7 @@ Roughly **15 min of King Kazuma's hands-on time, ~60 min of Cipher background wo
 | Source code | GitHub ✅ (outside GCP) |
 | Qdrant face DB | **Rsynced between VMs during migration window** (both alive at the same time — no external storage needed) |
 | Postgres | Same — rsync during migration |
-| Secrets (`.env*`, OpenVPN certs, `/root/.ssh`, `/root/.config/gh`, etc.) | Rsynced during migration |
+| Secrets (`.env*`, `/root/.ssh`, `/root/.config/gh`, WireGuard keys, etc.) | Rsynced during migration |
 | GCP-specific resources (disk, VM, firewall, IPs) | Disposable — rebuilt every cycle |
 
 **Zero external-storage cost.** VM-to-VM rsync works because both VMs have remaining credit during the migration window.
@@ -41,7 +41,7 @@ Roughly **15 min of King Kazuma's hands-on time, ~60 min of Cipher background wo
 |---|---|---|---|---|---|---|---|
 | 1 | 2026-04-24 | project-14e4bf6c | project-80de6b4a | ~3h | ~50 min* | ~25 | 9 (see below) |
 
-*Downtime was inflated by qdrant slow-load + firewall-rules-not-created-at-create-time + bridge Dockerfile OSINT pip failure. Cycle 2 should hit the ~5-10 min target.
+*Downtime was inflated by qdrant slow-load + firewall-rules-not-created-at-create-time. Cycle 2 should hit the ~5-10 min target.
 
 Per-cycle details in `migrations/<date>/metrics.json`.
 
@@ -63,7 +63,7 @@ Per-cycle details in `migrations/<date>/metrics.json`.
 
 | Resource | Value | Why |
 |---|---|---|
-| Machine type | `e2-standard-4` | 4 vCPU / 16 GB. Handles 1 redroid + all services. e2-standard-8 busts $300/90d budget. |
+| Machine type | `e2-standard-4` | 4 vCPU / 16 GB. Handles all services. e2-standard-8 busts $300/90d budget. |
 | Disk | 250 GB pd-balanced | Holds 113 GB qdrant + ~70 GB misc + 30% buffer. pd-ssd busts budget. |
 | Zone | `us-central1-a` | Cheapest tier ($0.134/h for e2-standard-4) + matches historical region |
 | Image | `ubuntu-2404-lts-amd64` | LTS, current. Fallback: `ubuntu-2204-lts`. |
@@ -71,7 +71,7 @@ Per-cycle details in `migrations/<date>/metrics.json`.
 
 **90-day cost:** ~$288, fits $300 free credit with ~$12 safety margin.
 
-**One redroid only** (running). The second redroid container exists but `docker compose stop redroid01` by default. Start it only when doing social media work. Sustained 2 redroids needs e2-standard-8 = busts budget.
+Redroid is decommissioned (app is iOS-only, no Android mirror).
 
 ---
 
@@ -269,32 +269,16 @@ For local-built images (`backend-bridge` etc.), see Phase 6 below — they requi
 
 **Owner: Cipher. Duration: ~10 min wall-clock, ~5 min until app responsive (qdrant load is the long pole).**
 
-### 6a — Patch bridge Dockerfile (drop OSINT pip install)
-
-OSINT Python tools (maigret/holehe/h8mail) are now run on dev-01 (Kali x86), not bundled into the bridge image. The pip install of those tools fails inside Ubuntu base image (pycairo build needs C compiler not in image, or version conflicts). **Drop it.**
+### 6a — Build local images
 
 ```bash
-ssh $SSH_OPTS $DEST "sudo sed -i.bak '10,12s|^|#OSINT-MOVED-TO-DEV01# |' /home/gcp/ozzu/backend/bridge/Dockerfile"
+ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose build --parallel bridge browser face-recognition"
 ```
 
-Verify the comment landed on lines 10-12 (the `RUN python3 -m venv /opt/osint-venv` block):
+### 6b — Bring up
 
 ```bash
-ssh $SSH_OPTS $DEST "grep -n OSINT-MOVED-TO-DEV01 /home/gcp/ozzu/backend/bridge/Dockerfile"
-```
-
-### 6b — Build local images
-
-```bash
-ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose build --parallel bridge browser face-recognition openvpn"
-```
-
-Skip `osint-tools` — its Dockerfile has the same broken pip install and we don't need it on the new VM.
-
-### 6c — Bring up — explicit service list (excludes osint-tools)
-
-```bash
-ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose up -d postgres redis qdrant nginx bridge browser face-recognition openvpn"
+ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose up -d postgres redis qdrant nginx bridge browser face-recognition"
 ```
 
 ### 6d — Verify services
@@ -303,7 +287,7 @@ ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose up -d post
 ssh $SSH_OPTS $DEST "sudo docker ps --format 'table {{.Names}}\t{{.Status}}'"
 ```
 
-All 8 should be `Up`. If any restart loop, `sudo docker logs <name> --tail 30` to debug.
+All 7 should be `Up` (+ anisette if SideStore auth needed). If any restart loop, `sudo docker logs <name> --tail 30` to debug.
 
 ### 6e — Wait for qdrant + bridge
 
@@ -326,7 +310,7 @@ Token saved at `/root/.ssh/cloudflare_token` (600 perms). Zone + record IDs:
 | FQDN | Record ID | Purpose | TTL |
 |---|---|---|---|
 | `home.ozzu.world` | `5069d0fef3212f43446bf4c6b096d71d` | Bridge HTTPS (TV, dashboard) | 60 |
-| `vpn.ozzu.world` | `80075d173aee86202ad2838a65ab1848` | OpenVPN — `.ovpn` files reference this | 60 |
+| `vpn.ozzu.world` | `80075d173aee86202ad2838a65ab1848` | Legacy (was OpenVPN, decommissioned) | 60 |
 | `ozzu.world` (apex) | `9d75b460201d9f1bfee9b9fefa8fe6e0` | Marketing root | 300 |
 
 ```bash
@@ -351,21 +335,11 @@ for h in home.ozzu.world vpn.ozzu.world ozzu.world; do
 done
 ```
 
-All three should print the new IP. Until they do, your phone may still be on old IP and OVPN clients (laptop, dev-01, ozzu-android) won't reconnect.
+All three should print the new IP. Until they do, your phone may still be on the old IP.
 
 **If Cloudflare token has changed:** generate new at cloudflare.com → My Profile → API Tokens → "Edit zone DNS" template → zone `ozzu.world` → save.
 
-### VPN configs use FQDN — do NOT regenerate per cycle
-
-`.ovpn` files in `artifacts/` reference `remote vpn.ozzu.world 1194 udp`, not the raw IP. After the DNS PATCH above, all clients reconnect on their own. **No client reissue is required during a normal migration cycle.**
-
-If a client cert/key is ever rotated (security event), regenerate that one file with `scripts/regen-ovpn.sh <client>` and ship the new `.ovpn` to the device once.
-
-**Pre-flight check before cycle ships:**
-```bash
-grep '^remote ' artifacts/*.ovpn   # should be vpn.ozzu.world on every line
-```
-If anything else appears, fix the `.ovpn` before cutover or that client will dial a dead IP.
+**WireGuard clients** use static IP endpoints in their `.conf` files — update the `Endpoint` in each device's WG config to the new VM IP after DNS cutover.
 
 ---
 
@@ -422,7 +396,7 @@ Old project sits idle until free credits expire (Google auto-suspends).
 
 6. **`/usr/bin/adb` mount fails with cryptic "not a directory" error** if host doesn't have it — docker auto-creates an empty dir at mount source, then mount-as-file fails. **Solution:** `apt install android-tools-adb` in Phase 1. **Cost: 5 min.**
 
-7. **`bridge` Dockerfile contains a doomed OSINT pip install** (`maigret holehe h8mail` — pycairo C-compile fails). Same for `osint-tools` Dockerfile. Workload moved to dev-01 anyway. **Solution baked into Phase 6a:** sed-comment lines 10-12 in `backend/bridge/Dockerfile`; skip `osint-tools` service entirely. **Cost: 10 min.**
+7. ~~OSINT pip install in bridge Dockerfile~~ — **Resolved permanently (2026-06-24).** OSINT code deleted, Dockerfile clean. No action needed in future cycles.
 
 8. **Pre-pulling Docker images during qdrant rsync fails with TLS handshake timeouts** — qdrant saturates network bandwidth, Docker Hub registry can't respond fast enough. **Solution:** do pulls in Phase 5b (after Phase 3), not in parallel. **Cost: 3 min.**
 
@@ -430,9 +404,9 @@ Old project sits idle until free credits expire (Google auto-suspends).
 
 ### Cycle 1 follow-up (discovered 2026-04-26)
 
-10. **OVPN client configs hardcoded the raw GCP IP, not an FQDN.** Two days post-cycle every VPN client (laptop, phone, dev-01) was looping on "connecting" — they were dialing 34.135.158.92, which now belongs to a different GCP customer. Root cause: `home.ozzu.world` got updated by Phase 7 but `.ovpn` files never used it. **Solution baked into Phase 7 (this commit):** `vpn.ozzu.world` added as separate Cloudflare record (TTL 60); `.ovpn` files regenerated via `scripts/regen-ovpn.sh` to use `remote vpn.ozzu.world 1194 udp`; phase doc adds explicit "PATCH all three records" loop and a pre-flight grep over `artifacts/*.ovpn`. **Cost: 1.5 days of nobody being able to reach dev-01 over VPN, +30 min to fix.**
+10. ~~OVPN client configs hardcoded the raw GCP IP~~ — **OpenVPN decommissioned 2026-05-02, replaced by WireGuard.** WG configs use static `Endpoint` IPs — update each device's `.conf` after migration. No `.ovpn` files to manage anymore.
 
-11. **`ozzu.world` apex record drift.** Cycle 1 Phase 7 updated only `home.ozzu.world`; the apex still pointed at the old IP. No one hit it (apex isn't load-bearing for the app), but it was a latent bug. **Solution:** Phase 7's PATCH loop now hits all three records, including apex.
+11. **`ozzu.world` apex record drift.** Cycle 1 Phase 7 updated only `home.ozzu.world`; the apex still pointed at the old IP. **Solution:** Phase 7's PATCH loop now hits all three records, including apex.
 
 **Soft-fail observations** (didn't break the migration, worth noting):
 - `qdrant` takes 5-30 min to load 113 GB / ~200 segments. No progress logging during shard recovery — looks "stuck" but isn't (look at `docker stats qdrant` Block I/O growth).
@@ -499,7 +473,6 @@ After each cycle, append a row to the **Cycle roster** table above and add lesso
 
 **Open items:**
 - Qdrant face-collection load may still be running — verify with `curl http://localhost:6333/collections/faces` (status `green` = ready).
-- `osint-tools` container is not deployed; OSINT workload runs on dev-01.
 
 **If session compacts during a future migration:**
 1. Read this section first

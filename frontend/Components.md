@@ -43,7 +43,6 @@ Expandable health card for services.
 | `HamburgerMenu` | `components/HamburgerMenu.tsx` | Global nav menu (12 items) |
 | `Keypad` | `components/Keypad.tsx` | PIN entry modal |
 | `TVPressable` | `components/TVPressable.tsx` | Rarity-colored pressable with glow |
-| `StreamingText` | `components/StreamingText.tsx` | Text with blinking cursor |
 | `ContentPanel` | `components/ContentPanel.tsx` | Rich markdown panel with animation |
 
 ## Directive Components
@@ -51,13 +50,10 @@ Expandable health card for services.
 | Component | File | Use For |
 |-----------|------|---------|
 | `DirectiveListItem` | `components/directives/DirectiveListItem.tsx` | List/overview rows |
-| `DirectiveCard` | `components/directives/DirectiveCard.tsx` | **DEPRECATED** — use DirectiveListItem |
-| `AuditTrail` | `components/directives/AuditTrail.tsx` | Timeline dots + vertical rail |
 | `BuildRunBadge` | `components/directives/BuildRunBadge.tsx` | CI/CD build status badge |
 | `PlanReviewModal` | `components/directives/PlanReviewModal.tsx` | Markdown plan review + approve/reject |
 | `StatusChangeSheet` | `components/directives/StatusChangeSheet.tsx` | Status transition bottom sheet |
 | `MessageApprovalModal` | `components/directives/MessageApprovalModal.tsx` | WhatsApp/Gmail approval gate |
-| `SummaryStatsBar` | `components/directives/SummaryStatsBar.tsx` | Status count row |
 
 ## Business Components
 

@@ -1,6 +1,6 @@
 # OzzuLab v0 — Pentest Lab for Harness Evaluation
 
-A reproducible 3-host pentest lab for evaluating the offense harness without depending on real engagement targets. Runs on dev-01 (same machine as the SOC executor → identical attack path to a real engagement).
+A reproducible 3-host pentest lab for evaluating the offense harness without depending on real engagement targets. Runs on dev-01. Note: SOC execution is now LOCAL on the bridge (not dev-01) — for physical-lab evals, the bridge reaches the lab /24 via wg0 → tablet relay.
 
 ## Architecture
 
@@ -61,7 +61,7 @@ ssh dev-01 'cd /home/gcp/ozzu/lab && make up'
 bash /home/gcp/ozzu/lab/eval/seed-engagement.sh
 
 # 3. Kick off the coordinator (from Cipher / MCP)
-#    invoke_joko OR start_engagement_run with engagement_id=OZZULAB-2026-001
+#    start_engagement_run with engagement_id=OZZULAB-2026-001 (or toggle autonomy)
 
 # 4. Watch progress
 docker exec bridge node -e "

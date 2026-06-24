@@ -1,6 +1,6 @@
 # OZZU PROJECT INVENTORY
 # CHECK THIS BEFORE BUILDING ANYTHING. If it exists here, USE IT. Do NOT rebuild.
-# Last updated: 2026-05-02
+# Last updated: 2026-06-24
 
 > **Canonical infra source:** `infra/devices.json` (machine-readable, scripts/code consume it via `scripts/lib/infra.sh` and `backend/bridge/lib/devices.js`) and `~/.claude/projects/-home-gcp-ozzu/memory/infra_registry.md` (prose context).
 > All device IPs, SSH paths, VPN topology, DNS, ports, and credentials live there.
@@ -64,9 +64,8 @@ WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a contain
 | embed-hf-dataset.py | Any HuggingFace WebDataset → Qdrant | `<dataset_name> [start] [end]` |
 | embed-parquet-dataset.py | Parquet format datasets → Qdrant | |
 | face-clusterer.py | Identity clustering (Union-Find) | `--incremental`, `--stats` |
-| ota-deploy.sh | OTA JS update (iOS + Android bundle) | `--restart` (restarts Android tablets) |
+| ota-deploy.sh | OTA JS update (iOS + Android bundle) | Exports both platforms; iPhone applies on next launch |
 | ota-deploy-tv.sh | OTA JS update (TV app) | Separate runtimeVersion `tv-1.0.0` |
-| deploy-ios.sh | iOS IPA via AltStore on Windows laptop | `--local /path`, `--check` |
 | cipher.sh | Launch Cipher with memory context | Loads from bridge /cipher/context |
 | cipher-guard.sh | PreToolUse hook — enforce pipeline | Blocks edits without directive |
 | cipher-session-save.sh | SessionEnd hook — save to postgres | |
@@ -251,6 +250,7 @@ sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
 | whatsapp-mcp | http://localhost:8081/mcp | WhatsApp Extended — 41 tools. **Containers DOWN — check `docker ps` before use.** |
 | gmail-personal | http://localhost:8000/mcp | Gmail (eng.hsuarezp). **DOWN since 2026-06-03 — creds wiped, parked.** |
 | gmail-ozzu | http://localhost:8001/mcp | Gmail (eng.ozzu). **DOWN since 2026-06-03 — same.** |
+| codegraph | stdio (`codegraph serve --mcp`) | Code knowledge graph — AST + FTS5 + graph. Index at `.codegraph/`. |
 
 **WhatsApp MCP**: `cd whatsapp-mcp && docker compose up -d` (separate compose, not in backend/)
 **Gmail MCP**: `./scripts/start-gmail-mcp.sh` — **DOWN, requires re-setup of Google OAuth credentials**

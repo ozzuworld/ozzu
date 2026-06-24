@@ -25,5 +25,5 @@ paths:
 - DO NOT attempt ESP32 BLE pairing — failed 55+ times over full day
 - Use dev-01 BlueZ stack instead if BLE enrollment is needed
 
-## Autojoint
-- Hardware in `hardware/autojoint/` — separate subsystem
+## SOC Hardware Tools
+- ESP32 WG bridge + Android pentest bridge — see `tools/` and `.claude/rules/tools-folder.md`

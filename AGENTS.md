@@ -24,7 +24,7 @@ The repo is too big for any single LLM context window. Use the indexes, do NOT p
 
 - **Bridge backend**: `docker compose -f backend/docker-compose.yml up -d`. Restart after backend code changes: `docker restart bridge` (but only if smartDeploy didn't already handle it).
 - **Frontend (Expo)**: **iOS-only** — builds via GitHub Actions CI. JS changes deploy OTA; native changes build an IPA. Local dev: `cd frontend && npm install && npx expo start`.
-- **Deploy**: `merge-and-deploy` MCP tool (or `POST /directives/<id>/merge-and-deploy`) — auto-detects HOT/WARM/STAGING tier and runs the right pipeline. **Never** run `./scripts/ota-deploy.sh`, `./scripts/deploy.sh`, or `gh workflow run build-*.yml` manually after a merge. See `.claude/rules/pipeline.md`.
+- **Deploy**: `merge-and-deploy` MCP tool (or `POST /directives/<id>/merge-and-deploy`) — auto-detects HOT/WARM/STAGING tier and runs the right pipeline. **Never** run `./scripts/ota-deploy.sh` or `gh workflow run build-*.yml` manually after a merge. See `.claude/rules/pipeline.md`.
 - **Codebase analysis**: `scripts/cipher-analyze.sh {layer1|layer2|layer3|layer3-llm|all}`. Layer 1+3 auto-refresh on every commit via post-commit hook.
 
 ## Architecture overview
@@ -33,9 +33,9 @@ The repo is too big for any single LLM context window. Use the indexes, do NOT p
 |---|---|---|
 | Frontend (mobile app) | `frontend/` | React Native + Expo. 5 grouped bottom tabs: Home/Cipher/Work/Me/Ops. See `.cipher/layer4/intent/ui.md`. |
 | TV app | `tv/` | Separate Expo project for the KTC 4K TV. |
-| Bridge backend | `backend/bridge/` | Node.js. Routes in `routes/`. Long-running services: orchestrator, agent-spawner, octoprint-pipeline. |
+| Bridge backend | `backend/bridge/` | Node.js. `routes/` (HTTP), `soc/` (offense harness), `face/` (face DB), `cipher-agent/` (Cipher agent), `infra/` (monitoring/recovery). |
 | WireGuard | `backend/wireguard/clients/` | Per-device .conf files. **DO NOT commit** — they contain private keys. |
-| Hardware firmware | `hardware/` | ESP32 positioning nodes. |
+| Hardware firmware | `hardware/` | ESP32 positioning (decommissioned), drone FC. SOC hardware tools in `tools/`. |
 | Scripts | `scripts/` | Cron-driven (backup, sync), deploy (ota-deploy, deploy), Cipher tooling (cipher-analyze, cipher.sh). |
 | Cipher analysis | `.cipher/` | Layer 1-4 codebase indexes. See `.cipher/README.md`. |
 | Agent rules | `.claude/rules/*.md` | Scoped per directory via `paths:` frontmatter (auto-load when working in those paths). |

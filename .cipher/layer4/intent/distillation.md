@@ -1,6 +1,8 @@
-# Ozzu Distillation — The Master Plan
+# Ozzu Distillation — ABANDONED (historical record)
 
-**Read every session before touching anything related to Sprint 2c, Sprint 3, Sprint 4, OzzuLab runs, the offense model, or any Opus-as-teacher work. This file is the source of truth. TaskList titles go stale — this file does not.**
+> **This effort was abandoned 2026-06-22.** The custom-trained model did NOT generalize — it memorized trained instances, and adding more data or classes *lowered* held-out capture. DeepSeek-V4 (untrained, off-the-shelf via OpenRouter) beat the distilled model. The harness, not bespoke weights, is the product. Full spend record + narrative: `private/distillation/PROJECT-DOCUMENTATION.md`. Code deleted 2026-06-24 (dir_1782317757637).
+>
+> **What follows is the historical plan as of 2026-06-17, preserved for context only. Do NOT execute any of this.**
 
 Last reviewed: 2026-06-17 (boot7 8-class SFT + the first offense-model run against a `192.168.1.0/24` — but its **target/routing is UNVERIFIED and the run is INVALID as a real-lab benchmark** (KAZUMA-PC, King Kazuma's real PC, appeared in results; dev-01 has a direct route to that subnet), see REAL-LAB BENCHMARK; King Kazuma LOCKED the goal = **autonomous pentest, human oversees, autonomy is the main part** — see GOAL DECISION + NEXT CONCRETE ACTION). Prior review 2026-06-12 (GRPO rounds 0–3: in-distribution capture SOLVED, self-hosted, zero Opus; held-out v2 still 0). Origin 2026-06-11 (Fable takeover — rewritten after the lab-verify sweep exposed the prior plan chasing winners that don't exist).
 

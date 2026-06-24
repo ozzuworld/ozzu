@@ -22,7 +22,7 @@ paths:
 
 ## Bridge MCP
 - Custom JSON-RPC over HTTP at POST /mcp (NOT stdio)
-- 30+ tools registered — check bridge/mcp-tools/ for current list
+- 60+ tools registered — defined inline in `routes/mcp.js`
 - Bridge server: localhost:3333
 
 ## Docker Services
