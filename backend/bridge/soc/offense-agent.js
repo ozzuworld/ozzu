@@ -1031,10 +1031,27 @@ async function runAgent(engagementId, opts = {}) {
       }
     }
 
-    await orchestrator.completeTask(task.id, summary.success ? "done" : "failed", summary);
+    // dir_1782332264303: distinguish "command broke" from "attack didn't yield access."
+    // A queue step that executed (status='done') but didn't achieve its objective
+    // (aggregator success=false, no error_category) is a COMPLETED negative result,
+    // not a failed task. Marking it 'failed' triggers the loop-breaker / phase-advance
+    // on steps that ran correctly. Only mark 'failed' when there's a real error_category
+    // (tool_missing, no_route, auth_fail, timeout, parse_error) or the step itself failed.
+    let taskOutcome;
+    if (summary.success) {
+      taskOutcome = "done";
+    } else if (summary.error_category && status !== "done") {
+      taskOutcome = "failed";
+    } else if (status === "done" && !summary.error_category) {
+      taskOutcome = "done";
+      summary._negative_result = true;
+    } else {
+      taskOutcome = "failed";
+    }
+    await orchestrator.completeTask(task.id, taskOutcome, summary);
 
     // (11) Heartbeat status for live monitoring
-    await setAgentStatus(engagementId, "running", { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, last_action: `completed task ${task.id} (${summary.success ? "done" : "failed"})` });
+    await setAgentStatus(engagementId, "running", { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, last_action: `completed task ${task.id} (${taskOutcome})` });
 
     // (12) Mentor check — dir_1780838519357. The action signature is the
     // directive shape. If the same shape repeats N times OR total calls hit

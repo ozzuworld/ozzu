@@ -790,18 +790,24 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       const oneIsGated = GATE_INTENTS.has(claimed) || GATE_INTENTS.has(inferred);
       if (oneIsGated) {
         await recordIntentMismatch(item.engagement_id, item.id, claimed, inferred, item.command);
-        // Push iff inferred is gated — the model TRIED to slip something past.
         if (GATE_INTENTS.has(inferred)) {
           await pushOnGatedIntent(item.engagement_id, item.id, `mismatch(${claimed}→${inferred})`, item.command);
         }
-        // dir_1782238863765 Part 1: write terminal status so waitForOutcome unblocks.
-        // Intent mismatch is a model-error signal; mark failed so the agent sees
-        // the diagnostic on the next poll and picks a corrected intent_class.
-        const diagMismatch = `[PERMISSION_DENIED — dir_1782238863765]\nlayer=intent_mismatch\nreason=declared intent_class='${claimed}' but command content suggests='${inferred}'. One of these is gated — step blocked. Retry with the correct (and honest) intent_class.\nAgent: review the queue_step tool description: claiming a benign intent for a gated command is logged as a model-behavior signal.`;
-        await db.withBypass("autonomous_intent_mismatch", (client) => client.query(
-          `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
-          [diagMismatch, item.id]));
-        return { autoExecuted: false, reason: `intent_mismatch claimed=${claimed} inferred=${inferred}` };
+        // dir_1782332264303: in full_access mode, mismatch is a training signal,
+        // NOT a gate. The operator opted into full autonomous execution — blocking
+        // on mismatch defeats that (e.g. 130 blocked steps on SKYLINE-SOC-2026-915).
+        // Log it, correct the intent_class, and proceed.
+        if (item.autonomous_full_access) {
+          console.log(`[autonomous-executor] intent_mismatch in full_access mode — logging but proceeding (claimed=${claimed} inferred=${inferred})`);
+          await db.query(`UPDATE soc_queue_items SET intent_class=$1 WHERE id=$2`, [inferred, item.id]);
+          claimed = inferred;
+        } else {
+          const diagMismatch = `[PERMISSION_DENIED — dir_1782238863765]\nlayer=intent_mismatch\nreason=declared intent_class='${claimed}' but command content suggests='${inferred}'. One of these is gated — step blocked. Retry with the correct (and honest) intent_class.\nAgent: review the queue_step tool description: claiming a benign intent for a gated command is logged as a model-behavior signal.`;
+          await db.withBypass("autonomous_intent_mismatch", (client) => client.query(
+            `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
+            [diagMismatch, item.id]));
+          return { autoExecuted: false, reason: `intent_mismatch claimed=${claimed} inferred=${inferred}` };
+        }
       }
     }
     if (!AUTO_RUN_INTENTS.has(claimed)) {
