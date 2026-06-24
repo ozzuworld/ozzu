@@ -1092,11 +1092,10 @@ module.exports = function socRoutes(ctx) {
               result = { exit_code: -1, stdout: '', stderr: `[exec-agent invalid JSON: ${e.message}]`, timed_out: false };
             }
             const fullOutput = (result.stdout || '') + (result.stderr ? `\n[stderr]\n${result.stderr}` : '');
-            // dir_1782316000000: recon sweeps exit non-zero even on success — a step that
-            // parsed live hosts did its job → 'done', not 'failed'-by-exit-code.
-            let reconFound = 0;
-            try { reconFound = parseReconOutput(fullOutput).length; } catch (_) {}
-            const finalStatus = (!result.timed_out && (result.exit_code === 0 || reconFound > 0)) ? 'done' : 'failed';
+            // dir_1782329692909: step status = "did the process run?" not "did a regex
+            // parser like the output?" The model reads its own output and decides success.
+            // Only genuine timeouts are 'failed'; everything else is 'done' (ran to completion).
+            const finalStatus = result.timed_out ? 'failed' : 'done';
             const appendMsg = result.timed_out ? `\n\n[TIMEOUT after ${timeoutSec}s — exec-agent killed]` : '';
             const safeOutput = sanitizeOutput(fullOutput + appendMsg);
             try {
@@ -1201,13 +1200,10 @@ module.exports = function socRoutes(ctx) {
           clearTimeout(entry.timeoutHandle);
           runningProcs.delete(sessionId);
           const timedOut = entry.timedOut;
-          // dir_1782316000000: recon sweeps routinely exit NON-ZERO even when they succeed
-          // (a /24 ping-sweep's last host is down → last ping exits 1; grep matches nothing
-          // on some hosts; a pipe leg fails). Exit code ALONE wrongly stamps successful
-          // discovery 'failed'. If the output parsed into live hosts, the step did its job.
-          let reconFound = 0;
-          try { reconFound = parseReconOutput(fullOutput).length; } catch (_) {}
-          const finalStatus = (!timedOut && (code === 0 || reconFound > 0)) ? 'done' : 'failed';
+          // dir_1782329692909: step status = "did the process run?" not "did the exit code
+          // or a regex parser say it succeeded?" The model reads its own output and decides.
+          // Only genuine timeouts are 'failed'; any completed process is 'done'.
+          const finalStatus = timedOut ? 'failed' : 'done';
           const appendMsg = timedOut ? `\n\n[TIMEOUT after ${timeoutSec}s — process killed]` : '';
           const rawLen = fullOutput.length;
           const safeOutput = sanitizeOutput(fullOutput + appendMsg);

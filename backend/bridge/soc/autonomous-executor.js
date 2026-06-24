@@ -562,7 +562,13 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
 
     let commandForExecution = item.command;
     const preflightCheck = lintCommandPreflight(commandForExecution, { executor_host: item.executor_host });
-    if (preflightCheck) {
+    // dir_1782329692909: nmap flag rules disabled — constraints moved to offense model
+    // system prompt. The lint rule stays in the JSON (safety net) but auto-executor
+    // no longer rejects or rewrites based on it.
+    const DISABLED_LINT_RULES = new Set(["nmap_missing_pn_st_on_tablet"]);
+    if (preflightCheck && DISABLED_LINT_RULES.has(preflightCheck.rule)) {
+      console.log(`[autonomous-executor] lint rule '${preflightCheck.rule}' disabled (dir_1782329692909) — passing through q#${item.id}`);
+    } else if (preflightCheck) {
       // dir_1782234450321: LINT AUTO-REPAIR — for KNOWN mechanical failures, fix
       // the command in-place and retry the preflight once instead of just rejecting.
       // dir_1782251824781 Fix 4: EXTENDED auto-repair rules to push step_queued above 50%.
@@ -585,14 +591,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       let repairedCommand = null;
       let repairNote = null;
 
-      if (preflightCheck.rule === "nmap_missing_pn_st_on_tablet") {
-        // Inject -Pn -sT immediately after 'nmap' (with any leading sudo).
-        const fixed = commandForExecution.replace(/\bnmap\b/, "nmap -Pn -sT");
-        if (fixed !== commandForExecution) {
-          repairedCommand = fixed;
-          repairNote = "auto-repaired: injected -Pn -sT after nmap (dir_1782234450321)";
-        }
-      } else if (preflightCheck.rule === "ssh_quoted_empty_user") {
+      if (preflightCheck.rule === "ssh_quoted_empty_user") {
         // dir_1782251824781 Fix 4 — auto-repair quoted user@host.
         // Pattern: ssh 'user@' host or ssh "user@" host (empty host inside quotes).
         // The model wraps "user@host" in quotes and bash splits it into 'user@' + 'host',
@@ -653,48 +652,9 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
         }
       }
 
-      // dir_1782251824781 Fix 4 — nmap missing -Pn on Linux bridge executor.
-      // The nmap_missing_pn_st_on_tablet rule only fires for applies_when=tablet.
-      // The Linux bridge executor (the primary executor for SKYLINE runs) also needs
-      // -Pn because it reaches lab targets over the WG relay — ICMP pings never
-      // cross the relay and always cause nmap host-discovery to silently skip hosts.
-      // Detect the pattern ourselves and inject -Pn when nmap has -sT but no -Pn.
-      //
-      // adversarial-review fix: prior code used replace(/\bnmap\b/, "nmap -Pn") on the
-      // whole string — in a pipe like `echo nmap | nmap -sT ...` it patches "echo nmap"
-      // first, producing "echo nmap -Pn | nmap -sT ..." (wrong token). Fix: split on
-      // pipe/semicolon/newline boundaries, find the segment where nmap is the LEADING
-      // command, and patch only that segment.
-      if (!repairedCommand && /\bnmap\b/.test(commandForExecution)) {
-        const hasPN = /\bnmap\b[^;\n|]*-Pn\b/.test(commandForExecution);
-        const hasST = /\bnmap\b[^;\n|]*(-sT|-sV|--open)\b/.test(commandForExecution);
-        if (!hasPN && hasST) {
-          // Split on pipe/semicolons/newlines, patch only the segment whose LEADING
-          // command is nmap (i.e. nmap is the first non-whitespace non-flag token).
-          const SEP_RE = /([|;&\n])/;
-          const parts = commandForExecution.split(SEP_RE);
-          let patched = false;
-          const patchedParts = parts.map(seg => {
-            if (patched) return seg;
-            // Skip separator tokens (single |, ;, &, \n chars)
-            if (SEP_RE.test(seg) && seg.trim().length <= 1) return seg;
-            // Does nmap lead this segment? (after optional sudo/env-prefix)
-            const leadToken = seg.trimStart().replace(/^(sudo\s+|nice\s+|timeout\s+\S+\s+)*/, "").split(/\s+/)[0];
-            if (leadToken === "nmap" || leadToken.endsWith("/nmap")) {
-              patched = true;
-              return seg.replace(/\bnmap\b/, "nmap -Pn");
-            }
-            return seg;
-          });
-          if (patched) {
-            const fixed = patchedParts.join("");
-            if (fixed !== commandForExecution) {
-              repairedCommand = fixed;
-              repairNote = "auto-repaired: injected -Pn into nmap invocation segment (WG-relay host discovery; dir_1782251824781 Fix 4)";
-            }
-          }
-        }
-      }
+      // dir_1782329692909: REMOVED nmap -Pn injection block (dir_1782251824781 Fix 4).
+      // Was silently injecting -Pn into nmap commands, conflicting with -sn ping sweeps
+      // and the recon-discovery-normalize layer. Constraints now in system prompt.
 
       if (repairedCommand) {
         // Retry the preflight on the repaired command
@@ -856,24 +816,9 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       // Full-access — fall through to auto-run. No push (would spam).
     }
 
-    // dir_1782311308515: FINAL recon-discovery normalization before execution.
-    // The lab is reached over the wg0→tablet L3 relay. ICMP crosses it (verified);
-    // ARP does not, and -Pn (skip discovery → scan all 254) times out before any
-    // host is recorded — that's why recon returned 0 hosts while the hosts were up.
-    // Force ICMP discovery (--disable-arp-ping, strip -Pn) so the scan actually finds
-    // the live hosts that the /run deterministic parser then writes to recon_hosts.
-    // Persist the normalized command because /soc/queue/:id/run reads it from the DB.
-    try {
-      const { normalizeNmapDiscovery } = require("/app/soc/recon-discovery-normalize");
-      const normalized = normalizeNmapDiscovery(commandForExecution);
-      if (normalized !== commandForExecution) {
-        commandForExecution = normalized;
-        item.command = normalized;
-        await db.withBypass("autonomous_recon_discovery_norm", (client) => client.query(
-          `UPDATE soc_queue_items SET command=$1 WHERE id=$2`, [normalized, item.id]));
-        console.log(`[autonomous-executor] recon-discovery normalize q#${item.id}: stripped -Pn, forced ICMP (--disable-arp-ping)`);
-      }
-    } catch (e) { console.error(`[autonomous-executor] recon-discovery normalize failed:`, e.message); }
+    // dir_1782329692909: REMOVED recon-discovery-normalize (dir_1782311308515).
+    // Was silently rewriting nmap commands (strip -Pn, inject --disable-arp-ping).
+    // Constraints now in offense model system prompt — model writes correct commands.
 
     // All checks passed — auto-execute.
     await db.query(`UPDATE soc_queue_items SET auto_executed=true WHERE id=$1`, [item.id]);

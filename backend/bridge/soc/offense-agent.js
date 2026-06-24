@@ -62,7 +62,12 @@ const AGENT_SYSTEM_PROMPT_BASE = [
   "",
   "EXECUTION ENVIRONMENT (this OVERRIDES any assumption from the executor's name):",
   "  - Your commands run on a LINUX host with a full pentest toolset (nmap, netcat, curl, dig, etc.). You are NOT on the Android tablet — do NOT use Android-only tools (dumpsys, getprop, pm, settings); they don't exist here. Write standard Linux commands.",
-  "  - The lab subnet is reached through a WireGuard relay to the tablet (the tablet is the L3 doorway INTO the lab, not where you run). Scans traverse that relay, so ALWAYS use `nmap -Pn -sT` against lab IPs (TCP connect, skip host-discovery ping). Raw SYN (-sS) and ICMP ping do NOT cross the relay and are blocked by the preflight lint — `-Pn -sT` is mandatory on every nmap against the lab subnet (combine with -sV/-p as needed, but keep -Pn -sT).",
+  "  - The lab subnet is reached through a WireGuard L3 relay to the tablet (the tablet is the L3 doorway INTO the lab, not where you run). Because WireGuard is an L3 tunnel:",
+  "    • ARP does NOT cross WireGuard — nmap's default ARP host-discovery reports 0 hosts. ALWAYS add `--disable-arp-ping` so nmap uses ICMP/TCP discovery instead.",
+  "    • Use `-sT` (TCP connect scan) for port scanning — raw SYN (`-sS`) may not work across the relay.",
+  "    • Do NOT combine `-sn` (ping sweep, no ports) with any port-scan flag (`-sT`, `-sS`, `-sV`, etc.) — nmap rejects it.",
+  "    • ICMP ping DOES cross the relay (~240ms RTT). Host discovery works; just disable ARP.",
+  "    • Scans take longer over the relay. A /24 sweep may take 3-5 minutes. This is normal.",
   "",
   "VULNERABILITY RESEARCH → EXPLOITATION (you have a local exploit DB + active CVE scanner + read-only CVE internet access):",
   "  - When you identify a service AND version (e.g. a Hikvision camera web UI, Dropbear SSH 2022.83), do NOT just record it as a finding — RESEARCH its known vulnerabilities, then EXPLOIT them. The version→CVE→exploit chain is the entire point of enumeration; cataloging services without attacking them is a failure.",
@@ -952,9 +957,12 @@ async function runAgent(engagementId, opts = {}) {
       rawOutput,
       modelOverride
     );
-    // If we know the queue status was failure but aggregator said success, defer to queue truth
-    if (status !== "done") summary.success = false;
+    // dir_1782329692909: the aggregator reads the actual output and decides success.
+    // Prior code overrode this with queue status, but queue status was often wrong
+    // (exit code 1 from a ping loop that found hosts → "failed" even though recon
+    // worked). Trust the aggregator; only override on genuine timeout.
     if (status === "timeout" && !summary.error_category) summary.error_category = "timeout";
+    if (status === "timeout") summary.success = false;
 
     // (10b) dir_1782260457892: contradiction-detection / finding-revision.
     // Placed after the queue-truth correction above so the failed-step guard
