@@ -204,6 +204,10 @@ const RESEARCH_HOSTS = [
   "cve.circl.lu", "nvd.nist.gov", "services.nvd.nist.gov", "cve.mitre.org", "cveawg.mitre.org",
   "exploit-db.com", "www.exploit-db.com", "vulners.com", "cvedetails.com", "www.cvedetails.com",
   "github.com", "api.github.com", "raw.githubusercontent.com", "objects.githubusercontent.com",
+  // dir_1782331356896: XML namespace URIs are protocol constants, not attack targets.
+  // ONVIF SOAP envelopes reference these in xmlns= attributes; the jail was blocking
+  // legitimate ONVIF credential tests (Q10 on SKYLINE-SOC-2026-851).
+  "www.w3.org", "www.onvif.org", "schemas.xmlsoap.org",
 ];
 function isResearchHost(target) {
   const h = String(target || "").split(":")[0].toLowerCase().replace(/^https?:\/\//, "");
