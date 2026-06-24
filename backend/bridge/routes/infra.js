@@ -4,7 +4,7 @@ const fs = require("fs");
 
 module.exports = function infraRoutes(ctx) {
   const { sendJSON, db } = ctx;
-  const infraMonitor = (() => { try { return require("../infra-monitor"); } catch { return null; } })();
+  const infraMonitor = (() => { try { return require("../infra/infra-monitor"); } catch { return null; } })();
 
   // Parse ?since= as "24h" / "30m" / "7d" / ISO into a timestamptz string, like ops.js.
   function parseSince(raw) {

@@ -9,10 +9,10 @@ module.exports = function mcpRoutes(ctx) {
           broadcastToAll, sendNotification } = ctx;
   const log = typeof logObj === "function" ? logObj : (...args) => (logObj?.bridge?.info?.(...args) || console.log(...args));
 
-  const watchdog = (() => { try { return require("../watchdog"); } catch { return null; } })();
-  const recoveryEngine = (() => { try { return require("../recovery-engine"); } catch { return null; } })();
+  const watchdog = (() => { try { return require("../infra/watchdog"); } catch { return null; } })();
+  const recoveryEngine = (() => { try { return require("../infra/recovery-engine"); } catch { return null; } })();
   const buildVerifier = (() => { try { return require("../build-verifier"); } catch { return null; } })();
-  const infraMonitor = (() => { try { return require("../infra-monitor"); } catch { return null; } })();
+  const infraMonitor = (() => { try { return require("../infra/infra-monitor"); } catch { return null; } })();
   const { mergeWorktreeToMain, smartDeploy } = (() => {
     try { return require("../agent-spawner"); } catch { return {}; }
   })();
@@ -1695,9 +1695,9 @@ module.exports = function mcpRoutes(ctx) {
       }
 
       case "execute_objective": {
-        const { ObjectiveEngine } = require("../objective-engine");
-        const { AttackPlanner } = require("../attack-planner");
-        const { AutonomousLoop } = require("../autonomous-loop");
+        const { ObjectiveEngine } = require("../soc/objective-engine");
+        const { AttackPlanner } = require("../soc/attack-planner");
+        const { AutonomousLoop } = require("../soc/autonomous-loop");
 
         const objEngine = new ObjectiveEngine(db, log);
         const planner = new AttackPlanner(log);
@@ -1895,7 +1895,7 @@ ${result.narrative}
         // dir_1780846961338: warn at creation if scope.targets is free-text only.
         let scopeWarn = "";
         try {
-          const sv = require("../scope-validator");
+          const sv = require("../soc/scope-validator");
           const v = sv.validateScope(args.scope || {});
           if (!v.machine_readable) {
             scopeWarn =
@@ -1920,7 +1920,7 @@ ${result.narrative}
 
       case "spawn_sub_agent": {
         // dir_1780848098817
-        const sa = require("../offense-sub-agent");
+        const sa = require("../soc/offense-sub-agent");
         try {
           const r = await sa.spawnSubAgent({
             engagement_id: args.engagement_id,
@@ -1955,7 +1955,7 @@ ${result.narrative}
 
       case "list_sub_agents": {
         // dir_1780848098817
-        const sa = require("../offense-sub-agent");
+        const sa = require("../soc/offense-sub-agent");
         try {
           const rows = await sa.listSubAgents(args.engagement_id);
           if (rows.length === 0) {
@@ -1983,7 +1983,7 @@ ${result.narrative}
 
       case "terminate_sub_agent": {
         // dir_1780848098817
-        const sa = require("../offense-sub-agent");
+        const sa = require("../soc/offense-sub-agent");
         try {
           const r = await sa.terminateSubAgent(args.sub_agent_id, args.reason);
           if (!r) {
@@ -1997,7 +1997,7 @@ ${result.narrative}
 
       case "validate_engagement_scope": {
         // dir_1780846961338
-        const sv = require("../scope-validator");
+        const sv = require("../soc/scope-validator");
         try {
           const r = await db.query(`SELECT id, scope FROM pentest_engagements WHERE id = $1`, [args.engagement_id]);
           if (r.rows.length === 0) {
@@ -2106,7 +2106,7 @@ ${result.narrative}
         let addFindingKind = ["confirmed", "hypothesis", "refuted"].includes(args.kind) ? args.kind : "confirmed";
         let addFindingSeverity = args.severity;
         let _addGate = null;
-        try { _addGate = require("/app/claim-verifier").applyPreInsertGate; } catch (_) {}
+        try { _addGate = require("/app/soc/claim-verifier").applyPreInsertGate; } catch (_) {}
         if (_addGate) {
           try {
             const gated = await _addGate(
@@ -2162,7 +2162,7 @@ ${result.narrative}
       }
 
       case "get_finding_graph": {
-        const { materializeFindingGraph, renderForPrompt } = require("/app/finding-graph");
+        const { materializeFindingGraph, renderForPrompt } = require("/app/soc/finding-graph");
         const graph = await materializeFindingGraph(args.engagement_id);
         const format = args.format === "json" ? "json" : "ascii";
         if (format === "json") {
@@ -2290,7 +2290,7 @@ ${result.narrative}
 
       case "trace_dispatch": {
         // dir_1780846511537
-        const tracer = require("../dispatch-tracer");
+        const tracer = require("../soc/dispatch-tracer");
         try {
           const trace = await tracer.traceDispatch(args.engagement_id, args.command, args.intent_class);
           if (trace.error) {
@@ -2304,7 +2304,7 @@ ${result.narrative}
 
       case "register_engagement_cron": {
         // dir_1780846234615
-        const cron = require("../engagement-cron");
+        const cron = require("../soc/engagement-cron");
         try {
           const r = await cron.createCron({
             engagement_id: args.engagement_id,
@@ -2336,7 +2336,7 @@ ${result.narrative}
 
       case "list_engagement_crons": {
         // dir_1780846234615
-        const cron = require("../engagement-cron");
+        const cron = require("../soc/engagement-cron");
         try {
           const rows = await cron.listCrons(args.engagement_id || null);
           if (rows.length === 0) {
@@ -2357,7 +2357,7 @@ ${result.narrative}
 
       case "delete_engagement_cron": {
         // dir_1780846234615
-        const cron = require("../engagement-cron");
+        const cron = require("../soc/engagement-cron");
         try {
           const r = await cron.deleteCron(args.cron_id);
           if (!r) {
@@ -2371,7 +2371,7 @@ ${result.narrative}
 
       case "register_engagement_hook": {
         // dir_1780845861190
-        const hooks = require("../hooks");
+        const hooks = require("../soc/hooks");
         try {
           const r = await hooks.registerHook({
             engagement_id: args.engagement_id || null,
@@ -2403,7 +2403,7 @@ ${result.narrative}
 
       case "list_engagement_hooks": {
         // dir_1780845861190
-        const hooks = require("../hooks");
+        const hooks = require("../soc/hooks");
         try {
           const rows = await hooks.listHooks(args.engagement_id);
           if (rows.length === 0) {
@@ -2421,7 +2421,7 @@ ${result.narrative}
 
       case "list_recovery_state": {
         // dir_1780845298918
-        const recovery = require("../recovery-recipes");
+        const recovery = require("../infra/recovery-recipes");
         try {
           const r = await recovery.getRecoveryState(db, args.engagement_id);
           if (!r) {
@@ -2451,7 +2451,7 @@ ${result.narrative}
 
       case "set_engagement_permission_mode": {
         // dir_1780844590951
-        const enforcer = require("../permission-enforcer");
+        const enforcer = require("../soc/permission-enforcer");
         if (!enforcer.isValidMode(args.mode)) {
           return { content: [{ type: "text", text: `Invalid mode '${args.mode}'. Valid: ${enforcer.ALL_MODES.join(", ")}` }], isError: true };
         }
@@ -2490,7 +2490,7 @@ ${result.narrative}
       }
 
       case "advance_offense": {
-        const offense = require("../offense-engine");
+        const offense = require("../soc/offense-engine");
         try {
           const r = await offense.advanceOffense(args.engagement_id, args.intent, args.model_override);
           if (!r.queued) {
@@ -2503,7 +2503,7 @@ ${result.narrative}
       }
 
       case "start_offense_model": {
-        const startup = require("../offense-startup");
+        const startup = require("../soc/offense-startup");
         try {
           const r = await startup.startOffenseModel(args);
           const head = r.reused ? `♻️  Reusing ${r.gpu}` : `🚀 Rented ${r.gpu}`;
@@ -2514,7 +2514,7 @@ ${result.narrative}
       }
 
       case "wait_offense_model": {
-        const startup = require("../offense-startup");
+        const startup = require("../soc/offense-startup");
         try {
           const r = await startup.waitOffenseModel(args);
           return { content: [{ type: "text", text: `✅ L3 offense model "${r.model}" ready (instance ${r.instance_id}, ${r.elapsed_sec}s).\n\n${r.note}` }] };
@@ -2524,7 +2524,7 @@ ${result.narrative}
       }
 
       case "stop_offense_model": {
-        const startup = require("../offense-startup");
+        const startup = require("../soc/offense-startup");
         try {
           const r = await startup.stopOffenseModel();
           return { content: [{ type: "text", text: `🔌 ${r.note}` }] };
@@ -2534,7 +2534,7 @@ ${result.narrative}
       }
 
       case "start_engagement_run": {
-        const agent = require("../offense-agent");
+        const agent = require("../soc/offense-agent");
         try {
           const r = await agent.runAgent(args.engagement_id, {
             max_iter: args.max_iter,
@@ -2557,7 +2557,7 @@ ${result.narrative}
       }
 
       case "reset_agent_run": {
-        const agent = require("../offense-agent");
+        const agent = require("../soc/offense-agent");
         try {
           await agent.resetAgent(args.engagement_id);
           return { content: [{ type: "text", text: `🧹 Agent transcript + task graph reset for ${args.engagement_id}.` }] };
@@ -2567,7 +2567,7 @@ ${result.narrative}
       }
 
       case "get_task_graph": {
-        const orch = require("../offense-orchestrator");
+        const orch = require("../soc/offense-orchestrator");
         try {
           const g = await orch.loadGraph(args.engagement_id);
           const lines = [
@@ -2600,7 +2600,7 @@ ${result.narrative}
       }
 
       case "probe_executor": {
-        const probe = require("../executor-probe");
+        const probe = require("../soc/executor-probe");
         try {
           const r = await probe.probeExecutor(args.engagement_id, !!args.force);
           if (!r.probed) {
@@ -2670,7 +2670,7 @@ ${result.narrative}
 
       case "get_behavioral_scorecard": {
         try {
-          const { getBehavioralScorecard } = require("/app/behavioral-scorecard");
+          const { getBehavioralScorecard } = require("/app/soc/behavioral-scorecard");
           const scorecard = await getBehavioralScorecard(args.engagement_id, db);
           return { content: [{ type: "text", text: JSON.stringify(scorecard, null, 2) }] };
         } catch (e) {

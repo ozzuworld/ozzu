@@ -122,7 +122,7 @@ function detectContradictions(summary, findings) {
 // pattern as claim-verifier.js): defaults to the real verifyFinding.
 async function reverifyContradicted(engagementId, contradictions, { db, verifyFn } = {}) {
   const dbh = resolveDb(db);
-  verifyFn = verifyFn || require("/app/claim-verifier").verifyFinding;
+  verifyFn = verifyFn || require("/app/soc/claim-verifier").verifyFinding;
 
   for (const c of contradictions) {
     if (!c || c.finding_id == null) continue;

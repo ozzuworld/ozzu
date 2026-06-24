@@ -2,8 +2,8 @@
 
 "use strict";
 
-const watchdog = require("../watchdog");
-const recoveryEngine = (() => { try { return require("../recovery-engine"); } catch { return null; } })();
+const watchdog = require("../infra/watchdog");
+const recoveryEngine = (() => { try { return require("../infra/recovery-engine"); } catch { return null; } })();
 
 module.exports = function opsRoutes(ctx) {
   const { sendJSON, parseBody, db } = ctx;
@@ -307,7 +307,7 @@ module.exports = function opsRoutes(ctx) {
     // GET /ops/kairos — KAIROS + autoDream status
     if (req.method === "GET" && pathname === "/ops/kairos") {
       try {
-        const daemon = require("../cipher-daemon");
+        const daemon = require("../cipher-agent/cipher-daemon");
         return sendJSON(res, 200, {
           kairos: daemon.getKairosStatus(),
           autoDream: daemon.getAutoDreamStatus(),

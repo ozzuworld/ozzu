@@ -158,7 +158,7 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
     let recovered = false;
     if (raw) {
       try {
-        const { performReflector } = require("/app/execution-monitor");
+        const { performReflector } = require("/app/soc/execution-monitor");
         const corrected = await performReflector({
           rawText: raw,
           expectedFormat: "JSON",
@@ -215,7 +215,7 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
       // unverified instead of inserting at the model's claimed severity.
       // Cred-test verification stays post-insert (needs DB id for the active probe).
       try {
-        const { verifyFindingDataSync } = require("/app/claim-verifier");
+        const { verifyFindingDataSync } = require("/app/soc/claim-verifier");
         const preCheck = verifyFindingDataSync({ title: f.title, evidence: f.evidence, evidence_summary: f.evidence, affected_asset: f.affected_asset });
         if (preCheck.verdict === "fail") {
           finalSeverity = "info";
@@ -258,7 +258,7 @@ async function fold(engagementId, taskDirective, expectedArtifact, rawOutput, mo
       if (!preVerifyResolved && ins.rows && ins.rows.length > 0) {
         const newId = ins.rows[0].id;
         try {
-          const { verifyFinding } = require("/app/claim-verifier");
+          const { verifyFinding } = require("/app/soc/claim-verifier");
           setImmediate(() => verifyFinding(newId).catch(e =>
             console.error(`[claim-verifier] verify ${newId} crashed: ${e.message}`)));
         } catch (_) { /* module load failure — skip silently */ }

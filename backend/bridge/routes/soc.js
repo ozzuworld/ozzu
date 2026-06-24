@@ -3,7 +3,7 @@
 
 const { spawn } = require('child_process');
 const fs = require('fs');
-const { parseReconOutput } = require('../soc-recon-parser');
+const { parseReconOutput } = require('../soc/soc-recon-parser');
 
 // In-memory registry of running SSH children, keyed by session_id.
 // Entry shape: { proc, itemId, timeoutHandle, timedOut }
@@ -380,7 +380,7 @@ module.exports = function socRoutes(ctx) {
         try { const b = await parseBody(req); if (b && b.max_iter) maxIter = Math.max(1, Math.min(200, parseInt(b.max_iter, 10) || 50)); } catch {}
         // clear any leftover abort flag so the new run isn't halted on its first iteration
         await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) - 'abort_requested' WHERE id = $1`, [eid]).catch(() => {});
-        const agent = require("../offense-agent");
+        const agent = require("../soc/offense-agent");
         agent.runAgent(eid, { max_iter: maxIter }).catch((e) => console.error("[soc/run] runAgent:", e && e.message));
         sendJSON(res, 202, { ok: true, status: "launching", engagement_id: eid, max_iter: maxIter });
       } catch (error) {
@@ -425,7 +425,7 @@ module.exports = function socRoutes(ctx) {
         let kicked = 0, launched = false;
         if (enabled) {
           try {
-            const autoEx = require("../autonomous-executor");
+            const autoEx = require("../soc/autonomous-executor");
             const pend = await db.query(`SELECT id FROM soc_queue_items WHERE engagement_id = $1 AND status = 'pending' ORDER BY seq`, [eid]);
             for (const row of pend.rows) {
               try { const r = await autoEx.maybeAutoExecute(row.id); if (r && r.autoExecuted) kicked++; } catch (_) {}
@@ -435,7 +435,7 @@ module.exports = function socRoutes(ctx) {
           // steps and (auto_exec=true) auto-runs them through the membrane. The operator's toggle is
           // the trigger (same hand-on-the-switch as Launch).
           if (er.rows[0].agent_status !== "running") {
-            const agent = require("../offense-agent");
+            const agent = require("../soc/offense-agent");
             agent.runAgent(eid, { max_iter: 50 }).catch((e) => console.error("[soc/autonomy] runAgent:", e && e.message));
             launched = true;
           }
@@ -626,7 +626,7 @@ module.exports = function socRoutes(ctx) {
     if (req.method === "GET" && pathname.match(/^\/soc\/engagements\/[^\/]+\/finding-graph$/)) {
       const id = pathname.split("/")[3];
       try {
-        const { materializeFindingGraph } = require("../finding-graph");
+        const { materializeFindingGraph } = require("../soc/finding-graph");
         const graph = await materializeFindingGraph(id);
         sendJSON(res, 200, graph);
       } catch (e) {
@@ -831,7 +831,7 @@ module.exports = function socRoutes(ctx) {
       // case the gate cannot self-report — its own module failing to load — by
       // emitting a gate_failed_open row so a broken gate is still countable.
       let _gate = null;
-      try { _gate = require('/app/claim-verifier').applyPreInsertGate; } catch (_) {}
+      try { _gate = require('/app/soc/claim-verifier').applyPreInsertGate; } catch (_) {}
       if (!_gate) {
         try {
           await db.query(
@@ -967,7 +967,7 @@ module.exports = function socRoutes(ctx) {
         sendJSON(res, 200, { inserted, total_pending: inserted.length });
 
         try {
-          const ae = require("../autonomous-executor");
+          const ae = require("../soc/autonomous-executor");
           for (const ins of inserted) {
             ae.maybeAutoExecute(ins.id).catch(e =>
               console.error(`[soc queue POST] maybeAutoExecute(${ins.id}) error:`, e.message));

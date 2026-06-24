@@ -229,7 +229,7 @@ async function autoVerifyCves(body, engagement) {
   const ids = [...new Set([...body.matchAll(CVE_EXTRACT_RE)].map(m => m[0].toUpperCase()))];
   if (ids.length === 0) return null;
   let mk;
-  try { mk = require("/app/model-knowledge-tools"); }
+  try { mk = require("/app/soc/model-knowledge-tools"); }
   catch (_) { return null; } // model-knowledge-tools not loaded — skip silently
   for (const id of ids) {
     let result;
@@ -281,7 +281,7 @@ async function autoEnrichSploitus(body) {
   const ids = [...new Set([...body.matchAll(CVE_EXTRACT_RE)].map(m => m[0].toUpperCase()))];
   if (ids.length === 0) return null;
   let mk;
-  try { mk = require("/app/model-knowledge-tools"); }
+  try { mk = require("/app/soc/model-knowledge-tools"); }
   catch (_) { return null; }
   if (typeof mk.searchSploitus !== "function") return null;
   const results = [];
@@ -371,7 +371,7 @@ function roeLint(command, roe) {
 // from any string before it lands in offense_telemetry.outcome_notes.
 // Mirrors the membrane patterns in membrane-audit.js (read-side) but catches
 // leaks at write-time so the DB stays clean from the start.
-const { sanitizeOutcomeNotes } = require("/app/telemetry-sanitize");
+const { sanitizeOutcomeNotes } = require("/app/soc/telemetry-sanitize");
 
 // Log mismatch + write diagnostic to queue row. Membrane bypass since the
 // diagnostic may quote the offending command.
@@ -434,7 +434,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
     // linter and auto-verify. Declarative replacement for scattered
     // autonomous_full_access / intent_class gating.
     try {
-      const enforcer = require("/app/permission-enforcer");
+      const enforcer = require("/app/soc/permission-enforcer");
       const pEng = {
         permission_mode: item.permission_mode,
         scope:           item.scope,
@@ -445,7 +445,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       // veto with allow:false → queue item failed with [HOOK_DENIED].
       if (verdict.allowed) {
         try {
-          const hooks = require("/app/hooks");
+          const hooks = require("/app/soc/hooks");
           const hr = await hooks.runEvent({
             engagementId: item.engagement_id,
             event: hooks.HOOK_EVENTS.PRE_QUEUE_DISPATCH,
@@ -507,7 +507,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
     // included).
     let autoVerifyHit = null;
     try {
-      const body = (() => { try { return require("/app/autonomous-executor").__bodyForLint?.(item.command); } catch (_) { return item.command; } })() || item.command;
+      const body = (() => { try { return require("/app/soc/autonomous-executor").__bodyForLint?.(item.command); } catch (_) { return item.command; } })() || item.command;
       const decoded = (typeof unwrapCommand === "function") ? unwrapCommand(body) : body;
       const fullText = `${item.command || ""} ${decoded || ""}`;
       const engRow = await db.query(
@@ -864,7 +864,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
     // the live hosts that the /run deterministic parser then writes to recon_hosts.
     // Persist the normalized command because /soc/queue/:id/run reads it from the DB.
     try {
-      const { normalizeNmapDiscovery } = require("/app/recon-discovery-normalize");
+      const { normalizeNmapDiscovery } = require("/app/soc/recon-discovery-normalize");
       const normalized = normalizeNmapDiscovery(commandForExecution);
       if (normalized !== commandForExecution) {
         commandForExecution = normalized;

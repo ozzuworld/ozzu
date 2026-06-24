@@ -112,7 +112,7 @@ async function gatherContext(engagementId) {
   let findingGraphRendered = null;
   if (eng.rows[0] && eng.rows[0].graph_mode_enabled) {
     try {
-      const { materializeFindingGraph, renderForPrompt } = require("/app/finding-graph");
+      const { materializeFindingGraph, renderForPrompt } = require("/app/soc/finding-graph");
       const graph = await materializeFindingGraph(engagementId);
       findingGraphRendered = renderForPrompt(graph);
     } catch (e) {
@@ -392,7 +392,7 @@ async function advanceOffense(engagementId, intent, modelOverride) {
   await insertTelemetry(tel);
 
   try {
-    const { maybeAutoExecute } = require("/app/autonomous-executor");
+    const { maybeAutoExecute } = require("/app/soc/autonomous-executor");
     maybeAutoExecute(ins.rows[0].id)
       .then(r => console.log(`[offense-engine] autoExec q=${ins.rows[0].id} result=${JSON.stringify(r)}`))
       .catch(e =>

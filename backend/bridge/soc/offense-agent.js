@@ -280,7 +280,7 @@ async function loadEngagementContext(engagementId) {
   let findingGraphRendered = null;
   if (eng.rows[0].graph_mode_enabled) {
     try {
-      const { materializeFindingGraph, renderForPrompt } = require("/app/finding-graph");
+      const { materializeFindingGraph, renderForPrompt } = require("/app/soc/finding-graph");
       const graph = await materializeFindingGraph(engagementId);
       findingGraphRendered = renderForPrompt(graph);
     } catch (e) {
@@ -373,7 +373,7 @@ async function synthesizeCommand(task, ctx, modelOverride) {
   catch (e) {
     // dir_1780841672508: Reflector recovery for synthesizer prose
     try {
-      const { performReflector } = require("/app/execution-monitor");
+      const { performReflector } = require("/app/soc/execution-monitor");
       const corrected = await performReflector({
         rawText: raw,
         expectedFormat: "JSON",
@@ -439,7 +439,7 @@ async function runAgent(engagementId, opts = {}) {
   let plannerPlan = null;
   let mentorGuidance = null;
   try {
-    const { ExecutionMonitor, performPlanner } = require("/app/execution-monitor");
+    const { ExecutionMonitor, performPlanner } = require("/app/soc/execution-monitor");
     // Pull engagement flags + thresholds once at start
     const flagsRow = await db.query(
       `SELECT mentor_enabled, planner_enabled, mentor_same_threshold, mentor_total_threshold
@@ -528,7 +528,7 @@ async function runAgent(engagementId, opts = {}) {
     // iteration so the orchestrator never sees ghost-pending items when deciding
     // whether there's pending work in flight.
     try {
-      const { reconcilePendingItems } = require("/app/autonomous-executor");
+      const { reconcilePendingItems } = require("/app/soc/autonomous-executor");
       await reconcilePendingItems(engagementId);
     } catch (e) {
       console.error(`[offense-agent] reconcile sweep failed:`, e.message);
@@ -538,7 +538,7 @@ async function runAgent(engagementId, opts = {}) {
     // apply structured recovery before this iter's model call. Saves a model
     // call when executor is offline + auto-paces fabrication streaks.
     try {
-      const recovery = require("/app/recovery-recipes");
+      const recovery = require("/app/infra/recovery-recipes");
       const [tel, qi] = await Promise.all([
         db.query(
           `SELECT outcome, outcome_notes FROM offense_telemetry
@@ -679,7 +679,7 @@ async function runAgent(engagementId, opts = {}) {
     // dir_1780848456715: process coordinator_actions[] — spawn/terminate/reprompt/await
     if (Array.isArray(decision.coordinator_actions) && decision.coordinator_actions.length) {
       try {
-        const sa = require("/app/offense-sub-agent");
+        const sa = require("/app/soc/offense-sub-agent");
         for (const action of decision.coordinator_actions) {
           try {
             if (action.kind === "spawn_sub_agent" && typeof action.target_host === "string") {
@@ -961,7 +961,7 @@ async function runAgent(engagementId, opts = {}) {
     // sees the corrected summary.success. ctx.findings is the set recorded BEFORE
     // this iteration — i.e. findings a LATER step can now contradict.
     try {
-      const { detectContradictions, reverifyContradicted } = require("/app/finding-revision");
+      const { detectContradictions, reverifyContradicted } = require("/app/soc/finding-revision");
       const contradictions = detectContradictions(summary, ctx.findings || []);
       if (contradictions.length > 0) {
         await reverifyContradicted(engagementId, contradictions, { db });
@@ -985,7 +985,7 @@ async function runAgent(engagementId, opts = {}) {
         const snap = monitor.snapshot();
         console.log(`[offense-agent] Mentor threshold hit (same=${snap.sameToolCount}, total=${snap.totalCallCount}) — invoking adviser`);
         try {
-          const { performMentor } = require("/app/execution-monitor");
+          const { performMentor } = require("/app/soc/execution-monitor");
           // Build mentor context from recent queue items (model's actual actions)
           const queueRecent = await db.query(
             `SELECT title, status, LEFT(COALESCE(command,''),300) AS cmd, LEFT(COALESCE(output,''),300) AS out

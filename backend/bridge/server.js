@@ -9,7 +9,7 @@ const crypto = require("crypto");
 const WebSocket = require("ws");
 const Redis = require("ioredis");
 const db = require("./db");
-const { CipherPipeline, convertToolsForClaude } = require("./cipher-pipeline");
+const { CipherPipeline, convertToolsForClaude } = require("./cipher-agent/cipher-pipeline");
 const { spawnPlanningAgent, spawnImplementationAgent, spawnWorkerWithPrompt, getRunningAgents, killAgent, killAllAgents, startWatchdog, setBroadcast, getConfig, setConfig, mergeWorktreeToMain, cleanupWorktree, smartDeploy } = require("./agent-spawner");
 const orchestrator = require("./orchestrator");
 const buildVerifier = require("./build-verifier");
@@ -46,12 +46,12 @@ const financeRoutes = require("./routes/finance");
 const whatsappRoutes = require("./routes/whatsapp");
 const octoprintRoutes = require("./routes/octoprint");
 const socRoutes = require("./routes/soc");
-const watchdog = require("./watchdog");
-const recoveryEngine = require("./recovery-engine");
-const cipherDaemon = require("./cipher-agent");
-const kairosService = require("./cipher-daemon");
+const watchdog = require("./infra/watchdog");
+const recoveryEngine = require("./infra/recovery-engine");
+const cipherDaemon = require("./cipher-agent/cipher-agent");
+const kairosService = require("./cipher-agent/cipher-daemon");
 const actionQueue = require("./action-queue");
-const proactiveReporter = require("./proactive-reporter");
+const proactiveReporter = require("./infra/proactive-reporter");
 
 const log = {
   bridge: createLogger("bridge"),
@@ -1147,7 +1147,7 @@ async function initStorage() {
   // ── Face Crawler 24/7 Service — start after 1 minute ──
   setTimeout(() => {
     try {
-      const faceCrawler = require("./face-crawler");
+      const faceCrawler = require("./face/face-crawler");
       faceCrawler.start();
       log.bridge.info("Face crawler 24/7 service auto-started");
     } catch (err) { log.bridge.error("Face crawler auto-start failed:", err.message); }
@@ -1898,7 +1898,7 @@ async function handleRequest(req, res) {
       const fs = require("fs");
       fs.writeFileSync("/home/gcp/ozzu/data/state/pipeline-state.json", JSON.stringify(state));
       // Record heartbeat for training recovery watchdog
-      try { const wd = require("./watchdog"); wd.recordHeartbeat(); } catch {}
+      try { const wd = require("./infra/watchdog"); wd.recordHeartbeat(); } catch {}
       sendJSON(res, 200, { ok: true });
     } catch (e) {
       sendJSON(res, 400, { error: e.message });
@@ -6713,7 +6713,7 @@ wss.on("connection", (ws, req) => {
     // dir_1780846234615: engagement cron poller — ticks every minute, fires
     // due crons by inserting queue items through the normal gate stack.
     try {
-      const cron = require("./engagement-cron");
+      const cron = require("./soc/engagement-cron");
       cron.startPoller(60000);
     } catch (e) { log.bridge.error(`engagement-cron poller failed to start: ${e.message}`); }
     // dir_1780848098817: resume orphaned sub-agents on bridge restart. Any row
@@ -6727,7 +6727,7 @@ wss.on("connection", (ws, req) => {
               AND (started_at IS NULL OR started_at < NOW() - INTERVAL '1 minute')`);
         if (r.rows.length > 0) {
           log.bridge.info(`auto-resuming ${r.rows.length} orphaned sub-agent(s)`);
-          const sa = require("./offense-sub-agent");
+          const sa = require("./soc/offense-sub-agent");
           for (const row of r.rows) {
             setImmediate(() => {
               sa.runSubAgent(row.id).catch(e => log.bridge.error(`sub-agent ${row.id} resume crashed: ${e.message}`));
@@ -6772,14 +6772,14 @@ wss.on("connection", (ws, req) => {
               AND (agent_run_state->>'started_at')::timestamptz > NOW() - INTERVAL '1 hour'`);
         if (r.rows.length === 0) return;
         log.bridge.info(`offense tunnel: ${r.rows.length} engagement still running — reopening`);
-        const { waitOffenseModel } = require("./offense-startup");
+        const { waitOffenseModel } = require("./soc/offense-startup");
         const result = await waitOffenseModel({ timeout_sec: 120 });
         log.bridge.info(`offense tunnel: reopened (${JSON.stringify(result).slice(0, 200)})`);
 
         // dir_1780832189054: ALSO resume the runAgent loop for each running
         // engagement. Without this, the tunnel comes back but the previous
         // agent process is dead — DB ghost state until manual restart.
-        const { runAgent } = require("./offense-agent");
+        const { runAgent } = require("./soc/offense-agent");
         for (const row of r.rows) {
           if (row.autonomous_paused) {
             log.bridge.info(`offense agent: skipping ${row.id} (autonomous_paused=true)`);
@@ -6803,7 +6803,7 @@ wss.on("connection", (ws, req) => {
     log.bridge.info(`agent spawner: ready (event-driven, replaces cipher-watcher polling)`);
     startWatchdog();
     watchdog.start({ db, redis, broadcastToAll, sendNotification });
-    try { require("./infra-monitor").start(); } catch (e) { log.bridge.error("infra-monitor start error:", e.message); }
+    try { require("./infra/infra-monitor").start(); } catch (e) { log.bridge.error("infra-monitor start error:", e.message); }
     recoveryEngine.start({ db, redis, broadcastToAll, sendNotification, watchdog });
     cipherDaemon.start({ db, redis, broadcastToAll, watchdog, recoveryEngine });
     kairosService.start({ db, redis, broadcastToAll, watchdog, recoveryEngine, sendNotification });

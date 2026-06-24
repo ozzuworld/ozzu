@@ -149,7 +149,7 @@ async function queueStep(args) {
   // diagnostic the agent sees on its next poll.
   let auto = null;
   try {
-    const { maybeAutoExecute } = require("/app/autonomous-executor");
+    const { maybeAutoExecute } = require("/app/soc/autonomous-executor");
     auto = await maybeAutoExecute(ins.rows[0].id);
     console.log(`[queue_step] q=${ins.rows[0].id} autoExec=${JSON.stringify(auto)}`);
   } catch (e) {
@@ -323,7 +323,7 @@ async function advancePhase(args) {
   // AND new phase is gated AND throttle not active. Failures swallowed.
   let pushResult = null;
   try {
-    const { onPhaseAdvance } = require("/app/autonomous-executor");
+    const { onPhaseAdvance } = require("/app/soc/autonomous-executor");
     pushResult = await onPhaseAdvance(engagement_id, oldPhase, new_phase);
   } catch (e) {
     console.error(`[advance_phase] push hook failed:`, e.message);
@@ -356,7 +356,7 @@ async function requestHuman(args) {
 // ────────────────────────────────── dispatcher ─────────────────────────────────
 
 // Model knowledge tools (dir_1780827444328) — anti-hallucination grounding
-const mkTools = require("/app/model-knowledge-tools");
+const mkTools = require("/app/soc/model-knowledge-tools");
 
 const TOOL_IMPLS = {
   get_engagement_state: getEngagementState,

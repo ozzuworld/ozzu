@@ -354,7 +354,7 @@ async function renderFindingsSection(eng, engagementCtx) {
 
 async function maybeSummarize(eng, fullText, cacheKey, headerLabel) {
   try {
-    const { performSummarizer, hashContent } = require("/app/execution-monitor");
+    const { performSummarizer, hashContent } = require("/app/soc/execution-monitor");
     const head = fullText.slice(0, fullText.length - 2000);   // older portion to summarize
     const tail = fullText.slice(fullText.length - 2000);       // last 2KB verbatim
     const hash = hashContent(head);
@@ -379,7 +379,7 @@ async function maybeSummarize(eng, fullText, cacheKey, headerLabel) {
       // budget. Zero LLM cost. Reproducible.
       const beforeCompressLen = (summary || "").length;
       try {
-        const { compressSummary } = require("/app/summary-compress");
+        const { compressSummary } = require("/app/soc/summary-compress");
         const r = compressSummary(summary || "", { max_chars: 2400, max_lines: 40, max_line_chars: 200 });
         summary = r.summary;
         try {
@@ -517,7 +517,7 @@ async function decide(engagementCtx, modelOverride) {
     // dir_1780841672508: Reflector recovery — model returned prose instead
     // of JSON. Send the raw text back with a schema hint, retry once.
     try {
-      const { performReflector } = require("/app/execution-monitor");
+      const { performReflector } = require("/app/soc/execution-monitor");
       const corrected = await performReflector({
         rawText: raw,
         expectedFormat: "JSON",
@@ -562,7 +562,7 @@ async function decide(engagementCtx, modelOverride) {
   const overgrown = graph.unblocked.length > 5;
   if (stallShape || overgrown) {
     try {
-      const { performRefiner } = require("/app/execution-monitor");
+      const { performRefiner } = require("/app/soc/execution-monitor");
       const allTasks = graph.tasks || [];
       const byIdLocal = Object.create(null);
       for (const t of allTasks) byIdLocal[t.id] = t;

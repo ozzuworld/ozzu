@@ -16,7 +16,7 @@
 // without them and still works.
 //
 // Usage:
-//   const { sanitizeOutcomeNotes } = require("/app/telemetry-sanitize");
+//   const { sanitizeOutcomeNotes } = require("/app/soc/telemetry-sanitize");
 //   ...
 //   sanitizeOutcomeNotes(dynamicString, "outcome_notes", engagementId)
 //   ...

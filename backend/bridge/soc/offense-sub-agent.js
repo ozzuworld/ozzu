@@ -296,7 +296,7 @@ async function runSubAgent(subAgentId, opts = {}) {
     // (7) Synthesizer — reuse the main agent's synthesizer via a thin re-export
     let step;
     try {
-      const agentMod = require("/app/offense-agent");
+      const agentMod = require("/app/soc/offense-agent");
       step = await agentMod.__synthesizeCommandForSubAgent
         ? await agentMod.__synthesizeCommandForSubAgent(task, ctx, modelOverride)
         : await defaultSynthesize(task, ctx, modelOverride);
@@ -315,7 +315,7 @@ async function runSubAgent(subAgentId, opts = {}) {
     // queued, coordinator had no signal → re-spawned redundant batches.
     let queueId;
     try {
-      const { wrapForExecutor } = require("/app/offense-agent-tools");
+      const { wrapForExecutor } = require("/app/soc/offense-agent-tools");
       const seqRow = await db.query(
         `SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM soc_queue_items WHERE engagement_id = $1`,
         [ctx.engagement.id]);
@@ -341,7 +341,7 @@ async function runSubAgent(subAgentId, opts = {}) {
     // (9) Dispatch to autonomous-executor (same as parent agent — sub-agent
     // doesn't bypass any gates)
     try {
-      const ae = require("/app/autonomous-executor");
+      const ae = require("/app/soc/autonomous-executor");
       await ae.maybeAutoExecute(queueId);
     } catch (e) {
       console.error(`[sub-agent ${subAgentId}] maybeAutoExecute error:`, e.message);
@@ -410,7 +410,7 @@ async function waitForQueueItem(queueId, timeoutMs) {
 
 // Fallback synthesizer when offense-agent doesn't export __synthesizeCommandForSubAgent.
 async function defaultSynthesize(task, ctx, modelOverride) {
-  const agentMod = require("/app/offense-agent");
+  const agentMod = require("/app/soc/offense-agent");
   if (typeof agentMod.synthesizeCommand === "function") {
     return await agentMod.synthesizeCommand(task, ctx, modelOverride);
   }
