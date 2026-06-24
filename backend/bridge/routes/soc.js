@@ -441,8 +441,15 @@ module.exports = function socRoutes(ctx) {
         // clear any leftover abort flag so the new run isn't halted on its first iteration
         await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) - 'abort_requested' WHERE id = $1`, [eid]).catch(() => {});
         const agent = require("../soc/offense-agent");
-        agent.runAgent(eid, { max_iter: maxIter }).catch((e) => console.error("[soc/run] runAgent:", e && e.message));
-        sendJSON(res, 202, { ok: true, status: "launching", engagement_id: eid, max_iter: maxIter });
+        // dir_1782339906899: v2 model-driven loop (DeepSeek drives via tool calls).
+        // v1 (runAgent) kept as fallback — set SOC_LOOP_VERSION=v1 in env to revert.
+        const loopVersion = process.env.SOC_LOOP_VERSION || "v2";
+        if (loopVersion === "v2" && agent.runAgentV2) {
+          agent.runAgentV2(eid, { max_iter: maxIter }).catch((e) => console.error("[soc/run] runAgentV2:", e && e.message));
+        } else {
+          agent.runAgent(eid, { max_iter: maxIter }).catch((e) => console.error("[soc/run] runAgent:", e && e.message));
+        }
+        sendJSON(res, 202, { ok: true, status: "launching", engagement_id: eid, max_iter: maxIter, loop: loopVersion });
       } catch (error) {
         console.error("[soc/run] Error:", error);
         sendJSON(res, 500, { error: "launch failed", details: error.message });
@@ -496,7 +503,12 @@ module.exports = function socRoutes(ctx) {
           // the trigger (same hand-on-the-switch as Launch).
           if (er.rows[0].agent_status !== "running") {
             const agent = require("../soc/offense-agent");
-            agent.runAgent(eid, { max_iter: 50 }).catch((e) => console.error("[soc/autonomy] runAgent:", e && e.message));
+            const loopV = process.env.SOC_LOOP_VERSION || "v2";
+            if (loopV === "v2" && agent.runAgentV2) {
+              agent.runAgentV2(eid, { max_iter: 50 }).catch((e) => console.error("[soc/autonomy] runAgentV2:", e && e.message));
+            } else {
+              agent.runAgent(eid, { max_iter: 50 }).catch((e) => console.error("[soc/autonomy] runAgent:", e && e.message));
+            }
             launched = true;
           }
         }

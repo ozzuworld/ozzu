@@ -394,6 +394,35 @@ async function requestHuman(args) {
   };
 }
 
+// ─────────────────────── add_finding (dir_1782339906899) ─────────────────────
+// Model-callable tool: the model records a finding directly when it discovers
+// something, instead of relying on the aggregator to parse raw output.
+async function addFinding(args) {
+  const { engagement_id, title, severity, description, affected_asset, refs, kind } = args || {};
+  if (!engagement_id || !title) return { error: "engagement_id and title required" };
+  const validSev = ["critical", "high", "medium", "low", "info"];
+  const sev = validSev.includes((severity || "").toLowerCase()) ? severity.toLowerCase() : "info";
+  const fKind = ["confirmed", "hypothesis"].includes(kind) ? kind : "hypothesis";
+  let finalSev = sev;
+  let finalKind = fKind;
+  try {
+    const gate = require("/app/soc/claim-verifier").applyPreInsertGate;
+    if (gate) {
+      const gated = await gate(
+        { title, description: description || "", severity: sev, kind: fKind, affected_asset: affected_asset || "" },
+        { db, engagementId: engagement_id, source: "model_add_finding" });
+      finalSev = gated.severity;
+      finalKind = gated.kind;
+    }
+  } catch (_) {}
+  const r = await db.query(
+    `INSERT INTO pentest_findings (engagement_id, severity, title, description, affected_asset, refs, kind, discovered_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'model')
+     RETURNING id, severity, kind`,
+    [engagement_id, finalSev, title, description || "", affected_asset || "", JSON.stringify(refs || []), finalKind]);
+  return { ok: true, finding_id: r.rows[0].id, severity: r.rows[0].severity, kind: r.rows[0].kind };
+}
+
 // ────────────────────────────────── dispatcher ─────────────────────────────────
 
 // Model knowledge tools (dir_1780827444328) — anti-hallucination grounding
@@ -410,6 +439,8 @@ const TOOL_IMPLS = {
   verify_cve:           mkTools.verifyCve,
   list_nse_scripts:     mkTools.listNseScripts,
   search_exploits:      mkTools.searchExploits,
+  search_sploitus:      mkTools.searchSploitus,
+  add_finding:          addFinding,
 };
 
 // Central router. Returns the tool's result as a JSON-serializable object the
@@ -585,6 +616,41 @@ const TOOL_SCHEMAS = [
           port:    { type: "string", description: "Service port to filter by (optional)" },
         },
         required: ["product"],
+      },
+    },
+  },
+  // ─── dir_1782339906899: search_sploitus + add_finding ─────────────────────
+  {
+    type: "function",
+    function: {
+      name: "search_sploitus",
+      description: "Search Sploitus.com for CVE→PoC and product→PoC mappings. Aggregates ExploitDB + Packet Storm + Vulners + GitHub PoCs + Metasploit — broader than search_exploits. Use when verify_cve confirms a CVE exists and you want a working PoC reference. Membrane-safe: returns metadata only.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query — CVE ID, product name, or product+version (e.g. 'Hikvision CVE-2021-36260')" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_finding",
+      description: "Record a security finding you discovered. Use this to formally log vulnerabilities, misconfigurations, or exposed services. The finding goes through the claim verifier — fabricated claims get auto-refuted. Set kind='confirmed' for verified exploits, kind='hypothesis' for unverified observations.",
+      parameters: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string",  description: "Engagement ID" },
+          title:         { type: "string",  description: "Short title of the finding (e.g. 'Hikvision IVMS-4200 default credentials')" },
+          severity:      { type: "string",  enum: ["critical", "high", "medium", "low", "info"], description: "Finding severity" },
+          description:   { type: "string",  description: "Detailed description with evidence (what was found, how, proof)" },
+          affected_asset:{ type: "string",  description: "The affected host:port or service (e.g. '192.168.1.64:80')" },
+          refs:          { type: "array",   items: { type: "string" }, description: "Public reference IDs (CVE-..., EDB-..., MSF module path)" },
+          kind:          { type: "string",  enum: ["confirmed", "hypothesis"], description: "confirmed = verified exploit, hypothesis = observed but not yet exploited" },
+        },
+        required: ["engagement_id", "title", "severity"],
       },
     },
   },

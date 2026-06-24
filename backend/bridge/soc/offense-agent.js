@@ -1211,7 +1211,283 @@ async function runAgent(engagementId, opts = {}) {
   };
 }
 
-// ───────────────────────────── Step 5 legacy (kept for comparison) ─────────────────────────────
+// ───────────────────────────── V2: model-driven tool-calling loop ─────────────────────────────
+// dir_1782339906899: DeepSeek V4 drives the engagement via tool calls. The harness
+// enforces guardrails (abort, Mentor, context compression, telemetry) but does NOT
+// pick tasks or synthesize commands — the model does all of that.
+//
+// Why this replaces runAgent: the orchestrator loop used the model as a command
+// translator (task in → shell command out). The knowledge tools (verify_cve,
+// search_exploits, search_sploitus, list_nse_scripts, add_finding) were registered
+// but unreachable because the main loop never passed them. This loop gives the
+// model all tools and lets it drive end-to-end.
+
+async function runAgentV2(engagementId, opts = {}) {
+  const maxIter = Number(opts.max_iter) > 0 ? Number(opts.max_iter) : DEFAULT_MAX_ITER;
+  const modelOverride = opts.model_override || null;
+  const intent = opts.intent || null;
+
+  const prior = await loadOrInitState(engagementId);
+  let messages = prior.messages;
+  let iter     = prior.iter;
+  let phase    = prior.phase;
+  const resumed = !!messages;
+
+  if (!messages) {
+    messages = [
+      { role: "system", content: buildSystemPrompt(phase) },
+      { role: "user", content: [
+        `Begin the authorized pentest engagement ${engagementId}.`,
+        intent ? `Operator intent: ${intent}.` : "",
+        `Current phase: ${phase}.`,
+        "Start by calling get_engagement_state to see scope, ROE, recon hosts, queue history, and executor capabilities.",
+      ].filter(Boolean).join(" ") },
+    ];
+  } else {
+    if (messages[0] && messages[0].role === "system") {
+      messages[0] = { role: "system", content: buildSystemPrompt(phase) };
+    }
+    messages.push({ role: "user", content: `(Resuming from iter ${iter}.) ${intent ? `Updated operator intent: ${intent}. ` : ""}Current phase: ${phase}. Call get_engagement_state to see what changed.` });
+  }
+
+  await setAgentStatus(engagementId, "running", { iter, mode: "v2" });
+
+  const startMs = Date.now();
+  let endedByModel = false;
+  let endReason = null;
+  let stepsQueued = 0;
+  let lastAssistantText = null;
+
+  // Execution monitor for Mentor (loop detection)
+  const { ExecutionMonitor, performMentor } = require("/app/soc/execution-monitor");
+  const monitor = new ExecutionMonitor();
+  await monitor.hydrateFromQueue(engagementId, db);
+
+  while (iter < maxIter) {
+    iter++;
+
+    // ── (1) Abort check at iteration boundary ──
+    try {
+      const engRow = await db.query(
+        `SELECT agent_run_state FROM pentest_engagements WHERE id = $1`, [engagementId]);
+      if (engRow.rows[0] && engRow.rows[0].agent_run_state && engRow.rows[0].agent_run_state.abort_requested) {
+        await setAgentStatus(engagementId, "paused", { iter, end_reason: "operator stopped the run" });
+        endReason = "operator_stopped";
+        break;
+      }
+    } catch (_) {}
+
+    // ── (2) Call model with full tool set ──
+    let resp;
+    try {
+      resp = await chatWithTools(messages, modelOverride);
+    } catch (e) {
+      const isTransient = /timeout|ETIMEDOUT|ECONNRESET|socket hang up/i.test(e.message);
+      if (isTransient) {
+        console.warn(`[offense-agent-v2] model call transient error at iter ${iter}: ${e.message} — retrying in 4s`);
+        await new Promise(r => setTimeout(r, 4000));
+        try { resp = await chatWithTools(messages, modelOverride); }
+        catch (e2) { endReason = `model call failed (retry): ${e2.message}`; break; }
+      } else {
+        endReason = `model call failed: ${e.message}`;
+        break;
+      }
+    }
+
+    const msg = resp.message;
+    if (msg.content) lastAssistantText = String(msg.content).slice(0, 500);
+    messages.push(msg);
+
+    const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+    if (toolCalls.length === 0) {
+      // Model returned text only — could be thinking aloud or done
+      if (lastAssistantText && /\b(complet|done|finish|exhausted|no\s+more)\b/i.test(lastAssistantText)) {
+        endedByModel = true;
+        endReason = "model signaled completion (no tool_calls + completion language)";
+      } else {
+        // Nudge it back to tool calling
+        messages.push({ role: "user", content: "Continue the engagement — call a tool (get_engagement_state, queue_step, verify_cve, etc.)." });
+      }
+      await saveStateToolCall(engagementId, messages, iter, endedByModel ? "completed" : "running");
+      if (endedByModel) break;
+      continue;
+    }
+
+    // ── (3) Process each tool call ──
+    let phaseChanged = false;
+    let abortedMidCall = false;
+    for (const tc of toolCalls) {
+      const name = tc.function && tc.function.name;
+      let parsedArgs;
+      try { parsedArgs = typeof tc.function.arguments === "string" ? JSON.parse(tc.function.arguments) : tc.function.arguments; }
+      catch (_) { parsedArgs = {}; }
+
+      // Abort check between tool calls (fast stop — dir_1782339045044)
+      try {
+        const abortRow = await db.query(
+          `SELECT agent_run_state->>'abort_requested' AS abort FROM pentest_engagements WHERE id = $1`,
+          [engagementId]);
+        if (abortRow.rows[0] && abortRow.rows[0].abort === "true") {
+          messages.push({ role: "tool", tool_call_id: tc.id || `${name}-${iter}`, name, content: JSON.stringify({ error: "operator stopped the run — halting" }) });
+          endReason = "operator_stopped (mid-tool-calls)";
+          abortedMidCall = true;
+          break;
+        }
+      } catch (_) {}
+
+      // Dispatch
+      const result = await dispatch(name, parsedArgs);
+      messages.push({ role: "tool", tool_call_id: tc.id || `${name}-${iter}`, name, content: serializeToolResult(result) });
+
+      // Track for Mentor
+      if (name === "queue_step") {
+        if (result && !result.error) {
+          stepsQueued++;
+          if (parsedArgs && parsedArgs.command) monitor.recordCommandShape(parsedArgs.command);
+        }
+        monitor.shouldInvokeMentor(`queue_step:${(parsedArgs && parsedArgs.title || "").slice(0, 60)}`);
+      } else {
+        monitor.shouldInvokeMentor(name);
+      }
+
+      // Detect end/phase-change
+      if (name === "end_engagement" && result && !result.error) {
+        endedByModel = true;
+        endReason = `model called end_engagement: ${result.reason || "(no reason)"}`;
+      }
+      if (name === "advance_phase" && result && !result.error && result.phase) {
+        phaseChanged = true;
+        phase = result.phase;
+      }
+
+      // Telemetry for knowledge tool usage
+      if (["verify_cve", "list_nse_scripts", "search_exploits", "search_sploitus"].includes(name)) {
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+             VALUES ($1, NULL, $2, 'knowledge_lookup', 0, 0, false, true, 0, 0, $3, $4)`,
+            [engagementId, name, result && result.error ? "lookup_error" : "lookup_ok",
+             `tool=${name}; has_result=${!!(result && !result.error)}`]);
+        } catch (_) {}
+      }
+    }
+
+    if (abortedMidCall) break;
+
+    // Update system prompt if phase changed
+    if (phaseChanged && messages[0] && messages[0].role === "system") {
+      messages[0] = { role: "system", content: buildSystemPrompt(phase) };
+    }
+
+    // ── (4) Mentor check — loop detection ──
+    const snap = monitor.snapshot();
+    if (snap.sameToolCount >= 3 || snap.totalCallCount >= 10 || snap.sameShapeCount >= 3) {
+      try {
+        const queueRecent = await db.query(
+          `SELECT title, status, LEFT(COALESCE(command,''),300) AS cmd
+             FROM soc_queue_items WHERE engagement_id=$1 AND status != 'pending'
+             ORDER BY id DESC LIMIT 20`, [engagementId]);
+        const executedCalls = queueRecent.rows.map(r => ({
+          name: "queue_step", args: r.title,
+          result: `[${r.status}] ${(r.cmd || "").replace(/\s+/g, " ").slice(0, 100)}`,
+        })).reverse();
+        const guidance = await performMentor({
+          agentType: "offense agent (v2 tool-calling)",
+          subtaskDescription: `Phase: ${phase}. Steps queued: ${stepsQueued}.`,
+          agentPrompt: "I'm an autonomous pentesting agent with full tool access. I should diversify approaches when one fails.",
+          recentMessages: [],
+          executedToolCalls: executedCalls,
+          lastToolName: toolCalls[toolCalls.length - 1] && toolCalls[toolCalls.length - 1].function && toolCalls[toolCalls.length - 1].function.name || "unknown",
+          lastToolArgs: "",
+          lastToolResult: "",
+        });
+        monitor.reset();
+        if (guidance) {
+          messages.push({ role: "user", content: `[MENTOR — your approach is looping. Change strategy.]\n${guidance}\n\nDo NOT repeat the same command shape. Try a different tool, target, or technique.` });
+        }
+        try {
+          await db.query(
+            `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+             VALUES ($1, NULL, 'mentor', 'monitoring', 0, 0, false, true, 0, 0, 'mentor_invoked', $2)`,
+            [engagementId, `v2; same=${snap.sameToolCount}; total=${snap.totalCallCount}; shape=${snap.sameShapeCount}`]);
+        } catch (_) {}
+        console.log(`[offense-agent-v2] Mentor fired at iter ${iter} (same=${snap.sameToolCount}, total=${snap.totalCallCount}, shape=${snap.sameShapeCount})`);
+      } catch (e) {
+        console.error(`[offense-agent-v2] Mentor failed:`, e.message);
+      }
+    }
+
+    // ── (5) Context compression — keep conversation from blowing up ──
+    // Tool-calling mode generates ~3-5 messages per iter. At 50 iters that's 150-250.
+    // Compress older turns once we pass 80 messages, keeping system + last 40.
+    if (messages.length > 80) {
+      try {
+        const { performSummarizer } = require("/app/soc/execution-monitor");
+        const middle = messages.slice(1, messages.length - 40);
+        const summaryInput = middle.map(m =>
+          `[${m.role}${m.name ? `:${m.name}` : ""}] ${String(m.content || "").slice(0, 200)}`
+        ).join("\n");
+        const summary = await performSummarizer({
+          content: summaryInput,
+          instructions: "Summarize the pentest engagement progress: what was scanned, what was found, what failed, what phases completed. Preserve specific IPs, ports, CVEs, and findings. Be concise.",
+          contentType: "pentest engagement conversation history",
+        });
+        if (summary && summary.length > 50) {
+          messages = [
+            messages[0],
+            { role: "user", content: `[CONTEXT SUMMARY — prior iterations compressed]\n${summary}\n\n(Full history above has been summarized to save context. Recent messages follow.)` },
+            ...messages.slice(messages.length - 40),
+          ];
+          console.log(`[offense-agent-v2] compressed ${middle.length} messages into summary (${summary.length} chars)`);
+        }
+      } catch (e) {
+        // Fallback: hard trim
+        console.warn(`[offense-agent-v2] Summarizer failed (${e.message}), hard-trimming`);
+        messages = [messages[0], ...messages.slice(messages.length - 50)];
+      }
+    }
+
+    // ── (6) Save state + status update ──
+    await saveStateToolCall(engagementId, messages, iter, endedByModel ? "completed" : "running");
+    await setAgentStatus(engagementId, "running", { iter, steps_queued: stepsQueued, mode: "v2" });
+
+    if (endedByModel) break;
+  }
+
+  // ── Conclusion cleanup ──
+  // Mark ghost-running queue items
+  try {
+    const qOrphans = await db.query(
+      `UPDATE soc_queue_items SET status = 'failed', completed_at = NOW()
+       WHERE engagement_id = $1 AND status = 'running' RETURNING id, seq`, [engagementId]);
+    if (qOrphans.rows.length > 0)
+      console.log(`[offense-agent-v2] conclusion: marked ${qOrphans.rows.length} ghost-running item(s) as failed`);
+  } catch (e) { console.error(`[offense-agent-v2] orphan cleanup failed:`, e.message); }
+
+  // Final status
+  const finalStatus = endedByModel ? "completed"
+    : (endReason && endReason.includes("operator_stopped")) ? "paused"
+    : (iter >= maxIter) ? "paused"
+    : "error";
+  const finalEndReason = endReason || (iter >= maxIter ? `hit max_iter=${maxIter} — re-run to continue` : "(unknown)");
+  await setAgentStatus(engagementId, finalStatus, {
+    iter, steps_queued: stepsQueued, end_reason: finalEndReason, mode: "v2",
+  });
+
+  return {
+    engagement_id: engagementId,
+    ok: true,
+    iter,
+    resumed,
+    ended_by_model: endedByModel,
+    end_reason: finalEndReason,
+    steps_queued: stepsQueued,
+    last_assistant_text: lastAssistantText,
+    elapsed_sec: Math.round((Date.now() - startMs) / 1000),
+  };
+}
+
+// ───────────────────────────── State persistence (shared by v1 + v2) ─────────────────────────────
 
 async function loadOrInitState(engagementId) {
   const r = await db.query(
@@ -1342,4 +1618,4 @@ async function resetAgent(engagementId) {
   return { engagement_id: engagementId, ok: true, orphans_cleaned: orphans.rows.length };
 }
 
-module.exports = { runAgent, runAgentToolCall, resetAgent, synthesizeCommand, computeFinalStatus };
+module.exports = { runAgent, runAgentV2, runAgentToolCall, resetAgent, synthesizeCommand, computeFinalStatus };
