@@ -10,3 +10,6 @@ node tests/finding-revision.test.js
 
 echo "Running loop-halt-detector tests (dir_1782242371780)..."
 node tests/loop-halt-detector.test.js
+
+echo "Running recon-discovery-normalize tests (dir_1782311308515)..."
+node tests/recon-discovery-normalize.test.js

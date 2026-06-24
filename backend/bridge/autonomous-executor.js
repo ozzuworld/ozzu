@@ -856,6 +856,25 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       // Full-access — fall through to auto-run. No push (would spam).
     }
 
+    // dir_1782311308515: FINAL recon-discovery normalization before execution.
+    // The lab is reached over the wg0→tablet L3 relay. ICMP crosses it (verified);
+    // ARP does not, and -Pn (skip discovery → scan all 254) times out before any
+    // host is recorded — that's why recon returned 0 hosts while the hosts were up.
+    // Force ICMP discovery (--disable-arp-ping, strip -Pn) so the scan actually finds
+    // the live hosts that the /run deterministic parser then writes to recon_hosts.
+    // Persist the normalized command because /soc/queue/:id/run reads it from the DB.
+    try {
+      const { normalizeNmapDiscovery } = require("/app/recon-discovery-normalize");
+      const normalized = normalizeNmapDiscovery(commandForExecution);
+      if (normalized !== commandForExecution) {
+        commandForExecution = normalized;
+        item.command = normalized;
+        await db.withBypass("autonomous_recon_discovery_norm", (client) => client.query(
+          `UPDATE soc_queue_items SET command=$1 WHERE id=$2`, [normalized, item.id]));
+        console.log(`[autonomous-executor] recon-discovery normalize q#${item.id}: stripped -Pn, forced ICMP (--disable-arp-ping)`);
+      }
+    } catch (e) { console.error(`[autonomous-executor] recon-discovery normalize failed:`, e.message); }
+
     // All checks passed — auto-execute.
     await db.query(`UPDATE soc_queue_items SET auto_executed=true WHERE id=$1`, [item.id]);
 
