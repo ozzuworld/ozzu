@@ -365,6 +365,48 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // GET /soc/queue/:id/report — structured step report for Cipher analysis.
+    // Returns all metadata + sanitized output for a single queue item.
+    if (req.method === "GET" && /^\/soc\/queue\/\d+\/report$/.test(pathname)) {
+      const qid = pathname.split("/")[3];
+      try {
+        const r = await db.query(
+          `SELECT q.id, q.engagement_id, q.seq, q.title, q.description,
+                  q.command, q.output, q.expected_artifact,
+                  q.status, q.intent_class, q.auto_executed,
+                  q.started_at, q.completed_at, q.created_at,
+                  EXTRACT(EPOCH FROM (q.completed_at - q.started_at))::int AS duration_sec
+           FROM soc_queue_items q WHERE q.id = $1`, [qid]);
+        if (r.rows.length === 0) { sendJSON(res, 404, { error: "queue item not found" }); return true; }
+        const row = r.rows[0];
+        const tel = await db.query(
+          `SELECT outcome, outcome_notes, intent_category, created_at
+           FROM offense_telemetry WHERE queue_item_id = $1 ORDER BY created_at`, [qid]);
+        sendJSON(res, 200, {
+          step: {
+            id: row.id,
+            engagement_id: row.engagement_id,
+            seq: row.seq,
+            title: row.title,
+            description: row.description,
+            command: row.command,
+            output: row.output,
+            expected_artifact: row.expected_artifact,
+            status: row.status,
+            intent_class: row.intent_class,
+            auto_executed: row.auto_executed,
+            started_at: row.started_at,
+            completed_at: row.completed_at,
+            duration_sec: row.duration_sec,
+          },
+          telemetry: tel.rows,
+        });
+      } catch (error) {
+        sendJSON(res, 500, { error: "failed to load step report", details: error.message });
+      }
+      return true;
+    }
+
     // POST /soc/engagements/:id/run — operator-fired launch of the autonomous DeepSeek run. RULE 3:
     // the operator executes via the app; this is the trigger the app was missing. Kicks off
     // offense-agent.runAgent in the BACKGROUND (long-running loop) and returns at once; the Now tab

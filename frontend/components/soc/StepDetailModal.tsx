@@ -1,5 +1,7 @@
-import { Modal, Pressable, ScrollView, Share, Text, View } from "react-native";
+import { useState } from "react";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { getBridgeUrl } from "../../lib/bridge-api";
 import {
   colors, fontSize, fontWeight, radius, spacing, withAlpha,
 } from "../../lib/design-tokens";
@@ -64,21 +66,27 @@ function intentLabel(cls: string): string {
 
 export function StepDetailModal({ visible, step, onClose }: Props) {
   const insets = useSafeAreaInsets();
+  const [reporting, setReporting] = useState(false);
   if (!step) return null;
 
   const vis = statusVis(step.status);
   const dur = formatDuration(step.started_at, step.completed_at);
 
-  const shareOutput = async () => {
+  const fetchReport = async () => {
+    setReporting(true);
     try {
-      const text = [
-        `#${step.seq} ${step.title}`,
-        step.description ? `\n${step.description}` : "",
-        step.command ? `\n--- Command ---\n${step.command}` : "",
-        step.output ? `\n--- Output ---\n${step.output.slice(0, 4000)}` : "",
-      ].join("");
-      await Share.share({ message: text });
-    } catch {}
+      const r = await fetch(`${getBridgeUrl()}/soc/queue/${step.id}/report`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      Alert.alert(
+        "Step report saved",
+        `Step #${step.seq} report is available at GET /soc/queue/${step.id}/report — Cipher can pull it from this session.`,
+      );
+    } catch (e: any) {
+      Alert.alert("Report failed", e.message || "Could not generate report");
+    } finally {
+      setReporting(false);
+    }
   };
 
   return (
@@ -98,11 +106,14 @@ export function StepDetailModal({ visible, step, onClose }: Props) {
             <Text style={{ color: colors.accent, fontSize: fontSize.lg, fontWeight: fontWeight.semibold }}>← Back</Text>
           </Pressable>
           <View style={{ flex: 1 }} />
-          <Pressable onPress={shareOutput} hitSlop={12} style={({ pressed }) => ({
-            opacity: pressed ? 0.6 : 1,
+          <Pressable onPress={fetchReport} disabled={reporting} hitSlop={12} style={({ pressed }) => ({
+            opacity: reporting ? 0.5 : pressed ? 0.6 : 1,
             paddingVertical: spacing.sm, paddingLeft: spacing.md,
           })}>
-            <Text style={{ color: colors.accent, fontSize: fontSize.base, fontWeight: fontWeight.semibold }}>Share</Text>
+            {reporting
+              ? <ActivityIndicator color={colors.accent} size="small" />
+              : <Text style={{ color: colors.accent, fontSize: fontSize.base, fontWeight: fontWeight.semibold }}>Report</Text>
+            }
           </Pressable>
         </View>
 
