@@ -355,7 +355,7 @@ function EngagementDetailInner() {
           <Text style={{ color: colors.accent, fontSize: fs.lg, fontWeight: fw.medium }}>← Back</Text>
         </Pressable>
         <Text
-          style={{ color: colors.text.primary, fontSize: fs.xxl, fontWeight: fw.bold }}
+          style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.bold }}
           numberOfLines={1}
         >
           {safe(engagement.id, "—")}
@@ -376,7 +376,6 @@ function EngagementDetailInner() {
           backgroundColor: colors.bg.elevated,
           borderBottomWidth: 1,
           borderBottomColor: colors.border.subtle,
-          paddingHorizontal: spacing.xs,
         }}
       >
         {TABS.map((t) => {
@@ -392,32 +391,28 @@ function EngagementDetailInner() {
                 pressed && { opacity: 0.8 },
               ]}
             >
-              <Text
-                numberOfLines={1}
-                style={{
-                  color: active ? colors.accent : colors.text.tertiary,
-                  fontSize: fs.sm,
-                  fontWeight: active ? fw.bold : fw.medium,
-                }}
-              >
-                {t.label}
-              </Text>
-              {badge != null && badge > 0 ? (
-                <View
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Text
+                  numberOfLines={1}
                   style={{
-                    minWidth: 18,
-                    paddingHorizontal: 5,
-                    paddingVertical: 1,
-                    borderRadius: 9,
-                    backgroundColor: active ? withAlpha(colors.accent, 0.15) : colors.gray[700],
-                    alignItems: "center",
+                    color: active ? colors.accent : colors.text.tertiary,
+                    fontSize: fs.md,
+                    fontWeight: active ? fw.bold : fw.medium,
                   }}
                 >
-                  <Text style={{ color: active ? colors.accent : colors.text.tertiary, fontSize: 10, fontFamily: "monospace", fontWeight: fw.semibold }}>
+                  {t.label}
+                </Text>
+                {badge != null && badge > 0 ? (
+                  <Text style={{
+                    color: active ? colors.accent : colors.text.disabled,
+                    fontSize: fs.xs,
+                    fontFamily: "monospace",
+                    fontWeight: fw.semibold,
+                  }}>
                     {badge}
                   </Text>
-                </View>
-              ) : null}
+                ) : null}
+              </View>
             </Pressable>
           );
         })}
@@ -488,12 +483,9 @@ function countForTab(key: Tab, queue: QueueItem[], findings: FindingRowData[]): 
 const styles = StyleSheet.create({
   tab: {
     flex: 1,
-    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.sm + 4,
     borderBottomWidth: 2,
     borderBottomColor: "transparent",
   },
