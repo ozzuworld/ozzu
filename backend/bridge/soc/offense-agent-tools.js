@@ -111,13 +111,17 @@ async function getEngagementState(args) {
   const engRow = eng.rows[0];
   const tools = Array.isArray(engRow.executor_tools) ? engRow.executor_tools : [];
   if (tools.length === 0) {
-    const BRIDGE_TOOLS = ["nmap","masscan","hydra","sqlmap","curl","wget","ssh","python3",
-                          "gobuster","nikto","searchsploit","tcpdump","ncat","openssl",
-                          "nuclei","httpx","whatweb","ffuf","netcat","dig","whois"];
+    // dir_1782342907969: ground-truth tool list. ONLY tools actually installed
+    // in the bridge container (Dockerfile). Listing absent tools here causes the
+    // model to queue commands that fail with "command not found".
+    const BRIDGE_TOOLS = ["nmap","curl","ssh","python3","searchsploit",
+                          "nuclei","httpx","whatweb","netcat","dig","host",
+                          "openssl","jq","awk","grep","sed","bash"];
     engRow.executor_tools = BRIDGE_TOOLS;
     engRow.executor_caps_note =
-      "Executor: Linux bridge container (local bash). Full TCP/ICMP/raw-socket support. " +
-      "Lab subnet reached via WireGuard L3 relay (~240ms RTT). All listed tools are pre-installed.";
+      "Executor: Linux bridge container (local bash). Lab subnet via WireGuard (~240ms RTT). " +
+      "NOT installed: gobuster, nikto, hydra, john, hashcat, dirb, wfuzz, sqlmap, metasploit, wget, masscan, ffuf. " +
+      "For dir-enum use curl+loop or nuclei fuzzing; for cred-test use curl+auth or nmap NSE auth scripts.";
   }
   return {
     engagement: engRow,
