@@ -475,7 +475,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
         }
       }
       if (!verdict.allowed) {
-        const diag = `[PERMISSION_DENIED — dir_1780844590951]\nlayer=${verdict.layer}\nreason=${verdict.denied_reason}\ncurrent_mode=${verdict.current_mode || pEng.permission_mode || "enumeration"}${verdict.required_mode ? `\nrequired_mode=${verdict.required_mode}` : ""}${verdict.out_of_scope_targets ? `\nout_of_scope=${verdict.out_of_scope_targets.join(", ")}` : ""}`;
+        const diag = `[PERMISSION_DENIED — dir_1780844590951]\nlayer=${verdict.layer}\nreason=${verdict.reason || verdict.denied_reason}\ncurrent_mode=${verdict.current_mode || pEng.permission_mode || "enumeration"}${verdict.required_mode ? `\nrequired_mode=${verdict.required_mode}` : ""}${verdict.out_of_scope_targets ? `\nout_of_scope=${verdict.out_of_scope_targets.join(", ")}` : ""}`;
         await db.withBypass("autonomous_permission_deny", (client) => client.query(
           `UPDATE soc_queue_items SET status='failed', output=$1, completed_at=NOW() WHERE id=$2`,
           [diag, item.id]));
@@ -488,9 +488,9 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
              VALUES ($1, $2, 'permission_enforcer', $3, 0, 0, false, false, 0, 0,
                      'permission_denied', $4)`,
             [item.engagement_id, item.id, verdict.layer || "unknown",
-             sanitizeOutcomeNotes(`${verdict.layer}: ${(verdict.denied_reason || "").slice(0, 200)}`, "outcome_notes", item.engagement_id)]);
+             sanitizeOutcomeNotes(`${verdict.layer}: ${(verdict.reason || verdict.denied_reason || "").slice(0, 200)}`, "outcome_notes", item.engagement_id)]);
         } catch (_) {}
-        return { autoExecuted: false, reason: `permission:${verdict.layer}`, hint: verdict.denied_reason };
+        return { autoExecuted: false, reason: `permission:${verdict.layer}`, hint: verdict.reason || verdict.denied_reason };
       }
     } catch (e) {
       console.error(`[autonomous-executor] permission enforcer failed:`, e.message);

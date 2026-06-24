@@ -89,6 +89,10 @@ const FILE_EXT_BLOCKLIST = new Set([
   "md", "rst", "txt", "rtf", "pdf",
   "png", "jpg", "jpeg", "gif", "svg", "ico", "webp",
   "exe", "dll", "so", "dylib", "elf", "bin", "img", "iso", "deb", "rpm", "apk",
+  // dir_1782331844373: nmap script extensions + misc tool extensions
+  "nse", "nasl", "perf", "rc",
+  // dir_1782331844373: Linux directory-name conventions (conf.d, cron.d, etc.)
+  "d",
 ]);
 
 // dir_1780925940313: Python / shell module-method patterns that look like
@@ -141,11 +145,21 @@ function stripQuotedSqlBodies(command) {
   // heuristic — quoted body with FROM/SELECT/UPDATE/INTO/JOIN/WHERE keyword).
   const sqlFlagPattern = /\s(?:-(?:e|c|q|H)|--(?:execute|query|command))[= ]'([^']*)'/gi;
   s = s.replace(sqlFlagPattern, " '<SQL>'");
+  // dir_1782331844373: same for double-quoted SQL bodies (model uses either)
+  const sqlFlagPatternDQ = /\s(?:-(?:e|c|q|H)|--(?:execute|query|command))[= ]"([^"]*)"/gi;
+  s = s.replace(sqlFlagPatternDQ, ' "<SQL>"');
   // Also catch bare quoted strings containing SQL keywords (safety net).
   const sqlKeywordPattern = /'([^']*(?:\bSELECT\b|\bFROM\b|\bINTO\b|\bUPDATE\b|\bJOIN\b|\bWHERE\b|\bSHOW\b|\bCREATE\b|\bDROP\b|\bALTER\b|\bDELETE\b|\bINSERT\b)[^']*)'/gi;
   s = s.replace(sqlKeywordPattern, "'<SQL>'");
+  const sqlKeywordPatternDQ = /"([^"]*(?:\bSELECT\b|\bFROM\b|\bINTO\b|\bUPDATE\b|\bJOIN\b|\bWHERE\b|\bSHOW\b|\bCREATE\b|\bDROP\b|\bALTER\b|\bDELETE\b|\bINSERT\b)[^"]*)"/gi;
+  s = s.replace(sqlKeywordPatternDQ, '"<SQL>"');
   return s;
 }
+
+// dir_1782331844373: version strings, SSH banners, and XML namespace URIs
+// match HOSTNAME_RE but are never attack targets.
+const VERSION_LIKE_RE = /^(?:SSH-\d|[A-Za-z]+-\d)/;           // SSH-2.0-OpenSSH, HTTP-1.1-Apache
+const VERSION_SUFFIX_RE = /^\d+\.\d+(?:\.\d+)*[a-z]\d*$/i;    // 8.9p1, 1.30b, 7.4.3p1
 
 function extractTargetsFromCommand(command) {
   if (!command) return [];
@@ -154,7 +168,9 @@ function extractTargetsFromCommand(command) {
   const hosts = [...new Set((String(stripped).match(HOSTNAME_RE) || [])
     .filter(h => !ips.includes(h)
               && !/^[0-9.]+$/.test(h)
-              && !isLikelyFilePath(h)))];
+              && !isLikelyFilePath(h)
+              && !VERSION_LIKE_RE.test(h)
+              && !VERSION_SUFFIX_RE.test(h)))];
   return [...ips, ...hosts];
 }
 
