@@ -332,7 +332,7 @@ async function synthesizeCommand(task, ctx, modelOverride) {
     `Task directive (assigned by Orchestrator): ${task.directive}`,
     `Engagement phase: ${phase}`,
     `Phase guidance:\n${guide}`,
-    `Executor: ${eng.executor_host || "dev-01"}`,
+    `Executor: ${eng.executor_host || "local-bridge"}`,
     `Tools available: ${execTools.length ? execTools.join(", ") : "(unknown — POSIX-portable only)"}`,
     `Prerequisites note: ${task.prerequisites || "(none)"}`,
     recentFailures ? `Recent failed commands on this engagement — do NOT repeat these shapes:\n${recentFailures}` : "Recent failed commands: (none)",
@@ -1049,6 +1049,16 @@ async function runAgent(engagementId, opts = {}) {
       taskOutcome = "failed";
     }
     await orchestrator.completeTask(task.id, taskOutcome, summary);
+
+    // dir_1782332848586: reset loop-breaker streak on productive iterations.
+    // The streak should track consecutive UNPRODUCTIVE same-phase iterations,
+    // not just consecutive same-phase iterations. A successful recon step
+    // (found hosts, scanned ports) or a completed negative result (cred test
+    // returned 401 = useful data) is productive work — don't count it toward
+    // the forced phase advance.
+    if (taskOutcome === "done") {
+      consecutivePhaseStreak = Math.max(0, consecutivePhaseStreak - 1);
+    }
 
     // (11) Heartbeat status for live monitoring
     await setAgentStatus(engagementId, "running", { iter, tasks_added: tasksAdded, steps_queued: stepsQueued, last_action: `completed task ${task.id} (${taskOutcome})` });

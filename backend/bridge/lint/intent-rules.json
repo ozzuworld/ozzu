@@ -15,6 +15,7 @@
     },
     {
       "intent": "cred_test",
+      "_note_dir": "dir_1782332848586: removed bare ssh user@IP (matched all SSH as cred_test, 130 false mismatches on 915). sshpass catches real SSH cred tests. Narrowed mysql/psql/redis/mongo to require password flags, not just -h.",
       "patterns": [
         "(?i)(curl|wget|httpie|http)[^\\n]{0,200}(-u\\s|--user[=\\s]|--password[=\\s])\\s*[A-Za-z0-9._-]+:[A-Za-z0-9._@!#%-]+",
         "(?i)\\bhydra\\b",
@@ -25,11 +26,10 @@
         "(?i)\\bnxc\\b",
         "(?i)Authorization\\s*:\\s*Basic\\s+[A-Za-z0-9+/=]{4,}",
         "(?i)\\b(admin|root|guest|administrator):(12345|admin|password|root|toor|1234|user|guest)\\b",
-        "(?i)\\bmysql\\b\\s+-[hHuPp]",
-        "(?i)\\bpsql\\b\\s+(-h|--host)",
-        "(?i)\\bredis-cli\\b\\s+(-h|-p|-a|--user)",
-        "(?i)\\bmongo(sh|dump)?\\b\\s+(--host|--uri|mongodb://)",
-        "(?i)\\bssh\\b\\s+[A-Za-z0-9._-]+@\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}",
+        "(?i)\\bmysql\\b[^\\n]{0,200}(-p\\S|--password[=\\s])",
+        "(?i)\\bpsql\\b[^\\n]{0,200}(-W|PGPASSWORD)",
+        "(?i)\\bredis-cli\\b[^\\n]{0,200}(-a\\s|--user\\s|AUTH\\b)",
+        "(?i)\\bmongo(sh|dump)?\\b[^\\n]{0,200}(--password|--authenticationDatabase)",
         "(?i)\\bsshpass\\b"
       ]
     },
