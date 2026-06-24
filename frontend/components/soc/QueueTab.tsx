@@ -103,7 +103,7 @@ export function QueueTab({ queue, busyId, onRun, onCancel, onSkip, onItemPress }
         contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxl, gap: spacing.sm }}
       >
         {filtered.length === 0 ? (
-          <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm, textAlign: "center", marginTop: spacing.xl }}>
+          <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm, textAlign: "center", marginTop: spacing.lg }}>
             No items in this bucket
           </Text>
         ) : (

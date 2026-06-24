@@ -206,8 +206,10 @@ function Section({
           alignItems: "center",
           backgroundColor: colors.gray[800],
           borderRadius: radius.md,
+          borderLeftWidth: 3,
+          borderLeftColor: open ? colors.accent : colors.text.disabled,
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm,
+          paddingVertical: spacing.sm + 2,
           opacity: pressed ? 0.85 : 1,
         })}
       >
@@ -218,10 +220,10 @@ function Section({
           {title}
         </Text>
         {count != null ? (
-          <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, fontFamily: "monospace" }}>{count}</Text>
+          <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm, fontFamily: "monospace", fontWeight: fontWeight.semibold }}>{count}</Text>
         ) : null}
       </Pressable>
-      {open ? <View style={{ padding: spacing.md, gap: spacing.xs }}>{children}</View> : null}
+      {open ? <View style={{ paddingVertical: spacing.sm, gap: spacing.xs }}>{children}</View> : null}
     </View>
   );
 }

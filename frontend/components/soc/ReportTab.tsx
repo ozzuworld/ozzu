@@ -58,11 +58,20 @@ export function ReportTab({ engagementId }: { engagementId: string }) {
         operator report is saved on the bridge{hasFull ? " (generated)" : ""}.
       </Text>
       {err ? <Text style={{ color: colors.error, fontSize: fontSize.sm }}>{err}</Text> : null}
-      <View style={{ backgroundColor: colors.bg.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border.subtle, padding: spacing.md, minHeight: 140 }}>
+      <View style={{
+        backgroundColor: colors.gray[800],
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: colors.border.subtle,
+        borderLeftWidth: 3,
+        borderLeftColor: debrief ? colors.accent : colors.text.disabled,
+        padding: spacing.md,
+        minHeight: 120,
+      }}>
         {debrief ? (
-          <Text style={{ color: colors.text.secondary, fontSize: fontSize.sm, lineHeight: 20, fontFamily: "monospace" }}>{debrief}</Text>
+          <Text selectable style={{ color: colors.text.secondary, fontSize: fontSize.sm, lineHeight: 20, fontFamily: "monospace" }}>{debrief}</Text>
         ) : (
-          <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm }}>
+          <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm, lineHeight: 20 }}>
             No report yet. Generate a mid-run debrief once the run has activity, or a final report when it completes.
           </Text>
         )}

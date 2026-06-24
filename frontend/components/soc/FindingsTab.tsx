@@ -8,6 +8,7 @@ import {
   colors,
   fontSize,
   fontWeight,
+  radius,
   spacing,
 } from "../../lib/design-tokens";
 import { FindingRow, type FindingRowData } from "./FindingRow";
@@ -62,26 +63,31 @@ export function FindingsTab({ findings, onFindingPress }: FindingsTabProps) {
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxl, gap: spacing.sm }}
       >
         {findings.length === 0 ? (
           <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm, textAlign: "center", marginTop: spacing.xl }}>
             No findings yet
           </Text>
         ) : (
-          SEVERITY_ORDER.map((sev) => {
+          SEVERITY_ORDER.filter((sev) => buckets[sev].length > 0).map((sev) => {
             const list = buckets[sev];
-            if (list.length === 0) return null;
             const isOpen = open[sev];
+            const sevColor = severityColor(sev);
             return (
-              <View key={sev} style={{ marginBottom: spacing.lg }}>
+              <View key={sev}>
                 <Pressable
                   onPress={() => toggle(sev)}
                   style={({ pressed }) => ({
                     flexDirection: "row",
                     alignItems: "center",
-                    marginBottom: spacing.sm,
-                    opacity: pressed ? 0.7 : 1,
+                    backgroundColor: colors.gray[800],
+                    borderRadius: radius.md,
+                    borderLeftWidth: 3,
+                    borderLeftColor: sevColor,
+                    paddingHorizontal: spacing.md,
+                    paddingVertical: spacing.sm + 2,
+                    opacity: pressed ? 0.85 : 1,
                   })}
                 >
                   <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm, marginRight: spacing.sm }}>
@@ -89,8 +95,9 @@ export function FindingsTab({ findings, onFindingPress }: FindingsTabProps) {
                   </Text>
                   <Text
                     style={{
-                      color: severityColor(sev),
-                      fontSize: fontSize.sm,
+                      flex: 1,
+                      color: sevColor,
+                      fontSize: fontSize.md,
                       fontWeight: fontWeight.bold,
                       textTransform: "uppercase",
                       letterSpacing: 0.5,
@@ -98,12 +105,12 @@ export function FindingsTab({ findings, onFindingPress }: FindingsTabProps) {
                   >
                     {sev}
                   </Text>
-                  <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, marginLeft: spacing.sm, fontFamily: "monospace" }}>
+                  <Text style={{ color: colors.text.tertiary, fontSize: fontSize.sm, fontFamily: "monospace", fontWeight: fontWeight.semibold }}>
                     {list.length}
                   </Text>
                 </Pressable>
                 {isOpen ? (
-                  <View style={{ gap: spacing.sm }}>
+                  <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
                     {list.map((f) => (
                       <FindingRow key={f.id} finding={f} onPress={onFindingPress} />
                     ))}
