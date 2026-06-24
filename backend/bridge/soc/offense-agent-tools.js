@@ -227,6 +227,18 @@ async function waitForOutcome(args) {
         completed_at:     row.completed_at,
       };
     }
+    // dir_1782339045044: check abort flag inside the poll loop so operator Stop
+    // takes effect within 5s, not after the full 120s timeout.
+    if (row.engagement_id) {
+      try {
+        const ae = await db.query(
+          `SELECT agent_run_state->>'abort_requested' AS abort FROM pentest_engagements WHERE id = $1`,
+          [row.engagement_id]);
+        if (ae.rows[0] && ae.rows[0].abort === "true") {
+          return { queue_item_id, status: "abort", elapsed_sec: Math.round((Date.now() - start) / 1000), reason: "operator stopped the run" };
+        }
+      } catch (_) {}
+    }
     await new Promise((res) => setTimeout(res, pollMs));
   }
 

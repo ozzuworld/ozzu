@@ -967,6 +967,13 @@ async function runAgent(engagementId, opts = {}) {
       console.log(`[offense-agent] q=${queueResult.queue_id} still running at ${waitTimeoutSec}s — extending wait (${_runningReWaits}/${MAX_RUNNING_REWAITS})`);
       outcome = await dispatch("wait_for_outcome", { queue_item_id: queueResult.queue_id, timeout_sec: waitTimeoutSec });
     }
+    // dir_1782339045044: abort surfaced from wait_for_outcome → break immediately.
+    if (outcome.status === "abort") {
+      console.log(`[offense-agent] abort detected inside wait_for_outcome — stopping at iter ${iter}`);
+      endReason = "operator_stopped (mid-wait)";
+      break;
+    }
+
     const rawOutput = outcome.output_preview || "";
     const status = outcome.status || "timeout";
 
