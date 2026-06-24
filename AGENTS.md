@@ -55,7 +55,7 @@ The repo is too big for any single LLM context window. Use the indexes, do NOT p
 - **Every commit needs a directive ID** in the message (`dir_<unix-ms>` format). The hook enforces this on `cipher/*` branches as well as `main`.
 - **Merge via `merge-and-deploy`** for app code (triggers smartDeploy: HOT/WARM/STAGING tier auto-detected).
 - **Light pipeline** for Cipher self-improvement (INVENTORY.md, `.claude/rules/`, `.cipher/`, `scripts/cipher*`): branch + commit + manual merge + push, no merge-and-deploy. See `.claude/rules/self-improvement.md`.
-- **Co-Authored-By trailer**: `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>`. No real-name attribution.
+- **Co-Authored-By trailer**: `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`. No real-name attribution.
 
 ## Conventions
 

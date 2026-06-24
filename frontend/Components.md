@@ -8,7 +8,7 @@ Read this before creating new components. Reuse what exists.
 |------|---------|
 | `lib/design-tokens.ts` | Colors, spacing, radius, fontSize, fontWeight, helpers (`withAlpha`, `statusPillStyle`) |
 | `lib/directive-constants.ts` | Status/type emojis, colors, priority labels, `relativeTime()`, `HUMAN_STATUS` |
-| `lib/bridge-api.ts` | All API types (`Directive`, `BusinessProject`, `OsintProfile`, etc.) and fetch functions |
+| `lib/bridge-api.ts` | All API types (`Directive`, `BusinessProject`, etc.) and fetch functions |
 
 ## Card Patterns (use these as templates)
 
@@ -73,19 +73,6 @@ Expandable health card for services.
 | `ProgressBar` | `components/business/ProgressBar.tsx` | Horizontal progress fill |
 | `CostField` | `components/business/CostField.tsx` | COP currency input |
 
-## OSINT Components
-
-| Component | File | Use For |
-|-----------|------|---------|
-| `DossierView` | `components/osint/DossierView.tsx` | Full intel dossier (8 sections) |
-| `EntityGraph` | `components/osint/EntityGraph.tsx` | Force-directed relationship graph |
-| `FindingCard` | `components/osint/FindingCard.tsx` | Single OSINT finding |
-| `FindingGroup` | `components/osint/FindingGroup.tsx` | Grouped findings by category |
-| `Timeline` | `components/osint/Timeline.tsx` | Vertical event timeline |
-| `ScoreTrend` | `components/osint/ScoreTrend.tsx` | Line chart for threat scores |
-| `AlertBanner` | `components/osint/AlertBanner.tsx` | Threat alert banner |
-| `FaceSearchResults` | `components/osint/FaceSearchResults.tsx` | Reverse face search results |
-
 ## Ops Components
 
 | Component | File | Use For |
@@ -96,23 +83,6 @@ Expandable health card for services.
 | `NetworkBanner` | `components/ops/NetworkBanner.tsx` | Network status |
 | `SystemBanner` | `components/ops/SystemBanner.tsx` | Overall system health |
 
-## Glasses / Vision Components
-
-| Component | File | Use For |
-|-----------|------|---------|
-| `VisionOverlay` | `components/glasses/VisionOverlay.tsx` | Vision result display (describe/OCR/identify/translate) |
-| `FaceMatchOverlay` | `components/glasses/FaceMatchOverlay.tsx` | Face recognition match display |
-| `SettingsSheet` | `components/glasses/SettingsSheet.tsx` | Vision mode settings |
-
-## Home / IoT Components
-
-| Component | File | Use For |
-|-----------|------|---------|
-| `HomeMap3D` | `components/home/HomeMap3D.tsx` | 3D apartment with THREE.js |
-| `FloorPlanMap` | `components/home/FloorPlanMap.tsx` | 2D SVG floor plan |
-| `DevicePin` | `components/home/DevicePin.tsx` | Device marker on floor plan |
-| `DeviceSheet` | `components/home/DeviceSheet.tsx` | Device control bottom sheet |
-
 ## Screens (app/)
 
 | Screen | File | Tab |
@@ -120,9 +90,7 @@ Expandable health card for services.
 | Directives | `app/(tabs)/directives.tsx` | Main directive list (4 view modes) |
 | Business | `app/(tabs)/business.tsx` | Ventures (Dashboard/Projects/Pipeline/Contacts) |
 | Ops | `app/(tabs)/ops.tsx` | Infrastructure health |
-| OSINT | `app/(tabs)/osint.tsx` | Intelligence profiles |
-| Home | `app/(tabs)/home.tsx` | IoT control |
-| Glasses | `app/(tabs)/glasses.tsx` | AR glasses interface |
+| Home | `app/(tabs)/home.tsx` | Dashboard + shortcuts |
 | Directive Detail | `app/directive/[id].tsx` | Directive overview + activity timeline |
 
 ## Hooks
@@ -132,5 +100,5 @@ Expandable health card for services.
 | `useDirectives()` | `lib/directive-hooks.ts` | `{ directives, buildStatus, summary, loading, error, refresh }` |
 | `useBusiness()` | `lib/business-hooks.ts` | Projects, tasks, contacts, shipments, invoices, investments |
 | `usePhoneLayout()` | `lib/usePhoneLayout.ts` | `{ insets, isPhone, screenWidth, screenHeight }` |
-| `useEntity(id)` | `lib/ha-context.tsx` | Home Assistant entity state |
-| `usePosition()` | `lib/ha-context.tsx` | Current room position |
+| `useEntity(id)` | `lib/ha-context.tsx` | Home Assistant entity state (HA decommissioned — dead code chain) |
+| `usePosition()` | `lib/ha-context.tsx` | Current room position (HA decommissioned — dead code chain) |
