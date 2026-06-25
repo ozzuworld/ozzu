@@ -30,6 +30,7 @@ import { NowTab, type ExecutorLite } from "../../components/soc/NowTab";
 import { ReportTab } from "../../components/soc/ReportTab";
 import { QueueTab } from "../../components/soc/QueueTab";
 import { FindingsTab } from "../../components/soc/FindingsTab";
+import { ObservationsTab } from "../../components/soc/ObservationsTab";
 import { DetailTab, type EngagementMeta, type ReconHostRow, type AuditLogRow, type TaskGraphNode } from "../../components/soc/DetailTab";
 import { LiveExecModal } from "../../components/soc/LiveExecModal";
 import { StepDetailModal, type StepDetail } from "../../components/soc/StepDetailModal";
@@ -39,12 +40,13 @@ import type { QueueItemRow } from "../../components/soc/QueueRow";
 import type { FindingRowData } from "../../components/soc/FindingRow";
 import type { RunningItem } from "../../components/soc/LiveExecBanner";
 
-type Tab = "now" | "queue" | "findings" | "report" | "detail";
+type Tab = "now" | "queue" | "findings" | "observe" | "report" | "detail";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "now", label: "Now" },
   { key: "queue", label: "Queue" },
   { key: "findings", label: "Findings" },
+  { key: "observe", label: "Observe" },
   { key: "report", label: "Report" },
   { key: "detail", label: "Detail" },
 ];
@@ -91,6 +93,7 @@ function EngagementDetailInner() {
   const [execItem, setExecItem] = useState<RunningItem | null>(null);
   const [stepDetail, setStepDetail] = useState<StepDetail | null>(null);
   const [executor, setExecutor] = useState<ExecutorLite>(null);
+  const [pendingObs, setPendingObs] = useState(0);
 
   const mountedRef = useRef(true);
 
@@ -160,6 +163,13 @@ function EngagementDetailInner() {
         } catch {}
       }
       await Promise.all([fetchQueue(), fetchFindings(), fetchRecon(), fetchAuditLog(), fetchTaskGraph()]);
+      try {
+        const obsRes = await fetch(`${getBridgeUrl()}/soc/engagements/${id}/observations`);
+        if (obsRes.ok) {
+          const obsData = await obsRes.json();
+          if (mountedRef.current) setPendingObs((obsData.observations || []).filter((o: any) => o.status === "pending").length);
+        }
+      } catch {}
     } catch {
       Alert.alert("Error", "Failed to load engagement");
     } finally {
@@ -382,7 +392,7 @@ function EngagementDetailInner() {
       >
         {TABS.map((t) => {
           const active = tab === t.key;
-          const badge = countForTab(t.key, queue, findings);
+          const badge = countForTab(t.key, queue, findings, pendingObs);
           return (
             <Pressable
               key={t.key}
@@ -448,6 +458,7 @@ function EngagementDetailInner() {
       {tab === "findings" ? (
         <FindingsTab findings={findings} onFindingPress={onFindingPress} />
       ) : null}
+      {tab === "observe" ? <ObservationsTab engagementId={id!} /> : null}
       {tab === "report" ? <ReportTab engagementId={id!} /> : null}
       {tab === "detail" ? (
         <DetailTab
@@ -476,9 +487,10 @@ function EngagementDetailInner() {
   );
 }
 
-function countForTab(key: Tab, queue: QueueItem[], findings: FindingRowData[]): number | null {
+function countForTab(key: Tab, queue: QueueItem[], findings: FindingRowData[], pendingObs?: number): number | null {
   if (key === "queue") return queue.length;
   if (key === "findings") return findings.length;
+  if (key === "observe") return pendingObs || null;
   return null;
 }
 
