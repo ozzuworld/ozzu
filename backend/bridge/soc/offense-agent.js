@@ -157,14 +157,16 @@ const PHASE_GUIDANCE = {
   enumeration: [
     "CURRENT PHASE: enumeration",
     "Goal: identify attack vectors on your focused target. Fingerprint services, find versions, test default creds, probe for known vulns.",
-    "Right moves: version probes, HTTP fingerprinting, default cred tests, CVE lookups, reading exploit docs.",
+    "FIRST STEP in enumeration: call lookup_attack_playbook with the target service/device name (e.g. 'hikvision camera', 'zkteco'). This returns exact attack techniques, default credentials, and CVEs from HackTricks — use it to build your attack plan instead of guessing.",
+    "Right moves: lookup_attack_playbook FIRST, then version probes, HTTP fingerprinting, default cred tests, CVE lookups, reading exploit docs.",
     "ADVANCE TO FOOTHOLD when you have identified a specific attack vector (CVE match, default creds that might work, unauthenticated endpoint). Do NOT stay in enumeration forever probing — once you have a lead, advance and TRY IT.",
     "Step budget: if you've done 15+ steps in enumeration, you MUST either advance to foothold or move to a different target. Endless probing is a failure mode.",
   ].join("\n"),
   foothold: [
     "CURRENT PHASE: foothold",
     "Goal: gain initial access using the attack vector from enumeration. For IoT/cameras, 'access' means: admin login, unauthenticated config read, snapshot capture, RTSP stream access, or confirmed exploit execution.",
-    "Right moves: exploit the specific CVE/default-cred/unauth-endpoint you identified. Use real public PoCs.",
+    "If you haven't called lookup_attack_playbook yet for your target, DO IT NOW — it has the exact exploitation commands.",
+    "Right moves: follow the playbook techniques, exploit the specific CVE/default-cred/unauth-endpoint you identified. Use real public PoCs.",
     "IMPORTANT: for IoT devices, a foothold does NOT require a shell. Confirmed unauthenticated access to camera streams, admin panels, or config data IS a foothold. Record it as a finding and advance.",
     "ADVANCE TO EXPLOITATION when you have confirmed access. If the attack vector fails after 3 attempts, record what you tried as a finding and move to the next target or advance to reporting.",
   ].join("\n"),
@@ -1495,6 +1497,28 @@ async function runAgentV2(engagementId, opts = {}) {
           `  [${f.severity}] ${f.title} — ${f.affected_asset}`
         ).join("\n") || "  ⚠ NONE RECORDED — you MUST call add_finding for discoveries";
         const recentSteps = recentQ.rows.map(r => `  [${r.status}] ${r.title}`).join("\n");
+        // Detect services from recent steps to nudge playbook lookup
+        const stepTitles = recentQ.rows.map(r => r.title.toLowerCase()).join(" ");
+        const detectedServices = [];
+        const SERVICE_KEYWORDS = [
+          { kw: ["hikvision", "isapi", "hik"], name: "hikvision camera" },
+          { kw: ["zkteco", "zkaccess"], name: "zkteco access control" },
+          { kw: ["dahua"], name: "dahua camera" },
+          { kw: ["onvif"], name: "onvif" },
+          { kw: ["rtsp"], name: "rtsp streaming" },
+          { kw: ["dropbear"], name: "dropbear ssh" },
+          { kw: ["mikrotik", "routeros"], name: "mikrotik routeros" },
+          { kw: ["ubiquiti", "unifi"], name: "ubiquiti unifi" },
+        ];
+        for (const svc of SERVICE_KEYWORDS) {
+          if (svc.kw.some(k => stepTitles.includes(k))) detectedServices.push(svc.name);
+        }
+        // Check if model has already called lookup_attack_playbook (from telemetry)
+        const playbookUsed = await db.query(
+          `SELECT count(*) as c FROM offense_telemetry WHERE engagement_id = $1 AND outcome_notes LIKE '%lookup_attack_playbook%'`,
+          [engagementId]);
+        const playbookCalls = parseInt(playbookUsed.rows[0].c) || 0;
+
         const stateMsg = [
           `[STATE CHECK — ${stepsQueued} steps completed, phase: ${phase}]`,
           ``,
@@ -1508,9 +1532,14 @@ async function runAgentV2(engagementId, opts = {}) {
           `LAST 10 STEPS:`,
           recentSteps,
           ``,
+          detectedServices.length > 0 && playbookCalls === 0
+            ? `⚠ PLAYBOOK REQUIRED: You are working on ${detectedServices.join(", ")} but have NOT called lookup_attack_playbook yet. Call lookup_attack_playbook("${detectedServices[0]}") NOW — it returns exact exploitation steps, default credentials, and known vulnerabilities from HackTricks. This is how you know what to try instead of guessing.`
+            : "",
+          ``,
           `REMINDERS:`,
           `- Stay focused on ONE target until exhausted`,
           `- Record findings AS YOU DISCOVER THEM (add_finding)`,
+          `- When you identify a service/device, call lookup_attack_playbook BEFORE trying exploits — it tells you exactly what works`,
           phase === "recon" && stepsQueued >= 8 ? `- ⚠ PHASE: You've done ${stepsQueued} steps in recon — call advance_phase('enumeration') NOW` : "",
           phase === "enumeration" && stepsQueued >= 20 ? `- ⚠ PHASE: You've done ${stepsQueued} steps in enumeration. You MUST either advance_phase('foothold') to try an exploit, or if no vector found, advance_phase('reporting') to wrap up. Endless enumeration is a failure.` : "",
           phase === "foothold" && stepsQueued >= 35 ? `- ⚠ PHASE: You've been in foothold for a while. If exploitation succeeded, advance_phase('exploitation'). If not, advance_phase('reporting') to document what you tried.` : "",
@@ -1570,8 +1599,9 @@ async function runAgentV2(engagementId, opts = {}) {
               `You are now working on ${latestIp} instead.\n\n` +
               `Before moving to a new target, you MUST:\n` +
               `1. Did the exploit on ${activeExploitTarget} SUCCEED? If yes — record it as a finding (add_finding with proof)\n` +
-              `2. Did it FAIL? Debug WHY: wrong port? wrong firmware version? wrong syntax? Try a different technique on the SAME target\n` +
-              `3. Only move on if you've explicitly concluded ${activeExploitTarget} is NOT exploitable with available tools\n\n` +
+              `2. Did it FAIL? Call lookup_attack_playbook for the target service — it has exact exploitation steps you may have missed\n` +
+              `3. Try a different technique from the playbook on the SAME target\n` +
+              `4. Only move on if you've explicitly concluded ${activeExploitTarget} is NOT exploitable with available tools\n\n` +
               `A senior pentester exhausts one target before pivoting. Go back to ${activeExploitTarget}.`;
             messages.push({ role: "user", content: persistMsg });
             exploitPersistenceInjected++;
