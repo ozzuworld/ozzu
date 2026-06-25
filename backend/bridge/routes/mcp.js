@@ -2538,21 +2538,17 @@ ${result.narrative}
         try {
           const loopVersion = process.env.SOC_LOOP_VERSION || "v2";
           const runFn = (loopVersion === "v2" && agent.runAgentV2) ? agent.runAgentV2 : agent.runAgent;
-          const r = await runFn(args.engagement_id, {
+          const runOpts = {
             max_iter: args.max_iter,
             intent: args.intent,
             model_override: args.model_override,
-          });
-          const head = r.ended_by_model
-            ? `🏁 Agent ended engagement after ${r.iter} iters`
-            : `⏸  Agent paused after ${r.iter} iters (${r.end_reason})`;
-          const lines = [
-            head,
-            `engagement: ${r.engagement_id}`,
-            `${r.resumed ? "resumed prior run" : "fresh run"} · steps queued this run: ${r.steps_queued} · elapsed: ${r.elapsed_sec}s`,
-            r.last_assistant_text ? `\nLast model reasoning (sanitized preview):\n${r.last_assistant_text}` : "",
-          ].filter(Boolean);
-          return { content: [{ type: "text", text: lines.join("\n") }] };
+          };
+          // dir_1782420026188: fire-and-forget — don't await the full run (30+ min).
+          // The old code blocked until completion, causing MCP timeout + run death.
+          // Match the autonomy toggle pattern (routes/soc.js line ~459).
+          runFn(args.engagement_id, runOpts).catch((e) =>
+            console.error(`[mcp/start_engagement_run] ${args.engagement_id}:`, e && e.message));
+          return { content: [{ type: "text", text: `🚀 Run launched for ${args.engagement_id} (model: ${args.model_override || "default"}, max_iter: ${args.max_iter || "default"}). Monitor via get_offense_telemetry.` }] };
         } catch (e) {
           return { content: [{ type: "text", text: `start_engagement_run failed: ${e.message}` }], isError: true };
         }
