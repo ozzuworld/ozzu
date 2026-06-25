@@ -1691,12 +1691,51 @@ async function runAgentV2(engagementId, opts = {}) {
       console.log(`[offense-agent-v2] conclusion: marked ${qOrphans.rows.length} ghost-running item(s) as failed`);
   } catch (e) { console.error(`[offense-agent-v2] orphan cleanup failed:`, e.message); }
 
-  // Final status
+  // Auto-complete: when hitting iter cap, build a summary and mark completed
+  // instead of leaving the engagement in "paused" limbo. The model never calls
+  // end_engagement on its own (ignores wrap-up instructions like the playbook nudge).
+  if (iter >= maxIter && !endedByModel && !(endReason && endReason.includes("operator_stopped"))) {
+    try {
+      const [findingsQ, stepsQ] = await Promise.all([
+        db.query(`SELECT title, severity, affected_asset FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]),
+        db.query(`SELECT count(*) as total, count(*) FILTER (WHERE status = 'done') as done, count(*) FILTER (WHERE status = 'failed') as failed FROM soc_queue_items WHERE engagement_id = $1`, [engagementId]),
+      ]);
+      const findings = findingsQ.rows;
+      const stats = stepsQ.rows[0];
+      const summary = [
+        `Engagement auto-completed at iteration ${iter}/${maxIter}.`,
+        ``,
+        `Steps: ${stats.total} total (${stats.done} done, ${stats.failed} failed)`,
+        `Findings: ${findings.length}`,
+        ...findings.map(f => `  [${f.severity}] ${f.title} — ${f.affected_asset}`),
+        ``,
+        `Phase reached: ${phase || "unknown"}`,
+      ].join("\n");
+      // Update engagement status to completed
+      await db.query(
+        `UPDATE pentest_engagements SET status = 'completed', engagement_phase = 'reporting' WHERE id = $1`,
+        [engagementId]);
+      // Generate report via the report endpoint if available
+      try {
+        const reportGen = require("/app/soc/report-via-model");
+        if (reportGen && reportGen.generateReport) {
+          reportGen.generateReport(engagementId).catch(e =>
+            console.error(`[offense-agent-v2] auto-report generation failed:`, e.message));
+          console.log(`[offense-agent-v2] auto-report generation triggered for ${engagementId}`);
+        }
+      } catch (_) {}
+      endedByModel = true;
+      endReason = `auto-completed at iter cap (${iter}/${maxIter}): ${findings.length} findings, ${stats.total} steps`;
+      console.log(`[offense-agent-v2] auto-completed ${engagementId}: ${findings.length} findings, ${stats.total} steps, phase=${phase}`);
+    } catch (e) {
+      console.error(`[offense-agent-v2] auto-complete failed:`, e.message);
+    }
+  }
+
   const finalStatus = endedByModel ? "completed"
     : (endReason && endReason.includes("operator_stopped")) ? "paused"
-    : (iter >= maxIter) ? "paused"
     : "error";
-  const finalEndReason = endReason || (iter >= maxIter ? `hit max_iter=${maxIter} — re-run to continue` : "(unknown)");
+  const finalEndReason = endReason || "(unknown)";
   await setAgentStatus(engagementId, finalStatus, {
     iter, steps_queued: stepsQueued, end_reason: finalEndReason, mode: "v2",
   });
