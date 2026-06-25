@@ -113,10 +113,16 @@ async function getEngagementState(args) {
                         "nuclei","httpx","whatweb","netcat","dig","host",
                         "openssl","jq","awk","grep","sed","bash"];
   engRow.executor_tools = BRIDGE_TOOLS;
+  // dir_1782346173114: clear tablet identity — model sees "tablet-p610" and tries
+  // ADB commands. Execution is LOCAL on the bridge Linux VM, not on any tablet/phone.
+  engRow.executor_host = "bridge-local";
+  engRow.executor_adb_target = null;
   engRow.executor_caps_note =
-    "Executor: Linux bridge container (local bash). Lab subnet via WireGuard (~240ms RTT). " +
+    "Executor: Linux bridge container (local bash, NOT a tablet/phone — do NOT use ADB/Android commands). " +
+    "Lab subnet reached via WireGuard (~240ms RTT). " +
     "ONLY the tools listed above are installed. You CAN install more at runtime with apt-get install -y. " +
-    "NOT pre-installed: gobuster, nikto, hydra, john, hashcat, dirb, wfuzz, sqlmap, metasploit, wget, masscan, ffuf, xxd.";
+    "NOT pre-installed: gobuster, nikto, hydra, john, hashcat, dirb, wfuzz, sqlmap, metasploit, wget, masscan, ffuf, xxd. " +
+    "NOT available: adb, dumpsys, getprop, pm, settings, or any Android tool.";
   return {
     engagement: engRow,
     hosts: hosts.rows,
@@ -304,9 +310,20 @@ async function waitForOutcome(args) {
 }
 
 async function probeExecutorTool(args) {
-  const { engagement_id, force } = args || {};
+  const { engagement_id } = args || {};
   if (!engagement_id) return { error: "engagement_id required" };
-  return await executorProbe.probeExecutor(engagement_id, !!force);
+  // Execution is LOCAL on the bridge — return bridge ground truth, not tablet probe.
+  const BRIDGE_TOOLS = ["nmap","curl","ssh","python3","searchsploit",
+                        "nuclei","httpx","whatweb","netcat","dig","host",
+                        "openssl","jq","awk","grep","sed","bash"];
+  return {
+    engagement_id,
+    probed: true,
+    executor: "bridge-local",
+    installed_count: BRIDGE_TOOLS.length,
+    installed: BRIDGE_TOOLS,
+    note: "Executor is the Linux bridge container (local bash). NOT a tablet/phone. No ADB. Install more with apt-get install -y.",
+  };
 }
 
 // ─────────────────────────────── activated (Step 5) ───────────────────────────────
