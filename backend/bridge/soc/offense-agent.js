@@ -123,12 +123,17 @@ function serializeConversation(openaiMessages) {
       continue;
     }
     if (m.role === "tool") {
-      parts.push(`TOOL_RESULT (${m.tool_call_id}): ${(m.content || "").slice(0, 4000)}`);
+      parts.push(`TOOL_RESULT (${m.tool_call_id}): ${(m.content || "").slice(0, 2000)}`);
       continue;
     }
     parts.push(`USER: ${m.content}`);
   }
-  return { system, history: parts.join("\n\n") };
+  // Keep only the last ~10 exchanges to avoid prompt bloat (each query() spawns
+  // a fresh subprocess — no cross-call context). The system prompt provides the
+  // full engagement context via get_engagement_state on each call.
+  const MAX_PARTS = 20;
+  const trimmed = parts.length > MAX_PARTS ? parts.slice(-MAX_PARTS) : parts;
+  return { system, history: trimmed.join("\n\n") };
 }
 
 async function chatWithToolsClaude(messages, modelName) {
@@ -177,10 +182,11 @@ async function chatWithToolsClaude(messages, modelName) {
       return { message: parsed, usage: usage || {} };
     } catch (e) {
       const msg = e.message || "";
-      const isRetryable = msg.includes("429") || msg.includes("529") || msg.includes("overloaded");
+      console.error(`[chatWithToolsClaude] attempt ${attempt}/${MAX_RETRIES} error:`, msg.slice(0, 300));
+      const isRetryable = msg.includes("429") || msg.includes("529") || msg.includes("overloaded") || msg.includes("exit");
       if (isRetryable && attempt < MAX_RETRIES) {
-        const wait = 30 * attempt;
-        console.log(`[chatWithToolsClaude] ${msg.slice(0, 100)} — retry ${attempt}/${MAX_RETRIES} in ${wait}s`);
+        const wait = 15 * attempt;
+        console.log(`[chatWithToolsClaude] retrying in ${wait}s`);
         await new Promise(r => setTimeout(r, wait * 1000));
         continue;
       }
