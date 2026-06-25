@@ -447,8 +447,10 @@ module.exports = function socRoutes(ctx) {
             if (meta && typeof meta === "object" && meta.model_override) modelOverride = meta.model_override;
           } catch {}
         }
-        // clear any leftover abort flag so the new run isn't halted on its first iteration
-        await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) - 'abort_requested' WHERE id = $1`, [eid]).catch(() => {});
+        // clear any leftover abort flag so the new run isn't halted on its first iteration,
+        // and enable autonomous execution (same as the autonomy toggle — without this the
+        // executor refuses to run queued steps with "engagement opt-out")
+        await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) - 'abort_requested', autonomous_execution_enabled = true, autonomous_paused = false WHERE id = $1`, [eid]).catch(() => {});
         const agent = require("../soc/offense-agent");
         // dir_1782339906899: v2 model-driven loop (DeepSeek drives via tool calls).
         // v1 (runAgent) kept as fallback — set SOC_LOOP_VERSION=v1 in env to revert.

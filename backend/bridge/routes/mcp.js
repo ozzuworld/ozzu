@@ -2543,9 +2543,14 @@ ${result.narrative}
             intent: args.intent,
             model_override: args.model_override,
           };
-          // dir_1782420026188: fire-and-forget — don't await the full run (30+ min).
-          // The old code blocked until completion, causing MCP timeout + run death.
-          // Match the autonomy toggle pattern (routes/soc.js line ~459).
+          // dir_1782420026188: enable autonomous execution + fire-and-forget.
+          // Without this flag, the executor refuses to run queued steps ("engagement opt-out").
+          // Match the autonomy toggle (routes/soc.js POST /autonomy).
+          const db = require("../db");
+          await db.query(
+            `UPDATE pentest_engagements SET autonomous_execution_enabled = true,
+               autonomous_paused = false
+             WHERE id = $1`, [args.engagement_id]);
           runFn(args.engagement_id, runOpts).catch((e) =>
             console.error(`[mcp/start_engagement_run] ${args.engagement_id}:`, e && e.message));
           return { content: [{ type: "text", text: `🚀 Run launched for ${args.engagement_id} (model: ${args.model_override || "default"}, max_iter: ${args.max_iter || "default"}). Monitor via get_offense_telemetry.` }] };
