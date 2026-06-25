@@ -42,6 +42,128 @@ const DEFAULT_MAX_ITER = 60;
 // manually) should pass wait_timeout_sec=1800 in start_engagement_run opts.
 const DEFAULT_WAIT_TIMEOUT_SEC = 120; // 2 minutes
 
+// ─────────── Claude API adapter (Max subscription via OAuth token) ───────────
+// Converts OpenAI-format messages/tools to Anthropic Messages API format and
+// back, using the OAuth accessToken from ~/.claude/.credentials.json. This lets
+// runAgentV2 drive Opus 4.6 on the Max plan with zero extra cost.
+const fs = require("fs");
+let _claudeToken = null;
+function getClaudeToken() {
+  if (_claudeToken) return _claudeToken;
+  try {
+    const creds = JSON.parse(fs.readFileSync("/root/.claude/.credentials.json", "utf8"));
+    _claudeToken = creds.claudeAiOauth && creds.claudeAiOauth.accessToken;
+  } catch (_) {}
+  return _claudeToken;
+}
+
+function convertToolsToAnthropic(openaiTools) {
+  return (openaiTools || []).map(t => ({
+    name: t.function.name,
+    description: t.function.description,
+    input_schema: t.function.parameters,
+  }));
+}
+
+function convertMessagesToAnthropic(openaiMessages) {
+  let system = "";
+  const messages = [];
+  for (const m of openaiMessages) {
+    if (m.role === "system") {
+      system += (system ? "\n\n" : "") + m.content;
+      continue;
+    }
+    if (m.role === "assistant") {
+      const content = [];
+      if (m.content) content.push({ type: "text", text: m.content });
+      if (Array.isArray(m.tool_calls)) {
+        for (const tc of m.tool_calls) {
+          let input = tc.function.arguments;
+          if (typeof input === "string") {
+            try { input = JSON.parse(input); } catch (_) { input = {}; }
+          }
+          content.push({ type: "tool_use", id: tc.id || `tc_${tc.function.name}`, name: tc.function.name, input });
+        }
+      }
+      messages.push({ role: "assistant", content: content.length ? content : m.content || "" });
+      continue;
+    }
+    if (m.role === "tool") {
+      // Anthropic: tool results are user messages with tool_result content blocks.
+      // Merge consecutive tool results into a single user message.
+      const block = { type: "tool_result", tool_use_id: m.tool_call_id, content: m.content || "" };
+      const last = messages[messages.length - 1];
+      if (last && last.role === "user" && Array.isArray(last.content) && last.content[0] && last.content[0].type === "tool_result") {
+        last.content.push(block);
+      } else {
+        messages.push({ role: "user", content: [block] });
+      }
+      continue;
+    }
+    // user message
+    messages.push({ role: m.role, content: m.content });
+  }
+  return { system, messages };
+}
+
+function convertAnthropicToOpenAI(anthropicResp) {
+  const msg = { role: "assistant", content: null, tool_calls: [] };
+  const textParts = [];
+  for (const block of (anthropicResp.content || [])) {
+    if (block.type === "text") {
+      textParts.push(block.text);
+    } else if (block.type === "tool_use") {
+      msg.tool_calls.push({
+        id: block.id,
+        type: "function",
+        function: { name: block.name, arguments: JSON.stringify(block.input) },
+      });
+    }
+  }
+  msg.content = textParts.join("\n") || null;
+  if (msg.tool_calls.length === 0) delete msg.tool_calls;
+  return { message: msg, usage: anthropicResp.usage };
+}
+
+function chatWithToolsClaude(messages, modelName) {
+  return new Promise((resolve, reject) => {
+    const token = getClaudeToken();
+    if (!token) return reject(new Error("No Claude OAuth token found in /root/.claude/.credentials.json"));
+    const { system, messages: anthropicMsgs } = convertMessagesToAnthropic(messages);
+    const tools = convertToolsToAnthropic(TOOL_SCHEMAS);
+    const payload = JSON.stringify({
+      model: modelName || "claude-opus-4-6",
+      max_tokens: parseInt(process.env.OFFENSE_MAX_TOKENS, 10) || 8000,
+      system,
+      messages: anthropicMsgs,
+      tools,
+      temperature: 0.2,
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-key": token,
+      "anthropic-version": "2023-06-01",
+      "Content-Length": Buffer.byteLength(payload),
+    };
+    const reqAgent = new https.Agent({ keepAlive: false });
+    const req = https.request("https://api.anthropic.com/v1/messages", { method: "POST", headers, timeout: 300000, agent: reqAgent }, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`Claude API HTTP ${res.statusCode}: ${body.slice(0, 500)}`));
+        try {
+          const j = JSON.parse(body);
+          resolve(convertAnthropicToOpenAI(j));
+        } catch (e) { reject(new Error(`Claude API parse error: ${e.message}`)); }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error("Claude API timeout (300s)")));
+    req.write(payload);
+    req.end();
+  });
+}
+
 // ─────────── state injection (dir_1782350733850) ─────────────────────────────
 // Every N queued steps, inject a structured state summary into the conversation
 // so the model knows what it's found, what it's recorded, and what to focus on.
@@ -244,6 +366,9 @@ function chatJSON(messages, modelOverride) {
 }
 
 function chatWithTools(messages, modelOverride) {
+  if (modelOverride && modelOverride.startsWith("claude-")) {
+    return chatWithToolsClaude(messages, modelOverride);
+  }
   return new Promise((resolve, reject) => {
     const base = MODEL_URL.replace(/\/+$/, "");
     const url = new URL(base + "/chat/completions");

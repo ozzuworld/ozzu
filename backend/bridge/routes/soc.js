@@ -437,19 +437,22 @@ module.exports = function socRoutes(ctx) {
         if (er.rows.length === 0) { sendJSON(res, 404, { error: "engagement not found" }); return true; }
         if (er.rows[0].agent_status === "running") { sendJSON(res, 409, { error: "a run is already in progress" }); return true; }
         let maxIter = 60;
-        try { const b = await parseBody(req); if (b && b.max_iter) maxIter = Math.max(1, Math.min(200, parseInt(b.max_iter, 10) || 60)); } catch {}
+        let modelOverride = null;
+        try { const b = await parseBody(req); if (b) { if (b.max_iter) maxIter = Math.max(1, Math.min(200, parseInt(b.max_iter, 10) || 60)); if (b.model_override) modelOverride = String(b.model_override); } } catch {}
         // clear any leftover abort flag so the new run isn't halted on its first iteration
         await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) - 'abort_requested' WHERE id = $1`, [eid]).catch(() => {});
         const agent = require("../soc/offense-agent");
         // dir_1782339906899: v2 model-driven loop (DeepSeek drives via tool calls).
         // v1 (runAgent) kept as fallback — set SOC_LOOP_VERSION=v1 in env to revert.
         const loopVersion = process.env.SOC_LOOP_VERSION || "v2";
+        const runOpts = { max_iter: maxIter };
+        if (modelOverride) runOpts.model_override = modelOverride;
         if (loopVersion === "v2" && agent.runAgentV2) {
-          agent.runAgentV2(eid, { max_iter: maxIter }).catch((e) => console.error("[soc/run] runAgentV2:", e && e.message));
+          agent.runAgentV2(eid, runOpts).catch((e) => console.error("[soc/run] runAgentV2:", e && e.message));
         } else {
-          agent.runAgent(eid, { max_iter: maxIter }).catch((e) => console.error("[soc/run] runAgent:", e && e.message));
+          agent.runAgent(eid, runOpts).catch((e) => console.error("[soc/run] runAgent:", e && e.message));
         }
-        sendJSON(res, 202, { ok: true, status: "launching", engagement_id: eid, max_iter: maxIter, loop: loopVersion });
+        sendJSON(res, 202, { ok: true, status: "launching", engagement_id: eid, max_iter: maxIter, loop: loopVersion, model: modelOverride || process.env.OFFENSE_MODEL_NAME || "deepseek-reasoner" });
       } catch (error) {
         console.error("[soc/run] Error:", error);
         sendJSON(res, 500, { error: "launch failed", details: error.message });
