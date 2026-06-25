@@ -133,6 +133,13 @@ async function getEngagementState(args) {
       }
       engRow.scope = scope;
     }
+    // Inject relay device into prohibited so model skips it during recon.
+    // The relay's LAN IP is DHCP (dynamic), but we know its WG IP and that
+    // it exposes ADB (port 5555). Tell the model via caps_note instead of
+    // trying to guess the LAN IP.
+    if (!Array.isArray(scope.prohibited)) scope.prohibited = [];
+    scope.prohibited.push("10.9.0.10 (WireGuard relay — own infrastructure, do not attack)");
+    engRow.scope = scope;
   }
   return {
     engagement: engRow,
