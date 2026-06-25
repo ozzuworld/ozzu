@@ -552,8 +552,6 @@ async function runAgent(engagementId, opts = {}) {
   // step queued. If no step is queued for HALT_TIMEOUT_MS while we're running,
   // conclude with 'loop_halted' telemetry instead of staying stuck at 'running'.
   let lastStepQueuedAt = Date.now();
-  let activeExploitTarget = null; // IP currently being exploited — set on exploit_probe/cred_test, cleared on explicit give-up
-  let exploitPersistenceInjected = 0; // count injections to avoid infinite nagging
 
   while (iter < maxIter) {
     iter++;
@@ -1309,13 +1307,15 @@ async function runAgentV2(engagementId, opts = {}) {
     messages.push({ role: "user", content: `(Resuming from iter ${iter}.) ${intent ? `Updated operator intent: ${intent}. ` : ""}Current phase: ${phase}. Call get_engagement_state to see what changed.` });
   }
 
-  await setAgentStatus(engagementId, "running", { iter, mode: "v2" });
+  await setAgentStatus(engagementId, "running", { iter, mode: "v2", max_iter: maxIter });
 
   const startMs = Date.now();
   let endedByModel = false;
   let endReason = null;
   let stepsQueued = 0;
   let lastAssistantText = null;
+  let activeExploitTarget = null;
+  let exploitPersistenceInjected = 0;
 
   // Execution monitor for Mentor (loop detection)
   const { ExecutionMonitor, performMentor } = require("/app/soc/execution-monitor");
