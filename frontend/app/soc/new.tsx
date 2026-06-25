@@ -74,6 +74,8 @@ export default function SOCNewScreen() {
   const [type, setType] = useState("internal_pentest");
   const [autonomy, setAutonomy] = useState("exploitation_auto");
   const [model, setModel] = useState("deepseek-reasoner");
+  const [scopeMode, setScopeMode] = useState<"network" | "host">("network");
+  const [targetHost, setTargetHost] = useState("");
 
   // Executor
   const [executors, setExecutors] = useState<Executor[]>([]);
@@ -143,7 +145,7 @@ export default function SOCNewScreen() {
   }, [pickedNet, selected]);
 
   const canNext = useMemo(() => {
-    if (step === 0) return client.trim().length > 0;
+    if (step === 0) return client.trim().length > 0 && (scopeMode === "network" || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(targetHost.trim()));
     if (step === 1) return !!selected;
     if (step === 2) return !!pickedSsid && (verdict.kind === "ready" || verdict.kind === "wifi");
     return true;
@@ -153,11 +155,13 @@ export default function SOCNewScreen() {
     setSubmitting(true);
     try {
       const subnet = selectedExec?.lan_subnet || null;
+      const singleIp = scopeMode === "host" ? targetHost.trim() : null;
+      const scopeTargets = singleIp ? [`${singleIp}/32`] : (subnet ? [subnet] : []);
       const target_networks = [{ ssid: pickedSsid, subnet, reachable_via: selected }];
       const body: any = {
         client_name: client.trim(),
         engagement_type: type,
-        scope: { targets: subnet ? [subnet] : [], allowed: [], prohibited: [] },
+        scope: { targets: scopeTargets, allowed: [], prohibited: [] },
         target_networks,
         executor_host: selected,
         model_override: model,
@@ -208,6 +212,23 @@ export default function SOCNewScreen() {
                   <Chip key={t.key} label={t.label} active={type === t.key} onPress={() => setType(t.key)} />
                 ))}
               </View>
+            </Field>
+            <Field label="Scope">
+              <View style={styles.chipWrap}>
+                <Chip label="Full network" active={scopeMode === "network"} onPress={() => setScopeMode("network")} />
+                <Chip label="Single host" active={scopeMode === "host"} onPress={() => setScopeMode("host")} />
+              </View>
+              {scopeMode === "host" && (
+                <TextInput
+                  value={targetHost}
+                  onChangeText={setTargetHost}
+                  placeholder="e.g. 192.168.1.5"
+                  placeholderTextColor={colors.text.disabled}
+                  style={[styles.input, { marginTop: spacing.sm }]}
+                  keyboardType="decimal-pad"
+                  autoCapitalize="none"
+                />
+              )}
             </Field>
           </>
         )}
@@ -306,6 +327,7 @@ export default function SOCNewScreen() {
             <View style={styles.reviewCard}>
               <Meta k="Client" v={client} />
               <Meta k="Type" v={ENGAGEMENT_TYPES.find((t) => t.key === type)?.label || type} />
+              <Meta k="Scope" v={scopeMode === "host" ? `Single host: ${targetHost}` : "Full network"} highlight={scopeMode === "host" ? colors.warning : undefined} />
               <Meta k="Access point" v={selected || "—"} />
               <Meta k="Target Wi-Fi" v={pickedSsid || "—"} />
               <Meta k="Model" v={MODELS.find((m) => m.key === model)?.label || model} highlight={model.startsWith("claude-") ? colors.accent : undefined} />
