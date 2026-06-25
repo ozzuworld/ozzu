@@ -1642,9 +1642,22 @@ async function runAgentV2(engagementId, opts = {}) {
             console.log(`[offense-agent-v2] exploit persistence: model pivoted from ${activeExploitTarget} to ${latestIp} (injection #${exploitPersistenceInjected})`);
           }
 
-          // Clear active target if model has been working on other hosts for 5+ steps
+          // Model abandoned target after 2 persistence injections — auto-escalate
           if (activeExploitTarget && exploitPersistenceInjected >= 2) {
-            console.log(`[offense-agent-v2] exploit persistence: clearing active target ${activeExploitTarget} after 2 injections`);
+            console.log(`[offense-agent-v2] exploit persistence: model abandoned ${activeExploitTarget} — triggering auto-escalation`);
+            try {
+              const { autoEscalate } = require("/app/soc/auto-escalation");
+              const escResult = await autoEscalate(engagementId, activeExploitTarget);
+              if (escResult.queued > 0) {
+                messages.push({ role: "user", content:
+                  `[AUTO-ESCALATION] The harness has queued ${escResult.queued} deep attack steps against ${activeExploitTarget} (${escResult.deviceType}). ` +
+                  `These run in parallel — brute-force credentials, unauthenticated endpoints, protocol probes. ` +
+                  `Continue your work on other targets. Results will be checked automatically.`
+                });
+              }
+            } catch (e) {
+              console.error(`[offense-agent-v2] auto-escalation failed:`, e.message);
+            }
             activeExploitTarget = null;
           }
         }
@@ -1701,6 +1714,17 @@ async function runAgentV2(engagementId, opts = {}) {
     if (qOrphans.rows.length > 0)
       console.log(`[offense-agent-v2] conclusion: marked ${qOrphans.rows.length} ghost-running item(s) as failed`);
   } catch (e) { console.error(`[offense-agent-v2] orphan cleanup failed:`, e.message); }
+
+  // Harvest auto-escalation results — check if any deep attack chains found something
+  try {
+    const { harvestEscalationResults } = require("/app/soc/auto-escalation");
+    const escResults = await harvestEscalationResults(engagementId);
+    if (escResults.length > 0) {
+      console.log(`[offense-agent-v2] auto-escalation harvested ${escResults.length} successes`);
+    }
+  } catch (e) {
+    console.error(`[offense-agent-v2] escalation harvest failed:`, e.message);
+  }
 
   // Auto-complete: when hitting iter cap, build a summary and mark completed
   // instead of leaving the engagement in "paused" limbo. The model never calls
