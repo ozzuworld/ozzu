@@ -219,6 +219,13 @@ const IP_RE = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/;
 // the phase instead of asking the model again.
 const MAX_CONSECUTIVE_INTENT = 6;
 
+// dir_1782417388463: hard recon iteration cap. The streak-based loop-breaker
+// (above) is defeated by the productive-step decrement (line ~1319) — every
+// successful step reduces the streak, so models that execute many steps in
+// recon (DeepSeek: 32 iters) never trigger it. This separate cap counts TOTAL
+// iterations spent in recon regardless of step outcomes.
+const MAX_RECON_ITERS = 15;
+
 // Phase order for the one-way ratchet (change 2 is enforced at the advance_phase
 // call site in offense-agent-tools.js; this order is also used here when the
 // loop-breaker forces an advance).
@@ -744,6 +751,7 @@ async function runAgent(engagementId, opts = {}) {
   // detect when the orchestrator is cycling the same phase without advancing.
   let consecutivePhaseStreak = 0;
   let lastSeenPhase = null;
+  let totalReconIters = 0; // dir_1782417388463: hard recon cap (unaffected by streak resets)
 
   // dir_1782242371780: halt-detection — track the wall-clock time of the last
   // step queued. If no step is queued for HALT_TIMEOUT_MS while we're running,
@@ -859,6 +867,33 @@ async function runAgent(engagementId, opts = {}) {
     // dir_1780838519357: inject Planner plan + Mentor guidance into orchestrator context
     if (plannerPlan) ctx.planner_plan = plannerPlan;
     if (mentorGuidance) ctx.mentor_guidance = mentorGuidance;
+
+    // dir_1782417388463 — RECON HARD CAP: force advance after MAX_RECON_ITERS
+    // total iterations in recon, regardless of step outcomes. The streak-based
+    // loop-breaker below is defeated by the productive-step decrement — this
+    // counter is never decremented.
+    {
+      const currentPhase = (ctx.engagement && ctx.engagement.engagement_phase) || "recon";
+      if (currentPhase === "recon") {
+        totalReconIters++;
+        if (totalReconIters >= MAX_RECON_ITERS) {
+          console.log(`[offense-agent] recon-cap: ${totalReconIters} total recon iters — forcing advance to enumeration`);
+          try {
+            await dispatch("advance_phase", { engagement_id: engagementId, new_phase: "enumeration" });
+            await db.query(
+              `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+               VALUES ($1, NULL, 'recon_cap', 'phase_advance', 0, 0, false, true, 0, 0, 'forced_phase_advance', $2)`,
+              [engagementId, `recon_iters=${totalReconIters}; iter=${iter}; steps_queued=${stepsQueued}`]);
+          } catch (e) {
+            console.error(`[offense-agent] recon-cap advance_phase failed:`, e.message);
+          }
+          consecutivePhaseStreak = 0;
+          lastSeenPhase = "enumeration";
+          mentorGuidance = `[RECON-CAP dir_1782417388463] Recon phase ran for ${totalReconIters} iterations — automatically advanced to enumeration. You have enough reconnaissance data. Focus on version probes, vulnerability identification, and attack-vector analysis on discovered services. DO NOT return to recon.`;
+          ctx.mentor_guidance = mentorGuidance;
+        }
+      }
+    }
 
     // dir_1782234450321 — LOOP-BREAKER: detect consecutive same-phase iters.
     // The orchestrator's `task.phase` tells us which engagement phase the chosen
