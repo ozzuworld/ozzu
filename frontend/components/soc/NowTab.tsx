@@ -142,8 +142,10 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
     : runStatus === "paused"   ? colors.status.in_progress
     : colors.text.tertiary;
 
+  const modelLabel = engagement?.model_override?.startsWith?.("claude-") ? "Claude Opus" : "DeepSeek";
+
   const statusLine: string =
-    runStatus === "running"   ? "DeepSeek is running"
+    runStatus === "running"   ? `${modelLabel} is running`
     : runStatus === "stalled"  ? stalledLabel(engagement)
     : runStatus === "failed"   ? "Run errored"
     : runStatus === "halted"   ? "Run halted — no clean conclusion"
@@ -194,7 +196,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
             />
           )}
           <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, marginTop: spacing.xs }}>
-            {live ? "Halts after the current step finishes." : runStatus === "stalled" ? "Loop appears stalled — stop to reset." : "DeepSeek runs this engagement autonomously — you can stop it anytime."}
+            {live ? "Halts after the current step finishes." : runStatus === "stalled" ? "Loop appears stalled — stop to reset." : `${modelLabel} runs this engagement autonomously — you can stop it anytime.`}
           </Text>
         </View>
 
@@ -206,7 +208,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
           <View style={{ flex: 1, paddingRight: spacing.sm }}>
             <Text style={{ color: colors.text.primary, fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>Auto-execute steps</Text>
             <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, marginTop: 1 }}>
-              {autoEnabled ? "On — DeepSeek runs each step itself (membrane-gated)." : "Off — you run each step from the Queue tab."}
+              {autoEnabled ? `On — ${modelLabel} runs each step itself (membrane-gated).` : "Off — you run each step from the Queue tab."}
             </Text>
           </View>
           <View style={{ width: 46, height: 28, borderRadius: 14, backgroundColor: autoEnabled ? colors.success : colors.gray[600], padding: 3, justifyContent: "center" }}>

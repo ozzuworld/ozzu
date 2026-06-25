@@ -54,7 +54,7 @@ export function ReportTab({ engagementId }: { engagementId: string }) {
         <GenBtn label="Final report" busy={busy === "final"} disabled={!!busy} primary onPress={() => gen("final")} />
       </View>
       <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, lineHeight: 16 }}>
-        DeepSeek writes these from the run's activity. You see the sanitized engineering debrief; the full
+        The offense model writes these from the run's activity. You see the sanitized engineering debrief; the full
         operator report is saved on the bridge{hasFull ? " (generated)" : ""}.
       </Text>
       {err ? <Text style={{ color: colors.error, fontSize: fontSize.sm }}>{err}</Text> : null}
