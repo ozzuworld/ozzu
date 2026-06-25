@@ -1541,6 +1541,29 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // GET /soc/engagements/:id/observations — pending + answered observations for an engagement
+    if (req.method === "GET" && pathname.match(/^\/soc\/engagements\/[^\/]+\/observations$/)) {
+      const engagementId = pathname.split("/")[3];
+      const result = await db.query(
+        `SELECT id, question, context, response, status, created_at, responded_at
+           FROM engagement_observations WHERE engagement_id = $1 ORDER BY created_at`, [engagementId]);
+      sendJSON(res, 200, { observations: result.rows });
+      return true;
+    }
+
+    // POST /soc/engagements/:id/observations/:obsId/respond — operator answers an observation
+    if (req.method === "POST" && pathname.match(/^\/soc\/engagements\/[^\/]+\/observations\/\d+\/respond$/)) {
+      const parts = pathname.split("/");
+      const obsId = parts[5];
+      const body = await readBody(req);
+      if (!body.response) { sendJSON(res, 400, { error: "response required" }); return true; }
+      await db.query(
+        `UPDATE engagement_observations SET response = $1, status = 'answered', responded_at = NOW() WHERE id = $2`,
+        [body.response, obsId]);
+      sendJSON(res, 200, { ok: true });
+      return true;
+    }
+
     // GET /soc/audit-log/:engagement_id - Get execution history
     if (req.method === "GET" && pathname.match(/^\/soc\/audit-log\/[^\/]+$/)) {
       const engagementId = pathname.split("/")[3];

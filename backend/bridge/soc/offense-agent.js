@@ -97,7 +97,8 @@ function getSocMcpServer() {
       }
     }
     return sdkTool(f.name, f.description || f.name, inputShape, async (args) => {
-      return { content: [{ type: "text", text: "OK" }] };
+      const result = await dispatch(f.name, args);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
     });
   });
   _sdkMcpServer = createSdkMcpServer({ name: "soc", tools });
@@ -143,8 +144,8 @@ async function chatWithToolsClaude(messages, modelName) {
   const allowedTools = TOOL_SCHEMAS.map(t => `mcp__soc__${t.function.name}`);
 
   const prompt = history
-    ? `Continue this penetration testing engagement. Conversation so far:\n\n${history}\n\nDecide your next action. Think briefly (2-3 lines) then call exactly ONE tool.`
-    : "Begin the engagement. Call get_engagement_state to see scope and targets.";
+    ? `Continue this penetration testing engagement. Conversation so far:\n\n${history}\n\nDecide your next action. You can chain up to 3 tool calls in this turn — read results and adapt. Think briefly then act.`
+    : "Begin the engagement. Call get_engagement_state to see scope and targets. You can chain up to 3 tool calls this turn.";
 
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -153,7 +154,7 @@ async function chatWithToolsClaude(messages, modelName) {
         prompt,
         options: {
           model: modelName || "claude-opus-4-6",
-          maxTurns: 1,
+          maxTurns: 3,
           systemPrompt: system,
           tools: [],
           mcpServers: { soc: server },
@@ -182,7 +183,7 @@ async function chatWithToolsClaude(messages, modelName) {
       }
       if (allContent.length === 0) throw new Error("Claude SDK query returned no assistant message");
       const parsed = convertAnthropicToOpenAI(allContent);
-      return { message: parsed, usage: usage || {} };
+      return { message: parsed, usage: usage || {}, toolsAlreadyDispatched: true };
     } catch (e) {
       const msg = e.message || "";
       console.error(`[chatWithToolsClaude] attempt ${attempt}/${MAX_RETRIES} error:`, msg.slice(0, 500));
@@ -270,8 +271,9 @@ const AGENT_SYSTEM_PROMPT_BASE = [
   "     - What did I learn from the last step? Does it open a deeper path on THIS target?",
   "     - What's my next move on THIS target? (call lookup_attack_playbook if unsure)",
   "     Do NOT switch targets unless the current one is fully exhausted or clearly not exploitable.",
-  "  3. Call the appropriate tool: queue_step for commands, lookup_attack_playbook for research, verify_cve/search_exploits to ground claims, add_finding to record confirmed vulns.",
+  "  3. Call the appropriate tool: queue_step for commands, lookup_attack_playbook for research, verify_cve/search_exploits to ground claims, add_finding to record confirmed vulns, save_note to remember insights, request_observation to ask the operator for physical info.",
   "  4. Call wait_for_outcome after queue_step.",
+  "  TIP: You can chain multiple tools in one turn — e.g. queue_step + wait_for_outcome, or save_note + advance_phase. Don't waste iterations on single calls when you can batch.",
   "  5. Fold the result back: did it work? If yes, go DEEPER on this same target. If no, try the next technique on THIS target before pivoting.",
   "  6. When the phase's goals are met, call advance_phase to move forward.",
   "  7. When the current target is fully exploited or exhausted, move to the next highest-value target.",
@@ -282,7 +284,9 @@ const AGENT_SYSTEM_PROMPT_BASE = [
   "  - Tools available on the executor are listed in get_engagement_state's response. Use ONLY those.",
   "  - All references must be real public IDs (CVE-..., EDB-..., MSF module path).",
   "  - Stay strictly within scope/ROE.",
-  "  - If you hit something requiring human judgment, call end_engagement with the question.",
+  "  - If you need a physical observation from the operator (brand label, LED state, physical ports), call request_observation instead of guessing. The operator gets a push notification and can respond from their phone.",
+  "  - Use save_note to record your working hypotheses, attack plan, and observations. Notes survive across iterations — they're your memory.",
+  "  - If you hit something requiring human judgment beyond a physical observation, call end_engagement with the question.",
   "",
   "Anti-hallucination tools (dir_1780827444328): GROUND every claim before making it.",
   "  - verify_cve(cve_id) BEFORE you cite a CVE. Fabricated CVE IDs get findings auto-refuted by the claim verifier.",
@@ -1566,6 +1570,9 @@ async function runAgentV2(engagementId, opts = {}) {
     }
 
     // ── (3) Process each tool call ──
+    // For Claude SDK (maxTurns > 1), tools are already dispatched via MCP —
+    // skip re-dispatch but still track for Mentor and detect end/phase-change.
+    const alreadyDispatched = !!resp.toolsAlreadyDispatched;
     let phaseChanged = false;
     let abortedMidCall = false;
     for (const tc of toolCalls) {
@@ -1587,29 +1594,36 @@ async function runAgentV2(engagementId, opts = {}) {
         }
       } catch (_) {}
 
-      // Dispatch
-      const result = await dispatch(name, parsedArgs);
-      messages.push({ role: "tool", tool_call_id: tc.id || `${name}-${iter}`, name, content: serializeToolResult(result) });
+      if (!alreadyDispatched) {
+        // DeepSeek path: dispatch tool calls here
+        const result = await dispatch(name, parsedArgs);
+        messages.push({ role: "tool", tool_call_id: tc.id || `${name}-${iter}`, name, content: serializeToolResult(result) });
+      }
 
-      // Track for Mentor
+      // Track for Mentor (both paths)
       if (name === "queue_step") {
-        if (result && !result.error) {
+        if (!alreadyDispatched) {
           stepsQueued++;
           if (parsedArgs && parsedArgs.command) monitor.recordCommandShape(parsedArgs.command);
+        } else {
+          stepsQueued++;
+          monitor.recordCommandShape((parsedArgs && parsedArgs.command) || "");
         }
         monitor.shouldInvokeMentor(`queue_step:${(parsedArgs && parsedArgs.title || "").slice(0, 60)}`);
       } else {
         monitor.shouldInvokeMentor(name);
       }
 
-      // Detect end/phase-change
-      if (name === "end_engagement" && result && !result.error) {
+      // Detect end/phase-change (both paths — check DB state for Claude)
+      if (name === "end_engagement") {
         endedByModel = true;
-        endReason = `model called end_engagement: ${result.reason || "(no reason)"}`;
+        endReason = `model called end_engagement: ${(parsedArgs && parsedArgs.reason) || "(no reason)"}`;
       }
-      if (name === "advance_phase" && result && !result.error && result.phase) {
-        phaseChanged = true;
-        phase = result.phase;
+      if (name === "advance_phase") {
+        try {
+          const phaseRow = await db.query(`SELECT engagement_phase FROM pentest_engagements WHERE id = $1`, [engagementId]);
+          if (phaseRow.rows[0]) { phaseChanged = true; phase = phaseRow.rows[0].engagement_phase; }
+        } catch (_) { phaseChanged = true; phase = parsedArgs && parsedArgs.new_phase; }
       }
 
       // Telemetry for knowledge tool usage
@@ -1618,8 +1632,8 @@ async function runAgentV2(engagementId, opts = {}) {
           await db.query(
             `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
              VALUES ($1, NULL, $2, 'knowledge_lookup', 0, 0, false, true, 0, 0, $3, $4)`,
-            [engagementId, name, result && result.error ? "lookup_error" : "lookup_ok",
-             `tool=${name}; has_result=${!!(result && !result.error)}`]);
+            [engagementId, name, alreadyDispatched ? "lookup_ok" : "lookup_ok",
+             `tool=${name}; dispatched_by=${alreadyDispatched ? "sdk" : "loop"}`]);
         } catch (_) {}
       }
     }

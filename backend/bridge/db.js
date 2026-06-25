@@ -1415,6 +1415,28 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_offense_telemetry_engagement ON offense_telemetry(engagement_id, created_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_offense_telemetry_model ON offense_telemetry(model_used, created_at DESC)`);
 
+    // Working notes (persistent model memory across iterations)
+    await pool.query(`CREATE TABLE IF NOT EXISTS engagement_notes (
+      id SERIAL PRIMARY KEY,
+      engagement_id TEXT NOT NULL REFERENCES pentest_engagements(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      content TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(engagement_id, key)
+    )`);
+
+    // Physical observation requests (human-in-the-loop channel)
+    await pool.query(`CREATE TABLE IF NOT EXISTS engagement_observations (
+      id SERIAL PRIMARY KEY,
+      engagement_id TEXT NOT NULL REFERENCES pentest_engagements(id) ON DELETE CASCADE,
+      question TEXT NOT NULL,
+      context TEXT DEFAULT '',
+      response TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      responded_at TIMESTAMPTZ
+    )`);
+
     // ── Membrane write-guard (dir_1780773748369) ──
     // Structural backstop preventing L4 (Cipher) from authoring exploit content
     // into soc_queue_items.command / .output. Trip on 2026-06-06 (cfa3bf59) was

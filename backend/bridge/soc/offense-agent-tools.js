@@ -90,7 +90,7 @@ async function getEngagementState(args) {
             executor_host, executor_adb_target, executor_tools, executor_tools_probed_at
        FROM pentest_engagements WHERE id = $1`, [id]);
   if (eng.rows.length === 0) return { error: `engagement ${id} not found` };
-  const [hosts, findings, queue] = await Promise.all([
+  const [hosts, findings, queue, notes, observations] = await Promise.all([
     db.query(`SELECT ip, hostname, status, ports FROM recon_hosts WHERE engagement_id = $1 ORDER BY ip`, [id]),
     db.query(`SELECT title, severity, status, affected_asset, affected_assets, refs
                 FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [id]),
@@ -103,6 +103,10 @@ async function getEngagementState(args) {
         WHERE engagement_id = $1
           AND status IN ('done', 'failed', 'cancelled')
         ORDER BY seq DESC LIMIT 20`, [id]),
+    db.query(`SELECT key, content, updated_at FROM engagement_notes WHERE engagement_id = $1 ORDER BY updated_at`, [id])
+      .catch(() => ({ rows: [] })),
+    db.query(`SELECT id, question, context, response, status FROM engagement_observations WHERE engagement_id = $1 ORDER BY created_at`, [id])
+      .catch(() => ({ rows: [] })),
   ]);
   // dir_1782345318729: ALWAYS override executor_tools with bridge ground truth.
   // Execution is LOCAL on the bridge container — old tablet-probed lists are stale
@@ -147,6 +151,8 @@ async function getEngagementState(args) {
     findings: findings.rows,
     queue_history: queue.rows,
     executor_identity: getBridgeNetworkIdentity(),
+    working_notes: notes.rows.length > 0 ? notes.rows : undefined,
+    observations: observations.rows.length > 0 ? observations.rows : undefined,
   };
 }
 
@@ -418,13 +424,45 @@ async function endEngagement(args) {
   return { engagement_id, agent_status: r.rows[0].agent_status, reason: reason || "(no reason given)", ok: true };
 }
 
-// ─────────────────────────────── still-stubbed (Step 6) ───────────────────────────────
+// ─────── request_observation: human-in-the-loop physical observations ───────
+// The model asks King Kazuma for physical info ("check the label on the back",
+// "is the LED blinking?"). Push notification goes to the phone; response is
+// written back to `engagement_observations` and returned to the model on the
+// next get_engagement_state call (or immediately if the model polls).
+async function requestObservation(args) {
+  const { engagement_id, question, context } = args || {};
+  if (!engagement_id || !question) return { error: "engagement_id and question required" };
+  await db.query(
+    `INSERT INTO engagement_observations (engagement_id, question, context, status)
+     VALUES ($1, $2, $3, 'pending')
+     ON CONFLICT DO NOTHING`,
+    [engagement_id, question, context || ""]);
+  try {
+    const push = require("/app/routes/push");
+    if (push.sendToAll) {
+      await push.sendToAll({
+        title: "SOC: Physical observation needed",
+        body: question.slice(0, 200),
+        data: { type: "soc_observation", engagementId: engagement_id },
+      });
+    }
+  } catch (_) {}
+  return { ok: true, status: "pending", message: "Observation request sent to operator. Check get_engagement_state later to see the response, or continue with other tasks while waiting." };
+}
 
-async function requestHuman(args) {
-  return {
-    deferred: true,
-    reason: "request_human lands when the operator-side modal lands (Step 6 of OFFENSE-AGENT-DESIGN.md). For now, write the question into your reasoning before calling end_engagement — the operator will see it in the agent_run_state transcript.",
-  };
+// ─────── save_note: persistent working memory across iterations ─────────────
+// The model saves structured notes that survive across iterations. Notes are
+// returned in get_engagement_state so the model has continuity.
+async function saveNote(args) {
+  const { engagement_id, key, content } = args || {};
+  if (!engagement_id || !key || !content) return { error: "engagement_id, key, and content required" };
+  await db.query(
+    `INSERT INTO engagement_notes (engagement_id, key, content, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (engagement_id, key)
+     DO UPDATE SET content = $3, updated_at = NOW()`,
+    [engagement_id, key, content]);
+  return { ok: true, key, message: "Note saved. It will appear in get_engagement_state on future iterations." };
 }
 
 // ─────────────────────── add_finding (dir_1782339906899) ─────────────────────
@@ -475,6 +513,8 @@ const TOOL_IMPLS = {
   search_sploitus:        mkTools.searchSploitus,
   add_finding:            addFinding,
   lookup_attack_playbook: mkTools.lookupAttackPlaybook,
+  save_note:              saveNote,
+  request_observation:    requestObservation,
 };
 
 // Central router. Returns the tool's result as a JSON-serializable object the
@@ -700,6 +740,38 @@ const TOOL_SCHEMAS = [
           kind:          { type: "string",  enum: ["confirmed", "hypothesis"], description: "confirmed = verified exploit, hypothesis = observed but not yet exploited" },
         },
         required: ["engagement_id", "title", "severity"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_note",
+      description: "Save a working note that persists across iterations. Use this to record your attack plan, hypotheses, observations about the target, or anything you want to remember on the next iteration. Notes appear in get_engagement_state. Use a descriptive key (e.g. 'attack_plan', 'target_192.168.1.8_services', 'credentials_found'). Overwriting the same key updates the note.",
+      parameters: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string",  description: "Engagement ID" },
+          key:           { type: "string",  description: "Short key for this note (e.g. 'attack_plan', 'open_ports_summary')" },
+          content:       { type: "string",  description: "The note content — your observations, plans, or data to remember" },
+        },
+        required: ["engagement_id", "key", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "request_observation",
+      description: "Ask the human operator for a physical observation about the target environment. Use this when you need information that can only be obtained by physically looking at or interacting with the target (e.g. 'Is there a default credential sticker on the back of the router?', 'What brand/model is the device?', 'Is the device's LED blinking or solid?'). A push notification is sent to the operator's phone. The response will appear in get_engagement_state when answered. You can continue working on other tasks while waiting.",
+      parameters: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string",  description: "Engagement ID" },
+          question:      { type: "string",  description: "What you need the operator to physically check or observe" },
+          context:       { type: "string",  description: "Why you need this information (helps the operator prioritize)" },
+        },
+        required: ["engagement_id", "question"],
       },
     },
   },
