@@ -1522,22 +1522,33 @@ async function runAgentV2(engagementId, opts = {}) {
         const playbookCalls = parseInt(playbookUsed.rows[0].c) || 0;
         if (detectedServices.length > 0 && playbookCalls === 0) {
           try {
-            const { lookupAttackPlaybook } = require("/app/soc/model-knowledge-tools");
-            const pbResult = await lookupAttackPlaybook({ query: detectedServices[0], max_results: 3 });
-            if (pbResult && pbResult.results && pbResult.results.length > 0) {
-              const pbContent = pbResult.results.map(r =>
-                `### ${r.title} (${r.source})\n${r.content.slice(0, 2000)}`
-              ).join("\n\n---\n\n");
+            const { getAllMatchingPlaybooks } = require("/app/soc/iot-playbooks");
+            const iotPlaybooks = getAllMatchingPlaybooks(detectedServices);
+            let pbContent = "";
+            if (iotPlaybooks.length > 0) {
+              pbContent = iotPlaybooks.map(pb => pb.content).join("\n\n---\n\n");
+            } else {
+              const { lookupAttackPlaybook } = require("/app/soc/model-knowledge-tools");
+              const pbResult = await lookupAttackPlaybook({ query: detectedServices[0], max_results: 3 });
+              if (pbResult && pbResult.results && pbResult.results.length > 0) {
+                pbContent = pbResult.results.map(r =>
+                  `### ${r.title} (${r.source})\n${r.content.slice(0, 2000)}`
+                ).join("\n\n---\n\n");
+              }
+            }
+            if (pbContent) {
               messages.push({ role: "user", content:
-                `[AUTO-PLAYBOOK for "${detectedServices[0]}" — USE THESE TECHNIQUES]\n\n${pbContent}\n\n` +
-                `The above are proven attack techniques from HackTricks/PayloadsAllTheThings. ` +
-                `Follow these steps instead of guessing. Try the specific commands shown above.`
+                `[AUTO-PLAYBOOK for "${detectedServices.join(", ")}" — FOLLOW THESE STEPS IN ORDER]\n\n${pbContent}\n\n` +
+                `CRITICAL: Follow the PRIORITY ORDER in each playbook above. ` +
+                `For Hikvision cameras: check isActivated FIRST — if false, ACTIVATE the camera (set admin password) — that is instant admin access. ` +
+                `For ZKTeco: try default creds (admin:admin, admin:8888) FIRST. ` +
+                `Execute the EXACT curl commands shown. Do NOT improvise — these are the proven attack paths for these specific devices.`
               });
               await db.query(
                 `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
                  VALUES ($1, NULL, 'harness', 'knowledge_lookup', 0, 0, false, true, 0, 0, 'auto_playbook', $2)`,
-                [engagementId, `auto_playbook for ${detectedServices.join(", ")}; ${pbResult.results.length} results`]);
-              console.log(`[offense-agent-v2] auto-playbook injected for "${detectedServices[0]}": ${pbResult.results.length} results`);
+                [engagementId, `auto_playbook for ${detectedServices.join(", ")}; ${iotPlaybooks.length} IoT playbooks`]);
+              console.log(`[offense-agent-v2] auto-playbook injected: ${iotPlaybooks.length} IoT playbooks for ${detectedServices.join(", ")}`);
             }
           } catch (e) {
             console.error(`[offense-agent-v2] auto-playbook failed:`, e.message);
