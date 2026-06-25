@@ -80,6 +80,7 @@ export function DetailTab({ engagement, reconHosts, auditLog, taskGraph }: Detai
         <MetaRow label="Client" value={engagement.client_name} />
         <MetaRow label="Type" value={engagement.engagement_type} />
         <MetaRow label="Status" value={engagement.status} />
+        <MetaRow label="Model" value={(engagement as any).model_override?.startsWith?.("claude-") ? "Claude Opus 4.6" : (engagement as any).model_override || "DeepSeek R1"} />
         {engagement.engagement_phase ? <MetaRow label="Phase" value={engagement.engagement_phase} /> : null}
         {engagement.start_date ? <MetaRow label="Start" value={engagement.start_date} /> : null}
         {engagement.end_date ? <MetaRow label="End" value={engagement.end_date} /> : null}

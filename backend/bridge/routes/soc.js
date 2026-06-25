@@ -439,6 +439,14 @@ module.exports = function socRoutes(ctx) {
         let maxIter = 60;
         let modelOverride = null;
         try { const b = await parseBody(req); if (b) { if (b.max_iter) maxIter = Math.max(1, Math.min(200, parseInt(b.max_iter, 10) || 60)); if (b.model_override) modelOverride = String(b.model_override); } } catch {}
+        // Fall back to the engagement's stored model preference if not passed in the request
+        if (!modelOverride) {
+          try {
+            const engMeta = await db.query(`SELECT metadata FROM pentest_engagements WHERE id = $1`, [eid]);
+            const meta = engMeta.rows[0]?.metadata;
+            if (meta && typeof meta === "object" && meta.model_override) modelOverride = meta.model_override;
+          } catch {}
+        }
         // clear any leftover abort flag so the new run isn't halted on its first iteration
         await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) - 'abort_requested' WHERE id = $1`, [eid]).catch(() => {});
         const agent = require("../soc/offense-agent");
@@ -507,10 +515,18 @@ module.exports = function socRoutes(ctx) {
           if (er.rows[0].agent_status !== "running") {
             const agent = require("../soc/offense-agent");
             const loopV = process.env.SOC_LOOP_VERSION || "v2";
+            let engModel = null;
+            try {
+              const em = await db.query(`SELECT metadata FROM pentest_engagements WHERE id = $1`, [eid]);
+              const m = em.rows[0]?.metadata;
+              if (m && typeof m === "object" && m.model_override) engModel = m.model_override;
+            } catch {}
+            const runOpts = { max_iter: 60 };
+            if (engModel) runOpts.model_override = engModel;
             if (loopV === "v2" && agent.runAgentV2) {
-              agent.runAgentV2(eid, { max_iter: 60 }).catch((e) => console.error("[soc/autonomy] runAgentV2:", e && e.message));
+              agent.runAgentV2(eid, runOpts).catch((e) => console.error("[soc/autonomy] runAgentV2:", e && e.message));
             } else {
-              agent.runAgent(eid, { max_iter: 60 }).catch((e) => console.error("[soc/autonomy] runAgent:", e && e.message));
+              agent.runAgent(eid, runOpts).catch((e) => console.error("[soc/autonomy] runAgent:", e && e.message));
             }
             launched = true;
           }
@@ -548,6 +564,7 @@ module.exports = function socRoutes(ctx) {
         const metadata = (body.metadata && typeof body.metadata === "object") ? body.metadata : {};
         if (body.first_objective) metadata.first_objective = body.first_objective; // 'gain_wifi_access'
         if (body.wifi_target) metadata.wifi_target = body.wifi_target;             // SSID to join
+        if (body.model_override) metadata.model_override = body.model_override;
         metadata.created_via = "wizard";
 
         await db.query(
@@ -652,9 +669,11 @@ module.exports = function socRoutes(ctx) {
       );
       const staleness = stalenessResult.rows[0] || {};
 
+      const meta = typeof engagement.metadata === "object" ? engagement.metadata : {};
       sendJSON(res, 200, {
         engagement: {
           ...engagement,
+          model_override: meta.model_override || null,
           last_completed_at: staleness.last_completed_at ?? null,
           recent_telemetry: staleness.recent_telemetry ?? [],
         },

@@ -275,9 +275,11 @@ function EngagementDetailInner() {
   const launchRun = useCallback(() => {
     const targets = ((engagement as any)?.scope?.target_networks || []).map((t: any) => t.ssid).filter(Boolean).join(", ");
     const relayName = (engagement as any)?.executor_host || "the bridge";
+    const modelOverride = (engagement as any)?.model_override || "deepseek-reasoner";
+    const modelLabel = modelOverride.startsWith("claude-") ? "Claude Opus" : "DeepSeek";
     Alert.alert(
       "Launch run",
-      `DeepSeek will autonomously run this engagement${targets ? ` against ${targets}` : ""} via ${relayName}, up to 50 steps. You can stop it anytime. Launch?`,
+      `${modelLabel} will autonomously run this engagement${targets ? ` against ${targets}` : ""} via ${relayName}, up to 50 steps. You can stop it anytime. Launch?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -287,7 +289,7 @@ function EngagementDetailInner() {
               const r = await fetch(`${getBridgeUrl()}/soc/engagements/${id}/run`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ max_iter: 50 }),
+                body: JSON.stringify({ max_iter: 50, model_override: modelOverride }),
               });
               if (!r.ok) { const d = await r.json().catch(() => ({})); Alert.alert("Couldn't launch", d.error || `HTTP ${r.status}`); return; }
               setTimeout(fetchAll, 900);

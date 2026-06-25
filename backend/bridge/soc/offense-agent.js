@@ -42,145 +42,149 @@ const DEFAULT_MAX_ITER = 60;
 // manually) should pass wait_timeout_sec=1800 in start_engagement_run opts.
 const DEFAULT_WAIT_TIMEOUT_SEC = 120; // 2 minutes
 
-// ─────────── Claude API adapter (Max subscription via OAuth token) ───────────
-// Converts OpenAI-format messages/tools to Anthropic Messages API format and
-// back, using the OAuth accessToken from ~/.claude/.credentials.json. This lets
-// runAgentV2 drive Opus 4.6 on the Max plan with zero extra cost.
+// ─────────── Claude adapter via Agent SDK (Max subscription) ────────────────
+// Uses the Claude Agent SDK's createSdkMcpServer + query() to drive Opus 4.6
+// on the Max plan. Raw api.anthropic.com/v1/messages rejects OAuth tokens with
+// 429; the SDK's subprocess handles the OAuth→API-key exchange internally.
+//
+// Architecture: SOC tools are exposed as an in-process MCP server. query() with
+// maxTurns=1 makes one API call → Claude responds with tool_use → the MCP handler
+// fires (via the existing dispatch()) → result goes back → maxTurns hit → done.
+// The handler stores both the tool call and result so chatWithToolsClaude can
+// return them to the runAgentV2 loop in OpenAI format.
 const fs = require("fs");
-let _claudeToken = null;
-function getClaudeToken() {
-  if (_claudeToken) return _claudeToken;
-  try {
-    const creds = JSON.parse(fs.readFileSync("/root/.claude/.credentials.json", "utf8"));
-    _claudeToken = creds.claudeAiOauth && creds.claudeAiOauth.accessToken;
-  } catch (_) {}
-  return _claudeToken;
+
+function convertAnthropicToOpenAI(anthropicContent) {
+  const msg = { role: "assistant", content: null, tool_calls: [] };
+  const textParts = [];
+  for (const block of (anthropicContent || [])) {
+    if (block.type === "text") {
+      textParts.push(block.text);
+    } else if (block.type === "tool_use") {
+      const name = block.name.replace(/^mcp__soc__/, "");
+      msg.tool_calls.push({
+        id: block.id,
+        type: "function",
+        function: { name, arguments: JSON.stringify(block.input) },
+      });
+    }
+  }
+  msg.content = textParts.join("\n") || null;
+  if (msg.tool_calls.length === 0) delete msg.tool_calls;
+  return msg;
 }
 
-function convertToolsToAnthropic(openaiTools) {
-  return (openaiTools || []).map(t => ({
-    name: t.function.name,
-    description: t.function.description,
-    input_schema: t.function.parameters,
-  }));
+let _sdkMcpServer = null;
+function getSocMcpServer() {
+  if (_sdkMcpServer) return _sdkMcpServer;
+  const { createSdkMcpServer, tool: sdkTool } = require("@anthropic-ai/claude-agent-sdk");
+  const { z } = require("zod");
+  const tools = TOOL_SCHEMAS.map(t => {
+    const f = t.function;
+    const inputShape = {};
+    if (f.parameters && f.parameters.properties) {
+      for (const [key, schema] of Object.entries(f.parameters.properties)) {
+        const isRequired = (f.parameters.required || []).includes(key);
+        let field;
+        if (schema.type === "number" || schema.type === "integer") field = z.number();
+        else if (schema.type === "boolean") field = z.boolean();
+        else if (schema.type === "array") field = z.array(z.any());
+        else if (schema.type === "object") field = z.record(z.any());
+        else field = z.string();
+        if (schema.description) field = field.describe(schema.description);
+        if (!isRequired) field = field.optional();
+        inputShape[key] = field;
+      }
+    }
+    return sdkTool(f.name, f.description || f.name, inputShape, async (args) => {
+      return { content: [{ type: "text", text: "OK" }] };
+    });
+  });
+  _sdkMcpServer = createSdkMcpServer({ name: "soc", tools });
+  return _sdkMcpServer;
 }
 
-function convertMessagesToAnthropic(openaiMessages) {
+function serializeConversation(openaiMessages) {
   let system = "";
-  const messages = [];
+  const parts = [];
   for (const m of openaiMessages) {
     if (m.role === "system") {
       system += (system ? "\n\n" : "") + m.content;
       continue;
     }
     if (m.role === "assistant") {
-      const content = [];
-      if (m.content) content.push({ type: "text", text: m.content });
+      let text = m.content || "";
       if (Array.isArray(m.tool_calls)) {
         for (const tc of m.tool_calls) {
-          let input = tc.function.arguments;
-          if (typeof input === "string") {
-            try { input = JSON.parse(input); } catch (_) { input = {}; }
-          }
-          content.push({ type: "tool_use", id: tc.id || `tc_${tc.function.name}`, name: tc.function.name, input });
+          text += `\n[Called ${tc.function.name} with: ${tc.function.arguments}]`;
         }
       }
-      messages.push({ role: "assistant", content: content.length ? content : m.content || "" });
+      if (text) parts.push(`ASSISTANT: ${text}`);
       continue;
     }
     if (m.role === "tool") {
-      // Anthropic: tool results are user messages with tool_result content blocks.
-      // Merge consecutive tool results into a single user message.
-      const block = { type: "tool_result", tool_use_id: m.tool_call_id, content: m.content || "" };
-      const last = messages[messages.length - 1];
-      if (last && last.role === "user" && Array.isArray(last.content) && last.content[0] && last.content[0].type === "tool_result") {
-        last.content.push(block);
-      } else {
-        messages.push({ role: "user", content: [block] });
-      }
+      parts.push(`TOOL_RESULT (${m.tool_call_id}): ${(m.content || "").slice(0, 4000)}`);
       continue;
     }
-    // user message
-    messages.push({ role: m.role, content: m.content });
+    parts.push(`USER: ${m.content}`);
   }
-  return { system, messages };
-}
-
-function convertAnthropicToOpenAI(anthropicResp) {
-  const msg = { role: "assistant", content: null, tool_calls: [] };
-  const textParts = [];
-  for (const block of (anthropicResp.content || [])) {
-    if (block.type === "text") {
-      textParts.push(block.text);
-    } else if (block.type === "tool_use") {
-      msg.tool_calls.push({
-        id: block.id,
-        type: "function",
-        function: { name: block.name, arguments: JSON.stringify(block.input) },
-      });
-    }
-  }
-  msg.content = textParts.join("\n") || null;
-  if (msg.tool_calls.length === 0) delete msg.tool_calls;
-  return { message: msg, usage: anthropicResp.usage };
-}
-
-function _claudeRequest(payload, token) {
-  return new Promise((resolve, reject) => {
-    const headers = {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-      "anthropic-version": "2023-06-01",
-      "Content-Length": Buffer.byteLength(payload),
-    };
-    const reqAgent = new https.Agent({ keepAlive: false });
-    const req = https.request("https://api.anthropic.com/v1/messages", { method: "POST", headers, timeout: 300000, agent: reqAgent }, (res) => {
-      let body = "";
-      res.on("data", (c) => (body += c));
-      res.on("end", () => {
-        const retryAfter = res.headers["retry-after"];
-        if (res.statusCode === 429 || res.statusCode === 529) {
-          return reject({ retryable: true, waitSec: parseInt(retryAfter, 10) || 30, msg: `Claude API ${res.statusCode}` });
-        }
-        if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`Claude API HTTP ${res.statusCode}: ${body.slice(0, 500)}`));
-        try {
-          const j = JSON.parse(body);
-          resolve(convertAnthropicToOpenAI(j));
-        } catch (e) { reject(new Error(`Claude API parse error: ${e.message}`)); }
-      });
-    });
-    req.on("error", reject);
-    req.on("timeout", () => req.destroy(new Error("Claude API timeout (300s)")));
-    req.write(payload);
-    req.end();
-  });
+  return { system, history: parts.join("\n\n") };
 }
 
 async function chatWithToolsClaude(messages, modelName) {
-  const token = getClaudeToken();
-  if (!token) throw new Error("No Claude OAuth token found in /root/.claude/.credentials.json");
-  const { system, messages: anthropicMsgs } = convertMessagesToAnthropic(messages);
-  const tools = convertToolsToAnthropic(TOOL_SCHEMAS);
-  const payload = JSON.stringify({
-    model: modelName || "claude-opus-4-6",
-    max_tokens: parseInt(process.env.OFFENSE_MAX_TOKENS, 10) || 8000,
-    system,
-    messages: anthropicMsgs,
-    tools,
-    temperature: 0.2,
-  });
-  const MAX_RETRIES = 5;
+  const { query } = require("@anthropic-ai/claude-agent-sdk");
+  const server = getSocMcpServer();
+  const { system, history } = serializeConversation(messages);
+  const allowedTools = TOOL_SCHEMAS.map(t => `mcp__soc__${t.function.name}`);
+
+  const prompt = history
+    ? `Continue this penetration testing engagement. Conversation so far:\n\n${history}\n\nDecide your next action. Think briefly (2-3 lines) then call exactly ONE tool.`
+    : "Begin the engagement. Call get_engagement_state to see scope and targets.";
+
+  const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      return await _claudeRequest(payload, token);
+      const q = query({
+        prompt,
+        options: {
+          model: modelName || "claude-opus-4-6",
+          maxTurns: 1,
+          systemPrompt: system,
+          tools: [],
+          mcpServers: { soc: server },
+          allowedTools,
+          persistSession: false,
+          thinking: { type: "disabled" },
+        },
+      });
+
+      const allContent = [];
+      let usage = null;
+      try {
+        for await (const msg of q) {
+          if (msg.type === "assistant" && msg.message && Array.isArray(msg.message.content)) {
+            allContent.push(...msg.message.content);
+            if (msg.message.usage) usage = msg.message.usage;
+          }
+        }
+      } catch (loopErr) {
+        // maxTurns=1 throws "Reached maximum number of turns" after emitting
+        // the assistant messages. If we captured content, that's success.
+        if (allContent.length === 0) throw loopErr;
+      }
+      if (allContent.length === 0) throw new Error("Claude SDK query returned no assistant message");
+      const parsed = convertAnthropicToOpenAI(allContent);
+      return { message: parsed, usage: usage || {} };
     } catch (e) {
-      if (e && e.retryable && attempt < MAX_RETRIES) {
-        const wait = Math.min(e.waitSec || 30, 120) * 1000;
-        console.log(`[chatWithToolsClaude] ${e.msg} — retry ${attempt}/${MAX_RETRIES} in ${wait/1000}s`);
-        await new Promise(r => setTimeout(r, wait));
+      const msg = e.message || "";
+      const isRetryable = msg.includes("429") || msg.includes("529") || msg.includes("overloaded");
+      if (isRetryable && attempt < MAX_RETRIES) {
+        const wait = 30 * attempt;
+        console.log(`[chatWithToolsClaude] ${msg.slice(0, 100)} — retry ${attempt}/${MAX_RETRIES} in ${wait}s`);
+        await new Promise(r => setTimeout(r, wait * 1000));
         continue;
       }
-      throw e instanceof Error ? e : new Error(e.msg || String(e));
+      throw e;
     }
   }
 }

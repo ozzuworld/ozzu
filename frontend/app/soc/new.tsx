@@ -47,6 +47,11 @@ const AUTONOMY = [
   { key: "full_engagement", label: "Full + post-exploit", hint: "Everything including post-exploitation" },
 ];
 
+const MODELS = [
+  { key: "deepseek-reasoner", label: "DeepSeek R1", hint: "DeepSeek reasoning model via API" },
+  { key: "claude-opus-4-6", label: "Claude Opus 4.6", hint: "Anthropic Opus via Max subscription (zero cost)" },
+];
+
 const STEPS = ["Basics", "Access point", "Wi-Fi", "Autonomy", "Review"];
 
 function deviceColor(e: Executor): string {
@@ -68,6 +73,7 @@ export default function SOCNewScreen() {
   const [client, setClient] = useState("");
   const [type, setType] = useState("internal_pentest");
   const [autonomy, setAutonomy] = useState("exploitation_auto");
+  const [model, setModel] = useState("deepseek-reasoner");
 
   // Executor
   const [executors, setExecutors] = useState<Executor[]>([]);
@@ -154,6 +160,7 @@ export default function SOCNewScreen() {
         scope: { targets: subnet ? [subnet] : [], allowed: [], prohibited: [] },
         target_networks,
         executor_host: selected,
+        model_override: model,
         metadata: { permission_mode: autonomy },
       };
       if (verdict.kind === "wifi") {
@@ -172,7 +179,7 @@ export default function SOCNewScreen() {
       console.error("create failed", e);
       setSubmitting(false);
     }
-  }, [client, type, pickedSsid, selected, selectedExec, autonomy, verdict, router]);
+  }, [client, type, pickedSsid, selected, selectedExec, autonomy, model, verdict, router]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
@@ -269,16 +276,28 @@ export default function SOCNewScreen() {
         )}
 
         {step === 3 && (
-          <Field label="Autonomy level">
-            <View style={{ gap: spacing.sm }}>
-              {AUTONOMY.map((a) => (
-                <Pressable key={a.key} onPress={() => setAutonomy(a.key)} style={[styles.autoRow, autonomy === a.key && { borderColor: colors.accent, backgroundColor: withAlpha(colors.accent, 0.08) }]}>
-                  <Text style={{ color: autonomy === a.key ? colors.accent : colors.text.primary, fontSize: fs.base, fontWeight: fw.semibold }}>{a.label}</Text>
-                  <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, marginTop: 2 }}>{a.hint}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </Field>
+          <>
+            <Field label="Offense model">
+              <View style={{ gap: spacing.sm }}>
+                {MODELS.map((m) => (
+                  <Pressable key={m.key} onPress={() => setModel(m.key)} style={[styles.autoRow, model === m.key && { borderColor: colors.accent, backgroundColor: withAlpha(colors.accent, 0.08) }]}>
+                    <Text style={{ color: model === m.key ? colors.accent : colors.text.primary, fontSize: fs.base, fontWeight: fw.semibold }}>{m.label}</Text>
+                    <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, marginTop: 2 }}>{m.hint}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </Field>
+            <Field label="Autonomy level">
+              <View style={{ gap: spacing.sm }}>
+                {AUTONOMY.map((a) => (
+                  <Pressable key={a.key} onPress={() => setAutonomy(a.key)} style={[styles.autoRow, autonomy === a.key && { borderColor: colors.accent, backgroundColor: withAlpha(colors.accent, 0.08) }]}>
+                    <Text style={{ color: autonomy === a.key ? colors.accent : colors.text.primary, fontSize: fs.base, fontWeight: fw.semibold }}>{a.label}</Text>
+                    <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, marginTop: 2 }}>{a.hint}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </Field>
+          </>
         )}
 
         {step === 4 && (
@@ -289,6 +308,7 @@ export default function SOCNewScreen() {
               <Meta k="Type" v={ENGAGEMENT_TYPES.find((t) => t.key === type)?.label || type} />
               <Meta k="Access point" v={selected || "—"} />
               <Meta k="Target Wi-Fi" v={pickedSsid || "—"} />
+              <Meta k="Model" v={MODELS.find((m) => m.key === model)?.label || model} highlight={model.startsWith("claude-") ? colors.accent : undefined} />
               <Meta k="Autonomy" v={AUTONOMY.find((a) => a.key === autonomy)?.label || autonomy} />
               <Meta k="Objective #1" v={verdict.kind === "wifi" ? "Gain Wi-Fi access" : "Recon the target"} highlight={verdict.kind === "wifi" ? colors.warning : undefined} />
             </View>
