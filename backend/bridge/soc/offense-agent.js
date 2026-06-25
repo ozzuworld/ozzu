@@ -47,6 +47,13 @@ const DEFAULT_WAIT_TIMEOUT_SEC = 120; // 2 minutes
 // so the model knows what it's found, what it's recorded, and what to focus on.
 const STATE_INJECT_INTERVAL = 5;
 
+// ─────────── exploit persistence (dir_1782354744621) ─────────────────────────
+// When the model tries an exploit on a target and it fails, prevent silent
+// pivoting to other hosts. Force it to debug why the exploit failed before
+// moving on. A senior pentester exhausts a target, not scatters.
+const EXPLOIT_INTENTS = new Set(["exploit_probe", "cred_test"]);
+const IP_RE = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/;
+
 // ─────────── loop-breaker constants (dir_1782234450321) ───────────────────────
 // When the orchestrator picks tasks that map to the same engagement phase
 // MAX_CONSECUTIVE_INTENT times in a row, it's stuck in a loop. Force-advance
@@ -543,6 +550,8 @@ async function runAgent(engagementId, opts = {}) {
   // step queued. If no step is queued for HALT_TIMEOUT_MS while we're running,
   // conclude with 'loop_halted' telemetry instead of staying stuck at 'running'.
   let lastStepQueuedAt = Date.now();
+  let activeExploitTarget = null; // IP currently being exploited — set on exploit_probe/cred_test, cleared on explicit give-up
+  let exploitPersistenceInjected = 0; // count injections to avoid infinite nagging
 
   while (iter < maxIter) {
     iter++;
@@ -1513,6 +1522,70 @@ async function runAgentV2(engagementId, opts = {}) {
         console.log(`[offense-agent-v2] state injection at step ${stepsQueued}: ${findingCount} findings, ${hostCount} hosts, phase=${phase}`);
       } catch (e) {
         console.error(`[offense-agent-v2] state injection failed:`, e.message);
+      }
+    }
+
+    // ── (4c) Exploit persistence — prevent silent pivot after failed exploit ──
+    // When the model tries an exploit on target X and then starts scanning target Y,
+    // inject a "go back and debug X" message. Only fires up to 2 times per target
+    // to avoid infinite nagging — after that, the model genuinely gave up.
+    if (stepsQueued > 0) {
+      try {
+        const exploitQ = await db.query(
+          `SELECT title, intent_class, status FROM soc_queue_items
+           WHERE engagement_id = $1 ORDER BY seq DESC LIMIT 5`, [engagementId]);
+        const recentSteps = exploitQ.rows;
+
+        // Detect: did the model just queue an exploit step? Track the target.
+        if (recentSteps.length > 0) {
+          const latest = recentSteps[0];
+          const latestIp = (latest.title.match(IP_RE) || [])[1];
+
+          if (EXPLOIT_INTENTS.has(latest.intent_class) && latestIp) {
+            if (activeExploitTarget !== latestIp) {
+              activeExploitTarget = latestIp;
+              exploitPersistenceInjected = 0;
+            }
+          }
+
+          // Detect: model pivoted away from exploit target to a different host
+          if (activeExploitTarget && latestIp && latestIp !== activeExploitTarget
+              && !EXPLOIT_INTENTS.has(latest.intent_class)
+              && exploitPersistenceInjected < 2) {
+            // Check if the exploit on the active target actually succeeded
+            const exploitResultQ = await db.query(
+              `SELECT title, status FROM soc_queue_items
+               WHERE engagement_id = $1 AND intent_class IN ('exploit_probe','cred_test')
+               AND title LIKE $2 ORDER BY seq DESC LIMIT 1`,
+              [engagementId, `%${activeExploitTarget}%`]);
+            const lastExploit = exploitResultQ.rows[0];
+            if (lastExploit && lastExploit.status !== "done") {
+              // Exploit failed — don't let the model silently pivot
+              // (status 'done' doesn't mean success, but 'failed' definitely means failure)
+            }
+            // Inject regardless — even if status is 'done', the model should confirm
+            // whether the exploit WORKED before pivoting
+            const persistMsg = `⚠ EXPLOIT PERSISTENCE: You were attempting exploitation on ${activeExploitTarget} ` +
+              `(last exploit step: "${lastExploit ? lastExploit.title : "unknown"}"). ` +
+              `You are now working on ${latestIp} instead.\n\n` +
+              `Before moving to a new target, you MUST:\n` +
+              `1. Did the exploit on ${activeExploitTarget} SUCCEED? If yes — record it as a finding (add_finding with proof)\n` +
+              `2. Did it FAIL? Debug WHY: wrong port? wrong firmware version? wrong syntax? Try a different technique on the SAME target\n` +
+              `3. Only move on if you've explicitly concluded ${activeExploitTarget} is NOT exploitable with available tools\n\n` +
+              `A senior pentester exhausts one target before pivoting. Go back to ${activeExploitTarget}.`;
+            messages.push({ role: "user", content: persistMsg });
+            exploitPersistenceInjected++;
+            console.log(`[offense-agent-v2] exploit persistence: model pivoted from ${activeExploitTarget} to ${latestIp} (injection #${exploitPersistenceInjected})`);
+          }
+
+          // Clear active target if model has been working on other hosts for 5+ steps
+          if (activeExploitTarget && exploitPersistenceInjected >= 2) {
+            console.log(`[offense-agent-v2] exploit persistence: clearing active target ${activeExploitTarget} after 2 injections`);
+            activeExploitTarget = null;
+          }
+        }
+      } catch (e) {
+        console.error(`[offense-agent-v2] exploit persistence check failed:`, e.message);
       }
     }
 
