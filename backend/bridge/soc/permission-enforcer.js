@@ -206,8 +206,8 @@ function targetMatchesScope(target, scopeTargets) {
   for (const raw of scopeTargets) {
     const s = String(raw).trim();
     if (!s) continue;
-    // Strip optional :port suffix from both sides
-    const tHost = String(target).split(":")[0];
+    // Strip optional :port suffix and nmap range suffix (e.g. 192.168.1.1-20 → 192.168.1.1)
+    const tHost = String(target).split(":")[0].replace(/-\d+$/, "");
     const sHost = s.split(":")[0];
     if (tHost === sHost) return true;
     if (sHost.includes("/")) {
