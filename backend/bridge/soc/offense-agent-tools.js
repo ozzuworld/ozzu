@@ -505,7 +505,7 @@ const TOOL_IMPLS = {
   wait_for_outcome:     waitForOutcome,
   probe_executor:       probeExecutorTool,
   advance_phase:        advancePhase,
-  request_human:        requestHuman,
+  request_human:        requestObservation,
   end_engagement:       endEngagement,
   verify_cve:           mkTools.verifyCve,
   list_nse_scripts:     mkTools.listNseScripts,
