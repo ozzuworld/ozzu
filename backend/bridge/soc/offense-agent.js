@@ -225,6 +225,7 @@ const MAX_CONSECUTIVE_INTENT = 6;
 // recon (DeepSeek: 32 iters) never trigger it. This separate cap counts TOTAL
 // iterations spent in recon regardless of step outcomes.
 const MAX_RECON_ITERS = 15;
+const MAX_ENUM_ITERS = 15; // dir_1782422812849: same pattern for enumeration→foothold
 
 // Phase order for the one-way ratchet (change 2 is enforced at the advance_phase
 // call site in offense-agent-tools.js; this order is also used here when the
@@ -752,6 +753,7 @@ async function runAgent(engagementId, opts = {}) {
   let consecutivePhaseStreak = 0;
   let lastSeenPhase = null;
   let totalReconIters = 0; // dir_1782417388463: hard recon cap (unaffected by streak resets)
+  let totalEnumIters = 0;  // dir_1782422812849: hard enum cap (same pattern)
 
   // dir_1782242371780: halt-detection — track the wall-clock time of the last
   // step queued. If no step is queued for HALT_TIMEOUT_MS while we're running,
@@ -890,6 +892,32 @@ async function runAgent(engagementId, opts = {}) {
           consecutivePhaseStreak = 0;
           lastSeenPhase = "enumeration";
           mentorGuidance = `[RECON-CAP dir_1782417388463] Recon phase ran for ${totalReconIters} iterations — automatically advanced to enumeration. You have enough reconnaissance data. Focus on version probes, vulnerability identification, and attack-vector analysis on discovered services. DO NOT return to recon.`;
+          ctx.mentor_guidance = mentorGuidance;
+        }
+      }
+    }
+
+    // dir_1782422812849 — ENUMERATION HARD CAP: force advance after MAX_ENUM_ITERS
+    // DeepSeek-528 on Hikvision lab spent 26/30 iters in enumeration, never
+    // advanced to foothold, captured 0 flags. Same fix as recon cap.
+    {
+      const currentPhase = (ctx.engagement && ctx.engagement.engagement_phase) || "recon";
+      if (currentPhase === "enumeration") {
+        totalEnumIters++;
+        if (totalEnumIters >= MAX_ENUM_ITERS) {
+          console.log(`[offense-agent] enum-cap: ${totalEnumIters} total enum iters — forcing advance to foothold`);
+          try {
+            await dispatch("advance_phase", { engagement_id: engagementId, new_phase: "foothold" });
+            await db.query(
+              `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+               VALUES ($1, NULL, 'enum_cap', 'phase_advance', 0, 0, false, true, 0, 0, 'forced_phase_advance', $2)`,
+              [engagementId, `enum_iters=${totalEnumIters}; iter=${iter}; steps_queued=${stepsQueued}`]);
+          } catch (e) {
+            console.error(`[offense-agent] enum-cap advance_phase failed:`, e.message);
+          }
+          consecutivePhaseStreak = 0;
+          lastSeenPhase = "foothold";
+          mentorGuidance = `[ENUM-CAP dir_1782422812849] Enumeration phase ran for ${totalEnumIters} iterations — automatically advanced to foothold. You have enough service and vulnerability data. NOW EXPLOIT: try default credentials, known CVE payloads, authentication bypasses, and command injection on discovered services. DO NOT return to enumeration — act on what you found.`;
           ctx.mentor_guidance = mentorGuidance;
         }
       }
