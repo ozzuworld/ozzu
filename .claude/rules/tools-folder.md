@@ -28,6 +28,7 @@ Every tool gets its own `tools/<tool-name>/` directory with a `README.md` contai
 | `tools/esp32-wg-bridge/` | ESP32 L3 bridge — drop inside a target WiFi to get remote LAN access via WireGuard |
 | `tools/android-pentest-bridge/` | Rooted Android tablet as L3 pentest bridge — same role as ESP32 but tablet form. Magisk root + iptables + Android-routing fixes. SM-P610-tested. |
 | `tools/ozzu-lab-cmdinj/` | OzzuLab variant #2 — command-injection training lab for offense model diversity |
+| `tools/ozzu-lab-hikvision/` | OzzuLab Hikvision IP camera sim — CVE-2021-36260 RCE + CVE-2017-7921 + default creds, 3 flags |
 | `tools/diagnostics/` | SOC harness diagnostic tools |
 | `tools/tests/` | SOC agent test suite |
 

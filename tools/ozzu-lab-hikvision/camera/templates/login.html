@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>HIKVISION</title>
+<style>
+body { margin: 0; background: #1a1a2e; font-family: Arial, sans-serif; color: #fff; }
+.header { background: #c0392b; padding: 10px 20px; display: flex; align-items: center; }
+.header img { height: 28px; margin-right: 12px; }
+.header span { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
+.login-box { width: 380px; margin: 120px auto; background: #16213e; border-radius: 4px; padding: 30px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+.login-box h2 { text-align: center; margin-bottom: 25px; font-weight: normal; color: #ddd; }
+.field { margin-bottom: 15px; }
+.field label { display: block; margin-bottom: 5px; color: #aaa; font-size: 13px; }
+.field input { width: 100%; padding: 10px; border: 1px solid #333; background: #0f3460; color: #fff; border-radius: 3px; box-sizing: border-box; font-size: 14px; }
+.field input:focus { border-color: #c0392b; outline: none; }
+.btn { width: 100%; padding: 12px; background: #c0392b; color: #fff; border: none; border-radius: 3px; font-size: 15px; cursor: pointer; margin-top: 10px; }
+.btn:hover { background: #e74c3c; }
+.footer { text-align: center; margin-top: 20px; color: #555; font-size: 11px; }
+.model-info { text-align: center; color: #444; font-size: 11px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="header">
+<span>HIKVISION</span>
+</div>
+<div class="login-box">
+<h2>Network Camera</h2>
+<form method="POST" action="/doc/page/main.asp">
+<div class="field">
+<label>User Name</label>
+<input type="text" name="username" value="admin" autocomplete="off">
+</div>
+<div class="field">
+<label>Password</label>
+<input type="password" name="password" placeholder="Enter password" autocomplete="off">
+</div>
+<button class="btn" type="submit">Login</button>
+</form>
+<div class="footer">&copy; 2023 Hangzhou Hikvision Digital Technology Co., Ltd. All Rights Reserved.</div>
+<div class="model-info">DS-2CD2143G2-IU &middot; V5.7.11 build 230830</div>
+</div>
+</body>
+</html>

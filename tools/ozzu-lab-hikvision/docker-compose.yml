@@ -1,0 +1,17 @@
+services:
+  camera:
+    build: ./camera
+    container_name: ozzulab-hikvision-cam
+    hostname: DS-2CD2143G2-IU
+    networks:
+      ozzulab-hikvision-net:
+        ipv4_address: 10.10.60.10
+    restart: unless-stopped
+
+networks:
+  ozzulab-hikvision-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.60.0/24
+          gateway: 10.10.60.1

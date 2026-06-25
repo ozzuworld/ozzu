@@ -30,6 +30,7 @@ Each tool's directory MUST contain a `README.md` with these sections (in this or
 | [esp32-wg-bridge](esp32-wg-bridge/) | ESP32 L3 bridge — joins target wifi, opens WG to home hub, forwards LAN traffic for remote recon | working (2026-05-28) |
 | [android-pentest-bridge](android-pentest-bridge/) | Rooted Android tablet as L3 pentest bridge — same role as ESP32 but tablet form, full Linux kernel forwarding via Magisk root. SM-P610 procedure documented | working (2026-05-31) |
 | [ozzu-lab-cmdinj](ozzu-lab-cmdinj/) | OzzuLab variant #2 — command-injection in diagnose.php (vs variant #1 LFI in view.php). Different network 10.10.21.0/24, different vuln class for SFT diversity | working (2026-06-09) |
+| [ozzu-lab-hikvision](ozzu-lab-hikvision/) | OzzuLab Hikvision IP camera simulator — CVE-2021-36260 RCE + CVE-2017-7921 config leak + default creds. 3 flags, 3 ports (80/554/8000) | working (2026-06-25) |
 | [diagnostics](diagnostics/) | SOC harness diagnostic tools | active |
 | [tests](tests/) | SOC agent test suite | active |
 
