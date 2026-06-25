@@ -104,25 +104,19 @@ async function getEngagementState(args) {
           AND status IN ('done', 'failed', 'cancelled')
         ORDER BY seq DESC LIMIT 20`, [id]),
   ]);
-  // dir_1782331356896: populate executor_tools when empty. Execution is LOCAL on
-  // the bridge container (soc-command-execution.md) — tools are baked into the
-  // Dockerfile. The old probe_executor delegated to executor-probe.js which used
-  // dead ssh dev-01, so tools were always []. Populate from ground truth.
+  // dir_1782345318729: ALWAYS override executor_tools with bridge ground truth.
+  // Execution is LOCAL on the bridge container — old tablet-probed lists are stale
+  // and list tools (masscan, xxd, msfconsole...) that don't exist here, causing
+  // "command not found" failures every engagement.
   const engRow = eng.rows[0];
-  const tools = Array.isArray(engRow.executor_tools) ? engRow.executor_tools : [];
-  if (tools.length === 0) {
-    // dir_1782342907969: ground-truth tool list. ONLY tools actually installed
-    // in the bridge container (Dockerfile). Listing absent tools here causes the
-    // model to queue commands that fail with "command not found".
-    const BRIDGE_TOOLS = ["nmap","curl","ssh","python3","searchsploit",
-                          "nuclei","httpx","whatweb","netcat","dig","host",
-                          "openssl","jq","awk","grep","sed","bash"];
-    engRow.executor_tools = BRIDGE_TOOLS;
-    engRow.executor_caps_note =
-      "Executor: Linux bridge container (local bash). Lab subnet via WireGuard (~240ms RTT). " +
-      "NOT installed: gobuster, nikto, hydra, john, hashcat, dirb, wfuzz, sqlmap, metasploit, wget, masscan, ffuf. " +
-      "For dir-enum use curl+loop or nuclei fuzzing; for cred-test use curl+auth or nmap NSE auth scripts.";
-  }
+  const BRIDGE_TOOLS = ["nmap","curl","ssh","python3","searchsploit",
+                        "nuclei","httpx","whatweb","netcat","dig","host",
+                        "openssl","jq","awk","grep","sed","bash"];
+  engRow.executor_tools = BRIDGE_TOOLS;
+  engRow.executor_caps_note =
+    "Executor: Linux bridge container (local bash). Lab subnet via WireGuard (~240ms RTT). " +
+    "ONLY the tools listed above are installed. You CAN install more at runtime with apt-get install -y. " +
+    "NOT pre-installed: gobuster, nikto, hydra, john, hashcat, dirb, wfuzz, sqlmap, metasploit, wget, masscan, ffuf, xxd.";
   return {
     engagement: engRow,
     hosts: hosts.rows,
