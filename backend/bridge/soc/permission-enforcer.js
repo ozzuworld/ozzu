@@ -134,7 +134,9 @@ function isLikelyFilePath(s) {
   // dir_1782343161076: XML/SOAP/XPath method patterns — service.get,
   // device.getSystemDateAndTime, etc. If any dot-segment is a common
   // method verb, it's code not a hostname.
-  const METHOD_VERBS = new Set(["get","set","put","delete","post","select","insert","update","create","find","parse","split","join","replace","match","check","test","run","exec","call","send","read","write","list","add","remove","start","stop"]);
+  const METHOD_VERBS = new Set(["get","set","put","delete","post","select","insert","update","create","find","parse","split","join","replace","match","check","test","run","exec","call","send","read","write","list","add","remove","start","stop",
+    // dir_1782347960261: Python object attributes the model uses in inline scripts
+    "status","text","content","headers","json","url","data","response","resp","result","code","reason","body","length","encode","decode","strip","format","open","close","connect","request","readline"]);
   const segs = s.toLowerCase().split(".");
   if (segs.some(seg => METHOD_VERBS.has(seg))) return true;
   return false;
@@ -232,6 +234,10 @@ const RESEARCH_HOSTS = [
   // ONVIF SOAP envelopes reference these in xmlns= attributes; the jail was blocking
   // legitimate ONVIF credential tests (Q10 on SKYLINE-SOC-2026-851).
   "www.w3.org", "www.onvif.org", "schemas.xmlsoap.org",
+  // dir_1782348075911: Hikvision ISAPI XML namespace URIs — same pattern as ONVIF above.
+  // Model sends activation/config XML with xmlns="http://www.isapi.org" or
+  // xmlns="http://www.hikvision.com"; these are protocol constants, not targets.
+  "www.isapi.org", "www.hikvision.com",
 ];
 function isResearchHost(target) {
   const h = String(target || "").split(":")[0].toLowerCase().replace(/^https?:\/\//, "");
