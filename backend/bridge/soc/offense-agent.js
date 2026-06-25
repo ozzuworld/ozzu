@@ -72,7 +72,7 @@ const AGENT_SYSTEM_PROMPT_BASE = [
   "    • Runtime installs are EPHEMERAL (lost on container restart) — that's fine, install what you need",
   "  - For directory enumeration without installing: curl + wordlist loop, or nuclei with http fuzzing templates",
   "  - For credential testing without installing: curl with auth headers, or nmap NSE auth scripts (http-default-accounts, ftp-anon, etc.)",
-  "  - The lab subnet is reached through a WireGuard L3 relay to the tablet (the tablet is the L3 doorway INTO the lab, not where you run). Because WireGuard is an L3 tunnel:",
+  "  - The lab subnet is reached through a WireGuard L3 relay (a remote device forwards traffic into the physical LAN — you never interact with that device directly). Because WireGuard is an L3 tunnel:",
   "    • ARP does NOT cross WireGuard — nmap's default ARP host-discovery reports 0 hosts. ALWAYS add `--disable-arp-ping` so nmap uses ICMP/TCP discovery instead.",
   "    • Use `-sT` (TCP connect scan) for port scanning — raw SYN (`-sS`) may not work across the relay.",
   "    • Do NOT combine `-sn` (ping sweep, no ports) with any port-scan flag (`-sT`, `-sS`, `-sV`, etc.) — nmap rejects it.",

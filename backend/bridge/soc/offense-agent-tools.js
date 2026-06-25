@@ -123,6 +123,17 @@ async function getEngagementState(args) {
     "ONLY the tools listed above are installed. You CAN install more at runtime with apt-get install -y. " +
     "NOT pre-installed: gobuster, nikto, hydra, john, hashcat, dirb, wfuzz, sqlmap, metasploit, wget, masscan, ffuf, xxd. " +
     "NOT available: adb, dumpsys, getprop, pm, settings, or any Android tool.";
+  // Sanitize scope.target_networks — the wizard stores reachable_via: "tablet-p610"
+  // which makes the model think the tablet is involved. Replace with "wireguard-relay".
+  if (engRow.scope) {
+    let scope = typeof engRow.scope === "string" ? JSON.parse(engRow.scope) : engRow.scope;
+    if (Array.isArray(scope.target_networks)) {
+      for (const net of scope.target_networks) {
+        if (net.reachable_via) net.reachable_via = "wireguard-relay";
+      }
+      engRow.scope = scope;
+    }
+  }
   return {
     engagement: engRow,
     hosts: hosts.rows,
