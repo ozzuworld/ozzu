@@ -436,8 +436,8 @@ module.exports = function socRoutes(ctx) {
         const er = await db.query(`SELECT id, agent_status FROM pentest_engagements WHERE id = $1`, [eid]);
         if (er.rows.length === 0) { sendJSON(res, 404, { error: "engagement not found" }); return true; }
         if (er.rows[0].agent_status === "running") { sendJSON(res, 409, { error: "a run is already in progress" }); return true; }
-        let maxIter = 50;
-        try { const b = await parseBody(req); if (b && b.max_iter) maxIter = Math.max(1, Math.min(200, parseInt(b.max_iter, 10) || 50)); } catch {}
+        let maxIter = 60;
+        try { const b = await parseBody(req); if (b && b.max_iter) maxIter = Math.max(1, Math.min(200, parseInt(b.max_iter, 10) || 60)); } catch {}
         // clear any leftover abort flag so the new run isn't halted on its first iteration
         await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) - 'abort_requested' WHERE id = $1`, [eid]).catch(() => {});
         const agent = require("../soc/offense-agent");
@@ -505,9 +505,9 @@ module.exports = function socRoutes(ctx) {
             const agent = require("../soc/offense-agent");
             const loopV = process.env.SOC_LOOP_VERSION || "v2";
             if (loopV === "v2" && agent.runAgentV2) {
-              agent.runAgentV2(eid, { max_iter: 50 }).catch((e) => console.error("[soc/autonomy] runAgentV2:", e && e.message));
+              agent.runAgentV2(eid, { max_iter: 60 }).catch((e) => console.error("[soc/autonomy] runAgentV2:", e && e.message));
             } else {
-              agent.runAgent(eid, { max_iter: 50 }).catch((e) => console.error("[soc/autonomy] runAgent:", e && e.message));
+              agent.runAgent(eid, { max_iter: 60 }).catch((e) => console.error("[soc/autonomy] runAgent:", e && e.message));
             }
             launched = true;
           }
