@@ -125,23 +125,11 @@ function convertAnthropicToOpenAI(anthropicResp) {
   return { message: msg, usage: anthropicResp.usage };
 }
 
-function chatWithToolsClaude(messages, modelName) {
+function _claudeRequest(payload, token) {
   return new Promise((resolve, reject) => {
-    const token = getClaudeToken();
-    if (!token) return reject(new Error("No Claude OAuth token found in /root/.claude/.credentials.json"));
-    const { system, messages: anthropicMsgs } = convertMessagesToAnthropic(messages);
-    const tools = convertToolsToAnthropic(TOOL_SCHEMAS);
-    const payload = JSON.stringify({
-      model: modelName || "claude-opus-4-6",
-      max_tokens: parseInt(process.env.OFFENSE_MAX_TOKENS, 10) || 8000,
-      system,
-      messages: anthropicMsgs,
-      tools,
-      temperature: 0.2,
-    });
     const headers = {
       "Content-Type": "application/json",
-      "x-api-key": token,
+      "Authorization": `Bearer ${token}`,
       "anthropic-version": "2023-06-01",
       "Content-Length": Buffer.byteLength(payload),
     };
@@ -150,6 +138,10 @@ function chatWithToolsClaude(messages, modelName) {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => {
+        const retryAfter = res.headers["retry-after"];
+        if (res.statusCode === 429 || res.statusCode === 529) {
+          return reject({ retryable: true, waitSec: parseInt(retryAfter, 10) || 30, msg: `Claude API ${res.statusCode}` });
+        }
         if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`Claude API HTTP ${res.statusCode}: ${body.slice(0, 500)}`));
         try {
           const j = JSON.parse(body);
@@ -162,6 +154,35 @@ function chatWithToolsClaude(messages, modelName) {
     req.write(payload);
     req.end();
   });
+}
+
+async function chatWithToolsClaude(messages, modelName) {
+  const token = getClaudeToken();
+  if (!token) throw new Error("No Claude OAuth token found in /root/.claude/.credentials.json");
+  const { system, messages: anthropicMsgs } = convertMessagesToAnthropic(messages);
+  const tools = convertToolsToAnthropic(TOOL_SCHEMAS);
+  const payload = JSON.stringify({
+    model: modelName || "claude-opus-4-6",
+    max_tokens: parseInt(process.env.OFFENSE_MAX_TOKENS, 10) || 8000,
+    system,
+    messages: anthropicMsgs,
+    tools,
+    temperature: 0.2,
+  });
+  const MAX_RETRIES = 5;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await _claudeRequest(payload, token);
+    } catch (e) {
+      if (e && e.retryable && attempt < MAX_RETRIES) {
+        const wait = Math.min(e.waitSec || 30, 120) * 1000;
+        console.log(`[chatWithToolsClaude] ${e.msg} — retry ${attempt}/${MAX_RETRIES} in ${wait/1000}s`);
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      throw e instanceof Error ? e : new Error(e.msg || String(e));
+    }
+  }
 }
 
 // ─────────── state injection (dir_1782350733850) ─────────────────────────────
