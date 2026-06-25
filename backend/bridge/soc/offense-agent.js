@@ -33,7 +33,7 @@ const MODEL_URL  = process.env.OFFENSE_SYNTH_MODEL_URL  || process.env.OFFENSE_M
 const MODEL_NAME = process.env.OFFENSE_SYNTH_MODEL_NAME || process.env.OFFENSE_MODEL_NAME || "qwen3:32b";
 const MODEL_KEY  = process.env.OFFENSE_MODEL_KEY  || "";
 
-const DEFAULT_MAX_ITER = 30;
+const DEFAULT_MAX_ITER = 60;
 
 // dir_1782238863765 Part 2 — watchdog default for wait_for_outcome in the
 // autonomous loop. 120 seconds: if a queued step hasn't started executing
@@ -546,6 +546,18 @@ async function runAgent(engagementId, opts = {}) {
 
   while (iter < maxIter) {
     iter++;
+
+    // Near-cap warning: inject wrap-up message when 80% through iterations
+    const itersRemaining = maxIter - iter;
+    if (itersRemaining <= Math.ceil(maxIter * 0.2) && itersRemaining > 0) {
+      const wrapMsg = `⚠ ITERATION BUDGET: ${itersRemaining} iterations remaining out of ${maxIter}. You MUST wrap up NOW:\n` +
+        `1. Record any findings you haven't recorded yet (add_finding)\n` +
+        `2. Call advance_phase('reporting') if not already in reporting\n` +
+        `3. Call end_engagement with a summary of your work\n` +
+        `If you do NOT call end_engagement before iterations run out, the engagement ends without a proper conclusion.`;
+      messages.push({ role: "user", content: wrapMsg });
+      console.log(`[offense-agent-v2] wrap-up warning at iter ${iter}/${maxIter} (${itersRemaining} remaining)`);
+    }
 
     // Build engagement context fresh each iteration (Aggregator may have added findings/hosts)
     const ctx = await loadEngagementContext(engagementId);
