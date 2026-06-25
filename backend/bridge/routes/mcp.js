@@ -2536,7 +2536,9 @@ ${result.narrative}
       case "start_engagement_run": {
         const agent = require("../soc/offense-agent");
         try {
-          const r = await agent.runAgent(args.engagement_id, {
+          const loopVersion = process.env.SOC_LOOP_VERSION || "v2";
+          const runFn = (loopVersion === "v2" && agent.runAgentV2) ? agent.runAgentV2 : agent.runAgent;
+          const r = await runFn(args.engagement_id, {
             max_iter: args.max_iter,
             intent: args.intent,
             model_override: args.model_override,
