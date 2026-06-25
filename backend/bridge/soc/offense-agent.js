@@ -42,6 +42,11 @@ const DEFAULT_MAX_ITER = 30;
 // manually) should pass wait_timeout_sec=1800 in start_engagement_run opts.
 const DEFAULT_WAIT_TIMEOUT_SEC = 120; // 2 minutes
 
+// ─────────── state injection (dir_1782350733850) ─────────────────────────────
+// Every N queued steps, inject a structured state summary into the conversation
+// so the model knows what it's found, what it's recorded, and what to focus on.
+const STATE_INJECT_INTERVAL = 5;
+
 // ─────────── loop-breaker constants (dir_1782234450321) ───────────────────────
 // When the orchestrator picks tasks that map to the same engagement phase
 // MAX_CONSECUTIVE_INTENT times in a row, it's stuck in a loop. Force-advance
@@ -1449,6 +1454,52 @@ async function runAgentV2(engagementId, opts = {}) {
         console.log(`[offense-agent-v2] Mentor fired at iter ${iter} (same=${snap.sameToolCount}, total=${snap.totalCallCount}, shape=${snap.sameShapeCount})`);
       } catch (e) {
         console.error(`[offense-agent-v2] Mentor failed:`, e.message);
+      }
+    }
+
+    // ── (4b) State injection — periodic situational awareness for the model ──
+    // Every STATE_INJECT_INTERVAL steps, inject a structured summary of what the
+    // model has found, what it has recorded, and what phase it's in. This
+    // compensates for the model losing track of state across many iterations.
+    if (stepsQueued > 0 && stepsQueued % STATE_INJECT_INTERVAL === 0) {
+      try {
+        const [findingsQ, hostsQ, recentQ] = await Promise.all([
+          db.query(`SELECT title, severity, affected_asset FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]),
+          db.query(`SELECT ip, hostname, status, ports FROM recon_hosts WHERE engagement_id = $1 ORDER BY ip`, [engagementId]),
+          db.query(`SELECT title, status FROM soc_queue_items WHERE engagement_id = $1 ORDER BY seq DESC LIMIT 10`, [engagementId]),
+        ]);
+        const findingCount = findingsQ.rows.length;
+        const hostCount = hostsQ.rows.length;
+        const hostSummary = hostsQ.rows.map(h => {
+          const portStr = h.ports ? (Array.isArray(h.ports) ? h.ports.map(p => p.port || p).join(",") : String(h.ports).slice(0, 80)) : "?";
+          return `  ${h.ip}${h.hostname ? ` (${h.hostname})` : ""}: ports ${portStr}`;
+        }).join("\n") || "  (none in recon_hosts)";
+        const findingSummary = findingsQ.rows.map(f =>
+          `  [${f.severity}] ${f.title} — ${f.affected_asset}`
+        ).join("\n") || "  ⚠ NONE RECORDED — you MUST call add_finding for discoveries";
+        const recentSteps = recentQ.rows.map(r => `  [${r.status}] ${r.title}`).join("\n");
+        const stateMsg = [
+          `[STATE CHECK — ${stepsQueued} steps completed, phase: ${phase}]`,
+          ``,
+          `DISCOVERED HOSTS (${hostCount}):`,
+          hostSummary,
+          ``,
+          `RECORDED FINDINGS (${findingCount}):`,
+          findingSummary,
+          findingCount === 0 ? `\n⚠ You have completed ${stepsQueued} steps but recorded ZERO findings. If you discovered any open services, default credentials, CVEs, or security issues — call add_finding NOW before continuing.` : "",
+          ``,
+          `LAST 10 STEPS:`,
+          recentSteps,
+          ``,
+          `REMINDERS:`,
+          `- Stay focused on ONE target until exhausted`,
+          `- Record findings AS YOU DISCOVER THEM (add_finding)`,
+          phase === "recon" && stepsQueued >= 8 ? `- You've done ${stepsQueued} steps in recon — if you're probing services/versions, call advance_phase to 'enumeration' NOW` : "",
+        ].filter(Boolean).join("\n");
+        messages.push({ role: "user", content: stateMsg });
+        console.log(`[offense-agent-v2] state injection at step ${stepsQueued}: ${findingCount} findings, ${hostCount} hosts, phase=${phase}`);
+      } catch (e) {
+        console.error(`[offense-agent-v2] state injection failed:`, e.message);
       }
     }
 
