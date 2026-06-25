@@ -1513,11 +1513,36 @@ async function runAgentV2(engagementId, opts = {}) {
         for (const svc of SERVICE_KEYWORDS) {
           if (svc.kw.some(k => stepTitles.includes(k))) detectedServices.push(svc.name);
         }
-        // Check if model has already called lookup_attack_playbook (from telemetry)
+        // Auto-inject playbook content when services are detected — the model
+        // ignores "call lookup_attack_playbook" instructions, so we call it FOR
+        // the model and inject the results directly into the conversation.
         const playbookUsed = await db.query(
-          `SELECT count(*) as c FROM offense_telemetry WHERE engagement_id = $1 AND outcome_notes LIKE '%lookup_attack_playbook%'`,
+          `SELECT count(*) as c FROM offense_telemetry WHERE engagement_id = $1 AND outcome_notes LIKE '%auto_playbook%'`,
           [engagementId]);
         const playbookCalls = parseInt(playbookUsed.rows[0].c) || 0;
+        if (detectedServices.length > 0 && playbookCalls === 0) {
+          try {
+            const { lookupAttackPlaybook } = require("/app/soc/model-knowledge-tools");
+            const pbResult = await lookupAttackPlaybook({ query: detectedServices[0], max_results: 3 });
+            if (pbResult && pbResult.results && pbResult.results.length > 0) {
+              const pbContent = pbResult.results.map(r =>
+                `### ${r.title} (${r.source})\n${r.content.slice(0, 2000)}`
+              ).join("\n\n---\n\n");
+              messages.push({ role: "user", content:
+                `[AUTO-PLAYBOOK for "${detectedServices[0]}" — USE THESE TECHNIQUES]\n\n${pbContent}\n\n` +
+                `The above are proven attack techniques from HackTricks/PayloadsAllTheThings. ` +
+                `Follow these steps instead of guessing. Try the specific commands shown above.`
+              });
+              await db.query(
+                `INSERT INTO offense_telemetry (engagement_id, queue_item_id, model_used, intent_category, n_hosts, n_findings, step_queued, in_scope, n_references, latency_ms, outcome, outcome_notes)
+                 VALUES ($1, NULL, 'harness', 'knowledge_lookup', 0, 0, false, true, 0, 0, 'auto_playbook', $2)`,
+                [engagementId, `auto_playbook for ${detectedServices.join(", ")}; ${pbResult.results.length} results`]);
+              console.log(`[offense-agent-v2] auto-playbook injected for "${detectedServices[0]}": ${pbResult.results.length} results`);
+            }
+          } catch (e) {
+            console.error(`[offense-agent-v2] auto-playbook failed:`, e.message);
+          }
+        }
 
         const stateMsg = [
           `[STATE CHECK — ${stepsQueued} steps completed, phase: ${phase}]`,
@@ -1532,9 +1557,7 @@ async function runAgentV2(engagementId, opts = {}) {
           `LAST 10 STEPS:`,
           recentSteps,
           ``,
-          detectedServices.length > 0 && playbookCalls === 0
-            ? `⚠ PLAYBOOK REQUIRED: You are working on ${detectedServices.join(", ")} but have NOT called lookup_attack_playbook yet. Call lookup_attack_playbook("${detectedServices[0]}") NOW — it returns exact exploitation steps, default credentials, and known vulnerabilities from HackTricks. This is how you know what to try instead of guessing.`
-            : "",
+          "",
           ``,
           `REMINDERS:`,
           `- Stay focused on ONE target until exhausted`,
