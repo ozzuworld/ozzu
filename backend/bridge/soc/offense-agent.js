@@ -173,16 +173,21 @@ async function chatWithToolsClaude(messages, modelName) {
           }
         }
       } catch (loopErr) {
-        // maxTurns=1 throws "Reached maximum number of turns" after emitting
-        // the assistant messages. If we captured content, that's success.
-        if (allContent.length === 0) throw loopErr;
+        // maxTurns=1 throws "Reached maximum number of turns" after the tool call.
+        // SDK 0.2.39 changed the error shape — now "Claude Code returned an error result".
+        // If we captured content (tool_use blocks), that's success — swallow the error.
+        const isMaxTurns = (loopErr.message || "").includes("maximum number of turns") ||
+                           (loopErr.message || "").includes("Reached maximum");
+        if (allContent.length === 0 && !isMaxTurns) throw loopErr;
       }
       if (allContent.length === 0) throw new Error("Claude SDK query returned no assistant message");
       const parsed = convertAnthropicToOpenAI(allContent);
       return { message: parsed, usage: usage || {} };
     } catch (e) {
       const msg = e.message || "";
-      console.error(`[chatWithToolsClaude] attempt ${attempt}/${MAX_RETRIES} error:`, msg.slice(0, 300));
+      console.error(`[chatWithToolsClaude] attempt ${attempt}/${MAX_RETRIES} error:`, msg.slice(0, 500));
+      if (e.stderr) console.error(`[chatWithToolsClaude] stderr:`, String(e.stderr).slice(0, 500));
+      if (e.stack) console.error(`[chatWithToolsClaude] stack:`, e.stack.split('\n').slice(0, 5).join('\n'));
       const isRetryable = msg.includes("429") || msg.includes("529") || msg.includes("overloaded") || msg.includes("exit");
       if (isRetryable && attempt < MAX_RETRIES) {
         const wait = 15 * attempt;
