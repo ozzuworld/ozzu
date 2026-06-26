@@ -202,6 +202,9 @@ module.exports = function socRoutes(ctx) {
           // WG-reachable devices act as the relay/doorway into a physical lab (the bridge holds
           // the toolkit). Heuristic only — the wizard still gates on reachability.
           executor_capable: !!d.wg_ip,
+          // iPhone devices use SOCKS5 relay (can't do L3 forwarding like rooted Android).
+          // The Ozzu app runs a SOCKS5 server on port 1080; bridge wraps commands with proxychains.
+          proxy_mode: /iphone|ios/i.test(d.device_id || "") ? "socks5" : null,
         };
       });
       // dev-01 REMOVED from the offense pipeline (King Kazuma 2026-06-23) — no longer surfaced as
@@ -850,8 +853,21 @@ module.exports = function socRoutes(ctx) {
           ).catch((e) => console.error(`[soc/execute] anti-cloud log fail ${sessionId}:`, e.message));
           return true;
         }
+        const execEng = engResult.rows[0];
+        const execMeta = typeof execEng.metadata === 'string' ? JSON.parse(execEng.metadata) : (execEng.metadata || {});
+        const execProxy = (execMeta.proxy_mode === 'socks5' && execEng.executor_host) ? execEng.executor_host : null;
+        let execCmd = String(command);
+        if (execProxy) {
+          const fs = require('fs');
+          const confPath = `/tmp/ozzu-bridge/proxychains-${engagement_id}.conf`;
+          const proxyPort = execMeta.proxy_port || 1080;
+          const template = fs.readFileSync('/app/proxychains-iphone.conf', 'utf8');
+          fs.mkdirSync('/tmp/ozzu-bridge', { recursive: true });
+          fs.writeFileSync(confPath, template.replace('IPHONE_WG_IP', execProxy).replace('1080', String(proxyPort)));
+          execCmd = `proxychains4 -q -f ${confPath} bash -s <<'PROXYCMD'\n${execCmd}\nPROXYCMD`;
+        }
         const proc = spawn('bash', ['-s'], { detached: false, stdio: ['pipe', 'pipe', 'pipe'] });
-        proc.stdin.write(command);
+        proc.stdin.write(execCmd);
         proc.stdin.end();
 
         let fullOutput = '';
@@ -1086,7 +1102,7 @@ module.exports = function socRoutes(ctx) {
       try {
         const itemId = parseInt(pathname.split("/")[3], 10);
         const itemRes = await db.query(
-          `SELECT q.*, e.executor_host
+          `SELECT q.*, e.executor_host, e.metadata AS eng_metadata
              FROM soc_queue_items q
              JOIN pentest_engagements e ON q.engagement_id = e.id
             WHERE q.id = $1`,
@@ -1241,8 +1257,28 @@ module.exports = function socRoutes(ctx) {
         // bridge — it's host-networked and routes the lab /24 via wg0 → tablet → EDIFICIO, so the
         // engagement's executor_host names the relay/doorway, not an ssh target. Bridge holds the
         // toolkit; tablet is the doorway. detached:true → own process group (killable via -pid).
-        const proc = spawn('bash', ['-s'], { detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
-        proc.stdin.write(String(item.command));
+        //
+        // iPhone SOCKS5 relay (dir_1782498638510): when the engagement's metadata.proxy_mode is
+        // 'socks5', route TCP traffic through the iPhone's SOCKS5 relay via proxychains4. The
+        // iPhone runs a NWListener SOCKS5 server on its WG IP. Commands are wrapped:
+        //   proxychains4 -f <config> bash -s <<< command
+        // This covers TCP connect scans, HTTP tools, and most exploitation — but NOT raw SYN
+        // scans or UDP. The engagement scope should note this limitation.
+        const engMeta = typeof item.eng_metadata === 'string' ? JSON.parse(item.eng_metadata) : (item.eng_metadata || {});
+        const proxyMode = (engMeta.proxy_mode === 'socks5' && execHost) ? execHost : null;
+        let cmdToRun = String(item.command);
+        const env = { ...process.env };
+        if (proxyMode) {
+          const fs = require('fs');
+          const confPath = `/tmp/ozzu-bridge/proxychains-${item.engagement_id}.conf`;
+          const proxyPort = engMeta.proxy_port || 1080;
+          const template = fs.readFileSync('/app/proxychains-iphone.conf', 'utf8');
+          fs.mkdirSync('/tmp/ozzu-bridge', { recursive: true });
+          fs.writeFileSync(confPath, template.replace('IPHONE_WG_IP', proxyMode).replace('1080', String(proxyPort)));
+          cmdToRun = `proxychains4 -q -f ${confPath} bash -s <<'PROXYCMD'\n${cmdToRun}\nPROXYCMD`;
+        }
+        const proc = spawn('bash', ['-s'], { detached: true, stdio: ['pipe', 'pipe', 'pipe'], env });
+        proc.stdin.write(cmdToRun);
         proc.stdin.end();
         let fullOutput = '';
         const entry = { proc, itemId: item.id, timeoutHandle: null, timedOut: false, flushTimer: null };

@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv libimage-exiftool-perl \
     openssh-client prusa-slicer ffmpeg \
     nmap net-tools iproute2 iputils-ping dnsutils netcat-openbsd \
-    whatweb nikto gobuster && \
+    whatweb nikto gobuster proxychains4 && \
     rm -rf /var/lib/apt/lists/*
 # SOC offense toolkit (nmap/net-tools/iproute2/iputils/dnsutils/netcat/whatweb) — the bridge is the
 # toolkit host (2026-06-23): SOC execution runs LOCAL here, routing the lab /24 via wg0 → tablet
