@@ -54,33 +54,36 @@ const DEFAULT_WAIT_TIMEOUT_SEC = 120; // 2 minutes
 // return them to the runAgentV2 loop in OpenAI format.
 const fs = require("fs");
 
-// Dead code removed (dir_1782482810131): convertAnthropicToOpenAI,
-// getSocMcpServer (MCP shim), serializeConversation (text serializer).
-// Claude now uses direct Messages API — see chatWithToolsClaude below.
+// dir_1782487298698: SDK query() + createSdkMcpServer path.
+// v2 session API (unstable_v2_createSession) tried but doesn't connect SDK MCP
+// servers (passes empty Map internally). Reverted to query() which properly
+// wires in-process MCP tools. maxTurns=10 lets Claude chain 5-7 tool calls per
+// iteration. Proven on SKYLINE-SOC-2026-046: 43 steps, 3 findings in 10 iters.
 
-// ─────────── Claude v2 session path (replaces SDK query() shim) ─────────────
-// Architecture change (dir_1782482810131): the old SDK query() path spawned a
-// fresh subprocess per iteration, serialized history to text, limited to 3
-// turns, and disabled thinking. This debuffed Opus 4.6 to ~40% capability.
-//
-// New path: unstable_v2 session API. One persistent session per engagement —
-// full conversation context maintained by the SDK subprocess across iterations.
-// Tools are registered with our dispatch() as the handler, so the SDK calls
-// our functions directly. Each chatWithToolsClaude call sends one prompt and
-// lets the SDK run until stop_sequence/end_turn, collecting all tool calls
-// and results along the way.
-//
-// Returns { message, usage } with all tool_use blocks the model made. The tool
-// results are already dispatched by the SDK handler — but we reconstruct the
-// OpenAI-format tool_calls so the main loop can track them for Mentor, phase
-// detection, and step counting.
+function convertAnthropicToOpenAI(anthropicContent) {
+  const msg = { role: "assistant", content: null, tool_calls: [] };
+  const textParts = [];
+  for (const block of (anthropicContent || [])) {
+    if (block.type === "text") textParts.push(block.text);
+    else if (block.type === "tool_use") {
+      msg.tool_calls.push({
+        id: block.id, type: "function",
+        function: { name: block.name.replace(/^mcp__soc__/, ""), arguments: JSON.stringify(block.input) },
+      });
+    }
+  }
+  msg.content = textParts.join("\n") || null;
+  if (msg.tool_calls.length === 0) delete msg.tool_calls;
+  return msg;
+}
 
-const { unstable_v2_createSession, tool: sdkTool } = require("@anthropic-ai/claude-agent-sdk");
-
-function buildSdkTools() {
-  return TOOL_SCHEMAS.map(t => {
+let _sdkMcpServer = null;
+function getSocMcpServer() {
+  if (_sdkMcpServer) return _sdkMcpServer;
+  const { createSdkMcpServer, tool: sdkTool } = require("@anthropic-ai/claude-agent-sdk");
+  const { z } = require("zod");
+  const tools = TOOL_SCHEMAS.map(t => {
     const f = t.function;
-    const { z } = require("zod");
     const inputShape = {};
     if (f.parameters && f.parameters.properties) {
       for (const [key, schema] of Object.entries(f.parameters.properties)) {
@@ -101,90 +104,88 @@ function buildSdkTools() {
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     });
   });
+  _sdkMcpServer = createSdkMcpServer({ name: "soc", tools });
+  return _sdkMcpServer;
 }
 
-// One session per engagement — reused across iterations
-const _claudeSessions = new Map();
+function serializeConversation(openaiMessages) {
+  let system = "";
+  const parts = [];
+  for (const m of openaiMessages) {
+    if (m.role === "system") { system += (system ? "\n\n" : "") + m.content; continue; }
+    if (m.role === "assistant") {
+      let text = m.content || "";
+      if (Array.isArray(m.tool_calls)) {
+        for (const tc of m.tool_calls) text += `\n[Called ${tc.function.name}]`;
+      }
+      if (text) parts.push(`ASSISTANT: ${text}`);
+      continue;
+    }
+    if (m.role === "tool") { parts.push(`TOOL_RESULT (${m.name || m.tool_call_id}): ${(m.content || "").slice(0, 3000)}`); continue; }
+    parts.push(`USER: ${m.content}`);
+  }
+  const MAX_PARTS = 30;
+  const trimmed = parts.length > MAX_PARTS ? parts.slice(-MAX_PARTS) : parts;
+  return { system, history: trimmed.join("\n\n") };
+}
 
-function getOrCreateSession(engagementId, systemPrompt, modelName) {
-  const key = engagementId;
-  if (_claudeSessions.has(key)) return _claudeSessions.get(key);
+function destroySession() {}
+
+async function chatWithToolsClaude(messages, modelName) {
+  const { query } = require("@anthropic-ai/claude-agent-sdk");
+  const server = getSocMcpServer();
+  const { system, history } = serializeConversation(messages);
+  const allowedTools = TOOL_SCHEMAS.map(t => `mcp__soc__${t.function.name}`);
   const resolvedModel = (!modelName || modelName === "claude") ? "claude-opus-4-6" : modelName;
-  const session = unstable_v2_createSession({
-    model: resolvedModel,
-    systemPrompt,
-    tools: buildSdkTools(),
-  });
-  _claudeSessions.set(key, session);
-  return session;
-}
 
-function destroySession(engagementId) {
-  const session = _claudeSessions.get(engagementId);
-  if (session) {
-    try { session.close(); } catch (_) {}
-    _claudeSessions.delete(engagementId);
-  }
-}
-
-async function chatWithToolsClaude(messages, modelName, engagementId) {
-  // Extract system prompt and the latest user/tool message to send
-  let systemPrompt = "";
-  for (const m of messages) {
-    if (m.role === "system") systemPrompt += (systemPrompt ? "\n\n" : "") + m.content;
-  }
-  // Find the last user message to send as the prompt for this turn
-  let prompt = "";
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") { prompt = messages[i].content; break; }
-  }
-  if (!prompt) prompt = "Continue the engagement. Call get_engagement_state or queue_step.";
-
-  const session = getOrCreateSession(engagementId, systemPrompt, modelName);
+  const prompt = history
+    ? `Continue the penetration testing engagement.\n\nRecent context:\n${history}\n\nDecide your next action. Chain as many tool calls as needed — queue_step, wait_for_outcome, add_finding, etc.`
+    : "Begin the engagement. Call get_engagement_state to see scope and targets, then start working.";
 
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      await session.send(prompt);
-      const allToolCalls = [];
-      let resultText = "";
-      let usage = {};
-      for await (const msg of session.stream()) {
-        if (msg.type === "assistant" && msg.message) {
-          for (const block of (msg.message.content || [])) {
-            if (block.type === "tool_use") {
-              allToolCalls.push({
-                id: block.id,
-                type: "function",
-                function: { name: block.name, arguments: JSON.stringify(block.input) },
-              });
-            }
+      const q = query({
+        prompt,
+        options: {
+          model: resolvedModel,
+          maxTurns: 10,
+          systemPrompt: system,
+          tools: [],
+          mcpServers: { soc: server },
+          allowedTools,
+          persistSession: false,
+        },
+      });
+      const allContent = [];
+      let usage = null;
+      try {
+        for await (const msg of q) {
+          if (msg.type === "assistant" && msg.message && Array.isArray(msg.message.content)) {
+            allContent.push(...msg.message.content);
+            if (msg.message.usage) usage = msg.message.usage;
           }
         }
-        if (msg.type === "result") {
-          resultText = msg.result || "";
-          usage = msg.usage || {};
-          break;
-        }
+      } catch (loopErr) {
+        const isMaxTurns = (loopErr.message || "").includes("maximum number of turns") ||
+                           (loopErr.message || "").includes("Reached maximum") ||
+                           (loopErr.message || "").includes("error result");
+        if (allContent.length === 0 && !isMaxTurns) throw loopErr;
       }
-      const parsed = { role: "assistant", content: resultText || null };
-      if (allToolCalls.length > 0) parsed.tool_calls = allToolCalls;
-      // toolsAlreadyDispatched: true — SDK handled dispatch via our handlers
-      return { message: parsed, usage, toolsAlreadyDispatched: true };
+      if (allContent.length === 0) throw new Error("Claude SDK query returned no assistant message");
+      const parsed = convertAnthropicToOpenAI(allContent);
+      return { message: parsed, usage: usage || {}, toolsAlreadyDispatched: true };
     } catch (e) {
       const errMsg = e.message || "";
       console.error(`[chatWithToolsClaude] attempt ${attempt}/${MAX_RETRIES} error:`, errMsg.slice(0, 500));
-      if (e.stack) console.error(`[chatWithToolsClaude] stack:`, e.stack.split('\n').slice(0, 3).join('\n'));
-      const isRetryable = /429|529|overloaded|rate|timeout|ETIMEDOUT|ECONNRESET/i.test(errMsg);
+      if (e.stderr) console.error(`[chatWithToolsClaude] stderr:`, String(e.stderr).slice(0, 500));
+      const isRetryable = errMsg.includes("429") || errMsg.includes("529") || errMsg.includes("overloaded") || errMsg.includes("exit");
       if (isRetryable && attempt < MAX_RETRIES) {
         const wait = 15 * attempt;
         console.log(`[chatWithToolsClaude] retrying in ${wait}s`);
         await new Promise(r => setTimeout(r, wait * 1000));
-        // Session might be broken — recreate
-        destroySession(engagementId);
         continue;
       }
-      destroySession(engagementId);
       throw e;
     }
   }

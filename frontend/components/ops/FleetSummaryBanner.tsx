@@ -41,8 +41,12 @@ function getAlerts(devices: FleetDevice[]): Alert[] {
     }
     if (t.disk?.length) {
       for (const dk of t.disk) {
-        if (dk.total_mb && dk.used_mb && (dk.used_mb / dk.total_mb) > 0.9) {
-          alerts.push({ device: d.device_id, type: "disk", label: `${d.device_id} disk ${Math.round(dk.used_mb / dk.total_mb * 100)}%`, color: YELLOW });
+        const m = dk.mount || "";
+        if (m !== "/" && m !== "/data") continue;
+        const used = dk.used_mb || (dk.used_kb ? dk.used_kb / 1024 : 0);
+        const total = dk.total_mb || (dk.size_kb ? dk.size_kb / 1024 : 0);
+        if (total > 0 && (used / total) > 0.9) {
+          alerts.push({ device: d.device_id, type: "disk", label: `${d.device_id} disk ${m} ${Math.round(used / total * 100)}%`, color: YELLOW });
         }
       }
     }

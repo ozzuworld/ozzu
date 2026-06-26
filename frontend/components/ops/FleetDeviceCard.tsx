@@ -452,10 +452,20 @@ export default function FleetDeviceCard({ device, inventory }: { device: FleetDe
               <Bar label="SWAP" value={mem.swap_total_mb - mem.swap_free_mb} max={mem.swap_total_mb} unit=" MB" warnPct={50} />
             )}
 
-            {/* Disk */}
-            {disk && disk.length > 0 && disk.map((d: any, i: number) => (
-              <Bar key={i} label={`DISK ${d.mount || d.filesystem || ""}`} value={d.used_mb || 0} max={d.total_mb || 0} unit=" MB" />
-            ))}
+            {/* Disk — filter to meaningful mounts only */}
+            {disk && disk.length > 0 && (() => {
+              const important = disk.filter((d: any) => {
+                const m = d.mount || "";
+                return m === "/" || m === "/data" || m === "/cache" || m === "/sdcard" || m === "/storage/emulated" || m.startsWith("/mnt/");
+              });
+              const show = important.length > 0 ? important : disk.slice(0, 3);
+              return show.map((d: any, i: number) => {
+                const usedMb = (d.used_mb || (d.used_kb ? d.used_kb / 1024 : 0));
+                const totalMb = (d.total_mb || (d.size_kb ? d.size_kb / 1024 : 0));
+                const label = d.mount === "/" ? "ROOTFS" : d.mount === "/data" ? "DATA" : d.mount || d.fs || "";
+                return <Bar key={i} label={`DISK ${label}`} value={usedMb} max={totalMb} unit=" MB" />;
+              });
+            })()}
 
             {/* CPU detail */}
             {cpu && (
