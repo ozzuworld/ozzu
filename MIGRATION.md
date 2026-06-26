@@ -457,7 +457,24 @@ All three should print the new IP. Until they do, your phone may still be on the
 
 **If Cloudflare token has changed:** generate new at cloudflare.com → My Profile → API Tokens → "Edit zone DNS" template → zone `ozzu.world` → save.
 
-**WireGuard clients** use static IP endpoints in their `.conf` files — update the `Endpoint` in each device's WG config to the new VM IP after DNS cutover.
+### Phase 7b — migrate the WireGuard CLIENTS (Cycle 2: this was missed)
+
+The client configs use the **hostname** `vpn.ozzu.world` (not a raw IP), so DNS already points them at the new VM — BUT `wg-quick` resolves the endpoint **once at `up` time and caches the IP**, so live clients keep tunneling to the OLD server until their WG is restarted. The new server has the **same keys**, so a restart is all it takes — no config edits.
+
+Restart each device's WG so it re-resolves (do it while they're still reachable via the old tunnel):
+```bash
+# Linux (dev-01, orangepi5): wg-quick — detach so the restart survives its own SSH drop
+ssh dev-01 'sudo nohup sh -c "sleep 2; systemctl restart wg-quick@wg0" >/dev/null 2>&1 &'
+# Windows (kazuma-pc):
+ssh kazuma-pc 'powershell -Command "Get-Service WireGuardTunnel* | Restart-Service -Force"'
+# Android wireguard-go (p610 relay, ozzu-tab) — usually no SSH/authorized-ADB: REBOOT them
+# (Magisk boot-persist re-runs WG → re-resolves) or toggle the tunnel in the WireGuard app.
+```
+**Verify every device is on the NEW server and NONE remain on the old, before Phase 9:**
+```bash
+ssh <new-vm> 'now=$(date +%s); sudo wg show wg0 latest-handshakes | awk -v n=$now "\$2>0&&(n-\$2)<180{print \$1}"'  # everyone should be here
+ssh <old-vm> 'now=$(date +%s); sudo wg show wg0 latest-handshakes | awk -v n=$now "\$2>0&&(n-\$2)<180{print \$1}"'  # should be EMPTY
+```
 
 ---
 
@@ -555,6 +572,10 @@ Old project sits idle until free credits expire (Google auto-suspends).
 21. **nginx `/` 502 is pre-existing, not a regression** — `/` proxies to the decommissioned Home Assistant (`:8123`). Health-check `/bridge/health` or `/health`, never `/`. Same for the `osint-tools DOWN` recovery email.
 
 22. **Claude session files (`/root/.claude/projects`) silently under-transfer — and weren't in the freeze re-sync.** Two compounding gaps: (a) Phase 2's `.claude` copy reported "ok" but landed the 5,680-file `-home-gcp-ozzu/` folder (109 MB of long sessions) **empty** on the new VM — rsync drops files from a live, constantly-written tree; (b) unlike the DB volumes, `/root/.claude` had no Phase-5 delta re-sync, so anything written after the Phase-2 snapshot was stranded regardless. Symptom: `claude resume` / `cipher.sh` on the new VM show **no chat history past the snapshot** (King Kazuma noticed his pre-migration chats missing). Fix baked into Phase 5: re-sync `/root/.claude/projects` after the freeze + **verify `find … -name '*.jsonl' | wc -l` matches old vs new**. Data was never lost — the old VM held the full copy.
+
+23. **Host-only tools (codegraph, etc.) aren't carried — global hooks then fail on every prompt.** The `UserPromptSubmit` hook runs `codegraph prompt-hook`, but the `codegraph` binary lives on the host (not a bridge bind-mount, not in the repo), so on the new VM every prompt errored `codegraph: not found`. Same class as the missing `cron` package. Fix: after bring-up, install the host tools the hooks/CLI reference — audit `~/.claude/settings*.json` hooks and `which` each binary they call (`codegraph`, …), install what's missing.
+
+24. **WireGuard CLIENTS don't auto-migrate after the DNS cutover** (see Phase 7b). `wg-quick` caches the resolved endpoint IP, so live peers keep hitting the OLD server until their WG is restarted. Cycle 2 left 4 devices (dev-01, kazuma-pc, p610 relay, 10.9.0.9) tunneling to the old VM post-cutover — a decommission would have cut them off. The configs are hostname-based + the server keys are identical, so restarting each device's WG re-handshakes it on the new VM instantly; verify none remain on the old server before Phase 9.
 
 **DON'T:**
 - Don't paste private SSH keys in chat. Use `gcloud compute ssh --command` to inject pubkeys instead. (Cycle 1: King Kazuma pasted `~/.ssh/google_compute_engine` private key into transcript — rotated post-migration.)
