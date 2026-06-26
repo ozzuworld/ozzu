@@ -194,6 +194,20 @@ services:
   # WebUI:   http://10.9.0.5:1984/
   # Creds in /root/.ozzu-secrets (WYZE_EMAIL/WYZE_PASSWORD/API_ID/API_KEY) for re-discovery if needed.
 
+  asterisk:
+    image: andrius/asterisk:latest
+    container_name: ozzu-asterisk
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./asterisk/conf:/etc/asterisk
+      - asterisk-data:/var/lib/asterisk
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
   certbot:
     container_name: certbot
     image: certbot/dns-cloudflare
@@ -211,3 +225,4 @@ volumes:
   face-models:
   qdrant-data:
   anisette-data:
+  asterisk-data:
