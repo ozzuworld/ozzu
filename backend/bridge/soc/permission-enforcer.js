@@ -22,10 +22,19 @@ const MODE_RANK = {
 };
 
 // Each intent_class needs at LEAST this mode to be allowed.
+// dir_1782480866296: synced with canonical intent vocabulary used by
+// autonomous-executor.js GATE_INTENTS + offense-agent-tools.js queue_step schema.
 const INTENT_MIN_MODE = {
   recon:         "recon_only",
+  enum:          "enumeration",
   enumeration:   "enumeration",
+  banner_grab:   "enumeration",
+  service_version: "enumeration",
+  tool_setup:    "enumeration",
+  cred_test:     "exploitation_auto",
+  exploit_probe: "exploitation_auto",
   exploit_test:  "exploitation_auto",
+  lateral:       "full_engagement",
   exploit_rce:   "full_engagement",
   post_exploit:  "full_engagement",
 };
@@ -88,6 +97,7 @@ const FILE_EXT_BLOCKLIST = new Set([
   "pem", "key", "crt", "cer", "p12", "pfx", "asc",
   "md", "rst", "txt", "rtf", "pdf",
   "png", "jpg", "jpeg", "gif", "svg", "ico", "webp",
+  "dat", "db", "sqlite", "sqlite3",
   "exe", "dll", "so", "dylib", "elf", "bin", "img", "iso", "deb", "rpm", "apk",
   // dir_1782331844373: nmap script extensions + misc tool extensions
   "nse", "nasl", "perf", "rc",

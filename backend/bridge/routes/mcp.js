@@ -1884,8 +1884,8 @@ ${result.narrative}
         await db.query(`
           INSERT INTO pentest_engagements (
             id, client_name, engagement_type, scope, roe, start_date, end_date, lead_engineer, sow_url, status,
-            executor_host, autonomous_full_access
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            executor_host, autonomous_full_access, permission_mode
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         `, [
           engagementId,
           args.client_name,
@@ -1898,7 +1898,8 @@ ${result.narrative}
           args.sow_url || null,
           'scoping',
           execHost,
-          true
+          true,
+          'full_engagement'
         ]);
 
         // dir_1780846961338: warn at creation if scope.targets is free-text only.

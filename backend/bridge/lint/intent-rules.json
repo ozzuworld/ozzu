@@ -30,7 +30,9 @@
         "(?i)\\bpsql\\b[^\\n]{0,200}(-W|PGPASSWORD)",
         "(?i)\\bredis-cli\\b[^\\n]{0,200}(-a\\s|--user\\s|AUTH\\b)",
         "(?i)\\bmongo(sh|dump)?\\b[^\\n]{0,200}(--password|--authenticationDatabase)",
-        "(?i)\\bsshpass\\b"
+        "(?i)\\bsshpass\\b",
+        "(?i)curl[^\\n]{0,300}<password>[^<]+</password>",
+        "(?i)curl[^\\n]{0,300}(-X\\s+PUT|--request\\s+PUT)[^\\n]{0,200}(activate|password)"
       ]
     },
     {

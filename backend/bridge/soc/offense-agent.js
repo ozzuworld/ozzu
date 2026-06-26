@@ -2037,6 +2037,14 @@ async function runAgentV2(engagementId, opts = {}) {
     }
   }
 
+  // dir_1782480866296: sweep orphaned pending items on loop exit so they don't
+  // sit forever when the loop dies (previously only ran per-iteration at top).
+  try {
+    const { reconcilePendingItems } = require("/app/soc/autonomous-executor");
+    const swept = await reconcilePendingItems(engagementId);
+    if (swept.resolved > 0) console.log(`[offense-agent-v2] exit sweep: resolved ${swept.resolved} orphaned pending items`);
+  } catch (e) { console.error(`[offense-agent-v2] exit sweep failed:`, e.message); }
+
   const finalStatus = endedByModel ? "completed"
     : (endReason && endReason.includes("operator_stopped")) ? "paused"
     : "error";

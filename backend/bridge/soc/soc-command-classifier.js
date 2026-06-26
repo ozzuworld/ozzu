@@ -20,14 +20,23 @@ const MODE_RANK = {
 };
 
 // Each intent level needs at LEAST the matching mode.
+// dir_1782480866296: added canonical names (enum, cred_test, exploit_probe, lateral)
+// alongside the originals so cross-checking with autonomous-executor works.
 const INTENT_RANK = {
-  recon:        0,
-  enumeration:  1,
-  exploit_test: 2,
-  exploit_rce:  3,
-  post_exploit: 3,
-  destructive: 99,            // always blocked, regardless of mode
-  unknown:      1,            // default conservative — treat as enumeration
+  recon:         0,
+  enum:          1,
+  enumeration:   1,
+  banner_grab:   1,
+  service_version: 1,
+  tool_setup:    1,
+  cred_test:     2,
+  exploit_probe: 2,
+  exploit_test:  2,
+  lateral:       3,
+  exploit_rce:   3,
+  post_exploit:  3,
+  destructive:  99,
+  unknown:       1,
 };
 
 // ── Command sets ──────────────────────────────────────────────────────────
@@ -68,6 +77,7 @@ const ENUMERATION_COMMANDS = new Set([
 // EXPLOIT_TEST: credential brute/spray, soft cred testing, harmless PoC scripts.
 const EXPLOIT_TEST_COMMANDS = new Set([
   "hydra", "medusa", "ncrack", "patator",
+  "sshpass",
   "crackmapexec", "cme", "nxc", "netexec",
   "kerbrute",
   "responder",                                  // can be passive but typically used in active attack chains
@@ -102,7 +112,7 @@ const EXPLOIT_RCE_COMMANDS = new Set([
 // CONTEXTUAL: same binary, different intent depending on flags. The
 // classifyByFirstToken path delegates to classifyContextual() for these.
 const CONTEXTUAL_COMMANDS = new Set(["nc", "ncat", "socat", "python", "python3", "perl", "ruby", "node",
-  "bash", "sh", "zsh"]);
+  "bash", "sh", "zsh", "ssh"]);
 
 // POST_EXPLOIT: persistence, lateral movement, credential theft on host.
 const POST_EXPLOIT_COMMANDS = new Set([
@@ -301,6 +311,13 @@ function classifyContextual(token, fullCommand) {
       return { intent: "exploit_test", matched_rule: `${token}_command_runner` };
     }
     return { intent: "exploit_test",   matched_rule: `${token}_default` };
+  }
+  // dir_1782480866296: ssh contextual — plain ssh is enumeration (banner/id check),
+  // but sshpass wrapping or -o PasswordAuthentication=yes with a password = cred_test.
+  if (token === "ssh") {
+    if (/sshpass\b/.test(cmdStr) || /-o\s*PasswordAuthentication\s*=\s*yes/.test(cmdStr))
+      return { intent: "cred_test", matched_rule: "ssh_password_auth" };
+    return { intent: "enumeration", matched_rule: "ssh_default" };
   }
   return { intent: "unknown", matched_rule: `contextual_unhandled:${token}` };
 }

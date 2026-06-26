@@ -992,20 +992,25 @@ const ORPHAN_TIMEOUT_SEC = 120; // matches OUTCOME_TIMEOUT_MS / 1000
 async function reconcilePendingItems(engagementId) {
   let resolved = 0;
   try {
+    // dir_1782480866296: only sweep pending items when autonomous_full_access=true.
+    // When false, pending items are legitimately waiting for human approval (PA taps
+    // Run in the app). The old sweep indiscriminately killed those after 120s.
     const r = await db.withBypass("reconcile_pending", (client) => client.query(
-      `UPDATE soc_queue_items
+      `UPDATE soc_queue_items q
           SET status='failed',
-              output = COALESCE(output, '') ||
-                       '[ORPHAN_RESOLVED — dir_1782243745921 Fix 3]\n' ||
+              output = COALESCE(q.output, '') ||
+                       '[ORPHAN_RESOLVED — dir_1782480866296]\n' ||
                        'Item stayed pending for >' || $2 || 's with no execution. ' ||
-                       'Likely cause: command synthesis timed out before queue_step ' ||
-                       'could call maybeAutoExecute, or run endpoint failed without ' ||
-                       'writing a terminal status. Resolved by reconciliation sweep.',
+                       'Likely cause: intent gating blocked auto-execute, or run ' ||
+                       'endpoint failed. Resolved by reconciliation sweep.',
               completed_at = NOW()
-        WHERE engagement_id = $1
-          AND status = 'pending'
-          AND created_at < NOW() - ($2 || ' seconds')::interval
-        RETURNING id`,
+        FROM pentest_engagements e
+        WHERE q.engagement_id = $1
+          AND e.id = q.engagement_id
+          AND e.autonomous_full_access = true
+          AND q.status = 'pending'
+          AND q.created_at < NOW() - ($2 || ' seconds')::interval
+        RETURNING q.id`,
       [engagementId, ORPHAN_TIMEOUT_SEC]));
     resolved = r.rows.length;
     if (resolved > 0) {
