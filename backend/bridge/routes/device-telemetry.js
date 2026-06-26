@@ -109,8 +109,13 @@ module.exports = function deviceTelemetryRoutes(ctx) {
       if (v.thermal) telemetryBlob.thermal = v.thermal;
       if (v.network) telemetryBlob.network = v.network;
       if (v.uptime_s != null) telemetryBlob.uptime_s = v.uptime_s;
-      if (body.system) telemetryBlob.system = body.system;
-      if (body.inventory_data) telemetryBlob.inventory_data = body.inventory_data;
+      // Flatten medium-tier (system) and slow-tier (inventory_data) into top-level
+      if (body.system && typeof body.system === "object") {
+        for (const [k, val] of Object.entries(body.system)) telemetryBlob[k] = val;
+      }
+      if (body.inventory_data && typeof body.inventory_data === "object") {
+        for (const [k, val] of Object.entries(body.inventory_data)) telemetryBlob[k] = val;
+      }
       telemetryBlob._collected_at = new Date().toISOString();
 
       await db.updateDeviceTelemetry(deviceId, telemetryBlob);

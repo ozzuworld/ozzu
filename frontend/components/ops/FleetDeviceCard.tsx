@@ -2,7 +2,7 @@ import { View, Text, Pressable } from "react-native";
 import { useState } from "react";
 import { colors } from "../../lib/design-tokens";
 import { formatBytes, formatRelativeTime } from "../../lib/format";
-import type { FleetDevice } from "../../lib/fleet-hooks";
+import type { FleetDevice, DeviceInventory } from "../../lib/fleet-hooks";
 
 const ACCENT = colors.accent;
 const GREEN = colors.success;
@@ -180,7 +180,172 @@ function formatUptime(seconds: number): string {
   return `${m}m`;
 }
 
-export default function FleetDeviceCard({ device }: { device: FleetDevice }) {
+function IdentitySection({ inv }: { inv: DeviceInventory }) {
+  const hw = inv.hardware || {};
+  const os = inv.os || {};
+  const sec = inv.security || {};
+  return (
+    <View style={{ marginBottom: 10 }}>
+      <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: colors.text.tertiary, letterSpacing: 1, marginBottom: 6 }}>
+        DEVICE IDENTITY
+      </Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
+        {hw.model && <Pill label="MODEL" value={hw.model} />}
+        {hw.manufacturer && <Pill label="MFG" value={hw.manufacturer} />}
+        {hw.serial && <Pill label="SERIAL" value={hw.serial} />}
+        {hw.cpu_cores && <Pill label="CORES" value={`${hw.cpu_cores}`} />}
+        {hw.cpu_abi && <Pill label="ABI" value={hw.cpu_abi} />}
+        {os.version && <Pill label="OS" value={os.version} />}
+        {os.sdk && <Pill label="SDK" value={`${os.sdk}`} />}
+        {os.kernel && <Pill label="KERNEL" value={os.kernel.split("-")[0]} />}
+        {os.security_patch && <Pill label="PATCH" value={os.security_patch} />}
+      </View>
+      {/* Security posture */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+        {sec.selinux && (
+          <View style={{ backgroundColor: sec.selinux === "Enforcing" ? `${GREEN}15` : `${YELLOW}15`, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+            <Text style={{ fontFamily: "monospace", fontSize: 8, fontWeight: "700", color: sec.selinux === "Enforcing" ? GREEN : YELLOW }}>
+              SE:{sec.selinux.toUpperCase()}
+            </Text>
+          </View>
+        )}
+        {sec.encryption && (
+          <View style={{ backgroundColor: sec.encryption.includes("encrypted") ? `${GREEN}15` : `${RED}15`, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+            <Text style={{ fontFamily: "monospace", fontSize: 8, fontWeight: "700", color: sec.encryption.includes("encrypted") ? GREEN : RED }}>
+              {sec.encryption.includes("encrypted") ? "ENCRYPTED" : "UNENCRYPTED"}
+            </Text>
+          </View>
+        )}
+        {sec.magisk_version && (
+          <View style={{ backgroundColor: `${ACCENT}15`, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+            <Text style={{ fontFamily: "monospace", fontSize: 8, fontWeight: "700", color: ACCENT }}>
+              MAGISK {sec.magisk_version}
+            </Text>
+          </View>
+        )}
+      </View>
+      {/* Magisk modules */}
+      {sec.magisk_modules && sec.magisk_modules.length > 0 && (
+        <View style={{ marginTop: 6 }}>
+          <Text style={{ fontFamily: "monospace", fontSize: 8, color: colors.text.disabled, letterSpacing: 1, marginBottom: 3 }}>
+            MODULES ({sec.magisk_modules.length})
+          </Text>
+          {sec.magisk_modules.map((m: any, i: number) => (
+            <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 1 }}>
+              <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: m.disabled ? colors.text.disabled : GREEN }} />
+              <Text style={{ fontFamily: "monospace", fontSize: 9, color: m.disabled ? colors.text.disabled : colors.text.secondary }}>
+                {m.name || m.id}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {/* Screen + sensors */}
+      {hw.screen && (
+        <Text style={{ fontFamily: "monospace", fontSize: 8, color: colors.text.disabled, marginTop: 4 }}>
+          Screen: {hw.screen}
+        </Text>
+      )}
+      {hw.sensors && hw.sensors.length > 0 && (
+        <Text style={{ fontFamily: "monospace", fontSize: 8, color: colors.text.disabled, marginTop: 2 }}>
+          Sensors: {hw.sensors.join(", ")}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+function ProcessesSection({ processes }: { processes: any }) {
+  if (!processes) return null;
+  const top = processes.top_cpu || [];
+  return (
+    <View style={{ marginTop: 10 }}>
+      <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: colors.text.tertiary, letterSpacing: 1, marginBottom: 4 }}>
+        PROCESSES ({processes.count ?? "?"})
+      </Text>
+      {top.length > 0 && top.map((p: any, i: number) => (
+        <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 }}>
+          <Text style={{ fontFamily: "monospace", fontSize: 9, color: colors.text.secondary, flex: 1 }} numberOfLines={1}>
+            {p.name || p.cmd}
+          </Text>
+          <Text style={{ fontFamily: "monospace", fontSize: 8, fontWeight: "700", color: p.cpu_pct > 50 ? RED : p.cpu_pct > 20 ? YELLOW : colors.text.disabled }}>
+            {p.cpu_pct != null ? `${p.cpu_pct}%` : ""}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function ConnectionsSection({ connections }: { connections: any }) {
+  if (!connections) return null;
+  const listening = connections.listening || [];
+  return (
+    <View style={{ marginTop: 10 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+        <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: colors.text.tertiary, letterSpacing: 1 }}>
+          CONNECTIONS
+        </Text>
+        {connections.established_count != null && (
+          <Text style={{ fontFamily: "monospace", fontSize: 8, color: colors.text.disabled }}>
+            {connections.established_count} established
+          </Text>
+        )}
+      </View>
+      {listening.length > 0 && (
+        <>
+          <Text style={{ fontFamily: "monospace", fontSize: 8, color: colors.text.disabled, marginBottom: 2 }}>
+            LISTENING PORTS
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+            {listening.map((l: any, i: number) => (
+              <View key={i} style={{ backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                <Text style={{ fontFamily: "monospace", fontSize: 8, color: ACCENT }}>
+                  :{l.port}{l.proto ? `/${l.proto}` : ""}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
+function UsbSection({ usb }: { usb: any[] }) {
+  if (!usb || usb.length === 0) return null;
+  return (
+    <View style={{ marginTop: 10 }}>
+      <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: colors.text.tertiary, letterSpacing: 1, marginBottom: 4 }}>
+        USB DEVICES ({usb.length})
+      </Text>
+      {usb.map((d: any, i: number) => (
+        <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2 }}>
+          <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: GREEN }} />
+          <Text style={{ fontFamily: "monospace", fontSize: 9, color: colors.text.secondary }} numberOfLines={1}>
+            {d.product || d.name || `${d.vendor_id}:${d.product_id}`}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function PackagesSection({ packages }: { packages: any }) {
+  if (!packages) return null;
+  return (
+    <View style={{ marginTop: 10 }}>
+      <Text style={{ fontFamily: "monospace", fontSize: 9, fontWeight: "700", color: colors.text.tertiary, letterSpacing: 1, marginBottom: 2 }}>
+        PACKAGES
+      </Text>
+      <Text style={{ fontFamily: "monospace", fontSize: 10, color: colors.text.secondary }}>
+        {packages.count ?? packages.total ?? "?"} installed
+      </Text>
+    </View>
+  );
+}
+
+export default function FleetDeviceCard({ device, inventory }: { device: FleetDevice; inventory?: DeviceInventory | null }) {
   const [expanded, setExpanded] = useState(false);
   const t = device.telemetry || {};
   const meta = DEVICE_META[device.device_id] || { emoji: "📦", label: device.device_id.toUpperCase(), color: colors.text.tertiary };
@@ -196,6 +361,10 @@ export default function FleetDeviceCard({ device }: { device: FleetDevice }) {
   const wifi = net?.wifi;
   const wifiScan = t.wifi_scan;
   const disk = t.disk;
+  const processes = t.processes;
+  const connections = t.connections;
+  const usb = t.usb;
+  const packages = t.packages;
 
   return (
     <Pressable
@@ -334,9 +503,16 @@ export default function FleetDeviceCard({ device }: { device: FleetDevice }) {
               </View>
             )}
 
+            {/* Device identity */}
+            {inventory && <IdentitySection inv={inventory} />}
+
             <ThermalRow zones={thermal} />
             <WifiSection wifi={wifi} scan={wifiScan} />
             <TrafficRow traffic={net?.traffic} />
+            <ProcessesSection processes={processes} />
+            <ConnectionsSection connections={connections} />
+            <UsbSection usb={usb} />
+            <PackagesSection packages={packages} />
 
             {/* IPs */}
             <View style={{ marginTop: 10 }}>

@@ -19,6 +19,7 @@ import GcpCard from "../../components/ops/GcpCard";
 import RouterCard from "../../components/ops/RouterCard";
 import PositioningCard from "../../components/ops/PositioningCard";
 import FleetDeviceCard from "../../components/ops/FleetDeviceCard";
+import FleetSummaryBanner from "../../components/ops/FleetSummaryBanner";
 import { GroupNav } from "../../components/GroupNav";
 import { TopBar } from "../../components/TopBar";
 import { useFleetDevices } from "../../lib/fleet-hooks";
@@ -35,7 +36,7 @@ export default function OpsScreen() {
   const { services, loading: svcLoading, lastUpdate, forceCheck } = useOpsStatus();
   const { incidents, loading: incidentsLoading, refresh: refreshIncidents } = useOpsIncidents(20);
   const { state: infra, loading: infraLoading, refresh: refreshInfra } = useInfraState();
-  const { devices: fleetDevices, loading: fleetLoading, refresh: refreshFleet } = useFleetDevices();
+  const { devices: fleetDevices, inventory: fleetInventory, loading: fleetLoading, refresh: refreshFleet } = useFleetDevices();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -141,9 +142,12 @@ export default function OpsScreen() {
                   </Text>
                 </View>
               ) : (
-                fleetDevices.map((dev) => (
-                  <FleetDeviceCard key={dev.device_id} device={dev} />
-                ))
+                <>
+                  <FleetSummaryBanner devices={fleetDevices} inventory={fleetInventory} />
+                  {fleetDevices.map((dev) => (
+                    <FleetDeviceCard key={dev.device_id} device={dev} inventory={fleetInventory[dev.device_id] || null} />
+                  ))}
+                </>
               )}
             </>
           ) : activeTab === "infra" ? (

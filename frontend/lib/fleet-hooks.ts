@@ -58,20 +58,36 @@ export interface DeviceTelemetryDetail {
 
 const POLL_INTERVAL = 15000;
 
+export interface FleetState {
+  devices: FleetDevice[];
+  inventory: Record<string, DeviceInventory>;
+}
+
 export function useFleetDevices() {
   const [devices, setDevices] = useState<FleetDevice[]>([]);
+  const [inventory, setInventory] = useState<Record<string, DeviceInventory>>({});
   const [loading, setLoading] = useState(true);
   const mountedRef = useRef(true);
 
   const fetch_ = useCallback(async () => {
     try {
-      const res = await fetch(`${getBridgeUrl()}/infra/heartbeats`, {
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const base = getBridgeUrl();
+      const hdrs = getAuthHeaders();
+      const [hbRes, invRes] = await Promise.all([
+        fetch(`${base}/infra/heartbeats`, { headers: hdrs }),
+        fetch(`${base}/infra/inventory`, { headers: hdrs }),
+      ]);
       if (!mountedRef.current) return;
-      setDevices(data.devices || []);
+      if (hbRes.ok) {
+        const hb = await hbRes.json();
+        setDevices(hb.devices || []);
+      }
+      if (invRes.ok) {
+        const inv = await invRes.json();
+        const map: Record<string, DeviceInventory> = {};
+        for (const d of (inv.devices || [])) map[d.device_id] = d;
+        setInventory(map);
+      }
       setLoading(false);
     } catch {
       if (mountedRef.current) setLoading(false);
@@ -86,7 +102,7 @@ export function useFleetDevices() {
   }, [fetch_]);
 
   const refresh = useCallback(() => fetch_(), [fetch_]);
-  return { devices, loading, refresh };
+  return { devices, inventory, loading, refresh };
 }
 
 export function useDeviceTelemetry(deviceId: string | null) {
