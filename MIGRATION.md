@@ -326,6 +326,14 @@ for V in backend_postgres-data backend_redis-data backend_face-models backend_le
   sudo rsync -a --delete --rsync-path="sudo rsync" -e "ssh $SSH_OPTS" \
     /var/lib/docker/volumes/$V/_data/ $DEST:/var/lib/docker/volumes/$V/_data/
 done
+
+# CRITICAL (Cycle 2): also re-sync the Claude SESSION FILES — they live in NO docker volume.
+# Phase 2's copy under-transfers the big live `-home-gcp-ozzu/` folder SILENTLY (reports "ok",
+# lands empty) → `claude resume` / cipher.sh on the new VM show no chat history. Sessions are
+# frozen now, so this is consistent. Then VERIFY the counts match.
+sudo rsync -a --rsync-path="sudo rsync" -e "ssh $SSH_OPTS" /root/.claude/projects/ $DEST:/root/.claude/projects/
+echo "old sessions: $(sudo find /root/.claude/projects -name '*.jsonl' | wc -l)"
+ssh $SSH_OPTS $DEST "echo new sessions: \$(sudo find /root/.claude/projects -name '*.jsonl' | wc -l)"   # MUST match
 ```
 
 **Phase 5b — get the images onto the new VM (now that qdrant rsync is done).** Stock images: pull.
@@ -545,6 +553,8 @@ Old project sits idle until free credits expire (Google auto-suspends).
 20. **The repo is root-owned on the new VM** (Phase 2f chown) → the login user gets `cd: Permission denied`; every `docker compose` must run as root (`sudo bash -c "cd … && …"`). Services run as root anyway. (Phase 6b.)
 
 21. **nginx `/` 502 is pre-existing, not a regression** — `/` proxies to the decommissioned Home Assistant (`:8123`). Health-check `/bridge/health` or `/health`, never `/`. Same for the `osint-tools DOWN` recovery email.
+
+22. **Claude session files (`/root/.claude/projects`) silently under-transfer — and weren't in the freeze re-sync.** Two compounding gaps: (a) Phase 2's `.claude` copy reported "ok" but landed the 5,680-file `-home-gcp-ozzu/` folder (109 MB of long sessions) **empty** on the new VM — rsync drops files from a live, constantly-written tree; (b) unlike the DB volumes, `/root/.claude` had no Phase-5 delta re-sync, so anything written after the Phase-2 snapshot was stranded regardless. Symptom: `claude resume` / `cipher.sh` on the new VM show **no chat history past the snapshot** (King Kazuma noticed his pre-migration chats missing). Fix baked into Phase 5: re-sync `/root/.claude/projects` after the freeze + **verify `find … -name '*.jsonl' | wc -l` matches old vs new**. Data was never lost — the old VM held the full copy.
 
 **DON'T:**
 - Don't paste private SSH keys in chat. Use `gcloud compute ssh --command` to inject pubkeys instead. (Cycle 1: King Kazuma pasted `~/.ssh/google_compute_engine` private key into transcript — rotated post-migration.)
