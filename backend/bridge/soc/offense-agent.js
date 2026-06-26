@@ -1750,19 +1750,33 @@ async function runAgentV2(engagementId, opts = {}) {
     // compensates for the model losing track of state across many iterations.
     if (stepsQueued > 0 && stepsQueued % STATE_INJECT_INTERVAL === 0) {
       try {
-        const [findingsQ, hostsQ, recentQ] = await Promise.all([
-          db.query(`SELECT title, severity, affected_asset FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]),
+        const [findingsQ, hostsQ, recentQ, perHostQ] = await Promise.all([
+          db.query(`SELECT title, severity, kind, status, affected_asset FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [engagementId]),
           db.query(`SELECT ip, hostname, status, ports FROM recon_hosts WHERE engagement_id = $1 ORDER BY ip`, [engagementId]),
           db.query(`SELECT title, status FROM soc_queue_items WHERE engagement_id = $1 ORDER BY seq DESC LIMIT 10`, [engagementId]),
+          db.query(
+            `WITH hs AS (
+              SELECT (regexp_matches(command, '(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})'))[1] AS ip,
+                     intent_class, status
+              FROM soc_queue_items WHERE engagement_id = $1 AND command IS NOT NULL
+            )
+            SELECT ip, count(*) AS n,
+                   count(*) FILTER (WHERE status='done') AS ok,
+                   count(*) FILTER (WHERE status='failed') AS fail,
+                   array_agg(DISTINCT intent_class) FILTER (WHERE intent_class IS NOT NULL) AS intents
+            FROM hs WHERE ip IS NOT NULL GROUP BY ip ORDER BY n DESC`, [engagementId])
+            .catch(() => ({ rows: [] })),
         ]);
         const findingCount = findingsQ.rows.length;
         const hostCount = hostsQ.rows.length;
         const hostSummary = hostsQ.rows.map(h => {
           const portStr = h.ports ? (Array.isArray(h.ports) ? h.ports.map(p => p.port || p).join(",") : String(h.ports).slice(0, 80)) : "?";
-          return `  ${h.ip}${h.hostname ? ` (${h.hostname})` : ""}: ports ${portStr}`;
+          const workDone = (perHostQ.rows || []).find(w => w.ip === h.ip);
+          const workStr = workDone ? ` [${workDone.n} steps: ${(workDone.intents || []).join(",")}${workDone.fail > 0 ? `, ${workDone.fail} failed` : ""}]` : "";
+          return `  ${h.ip}${h.hostname ? ` (${h.hostname})` : ""}: ports ${portStr}${workStr}`;
         }).join("\n") || "  (none in recon_hosts)";
         const findingSummary = findingsQ.rows.map(f =>
-          `  [${f.severity}] ${f.title} — ${f.affected_asset}`
+          `  [${f.severity}/${f.kind || "?"}/${f.status || "open"}] ${f.title} — ${f.affected_asset}`
         ).join("\n") || "  ⚠ NONE RECORDED — you MUST call add_finding for discoveries";
         const recentSteps = recentQ.rows.map(r => `  [${r.status}] ${r.title}`).join("\n");
         // Detect services from recent steps to nudge playbook lookup
@@ -1823,11 +1837,20 @@ async function runAgentV2(engagementId, opts = {}) {
           }
         }
 
+        // Build work-per-host overview for hosts NOT in recon_hosts (IPs from commands only)
+        const extraHosts = (perHostQ.rows || []).filter(w =>
+          !hostsQ.rows.some(h => h.ip === w.ip)
+        );
+        const extraHostSummary = extraHosts.length > 0
+          ? extraHosts.map(w => `  ${w.ip}: ${w.n} steps [${(w.intents || []).join(",")}]`).join("\n")
+          : "";
+
         const stateMsg = [
           `[STATE CHECK — ${stepsQueued} steps completed, phase: ${phase}]`,
           ``,
           `DISCOVERED HOSTS (${hostCount}):`,
           hostSummary,
+          extraHostSummary ? `\nADDITIONAL TARGETS (from commands, not in recon_hosts):\n${extraHostSummary}` : "",
           ``,
           `RECORDED FINDINGS (${findingCount}):`,
           findingSummary,

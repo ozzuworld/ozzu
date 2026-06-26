@@ -90,9 +90,11 @@ async function getEngagementState(args) {
             executor_host, executor_adb_target, executor_tools, executor_tools_probed_at
        FROM pentest_engagements WHERE id = $1`, [id]);
   if (eng.rows.length === 0) return { error: `engagement ${id} not found` };
-  const [hosts, findings, queue, notes, observations] = await Promise.all([
+  const [hosts, findings, queue, notes, observations, perHostWork] = await Promise.all([
     db.query(`SELECT ip, hostname, status, ports FROM recon_hosts WHERE engagement_id = $1 ORDER BY ip`, [id]),
-    db.query(`SELECT title, severity, status, affected_asset, affected_assets, refs
+    db.query(`SELECT title, severity, status, kind, affected_asset, affected_assets, refs,
+                    LEFT(COALESCE(description, ''), 500) AS description_preview,
+                    LEFT(COALESCE(evidence_summary, ''), 500) AS evidence_preview
                 FROM pentest_findings WHERE engagement_id = $1 ORDER BY discovered_at`, [id]),
     db.query(
       `SELECT seq, title, status,
@@ -106,6 +108,29 @@ async function getEngagementState(args) {
     db.query(`SELECT key, content, updated_at FROM engagement_notes WHERE engagement_id = $1 ORDER BY updated_at`, [id])
       .catch(() => ({ rows: [] })),
     db.query(`SELECT id, question, context, response, status FROM engagement_observations WHERE engagement_id = $1 ORDER BY created_at`, [id])
+      .catch(() => ({ rows: [] })),
+    // Per-host work summary: what was tried on each target IP, grouped by host.
+    // Extracts IPs from commands, counts steps per host, tracks outcomes.
+    db.query(
+      `WITH host_steps AS (
+        SELECT
+          (regexp_matches(command, '(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})'))[1] AS target_ip,
+          title, status, intent_class,
+          LEFT(COALESCE(output, ''), 300) AS output_snippet
+        FROM soc_queue_items
+        WHERE engagement_id = $1
+          AND command IS NOT NULL
+      )
+      SELECT target_ip,
+             count(*) AS total_steps,
+             count(*) FILTER (WHERE status = 'done') AS done,
+             count(*) FILTER (WHERE status = 'failed') AS failed,
+             array_agg(DISTINCT intent_class) FILTER (WHERE intent_class IS NOT NULL) AS intents,
+             array_agg(title ORDER BY title) AS step_titles
+      FROM host_steps
+      WHERE target_ip IS NOT NULL
+      GROUP BY target_ip
+      ORDER BY total_steps DESC`, [id])
       .catch(() => ({ rows: [] })),
   ]);
   // dir_1782345318729: ALWAYS override executor_tools with bridge ground truth.
@@ -145,11 +170,22 @@ async function getEngagementState(args) {
     scope.prohibited.push("10.9.0.10 (WireGuard relay — own infrastructure, do not attack)");
     engRow.scope = scope;
   }
+  // Build per-host work summary — tells the model what it already tried on each IP
+  const hostWork = (perHostWork.rows || []).map(h => ({
+    ip: h.target_ip,
+    steps_total: parseInt(h.total_steps),
+    steps_done: parseInt(h.done),
+    steps_failed: parseInt(h.failed),
+    intents_tried: h.intents || [],
+    steps: (h.step_titles || []).slice(0, 15),
+  }));
+
   return {
     engagement: engRow,
     hosts: hosts.rows,
     findings: findings.rows,
     queue_history: queue.rows,
+    per_host_summary: hostWork.length > 0 ? hostWork : undefined,
     executor_identity: getBridgeNetworkIdentity(),
     working_notes: notes.rows.length > 0 ? notes.rows : undefined,
     observations: observations.rows.length > 0 ? observations.rows : undefined,
