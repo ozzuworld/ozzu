@@ -1875,10 +1875,17 @@ ${result.narrative}
         const timestamp = Date.now();
         const engagementId = `SKYLINE-SOC-${new Date().getFullYear()}-${String(timestamp).slice(-3)}`;
 
+        // Derive executor_host from scope.target_networks (matches frontend wizard behavior).
+        // dev-01 is OUT of the offense pipeline — executor is always local on the bridge;
+        // executor_host names the relay/doorway, not an ssh target.
+        const nets = (args.scope && args.scope.target_networks) || [];
+        const execHost = nets.length > 0 ? (nets[0].reachable_via || null) : null;
+
         await db.query(`
           INSERT INTO pentest_engagements (
-            id, client_name, engagement_type, scope, roe, start_date, end_date, lead_engineer, sow_url, status
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            id, client_name, engagement_type, scope, roe, start_date, end_date, lead_engineer, sow_url, status,
+            executor_host, autonomous_full_access
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         `, [
           engagementId,
           args.client_name,
@@ -1889,7 +1896,9 @@ ${result.narrative}
           args.end_date || null,
           args.lead_engineer || null,
           args.sow_url || null,
-          'scoping'
+          'scoping',
+          execHost,
+          true
         ]);
 
         // dir_1780846961338: warn at creation if scope.targets is free-text only.
