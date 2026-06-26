@@ -40,6 +40,7 @@ Roughly **15 min of King Kazuma's hands-on time, ~60 min of Cipher background wo
 | Cycle | Date | Source project | Target project | Wall-clock | Downtime | Manual steps | New failures discovered |
 |---|---|---|---|---|---|---|---|
 | 1 | 2026-04-24 | project-14e4bf6c | project-80de6b4a | ~3h | ~50 min* | ~25 | 9 (see below) |
+| 2 | 2026-06-26 | project-80de6b4a | project-2f3f9831 | in progress | TBD | 1 (IAM grant) | 4 (WG era, SA scopes, host units, console quirks) |
 
 *Downtime was inflated by qdrant slow-load + firewall-rules-not-created-at-create-time. Cycle 2 should hit the ~5-10 min target.
 
@@ -63,8 +64,8 @@ Per-cycle details in `migrations/<date>/metrics.json`.
 
 | Resource | Value | Why |
 |---|---|---|
-| Machine type | `e2-standard-4` | 4 vCPU / 16 GB. Handles all services. e2-standard-8 busts $300/90d budget. |
-| Disk | 250 GB pd-balanced | Holds 113 GB qdrant + ~70 GB misc + 30% buffer. pd-ssd busts budget. |
+| Machine type | `e2-standard-4` | 4 vCPU / 16 GB. Handles all services — live usage is only ~5 GB RAM, so don't be tempted to bump it. e2-standard-8 ~doubles compute and busts $300/90d (credit dry in ~7 wk). |
+| Disk | 250 GB pd-balanced | Holds the ~125 GB qdrant + ~15 GB repo + misc + buffer. pd-ssd busts budget. |
 | Zone | `us-central1-a` | Cheapest tier ($0.134/h for e2-standard-4) + matches historical region |
 | Image | `ubuntu-2404-lts-amd64` | LTS, current. Fallback: `ubuntu-2204-lts`. |
 | Static IP | Reserve first, attach to VM | Keeps Cloudflare DNS target stable. |
@@ -99,10 +100,13 @@ gcloud compute addresses create ozzu-static-ip --region=us-central1
 IP=$(gcloud compute addresses describe ozzu-static-ip --region=us-central1 --format='value(address)')
 
 # Create VM (single line — Cloud Shell mangles backslash continuations)
-gcloud compute instances create ozzu-vm --zone=us-central1-a --machine-type=e2-standard-4 --image-family=ubuntu-2404-lts-amd64 --image-project=ubuntu-os-cloud --boot-disk-size=250GB --boot-disk-type=pd-balanced --address="$IP" --tags=ozzu-vm,http-server,https-server --metadata=enable-oslogin=FALSE
+# --scopes=cloud-platform is REQUIRED so Cipher can run gcloud (firewall/IP/snapshots)
+# from inside the VM — without it every write fails "insufficient authentication scopes".
+gcloud compute instances create ozzu-vm --zone=us-central1-a --machine-type=e2-standard-4 --image-family=ubuntu-2404-lts-amd64 --image-project=ubuntu-os-cloud --boot-disk-size=250GB --boot-disk-type=pd-balanced --address="$IP" --tags=ozzu-vm,http-server,https-server --scopes=https://www.googleapis.com/auth/cloud-platform --metadata=enable-oslogin=FALSE
 
-# Open ALL the ports Ozzu needs (single rule — match the old project)
-gcloud compute firewall-rules create allow-ozzu-public --allow=tcp:80,tcp:443,tcp:3333,tcp:6333,tcp:6969,udp:1194 --source-ranges=0.0.0.0/0 --target-tags=ozzu-vm
+# Ports: 80/443 public + WireGuard udp:51820. (Dead OpenVPN udp:1194 dropped; qdrant 6333 /
+# anisette 6969 / bridge 3333 are NOT public — nginx-proxied or closed since 2026-05-17.)
+gcloud compute firewall-rules create allow-ozzu-public --allow=tcp:80,tcp:443,udp:51820 --source-ranges=0.0.0.0/0 --target-tags=ozzu-vm
 
 # Inject Cipher's pubkey via gcloud compute ssh (works regardless of OS Login state — uses Google's signed-SSH path)
 gcloud compute ssh ozzu-vm --zone=us-central1-a --command="echo '$CIPHER_PUBKEY' >> ~/.ssh/authorized_keys && echo NEW_VM_USER=\$(whoami) NEW_VM_IP=$IP"
@@ -113,7 +117,8 @@ gcloud compute ssh ozzu-vm --zone=us-central1-a --command="echo '$CIPHER_PUBKEY'
 **Why each piece matters (lessons from cycle 1):**
 
 - `enable-oslogin=FALSE` at **project level** — without this, instance-level metadata is ignored and metadata SSH keys silently don't work. Cycle 1 cost: 15 min debugging.
-- **Single firewall rule with all ports** — new GCP projects in 2026 don't auto-create `default-allow-http`/`default-allow-https` rules even with `http-server`/`https-server` tags. Cycle 1 cost: 20 min of "why is everything timing out".
+- **Firewall ports (updated 2026-06-26):** `tcp:80,tcp:443,udp:51820`. **WireGuard is udp:51820** — the OpenVPN-era doc opened the dead `udp:1194` and forgot WG entirely, which would cut off SSH + the whole SOC path at cutover. qdrant `6333` / anisette `6969` / bridge `3333` are NOT public (nginx-proxied or closed since 2026-05-17). New GCP projects still don't auto-create http/https rules even with the tags, so this explicit rule is required. Cycle 1 cost: 20 min of "why is everything timing out".
+- **`--scopes=cloud-platform` on the VM (added 2026-06-26):** without it the VM's service account is read-only and *every* `gcloud compute` write from inside the VM fails "insufficient authentication scopes" — Cipher can't manage the project autonomously. Console equivalent: "Allow full access to all Cloud APIs". If you forget it on a console-created VM, see **Autonomy / GCP access** below for the no-restart fix.
 - **`gcloud compute ssh --command` to inject pubkey** — bypasses the metadata-SSH-keys vs OS-Login fight entirely. Works first try every time.
 - **Single-line VM create command** — Cloud Shell's web terminal turns backslash-continuation pastes into separate commands.
 
@@ -121,6 +126,37 @@ gcloud compute ssh ozzu-vm --zone=us-central1-a --command="echo '$CIPHER_PUBKEY'
 ```bash
 ssh -i /root/.ssh/ozzu_migration <NEW_VM_USER>@<NEW_VM_IP> "echo OK"
 ```
+
+---
+
+## Autonomy / GCP access — Cipher must be able to manage the new project
+
+For Cipher to do the project-level work (firewall, static IP, snapshots, decommission)
+**autonomously**, it needs an identity with both (a) the `cloud-platform` **scope** and (b) an
+IAM **role** (editor) on the new project.
+
+**The clean way (do this):** create the VM with `--scopes=cloud-platform` (baked into Phase 0 +
+the bootstrap script). The fresh project's default compute SA already has `roles/editor`, so
+Cipher runs `gcloud` from inside the new VM with full power. Zero extra steps.
+
+**If the VM was created without it** (e.g. console without "Allow full access to all Cloud APIs"):
+the VM's SA is read-only and every `gcloud compute` write fails *"insufficient authentication
+scopes."* Two fixes:
+
+- **No-restart fix (used in Cycle 2):** grant the **old** VM's SA editor on the new project — one
+  Cloud Shell command, no VM restart, no interruption to the running transfer. Cipher already has
+  `cloud-platform` scope on the old VM, so it then drives the new project from the old VM:
+  ```bash
+  # In the NEW project's Cloud Shell:
+  gcloud projects add-iam-policy-binding <NEW_PROJECT_ID> \
+    --member="serviceAccount:<OLD_VM_SA_EMAIL>" --role="roles/editor"
+  # Then from the OLD VM:  gcloud --project=<NEW_PROJECT_ID> compute firewall-rules create ...
+  ```
+  (`<OLD_VM_SA_EMAIL>` = the old VM's `gcloud config get-value account`, e.g.
+  `<PROJECT_NUMBER>-compute@developer.gserviceaccount.com`.)
+- **Restart fix (for the new VM's *own* long-term autonomy):** once it's prod, do a one-time
+  `stop → set-service-account --scopes=cloud-platform → start`. Reserve the static IP first so the
+  IP survives the restart. Defer to a post-cutover window — it interrupts whatever's running.
 
 ---
 
@@ -134,26 +170,36 @@ SSH="ssh -i /root/.ssh/ozzu_migration -o StrictHostKeyChecking=accept-new <NEW_V
 $SSH "bash -s" <<'REMOTE'
 set -e
 sudo apt-get update -qq
+# wireguard/wireguard-tools: REQUIRED — the bridge VM is the WireGuard server (host wg0).
+# The OpenVPN-era doc omitted this; WG would be dead on the new VM without it.
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq \
-  ca-certificates curl gnupg rsync git htop tmux jq openssl \
-  android-tools-adb gh
+  ca-certificates curl gnupg wget rsync git htop tmux jq openssl \
+  android-tools-adb wireguard wireguard-tools
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER
 sudo systemctl enable --now docker
 sudo apt-get install -yq docker-compose-plugin
-docker --version && docker compose version && adb --version | head -1 && gh --version | head -1
+# gh (GitHub CLI) is NOT in Ubuntu main — bare `apt install gh` fails. Use the official repo:
+sudo mkdir -p -m 755 /etc/apt/keyrings
+wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+sudo apt-get update -qq && sudo apt-get install -yq gh
+docker --version && docker compose version && adb --version | head -1 && gh --version | head -1 && wg --version | head -1
 REMOTE
 ```
 
 **`android-tools-adb` is critical** — bridge container bind-mounts `/usr/bin/adb`. Without it, docker auto-creates an empty directory at the mount source, then container start fails with "not a directory". Cycle 1 cost: 5 min.
 
-**`gh` CLI** is mounted into bridge container too (`/usr/bin/gh`).
+**`gh` CLI** is mounted into bridge container too (`/usr/bin/gh`). Installed from GitHub's official apt repo (above) — it is **not** in Ubuntu main, so bare `apt install gh` fails.
+
+**`wireguard`/`wireguard-tools`** — the bridge VM is the WireGuard **server** (host `wg0`, `wg-quick@wg0`), not just a peer. Server config (`/etc/wireguard/`) is carried in Phase 2; the tunnel is enabled in Phase 6.
 
 ---
 
 ## Phase 2 — Code + memory + cron + bridge bind-mounts
 
-**Owner: Cipher. Duration: ~3 min. Transfers ~7 GB.**
+**Owner: Cipher. Duration: ~5-15 min. Transfers ~15 GB** (the repo grew — `.git` + `private/` reference clones, many small files). **Run this BACKGROUNDED** — it exceeds the 10-min foreground command limit; rsync is resumable, so a re-run just finishes the delta.
 
 Bridge container bind-mounts a bunch of host paths. Easy to miss them — if any are absent on the new VM, container fails to start.
 
@@ -180,11 +226,25 @@ sudo rsync -az --rsync-path="sudo rsync" -e "ssh $SSH_OPTS" \
   /root/.claude/ $DEST:/root/.claude/
 
 # 2d — bridge bind-mount paths (DON'T SKIP — bridge container fails without these)
-for p in /root/.claude.json /root/.gitconfig /root/.bashrc; do
+for p in /root/.claude.json /root/.gitconfig /root/.bashrc /root/.wandb_key; do
   sudo rsync -az --rsync-path="sudo rsync" -e "ssh $SSH_OPTS" "$p" "$DEST:$p"
 done
-for d in /root/.local /root/.config/gh /root/.ssh; do
+for d in /root/.local /root/.config/gh /root/.config/vastai /root/.ssh /root/.ozzu-hb /root/.android; do
   sudo rsync -az --rsync-path="sudo rsync" -e "ssh $SSH_OPTS" "$d/" "$DEST:$d/"
+done
+# /root/.ozzu-secrets is a FILE (infra secrets via lib/devices.js); /tmp/osint-data must pre-exist.
+# /root/.ozzu-hb = heartbeat token + bridge keys; /root/.config/vastai = GPU rental; /root/.android = ADB keys.
+sudo rsync -az --rsync-path="sudo rsync" -e "ssh $SSH_OPTS" /root/.ozzu-secrets $DEST:/root/.ozzu-secrets
+ssh $SSH_OPTS $DEST "mkdir -p /tmp/osint-data"
+
+# 2g — host WireGuard SERVER config (CRITICAL — host-level, NOT in repo, NOT under /root).
+# Carries server.key / server.pub / wg0.conf. Without it WG is dead on the new VM → no SSH, no SOC path.
+sudo rsync -az --rsync-path="sudo rsync" -e "ssh $SSH_OPTS" /etc/wireguard/ $DEST:/etc/wireguard/
+
+# 2h — host systemd units (NOT in repo): the infra-state monitoring timers. Their ExecStart
+# scripts live in /home/gcp/ozzu/scripts (carried by 2b); the unit files themselves are host-level.
+for u in ozzu-heartbeat-reporter.service ozzu-heartbeat-reporter.timer wg-state-poller.service wg-state-poller.timer; do
+  sudo rsync -az --rsync-path="sudo rsync" -e "ssh $SSH_OPTS" /etc/systemd/system/$u $DEST:/etc/systemd/system/$u
 done
 
 # 2e — crontabs
@@ -196,7 +256,7 @@ scp $SSH_OPTS /tmp/mig-cron-*.txt $DEST:/tmp/
 ssh $SSH_OPTS $DEST "sudo chown -R root:root /home/gcp/ozzu"
 ```
 
-**Checkpoint:** On new VM, `sudo ls /root/.claude.json /root/.gitconfig /root/.local/bin/claude /usr/bin/adb /usr/bin/gh` all exist.
+**Checkpoint:** On new VM, `sudo ls /root/.claude.json /root/.gitconfig /root/.local/bin/claude /root/.ozzu-secrets /usr/bin/adb /usr/bin/gh /etc/wireguard/wg0.conf /home/gcp/ozzu/backend/docker-compose.override.yml` all exist.
 
 ---
 
@@ -278,8 +338,34 @@ ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose build --pa
 ### 6b — Bring up
 
 ```bash
-ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose up -d postgres redis qdrant nginx bridge browser face-recognition"
+ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose up -d postgres redis qdrant nginx bridge browser face-recognition anisette"
 ```
+
+### 6c — Restore host services (WireGuard server, crons, infra timers, lab NETMAP)
+
+Host-level (outside Docker) — the OpenVPN-era doc never covered these. **Skipping them silently breaks WireGuard, backups, and infra-state monitoring on the new VM.**
+
+```bash
+# WireGuard server: perms, enable the tunnel, ensure IP forwarding persists.
+ssh $SSH_OPTS $DEST "sudo chmod 700 /etc/wireguard && sudo chmod 600 /etc/wireguard/* && \
+  sudo systemctl enable --now wg-quick@wg0 && \
+  sudo sysctl -w net.ipv4.ip_forward=1 && echo net.ipv4.ip_forward=1 | sudo tee /etc/sysctl.d/99-ozzu-fwd.conf && \
+  sudo wg show wg0 | head"
+
+# Root crontab (staged in Phase 2e): backup, session-sync, cipher-analyze, GPU rental, @reboot lab-NETMAP.
+ssh $SSH_OPTS $DEST "sudo crontab /tmp/mig-cron-root.txt && sudo crontab -l | wc -l"
+
+# Infra-state systemd timers (unit files carried in Phase 2h).
+ssh $SSH_OPTS $DEST "sudo systemctl daemon-reload && \
+  sudo systemctl enable --now ozzu-heartbeat-reporter.timer wg-state-poller.timer && \
+  systemctl is-active ozzu-heartbeat-reporter.timer wg-state-poller.timer"
+
+# Lab NETMAP alias (10.66.1.0/24 → 192.168.1.0/24 for the SOC lab over WG). The @reboot cron runs
+# it on boot, but the new VM won't reboot mid-migration — run once now (needs wg0 up first).
+ssh $SSH_OPTS $DEST "sudo /home/gcp/ozzu/scripts/lab-vpn-alias-nat.sh && echo NETMAP-applied"
+```
+
+**WireGuard clients keep working without re-keying** — the server private key moved with the host, so the server pubkey is unchanged. Only each client's `Endpoint` must reach the new IP: clients using `vpn.ozzu.world` auto-follow the Phase 7 DNS cutover; any client pinned to the raw IP needs its `.conf` updated.
 
 ### 6d — Verify services
 
@@ -412,6 +498,16 @@ Old project sits idle until free credits expire (Google auto-suspends).
 - `qdrant` takes 5-30 min to load 113 GB / ~200 segments. No progress logging during shard recovery — looks "stuck" but isn't (look at `docker stats qdrant` Block I/O growth).
 - Bridge first-startup runs `npm install --omit=dev` which adds ~30 sec to first-boot time. Subsequent restarts are fast.
 
+### Cycle 2 (2026-06-26) — WireGuard era + autonomy
+
+12. **The doc predated WireGuard** (OpenVPN was replaced 2026-05-02, *after* Cycle 1). Three host-level gaps would have broken cutover: (a) the Phase 0 firewall opened the dead `udp:1194` and omitted WG's `udp:51820`; (b) `/etc/wireguard/` (server keys + `wg0.conf`) is host-level, not in the repo, and wasn't rsynced; (c) `wg-quick@wg0` enable + `ip_forward` weren't in Phase 6. All fixed in Phases 0 / 1 / 2g / 6c. **Cost if missed: total loss of SSH + the SOC path at cutover.**
+
+13. **New-VM service-account scopes.** A console-created VM (default API access) has a **read-only** SA → every `gcloud compute` write from inside the VM fails "insufficient authentication scopes," so Cipher can't manage the project. Fix forward: `--scopes=cloud-platform` at create (Phase 0 + bootstrap). Fix in-flight with **no restart**: grant the old VM's SA `roles/editor` on the new project — see **Autonomy / GCP access**. **In Cycle 2 this would have blocked all autonomous project-level work; the IAM-grant trick recovered it with zero downtime.**
+
+14. **Host systemd units + extra `/root` paths the doc missed.** `ozzu-heartbeat-reporter.{service,timer}` and `wg-state-poller.{service,timer}` live in `/etc/systemd/system` (not the repo) — added to Phase 2h + enabled in 6c. Also un-migrated under `/root`: `.ozzu-hb` (heartbeat token + bridge keys), `.config/vastai` (GPU rental), `.android` (ADB keys), `.wandb_key` — added to Phase 2d. **Cost if missed: infra-state monitoring, heartbeats, and ADB device auth silently dead on the new VM.**
+
+15. **Console-creation quirks + repo growth.** GCP's console SSH-keys field uses the **key comment as the username** (the login user became `cipher-migration-20260424`). The "Allow HTTPS" checkbox opens 443 but **not** 80. The repo is now ~15 GB (`.git` + `private/` reference clones, many small files) → Phase 2 **exceeds the 10-min foreground command limit; run it backgrounded** (rsync resumes the delta on re-run).
+
 **DON'T:**
 - Don't paste private SSH keys in chat. Use `gcloud compute ssh --command` to inject pubkeys instead. (Cycle 1: King Kazuma pasted `~/.ssh/google_compute_engine` private key into transcript — rotated post-migration.)
 - Don't commit secrets to git-tracked files. Cloudflare token lives in `/root/.ssh/cloudflare_token` (600 perms), never in MIGRATION.md.
@@ -449,30 +545,28 @@ After each cycle, append a row to the **Cycle roster** table above and add lesso
 
 ## Current cycle state (LIVE — update as phases complete)
 
-**Cycle: 2026-04-24 — COMPLETE**
+**Cycle: 2026-06-26 — IN PROGRESS** (Cycle 1 2026-04-24 complete; its details are in git history)
 
-- **Directive:** `dir_1777067209669`
-- **Source:** `project-14e4bf6c-437a-42ed-87d` / `ozzu-vm` / `34.135.158.92` / `e2-custom-6-22528`
-- **Target:** `project-80de6b4a-6079-4dcd-a34` / `ozzu-vm` / `35.222.38.140` / `e2-standard-4`
-- **SSH user on target:** `jokoozzu` (OS Login-derived)
-- **SSH key:** `/root/.ssh/ozzu_migration` (private), pubkey in new VM's `/home/jokoozzu/.ssh/authorized_keys`
-- **Cloudflare:** zone `0bd328c71ae1fe4255f837389fe8fb39` / record `5069d0fef3212f43446bf4c6b096d71d` / token at `/root/.ssh/cloudflare_token`
+- **Directive:** `dir_1782482471456`
+- **Source:** `project-80de6b4a-6079-4dcd-a34` / `ozzu-vm` / `35.222.38.140` / `e2-standard-8`
+- **Target:** `project-2f3f9831-d29d-4413-ba4` / `ozzu-vm` / `34.10.215.92` (static) / `e2-standard-4` / us-central1-b
+- **SSH user on target:** `cipher-migration-20260424` (GCP used the key COMMENT as the username — console metadata add)
+- **SSH key:** `/root/.ssh/ozzu_migration` (private); pubkey in target's `~cipher-migration-20260424/.ssh/authorized_keys`
+- **GCP access:** old-VM SA `700980343543-compute@developer.gserviceaccount.com` granted `roles/editor` on the new project (no-restart fix; the new VM's own SA is still read-only — bump post-cutover)
+- **Cloudflare:** zone `0bd328c71ae1fe4255f837389fe8fb39` / records home `5069d0fef3212f43446bf4c6b096d71d`, vpn `80075d173aee86202ad2838a65ab1848`, apex `9d75b460201d9f1bfee9b9fefa8fe6e0` / token at `/root/.ssh/cloudflare_token`
 
-**Phase status (final):**
-- [x] 0 — Provision (~20 min, 6 manual steps, 3 failures — fixes baked into Phase 0 above)
-- [x] 1 — Bootstrap (45 s)
-- [x] 2 — Code + memory (144 s)
-- [x] 2b — Missing root files (375 s, parallel with Phase 3 — discovered mid-migration)
-- [x] 3 — Bulk volumes (~50 min, qdrant dominated)
-- [x] 4 — Freeze (20 s)
-- [x] 5 — Delta sync (9 s)
-- [x] 6 — Bring up (~30 min — qdrant slow + Dockerfile patch + missing adb)
-- [x] 7 — DNS cutover (5 s + 5 min TTL)
-- [ ] 8 — Soak (in progress — King Kazuma verifying on phone)
-- [ ] 9 — Decommission old VM (King Kazuma's call after 30+ min soak)
-
-**Open items:**
-- Qdrant face-collection load may still be running — verify with `curl http://localhost:6333/collections/faces` (status `green` = ready).
+**Phase status:**
+- [x] 0 — Provision (King Kazuma, console; firewall + scope corrected by Cipher post-create)
+- [x] 1 — Bootstrap (docker + tooling + wireguard + gh-official-repo)
+- [x] 2 — Code + memory + secrets + /etc/wireguard + host systemd units + /root paths (repo 15 GB, backgrounded)
+- [x] Firewall (tcp:80,443,udp:51820) + static IP — done by Cipher via the IAM grant
+- [~] 3 — Bulk volumes (qdrant 125 GB rsync in progress)
+- [ ] 4 — Freeze old VM
+- [ ] 5 — Delta sync
+- [ ] 6 — Bring up + restore WireGuard / crons / infra timers / lab NETMAP (Phase 6c)
+- [ ] 7 — DNS cutover (3 records)
+- [ ] 8 — Soak (King Kazuma on phone)
+- [ ] 9 — Decommission old VM
 
 **If session compacts during a future migration:**
 1. Read this section first
