@@ -18,33 +18,36 @@ import InfraDeviceCard from "../../components/ops/InfraDeviceCard";
 import GcpCard from "../../components/ops/GcpCard";
 import RouterCard from "../../components/ops/RouterCard";
 import PositioningCard from "../../components/ops/PositioningCard";
+import FleetDeviceCard from "../../components/ops/FleetDeviceCard";
 import { GroupNav } from "../../components/GroupNav";
 import { TopBar } from "../../components/TopBar";
+import { useFleetDevices } from "../../lib/fleet-hooks";
 
 import { colors } from "../../lib/design-tokens";
 const ACCENT = colors.accent;
 
-type Tab = "services" | "infra";
+type Tab = "fleet" | "infra" | "services";
 
 export default function OpsScreen() {
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>("infra");
+  const [activeTab, setActiveTab] = useState<Tab>("fleet");
 
   const { services, loading: svcLoading, lastUpdate, forceCheck } = useOpsStatus();
   const { incidents, loading: incidentsLoading, refresh: refreshIncidents } = useOpsIncidents(20);
   const { state: infra, loading: infraLoading, refresh: refreshInfra } = useInfraState();
+  const { devices: fleetDevices, loading: fleetLoading, refresh: refreshFleet } = useFleetDevices();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([forceCheck(), refreshIncidents(), refreshInfra()]);
+    await Promise.all([forceCheck(), refreshIncidents(), refreshInfra(), refreshFleet()]);
     setRefreshing(false);
-  }, [forceCheck, refreshIncidents, refreshInfra]);
+  }, [forceCheck, refreshIncidents, refreshInfra, refreshFleet]);
 
   const gridServices = Object.entries(services).filter(([name]) => name !== "vast-gpu");
   const gpuStatus = services["vast-gpu"];
   const downCount = Object.values(services).filter((s) => s.status === "down").length;
 
-  const loading = activeTab === "services" ? svcLoading : infraLoading;
+  const loading = activeTab === "fleet" ? fleetLoading : activeTab === "services" ? svcLoading : infraLoading;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
@@ -86,7 +89,7 @@ export default function OpsScreen() {
           borderBottomColor: "rgba(255,255,255,0.06)",
         }}
       >
-        {(["infra", "services"] as Tab[]).map((tab) => (
+        {(["fleet", "infra", "services"] as Tab[]).map((tab) => (
           <Pressable
             key={tab}
             onPress={() => setActiveTab(tab)}
@@ -107,7 +110,7 @@ export default function OpsScreen() {
                 color: activeTab === tab ? ACCENT : colors.gray[400],
               }}
             >
-              {tab === "infra" ? "INFRASTRUCTURE" : "SERVICES"}
+              {tab === "fleet" ? "FLEET" : tab === "infra" ? "INFRASTRUCTURE" : "SERVICES"}
             </Text>
           </Pressable>
         ))}
@@ -117,7 +120,7 @@ export default function OpsScreen() {
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={ACCENT} size="large" />
           <Text style={{ fontFamily: "monospace", fontSize: 11, color: colors.gray[400], marginTop: 12 }}>
-            {activeTab === "infra" ? "Probing infrastructure..." : "Checking services..."}
+            {activeTab === "fleet" ? "Loading fleet..." : activeTab === "infra" ? "Probing infrastructure..." : "Checking services..."}
           </Text>
         </View>
       ) : (
@@ -128,7 +131,22 @@ export default function OpsScreen() {
           }
           showsVerticalScrollIndicator={false}
         >
-          {activeTab === "infra" ? (
+          {activeTab === "fleet" ? (
+            /* ── FLEET TAB ── */
+            <>
+              {fleetDevices.length === 0 ? (
+                <View style={{ padding: 24, alignItems: "center" }}>
+                  <Text style={{ fontFamily: "monospace", fontSize: 11, color: colors.gray[400] }}>
+                    No devices reporting
+                  </Text>
+                </View>
+              ) : (
+                fleetDevices.map((dev) => (
+                  <FleetDeviceCard key={dev.device_id} device={dev} />
+                ))
+              )}
+            </>
+          ) : activeTab === "infra" ? (
             /* ── INFRASTRUCTURE TAB ── */
             <>
               {/* Network banner */}
