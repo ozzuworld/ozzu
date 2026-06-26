@@ -414,6 +414,23 @@ async function advancePhase(args) {
 async function endEngagement(args) {
   const { engagement_id, reason } = args || {};
   if (!engagement_id) return { error: "engagement_id required" };
+
+  // dir_1782480866296: "prove it" gate — block completion if HIGH+ findings
+  // are still hypotheses. The model must prove or downgrade them first.
+  const unproven = await db.query(
+    `SELECT id, severity, title FROM pentest_findings
+     WHERE engagement_id = $1 AND severity IN ('critical', 'high') AND kind = 'hypothesis'`,
+    [engagement_id]);
+  if (unproven.rows.length > 0) {
+    const list = unproven.rows.map(f => `  [${f.severity}] ${f.title} (id=${f.id})`).join("\n");
+    return {
+      error: "Cannot end engagement — unproven high-severity findings remain",
+      unproven_count: unproven.rows.length,
+      unproven_findings: list,
+      action_required: "For each finding above: 1) Run the exploit to prove it, then add_finding with kind='confirmed' + proof, OR 2) If exploitation failed, downgrade severity to medium/low/info. Then call end_engagement again.",
+    };
+  }
+
   const r = await db.query(
     `UPDATE pentest_engagements
         SET agent_status = 'completed',
@@ -501,7 +518,30 @@ async function addFinding(args) {
      VALUES ($1, $2, $3, $4, $5, $6, $7, 'model')
      RETURNING id, severity, kind`,
     [engagement_id, finalSev, title, description || "", affected_asset || "", JSON.stringify(refs || []), finalKind]);
-  return { ok: true, finding_id: r.rows[0].id, severity: r.rows[0].severity, kind: r.rows[0].kind };
+
+  // dir_1782480866296: "prove it" pressure — when a HIGH+ finding is added as
+  // hypothesis (unproven), push back in the return value telling the model to
+  // exploit it and re-submit with kind:'confirmed' + evidence. This is the
+  // harness-level enforcement that prevents "found vuln, filed finding, moved on."
+  const needsProof = ["critical", "high"].includes(finalSev) && finalKind === "hypothesis";
+  const proveIt = needsProof
+    ? `\n\n⚠️ PROVE IT: This ${finalSev} finding is recorded as HYPOTHESIS (unproven). ` +
+      `A professional pentest report requires exploitation proof for high-severity findings. ` +
+      `You MUST: 1) queue_step to actually exploit this vulnerability, ` +
+      `2) capture the output proving access/impact, ` +
+      `3) call add_finding again with kind:'confirmed' and the proof in the description. ` +
+      `Do NOT call end_engagement until all ${finalSev} findings are confirmed or downgraded.`
+    : "";
+
+  return {
+    ok: true,
+    finding_id: r.rows[0].id,
+    severity: r.rows[0].severity,
+    kind: r.rows[0].kind,
+    note: needsProof
+      ? `Finding saved as HYPOTHESIS. Prove exploitation before concluding.${proveIt}`
+      : `Finding saved as ${r.rows[0].kind}.`,
+  };
 }
 
 // ────────────────────────────────── dispatcher ─────────────────────────────────
@@ -737,7 +777,7 @@ const TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "add_finding",
-      description: "Record a security finding you discovered. Use this to formally log vulnerabilities, misconfigurations, or exposed services. The finding goes through the claim verifier — fabricated claims get auto-refuted. Set kind='confirmed' for verified exploits, kind='hypothesis' for unverified observations.",
+      description: "Record a security finding. IMPORTANT: For severity critical/high, you MUST first submit as kind='hypothesis', then PROVE IT by running the exploit, then re-submit with kind='confirmed' + proof in description. The harness blocks end_engagement until all critical/high findings are confirmed or downgraded. Low/medium/info can be hypothesis. Fabricated claims get auto-refuted by the claim verifier.",
       parameters: {
         type: "object",
         properties: {
