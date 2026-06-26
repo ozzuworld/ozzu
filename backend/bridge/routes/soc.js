@@ -67,6 +67,78 @@ async function parseAndStoreRecon(db, engagementId, sessionId, rawOutput) {
   }
 }
 
+// Run PhoneInfoga OSINT on a list of phone numbers and store results
+async function runCallOsint(db, numbers) {
+  for (const num of numbers) {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const proc = spawn('phoneinfoga', ['scan', '-n', num], {
+          timeout: 30000,
+          env: { ...process.env },
+        });
+        let stdout = '', stderr = '';
+        proc.stdout.on('data', d => { stdout += d; });
+        proc.stderr.on('data', d => { stderr += d; });
+        proc.on('close', code => {
+          if (code !== 0) reject(new Error(`phoneinfoga exit ${code}: ${stderr.slice(0, 200)}`));
+          else resolve(stdout);
+        });
+        proc.on('error', reject);
+      });
+
+      // parse phoneinfoga output
+      const parsed = parsePhoneInfoga(result, num);
+      await db.query(
+        `INSERT INTO call_osint (phone_number, carrier, line_type, country, country_code,
+           local_format, international_format, is_voip, raw_result, last_scanned)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+         ON CONFLICT (phone_number) DO UPDATE SET
+           carrier = COALESCE(EXCLUDED.carrier, call_osint.carrier),
+           line_type = COALESCE(EXCLUDED.line_type, call_osint.line_type),
+           country = COALESCE(EXCLUDED.country, call_osint.country),
+           country_code = COALESCE(EXCLUDED.country_code, call_osint.country_code),
+           local_format = COALESCE(EXCLUDED.local_format, call_osint.local_format),
+           international_format = COALESCE(EXCLUDED.international_format, call_osint.international_format),
+           is_voip = COALESCE(EXCLUDED.is_voip, call_osint.is_voip),
+           raw_result = EXCLUDED.raw_result,
+           last_scanned = NOW()`,
+        [num, parsed.carrier, parsed.line_type, parsed.country, parsed.country_code,
+         parsed.local_format, parsed.international_format, parsed.is_voip,
+         JSON.stringify({ raw: result.slice(0, 4000), parsed })]
+      );
+      console.log(`[call-osint] scanned ${num}: ${parsed.carrier || 'unknown'} / ${parsed.line_type || 'unknown'} / ${parsed.country || 'unknown'}`);
+    } catch (err) {
+      console.error(`[call-osint] failed for ${num}:`, err.message);
+    }
+  }
+}
+
+function parsePhoneInfoga(output, number) {
+  const r = { carrier: null, line_type: null, country: null, country_code: null,
+              local_format: null, international_format: null, is_voip: null };
+  const lines = output.split('\n');
+  for (const line of lines) {
+    const l = line.toLowerCase();
+    if (l.includes('carrier:') || l.includes('operator:'))
+      r.carrier = line.split(/:\s*/)[1]?.trim() || null;
+    if (l.includes('country:'))
+      r.country = line.split(/:\s*/)[1]?.trim() || null;
+    if (l.includes('country code:'))
+      r.country_code = line.split(/:\s*/)[1]?.trim() || null;
+    if (l.includes('local:') || l.includes('local format:'))
+      r.local_format = line.split(/:\s*/)[1]?.trim() || null;
+    if (l.includes('international:') || l.includes('e164:') || l.includes('international format:'))
+      r.international_format = line.split(/:\s*/)[1]?.trim() || null;
+    if (l.includes('line type:') || l.includes('line_type:'))
+      r.line_type = line.split(/:\s*/)[1]?.trim() || null;
+    if (l.includes('voip') && (l.includes('true') || l.includes('yes')))
+      r.is_voip = true;
+    if (l.includes('voip') && (l.includes('false') || l.includes('no')))
+      r.is_voip = false;
+  }
+  return r;
+}
+
 module.exports = function socRoutes(ctx) {
   const { sendJSON, parseBody, db, requireAuth } = ctx;
 
@@ -1638,6 +1710,205 @@ module.exports = function socRoutes(ctx) {
         [engagementId]
       );
       sendJSON(res, 200, { engagement_id: engagementId, hosts: result.rows, total: result.rows.length });
+      return true;
+    }
+
+    // ──────────────────────────────────────────────
+    // Call Investigation API
+    // ──────────────────────────────────────────────
+
+    // POST /soc/calls — bulk import call log entries
+    if (req.method === "POST" && pathname === "/soc/calls") {
+      const { calls } = body; // [{phone_number, direction?, call_time?, duration_sec?, answered?, label?}]
+      if (!Array.isArray(calls) || !calls.length) {
+        sendJSON(res, 400, { error: "calls array required" });
+        return true;
+      }
+      let imported = 0;
+      const newNumbers = new Set();
+      for (const c of calls) {
+        if (!c.phone_number) continue;
+        const num = c.phone_number.replace(/[^\d+]/g, '');
+        if (!num) continue;
+        try {
+          await db.query(
+            `INSERT INTO call_log (phone_number, direction, call_time, duration_sec, answered, label)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (phone_number, call_time) DO NOTHING`,
+            [num, c.direction || 'incoming', c.call_time || new Date(), c.duration_sec || null, c.answered || false, c.label || null]
+          );
+          imported++;
+          const exists = await db.query('SELECT 1 FROM call_osint WHERE phone_number=$1', [num]);
+          if (!exists.rows.length) newNumbers.add(num);
+        } catch (err) {
+          console.error('[call-log] insert error:', err.message);
+        }
+      }
+      // kick off async OSINT for new numbers
+      if (newNumbers.size > 0) {
+        runCallOsint(db, [...newNumbers]).catch(err =>
+          console.error('[call-osint] batch error:', err.message)
+        );
+      }
+      sendJSON(res, 200, { imported, osint_queued: newNumbers.size });
+      return true;
+    }
+
+    // POST /soc/calls/number — add a single number for investigation
+    if (req.method === "POST" && pathname === "/soc/calls/number") {
+      const num = (body.phone_number || '').replace(/[^\d+]/g, '');
+      if (!num) {
+        sendJSON(res, 400, { error: "phone_number required" });
+        return true;
+      }
+      await db.query(
+        `INSERT INTO call_log (phone_number, direction, call_time, label)
+         VALUES ($1, $2, NOW(), $3)
+         ON CONFLICT (phone_number, call_time) DO NOTHING`,
+        [num, body.direction || 'incoming', body.label || null]
+      );
+      const exists = await db.query('SELECT 1 FROM call_osint WHERE phone_number=$1', [num]);
+      if (!exists.rows.length) {
+        runCallOsint(db, [num]).catch(err =>
+          console.error('[call-osint] single error:', err.message)
+        );
+      }
+      sendJSON(res, 200, { ok: true, osint_queued: !exists.rows.length });
+      return true;
+    }
+
+    // GET /soc/calls — list all calls with OSINT data joined
+    if (req.method === "GET" && pathname === "/soc/calls") {
+      const result = await db.query(`
+        SELECT
+          cl.phone_number,
+          cl.direction,
+          COUNT(*)::int AS call_count,
+          MIN(cl.call_time) AS first_call,
+          MAX(cl.call_time) AS last_call,
+          SUM(CASE WHEN cl.answered THEN 1 ELSE 0 END)::int AS answered_count,
+          co.carrier, co.line_type, co.country, co.is_voip,
+          co.spam_score, co.spam_reports, co.international_format,
+          co.last_scanned
+        FROM call_log cl
+        LEFT JOIN call_osint co ON cl.phone_number = co.phone_number
+        GROUP BY cl.phone_number, cl.direction,
+                 co.carrier, co.line_type, co.country, co.is_voip,
+                 co.spam_score, co.spam_reports, co.international_format, co.last_scanned
+        ORDER BY MAX(cl.call_time) DESC
+      `);
+      sendJSON(res, 200, { numbers: result.rows, total: result.rows.length });
+      return true;
+    }
+
+    // GET /soc/calls/analysis — pattern analysis of all calls
+    if (req.method === "GET" && pathname === "/soc/calls/analysis") {
+      const totals = await db.query(`
+        SELECT
+          COUNT(DISTINCT phone_number)::int AS unique_numbers,
+          COUNT(*)::int AS total_calls,
+          COUNT(DISTINCT DATE(call_time))::int AS active_days,
+          MIN(call_time) AS first_call,
+          MAX(call_time) AS last_call
+        FROM call_log
+      `);
+      const byType = await db.query(`
+        SELECT
+          COALESCE(co.line_type, 'unknown') AS line_type,
+          co.is_voip,
+          COUNT(DISTINCT cl.phone_number)::int AS number_count,
+          COUNT(*)::int AS call_count
+        FROM call_log cl
+        LEFT JOIN call_osint co ON cl.phone_number = co.phone_number
+        GROUP BY co.line_type, co.is_voip
+        ORDER BY call_count DESC
+      `);
+      const byCountry = await db.query(`
+        SELECT
+          COALESCE(co.country, 'unknown') AS country,
+          COUNT(DISTINCT cl.phone_number)::int AS number_count,
+          COUNT(*)::int AS call_count
+        FROM call_log cl
+        LEFT JOIN call_osint co ON cl.phone_number = co.phone_number
+        GROUP BY co.country
+        ORDER BY call_count DESC
+      `);
+      const byHour = await db.query(`
+        SELECT
+          EXTRACT(HOUR FROM call_time)::int AS hour,
+          COUNT(*)::int AS call_count
+        FROM call_log
+        GROUP BY EXTRACT(HOUR FROM call_time)
+        ORDER BY hour
+      `);
+      const byCarrier = await db.query(`
+        SELECT
+          COALESCE(co.carrier, 'unknown') AS carrier,
+          co.is_voip,
+          COUNT(DISTINCT cl.phone_number)::int AS number_count
+        FROM call_log cl
+        LEFT JOIN call_osint co ON cl.phone_number = co.phone_number
+        GROUP BY co.carrier, co.is_voip
+        ORDER BY number_count DESC
+        LIMIT 20
+      `);
+      const prefixClusters = await db.query(`
+        SELECT
+          SUBSTRING(phone_number, 1, 7) AS prefix,
+          COUNT(DISTINCT phone_number)::int AS number_count,
+          COUNT(*)::int AS call_count
+        FROM call_log
+        GROUP BY SUBSTRING(phone_number, 1, 7)
+        HAVING COUNT(DISTINCT phone_number) > 1
+        ORDER BY number_count DESC
+        LIMIT 20
+      `);
+      sendJSON(res, 200, {
+        summary: totals.rows[0] || {},
+        by_type: byType.rows,
+        by_country: byCountry.rows,
+        by_hour: byHour.rows,
+        by_carrier: byCarrier.rows,
+        prefix_clusters: prefixClusters.rows,
+      });
+      return true;
+    }
+
+    // POST /soc/calls/rescan — re-run OSINT on all numbers (or specific ones)
+    if (req.method === "POST" && pathname === "/soc/calls/rescan") {
+      const numbers = body.numbers; // optional: specific numbers to rescan
+      let targets;
+      if (Array.isArray(numbers) && numbers.length) {
+        targets = numbers.map(n => n.replace(/[^\d+]/g, '')).filter(Boolean);
+      } else {
+        const all = await db.query('SELECT DISTINCT phone_number FROM call_log');
+        targets = all.rows.map(r => r.phone_number);
+      }
+      if (!targets.length) {
+        sendJSON(res, 200, { rescanned: 0 });
+        return true;
+      }
+      runCallOsint(db, targets).catch(err =>
+        console.error('[call-osint] rescan error:', err.message)
+      );
+      sendJSON(res, 200, { rescanning: targets.length });
+      return true;
+    }
+
+    // GET /soc/calls/:number — detailed OSINT for a single number
+    if (req.method === "GET" && pathname.match(/^\/soc\/calls\/\+?[\d]+$/)) {
+      const num = pathname.split("/soc/calls/")[1];
+      const osint = await db.query('SELECT * FROM call_osint WHERE phone_number=$1', [num]);
+      const calls = await db.query(
+        'SELECT * FROM call_log WHERE phone_number=$1 ORDER BY call_time DESC LIMIT 100',
+        [num]
+      );
+      sendJSON(res, 200, {
+        phone_number: num,
+        osint: osint.rows[0] || null,
+        calls: calls.rows,
+        call_count: calls.rows.length,
+      });
       return true;
     }
 
