@@ -126,7 +126,7 @@ collect_network() {
 
   # Traffic counters
   local traffic=""
-  for iface in $(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v '^lo$'); do
+  for iface in $(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -vE '^(lo|br-|veth|docker[0-9])'); do
     local rx=$(cat /sys/class/net/$iface/statistics/rx_bytes 2>/dev/null || echo 0)
     local tx=$(cat /sys/class/net/$iface/statistics/tx_bytes 2>/dev/null || echo 0)
     [ -n "$traffic" ] && traffic="$traffic,"
