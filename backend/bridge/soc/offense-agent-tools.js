@@ -416,12 +416,22 @@ async function endEngagement(args) {
   if (!engagement_id) return { error: "engagement_id required" };
   const r = await db.query(
     `UPDATE pentest_engagements
-        SET agent_status = 'completed'
+        SET agent_status = 'completed',
+            status = 'completed',
+            engagement_phase = 'reporting'
       WHERE id = $1
-      RETURNING id, agent_status`,
+      RETURNING id, agent_status, status`,
     [engagement_id]);
   if (r.rows.length === 0) return { error: `engagement ${engagement_id} not found` };
-  return { engagement_id, agent_status: r.rows[0].agent_status, reason: reason || "(no reason given)", ok: true };
+  try {
+    const reportGen = require("/app/soc/report-via-model");
+    if (reportGen && reportGen.generateReport) {
+      reportGen.generateReport(engagement_id).catch(e =>
+        console.error(`[end_engagement] report generation failed:`, e.message));
+      console.log(`[end_engagement] report generation triggered for ${engagement_id}`);
+    }
+  } catch (_) {}
+  return { engagement_id, agent_status: "completed", status: "completed", reason: reason || "(no reason given)", ok: true };
 }
 
 // ─────── request_observation: human-in-the-loop physical observations ───────
@@ -637,7 +647,7 @@ const TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "end_engagement",
-      description: "Mark the engagement complete with a reason. STUBBED — the agent-loop completion columns land in a later step. For now this returns deferred.",
+      description: "Mark the engagement as COMPLETED. Call this when you have exhausted the scope, recorded all findings, and are ready to end. This sets the engagement to completed, advances phase to reporting, and triggers the final report. You MUST call this before your iterations run out — an engagement without end_engagement has no proper conclusion.",
       parameters: {
         type: "object",
         properties: {

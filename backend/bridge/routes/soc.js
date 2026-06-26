@@ -1348,7 +1348,7 @@ module.exports = function socRoutes(ctx) {
           // dir_1780845861190: post_queue_complete hooks fire here. Advisory —
           // hook return value is logged but doesn't change the queue status.
           try {
-            const hooks = require('../hooks');
+            const hooks = require('../soc/hooks');
             await hooks.runEvent({
               engagementId: item.engagement_id,
               event: hooks.HOOK_EVENTS.POST_QUEUE_COMPLETE,
