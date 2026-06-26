@@ -169,7 +169,10 @@ export default function SOCNewScreen() {
         target_networks,
         executor_host: selected,
         model_override: model,
-        metadata: { permission_mode: autonomy },
+        metadata: {
+          permission_mode: autonomy,
+          ...(selectedExec?.proxy_mode ? { proxy_mode: selectedExec.proxy_mode, proxy_port: 1080 } : {}),
+        },
       };
       if (verdict.kind === "wifi") {
         body.first_objective = "gain_wifi_access";

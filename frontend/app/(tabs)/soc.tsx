@@ -28,6 +28,7 @@ import {
   withAlpha,
 } from "../../lib/design-tokens";
 import { EngagementCard, type EngagementSummary } from "../../components/soc/EngagementCard";
+import { RelayToggle } from "../../components/soc/RelayToggle";
 
 type FilterKey = "active" | "scoping" | "done" | "all";
 
@@ -100,6 +101,7 @@ export default function SOCScreen() {
         borderBottom
         right={
           <>
+            <RelayToggle />
             <Pressable
               onPress={() => router.push("/soc/new")}
               hitSlop={8}
