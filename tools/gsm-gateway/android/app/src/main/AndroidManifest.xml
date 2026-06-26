@@ -29,7 +29,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Call screening service — intercepts incoming calls -->
+        <!-- Call screening service — API 29+ only (CAT S41 may be API 26-28) -->
         <service
             android:name=".OzzuCallScreeningService"
             android:permission="android.permission.BIND_SCREENING_SERVICE"
@@ -38,6 +38,15 @@
                 <action android:name="android.telecom.CallScreeningService" />
             </intent-filter>
         </service>
+
+        <!-- Call state receiver — works on API 26+ (CAT S41 fallback) -->
+        <receiver
+            android:name=".CallReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" />
+            </intent-filter>
+        </receiver>
 
         <!-- Foreground service for SIP registration + audio bridge -->
         <service

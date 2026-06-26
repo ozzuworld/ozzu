@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "world.ozzu.gsmgateway"
-        minSdk = 29  // CAT S41 runs Android 8+ but CallScreeningService needs 29
+        minSdk = 26  // CAT S41 = Android 8 (API 26); CallReceiver handles API <29
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
