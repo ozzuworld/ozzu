@@ -76,6 +76,7 @@ export default function SOCNewScreen() {
   const [model, setModel] = useState("deepseek-reasoner");
   const [scopeMode, setScopeMode] = useState<"network" | "host">("network");
   const [targetHost, setTargetHost] = useState("");
+  const [excludeIps, setExcludeIps] = useState("");
 
   // Executor
   const [executors, setExecutors] = useState<Executor[]>([]);
@@ -157,11 +158,14 @@ export default function SOCNewScreen() {
       const subnet = selectedExec?.lan_subnet || null;
       const singleIp = scopeMode === "host" ? targetHost.trim() : null;
       const scopeTargets = singleIp ? [`${singleIp}/32`] : (subnet ? [subnet] : []);
+      const prohibited = scopeMode === "network"
+        ? excludeIps.split(/[,\s\n]+/).map((s) => s.trim()).filter((s) => /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d{1,2})?$/.test(s)).map((s) => s.includes("/") ? s : `${s}/32`)
+        : [];
       const target_networks = [{ ssid: pickedSsid, subnet, reachable_via: selected }];
       const body: any = {
         client_name: client.trim(),
         engagement_type: type,
-        scope: { targets: scopeTargets, allowed: [], prohibited: [] },
+        scope: { targets: scopeTargets, allowed: [], prohibited },
         target_networks,
         executor_host: selected,
         model_override: model,
@@ -228,6 +232,26 @@ export default function SOCNewScreen() {
                   keyboardType="decimal-pad"
                   autoCapitalize="none"
                 />
+              )}
+              {scopeMode === "network" && (
+                <View style={{ marginTop: spacing.sm, gap: spacing.xs }}>
+                  <Text style={{ color: colors.text.tertiary, fontSize: fs.xs }}>Exclude IPs (optional)</Text>
+                  <TextInput
+                    value={excludeIps}
+                    onChangeText={setExcludeIps}
+                    placeholder="e.g. 192.168.1.1, 192.168.1.254"
+                    placeholderTextColor={colors.text.disabled}
+                    style={[styles.input, { minHeight: 44 }]}
+                    keyboardType="decimal-pad"
+                    autoCapitalize="none"
+                    multiline
+                  />
+                  {excludeIps.trim().length > 0 && (
+                    <Text style={{ color: colors.text.disabled, fontSize: fs.xs }}>
+                      {excludeIps.split(/[,\s\n]+/).filter((s) => /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d{1,2})?$/.test(s.trim())).length} IPs will be excluded from scope
+                    </Text>
+                  )}
+                </View>
               )}
             </Field>
           </>
@@ -328,6 +352,9 @@ export default function SOCNewScreen() {
               <Meta k="Client" v={client} />
               <Meta k="Type" v={ENGAGEMENT_TYPES.find((t) => t.key === type)?.label || type} />
               <Meta k="Scope" v={scopeMode === "host" ? `Single host: ${targetHost}` : "Full network"} highlight={scopeMode === "host" ? colors.warning : undefined} />
+              {scopeMode === "network" && excludeIps.trim().length > 0 && (
+                <Meta k="Excluded" v={excludeIps.split(/[,\s\n]+/).filter((s) => /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d{1,2})?$/.test(s.trim())).map((s) => s.trim()).join(", ")} highlight={colors.warning} />
+              )}
               <Meta k="Access point" v={selected || "—"} />
               <Meta k="Target Wi-Fi" v={pickedSsid || "—"} />
               <Meta k="Model" v={MODELS.find((m) => m.key === model)?.label || model} highlight={model.startsWith("claude-") ? colors.accent : undefined} />
