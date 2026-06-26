@@ -40,7 +40,7 @@ Roughly **15 min of King Kazuma's hands-on time, ~60 min of Cipher background wo
 | Cycle | Date | Source project | Target project | Wall-clock | Downtime | Manual steps | New failures discovered |
 |---|---|---|---|---|---|---|---|
 | 1 | 2026-04-24 | project-14e4bf6c | project-80de6b4a | ~3h | ~50 min* | ~25 | 9 (see below) |
-| 2 | 2026-06-26 | project-80de6b4a | project-2f3f9831 | in progress | TBD | 1 (IAM grant) | 4 (WG era, SA scopes, host units, console quirks) |
+| 2 | 2026-06-26 | project-80de6b4a | project-2f3f9831 | ~3.5h | **~3 min** | 2 (IAM grant + soak) | 10 (WG era, SA scopes, host units, console quirks, **recovery-daemon split-brain**, image drift, qdrant 401, no-cron, root-perms, nginx-/) |
 
 *Downtime was inflated by qdrant slow-load + firewall-rules-not-created-at-create-time. Cycle 2 should hit the ~5-10 min target.
 
@@ -293,12 +293,25 @@ sudo rsync -a --rsync-path="sudo rsync" -e "ssh $SSH_OPTS" \
 
 ⚠️ **Downtime starts here.**
 
+**CRITICAL (Cycle 2): disable the bridge's self-healing FIRST, or it fights you for ~25 min.** The bridge runs a recovery engine + event daemon that, on seeing services down, **spawns autonomous Cipher agents** (`claude -p "URGENT: nginx is DOWN, restart it"`) which `docker compose up` the stack right back — split-brain that survives every plain `docker compose stop`. A `* * * * * sync-sessions-to-db.sh` cron also restarts the bridge. The reliable freeze stops the spawners, then **removes + renames the compose files** so nothing can recreate the stack:
+
 ```bash
 cd /home/gcp/ozzu/backend
-sudo docker compose stop
+# 1. stop the spawners (cron restarts the bridge; telemetry/timers poke it)
+sudo crontab -r 2>/dev/null
+sudo systemctl disable --now ozzu-telemetry.service ozzu-heartbeat-reporter.timer wg-state-poller.timer 2>/dev/null
+# 2. remove the stack (down, not just stop)
+sudo docker compose down --remove-orphans
+# 3. NEUTRALIZE: rename compose so the recovery agents' `docker compose up` fails ("no configuration file")
+sudo mv docker-compose.yml docker-compose.yml.MIGRATED-$(date +%F)
+sudo mv docker-compose.override.yml docker-compose.override.yml.MIGRATED-$(date +%F)
+# 4. kill any in-flight recovery agents — claude with -p, NOT your interactive session
+ps -eww -o pid=,comm=,args= | awk '$2=="claude" && / -p /{print $1}' | xargs -r sudo kill -9
 ```
 
-**That's it. Don't try `pg_dump` or `redis BGSAVE` after stop** — containers are stopped, those commands fail. The volume rsync from Phase 3 + Phase 5 delta is the authoritative copy. Cycle 1 wasted ~3 min trying to dump on stopped containers.
+**Don't try `pg_dump` / `redis BGSAVE` after** — containers are gone, those commands fail; the volume rsync (Phase 3 + Phase 5 delta) is the authoritative copy.
+
+**Rollback:** rename the compose files back + `docker compose up -d` + flip DNS. Data volumes are untouched. (You can't stop the whole old *instance* if Cipher is running on it — stopping it kills the session.)
 
 ---
 
@@ -315,13 +328,18 @@ for V in backend_postgres-data backend_redis-data backend_face-models backend_le
 done
 ```
 
-**Phase 5b — pull/build images on new VM (now that qdrant rsync is done).** This is also during downtime; fits in parallel with Phase 6 prep:
+**Phase 5b — get the images onto the new VM (now that qdrant rsync is done).** Stock images: pull.
 
 ```bash
-ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose pull postgres qdrant redis nginx"
+ssh $SSH_OPTS $DEST 'sudo bash -c "cd /home/gcp/ozzu/backend && docker compose pull postgres qdrant redis nginx anisette"'
 ```
 
-For local-built images (`backend-bridge` etc.), see Phase 6 below — they require a Dockerfile patch first.
+**Local images (`backend-bridge`, `backend-browser`, `backend-face-recognition`): TRANSFER them, do NOT rebuild.** Cycle 2: `docker compose build` failed because `node:22-slim` had drifted to a newer Debian base and an apt package no longer resolved (exit 100). The faithful migrate-the-artifact move is `docker save | load` (~7 GB, ~3 min):
+
+```bash
+sudo docker save backend-bridge backend-browser backend-face-recognition \
+  | gzip -1 | sudo ssh $SSH_OPTS $DEST 'sudo docker load'
+```
 
 ---
 
@@ -329,16 +347,19 @@ For local-built images (`backend-bridge` etc.), see Phase 6 below — they requi
 
 **Owner: Cipher. Duration: ~10 min wall-clock, ~5 min until app responsive (qdrant load is the long pole).**
 
-### 6a — Build local images
+### 6a — Local images
+
+Already transferred in Phase 5b via `docker save | load` (do NOT `docker compose build` — base-image drift breaks it). Confirm present:
 
 ```bash
-ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose build --parallel bridge browser face-recognition"
+ssh $SSH_OPTS $DEST "sudo docker images --format '{{.Repository}}' | grep -E 'backend-(bridge|browser|face-recognition)'"
 ```
 
 ### 6b — Bring up
 
+The repo is root-owned (Phase 2f chown), so the login user can't `cd` in — run as root (Cycle 2: `cd: Permission denied`):
 ```bash
-ssh $SSH_OPTS $DEST "cd /home/gcp/ozzu/backend && sudo docker compose up -d postgres redis qdrant nginx bridge browser face-recognition anisette"
+ssh $SSH_OPTS $DEST 'sudo bash -c "cd /home/gcp/ozzu/backend && docker compose up -d postgres redis qdrant nginx bridge browser face-recognition anisette"'
 ```
 
 ### 6c — Restore host services (WireGuard server, crons, infra timers, lab NETMAP)
@@ -352,8 +373,9 @@ ssh $SSH_OPTS $DEST "sudo chmod 700 /etc/wireguard && sudo chmod 600 /etc/wiregu
   sudo sysctl -w net.ipv4.ip_forward=1 && echo net.ipv4.ip_forward=1 | sudo tee /etc/sysctl.d/99-ozzu-fwd.conf && \
   sudo wg show wg0 | head"
 
-# Root crontab (staged in Phase 2e): backup, session-sync, cipher-analyze, GPU rental, @reboot lab-NETMAP.
-ssh $SSH_OPTS $DEST "sudo crontab /tmp/mig-cron-root.txt && sudo crontab -l | wc -l"
+# Root crontab (staged in Phase 2e). Fresh Ubuntu has NO `cron` package — install it FIRST
+# (Cycle 2: `crontab: command not found`). Jobs: backup, session-sync, cipher-analyze, GPU rental, @reboot lab-NETMAP.
+ssh $SSH_OPTS $DEST "sudo apt-get install -yq cron && sudo systemctl enable --now cron && sudo crontab /tmp/mig-cron-root.txt && sudo crontab -l | grep -cvE '^#'"
 
 # Infra-state systemd timers (unit files carried in Phase 2h).
 ssh $SSH_OPTS $DEST "sudo systemctl daemon-reload && \
@@ -380,8 +402,10 @@ All 7 should be `Up` (+ anisette if SideStore auth needed). If any restart loop,
 Bridge waits on qdrant on first connection. Qdrant takes 5-30 min to load 113 GB / ~200 segments depending on VM disk speed. Poll:
 
 ```bash
-ssh $SSH_OPTS $DEST 'until curl -sf http://localhost:6333/collections/faces -o /dev/null && curl -sf http://localhost:3333/business/projects -o /dev/null; do echo "[$(date +%T)] waiting..."; sleep 30; done; echo "BOTH UP"'
+ssh $SSH_OPTS $DEST 'K=$(sudo docker inspect qdrant --format "{{range .Config.Env}}{{println .}}{{end}}" | grep ^QDRANT__SERVICE__API_KEY= | cut -d= -f2-); until curl -sf -H "api-key: $K" http://localhost:6333/collections/faces -o /dev/null && curl -sf http://localhost:3333/health -o /dev/null; do echo "[$(date +%T)] waiting (qdrant loading)..."; sleep 30; done; echo "BOTH UP"'
 ```
+
+**qdrant requires its API key** (Phase 0.1 hardening) — an unauthenticated curl returns **401**, which is NOT "down" (Cycle 2 lost ~30 min misreading this; read the resolved key from the container env, as above). Check the bridge via `/health` or `/bridge/health` — **`/` proxies to the decommissioned Home Assistant (`:8123`) and 502s** (pre-existing, not a regression). **Pre-warm tip:** start qdrant during Phase 3/5 (before the freeze) so its ~30-min load isn't downtime — it's green by cutover.
 
 **Optional optimization:** flip DNS (Phase 7) once **bridge** alone responds — accept ~30 min of broken face features rather than ~30 min of full-app downtime. Cycle 1 chose this path.
 
@@ -508,6 +532,20 @@ Old project sits idle until free credits expire (Google auto-suspends).
 
 15. **Console-creation quirks + repo growth.** GCP's console SSH-keys field uses the **key comment as the username** (the login user became `cipher-migration-20260424`). The "Allow HTTPS" checkbox opens 443 but **not** 80. The repo is now ~15 GB (`.git` + `private/` reference clones, many small files) → Phase 2 **exceeds the 10-min foreground command limit; run it backgrounded** (rsync resumes the delta on re-run).
 
+**Cycle 2 — cutover discoveries (freeze + bring-up):**
+
+16. **The bridge's self-healing fights the freeze — the big one (~25 min lost).** Its recovery engine + event daemon detect "services down" and **spawn autonomous Cipher agents** (`claude -p "URGENT: nginx DOWN, fix it"`) that `docker compose up` the stack right back; a `* * * * * sync-sessions` cron also restarts the bridge. Plain `docker compose stop` loses the race every time. Fix baked into Phase 4: stop the spawners (`crontab -r` + disable telemetry/timers), `compose down`, **rename the compose files** so `compose up` fails, then kill the in-flight `claude -p` agents. (You can't just stop the *instance* — Cipher is running on it.)
+
+17. **Don't rebuild local images — transfer them.** `docker compose build` failed (`node:22-slim` base drifted, apt exit 100). `docker save | gzip | ssh load` the working `backend-*` images instead — faithful + faster (~3 min). (Phase 5b/6a.)
+
+18. **qdrant 401 ≠ down.** qdrant requires its API key (Phase 0.1) — read the **resolved** key from the running container's env (`docker inspect`), NOT the `${QDRANT_API_KEY}` placeholder in the override. An unauthenticated health check 401s and looks "stuck loading." Lost ~30 min. (Phase 6e.)
+
+19. **Fresh Ubuntu has no `cron`.** `crontab` → "command not found" → the whole root crontab silently fails to install. `apt install cron` first. (Phase 6c.)
+
+20. **The repo is root-owned on the new VM** (Phase 2f chown) → the login user gets `cd: Permission denied`; every `docker compose` must run as root (`sudo bash -c "cd … && …"`). Services run as root anyway. (Phase 6b.)
+
+21. **nginx `/` 502 is pre-existing, not a regression** — `/` proxies to the decommissioned Home Assistant (`:8123`). Health-check `/bridge/health` or `/health`, never `/`. Same for the `osint-tools DOWN` recovery email.
+
 **DON'T:**
 - Don't paste private SSH keys in chat. Use `gcloud compute ssh --command` to inject pubkeys instead. (Cycle 1: King Kazuma pasted `~/.ssh/google_compute_engine` private key into transcript — rotated post-migration.)
 - Don't commit secrets to git-tracked files. Cloudflare token lives in `/root/.ssh/cloudflare_token` (600 perms), never in MIGRATION.md.
@@ -545,7 +583,7 @@ After each cycle, append a row to the **Cycle roster** table above and add lesso
 
 ## Current cycle state (LIVE — update as phases complete)
 
-**Cycle: 2026-06-26 — IN PROGRESS** (Cycle 1 2026-04-24 complete; its details are in git history)
+**Cycle: 2026-06-26 — COMPLETE** (cutover ~16:36 UTC, ~3 min downtime. Cycle 1 2026-04-24 details in git history)
 
 - **Directive:** `dir_1782482471456`
 - **Source:** `project-80de6b4a-6079-4dcd-a34` / `ozzu-vm` / `35.222.38.140` / `e2-standard-8`
@@ -560,13 +598,14 @@ After each cycle, append a row to the **Cycle roster** table above and add lesso
 - [x] 1 — Bootstrap (docker + tooling + wireguard + gh-official-repo)
 - [x] 2 — Code + memory + secrets + /etc/wireguard + host systemd units + /root paths (repo 15 GB, backgrounded)
 - [x] Firewall (tcp:80,443,udp:51820) + static IP — done by Cipher via the IAM grant
-- [~] 3 — Bulk volumes (qdrant 125 GB rsync in progress)
-- [ ] 4 — Freeze old VM
-- [ ] 5 — Delta sync
-- [ ] 6 — Bring up + restore WireGuard / crons / infra timers / lab NETMAP (Phase 6c)
-- [ ] 7 — DNS cutover (3 records)
-- [ ] 8 — Soak (King Kazuma on phone)
-- [ ] 9 — Decommission old VM
+- [x] 3 — Bulk volumes (qdrant 117 GB transferred + verified green: 52.4M vectors)
+- [x] 3.5 — Pre-warm: started qdrant + `save|load` of backend-* images (zero downtime)
+- [x] 4 — Freeze old VM (had to neutralize the recovery-daemon split-brain — lesson #16)
+- [x] 5 — Delta sync (postgres + redis)
+- [x] 6 — Bring up + WireGuard + crons + infra timers + lab NETMAP
+- [x] 7 — DNS cutover (3 records → 34.10.215.92, propagated to 1.1.1.1 + 8.8.8.8)
+- [ ] 8 — Soak (King Kazuma verifying on iPhone)
+- [ ] 9 — Decommission old VM (King Kazuma's call; rollback = rename compose back + up + DNS flip)
 
 **If session compacts during a future migration:**
 1. Read this section first
