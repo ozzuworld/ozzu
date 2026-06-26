@@ -101,6 +101,18 @@ export default function SOCScreen() {
         borderBottom
         right={
           <>
+            <Pressable
+              onPress={() => router.push("/soc/calls")}
+              hitSlop={8}
+              style={({ pressed }) => ({
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 12,
+                backgroundColor: pressed ? withAlpha(colors.brand.amber, 0.13) : withAlpha(colors.brand.amber, 0.08),
+              })}
+            >
+              <Text style={{ color: colors.brand.amber, fontSize: 11, fontWeight: "600" as any }}>Calls</Text>
+            </Pressable>
             <RelayToggle />
             <Pressable
               onPress={() => router.push("/soc/new")}
