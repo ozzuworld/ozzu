@@ -75,3 +75,6 @@ backend/docker-compose.override.yml
 # Python venvs (scripts/.venv-vacuum/, etc. — pip-installed deps)
 scripts/.venv-*
 __pycache__/
+tools/gsm-gateway/android/app/build/
+tools/gsm-gateway/android/.gradle/
+tools/gsm-gateway/android/gradle/

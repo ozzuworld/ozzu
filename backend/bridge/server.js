@@ -6713,6 +6713,8 @@ wss.on("connection", (ws, req) => {
   server.listen(PORT, "0.0.0.0", () => {
     log.bridge.info(`listening on :${PORT}`);
     checkContainerBinaries();
+    // AGI call screener for Asterisk (FastAGI on port 4573)
+    try { require("./agi-screener"); } catch (e) { log.bridge.error(`AGI screener: ${e.message}`); }
     // dir_1780846234615: engagement cron poller — ticks every minute, fires
     // due crons by inserting queue items through the normal gate stack.
     try {
