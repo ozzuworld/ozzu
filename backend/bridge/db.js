@@ -1571,7 +1571,28 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_device_state_log_device ON device_state_log(device_id, ts DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_device_state_log_ts ON device_state_log(ts DESC)`);
 
-    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph + agent_audit_log + recon_hosts + infra_state)");
+    // ── Device telemetry v2 (dir_1782487057792) ──
+    await pool.query(`ALTER TABLE device_state ADD COLUMN IF NOT EXISTS telemetry JSONB DEFAULT '{}'`);
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS device_inventory (
+      device_id    TEXT PRIMARY KEY,
+      hardware     JSONB DEFAULT '{}',
+      os           JSONB DEFAULT '{}',
+      security     JSONB DEFAULT '{}',
+      agent        JSONB DEFAULT '{}',
+      first_seen   TIMESTAMPTZ DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS device_telemetry_snapshots (
+      id            SERIAL PRIMARY KEY,
+      device_id     TEXT NOT NULL,
+      snapshot      JSONB NOT NULL,
+      collected_at  TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_dts_device_time ON device_telemetry_snapshots(device_id, collected_at DESC)`);
+
+    console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph + agent_audit_log + recon_hosts + infra_state + device_telemetry_v2)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);
     _pgConnected = false;
@@ -4509,6 +4530,75 @@ async function getDeviceHistory(deviceId, { since = null, limit = 100 } = {}) {
   return res.rows;
 }
 
+// ── Device Telemetry v2 (dir_1782487057792) ──
+
+async function upsertDeviceInventory(deviceId, inv) {
+  if (!_pgConnected || !deviceId) return null;
+  const res = await query(
+    `INSERT INTO device_inventory (device_id, hardware, os, security, agent, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     ON CONFLICT (device_id) DO UPDATE SET
+       hardware = COALESCE(EXCLUDED.hardware, device_inventory.hardware),
+       os = COALESCE(EXCLUDED.os, device_inventory.os),
+       security = COALESCE(EXCLUDED.security, device_inventory.security),
+       agent = COALESCE(EXCLUDED.agent, device_inventory.agent),
+       updated_at = NOW()
+     RETURNING *`,
+    [deviceId,
+     JSON.stringify(inv.hardware || {}), JSON.stringify(inv.os || {}),
+     JSON.stringify(inv.security || {}), JSON.stringify(inv.agent || {})]
+  );
+  return res.rows[0] || null;
+}
+
+async function updateDeviceTelemetry(deviceId, telemetry) {
+  if (!_pgConnected || !deviceId) return null;
+  await query(
+    `UPDATE device_state SET telemetry = $2, updated_at = NOW() WHERE device_id = $1`,
+    [deviceId, JSON.stringify(telemetry)]
+  );
+}
+
+const _lastSnapshot = new Map();
+const SNAPSHOT_INTERVAL_MS = 300_000; // 5 min
+
+async function insertTelemetrySnapshot(deviceId, snapshot) {
+  if (!_pgConnected || !deviceId) return;
+  const now = Date.now();
+  const prev = _lastSnapshot.get(deviceId) || 0;
+  if (now - prev < SNAPSHOT_INTERVAL_MS) return;
+  _lastSnapshot.set(deviceId, now);
+  await query(
+    `INSERT INTO device_telemetry_snapshots (device_id, snapshot, collected_at) VALUES ($1, $2, NOW())`,
+    [deviceId, JSON.stringify(snapshot)]
+  );
+  await query(
+    `DELETE FROM device_telemetry_snapshots WHERE device_id = $1 AND collected_at < NOW() - INTERVAL '7 days'`,
+    [deviceId]
+  ).catch(() => {});
+}
+
+async function getDeviceInventory(deviceId) {
+  if (!_pgConnected) return deviceId ? null : [];
+  if (deviceId) {
+    const res = await query(`SELECT * FROM device_inventory WHERE device_id = $1`, [deviceId]);
+    return res.rows[0] || null;
+  }
+  const res = await query(`SELECT * FROM device_inventory ORDER BY device_id`);
+  return res.rows;
+}
+
+async function getDeviceTelemetrySnapshots(deviceId, { since = null, limit = 100 } = {}) {
+  if (!_pgConnected || !deviceId) return [];
+  const params = [deviceId];
+  let sql = `SELECT device_id, snapshot, collected_at FROM device_telemetry_snapshots WHERE device_id = $1`;
+  if (since) { params.push(since); sql += ` AND collected_at >= $${params.length}::timestamptz`; }
+  params.push(limit);
+  sql += ` ORDER BY collected_at DESC LIMIT $${params.length}`;
+  const res = await query(sql, params);
+  return res.rows;
+}
+
 module.exports = {
   init,
   isConnected,
@@ -4522,6 +4612,12 @@ module.exports = {
   upsertDeviceState,
   getDeviceStates,
   getDeviceHistory,
+  // Device telemetry v2
+  upsertDeviceInventory,
+  updateDeviceTelemetry,
+  insertTelemetrySnapshot,
+  getDeviceInventory,
+  getDeviceTelemetrySnapshots,
   // Memories
   addMemory,
   getMemories,

@@ -114,6 +114,46 @@ module.exports = function infraRoutes(ctx) {
       return true;
     }
 
+    // GET /infra/inventory — device inventory from telemetry v2 (dir_1782487057792)
+    if (req.method === "GET" && pathname === "/infra/inventory") {
+      if (!db || !db.isConnected || !db.isConnected()) { sendJSON(res, 503, { error: "Database not available" }, req); return true; }
+      try {
+        const deviceId = url.searchParams.get("device_id");
+        const inv = await db.getDeviceInventory(deviceId || null);
+        if (deviceId) {
+          sendJSON(res, inv ? 200 : 404, inv || { error: "not found" }, req);
+        } else {
+          sendJSON(res, 200, { count: inv.length, devices: inv }, req);
+        }
+      } catch (e) {
+        sendJSON(res, 500, { error: "inventory query failed", detail: e.message }, req);
+      }
+      return true;
+    }
+
+    // GET /infra/telemetry/:device_id — latest rich telemetry for a device
+    if (req.method === "GET" && pathname.startsWith("/infra/telemetry/")) {
+      if (!db || !db.isConnected || !db.isConnected()) { sendJSON(res, 503, { error: "Database not available" }, req); return true; }
+      const deviceId = pathname.split("/")[3];
+      if (!deviceId) { sendJSON(res, 400, { error: "device_id required in path" }, req); return true; }
+      try {
+        const states = await db.getDeviceStates();
+        const dev = states.find(d => d.device_id === deviceId);
+        const inv = await db.getDeviceInventory(deviceId);
+        if (!dev) { sendJSON(res, 404, { error: "device not found" }, req); return true; }
+        sendJSON(res, 200, {
+          device_id: deviceId,
+          status: dev.status,
+          last_seen: dev.last_seen,
+          inventory: inv || null,
+          telemetry: dev.telemetry || {},
+        }, req);
+      } catch (e) {
+        sendJSON(res, 500, { error: "telemetry query failed", detail: e.message }, req);
+      }
+      return true;
+    }
+
     return false;
   };
 };

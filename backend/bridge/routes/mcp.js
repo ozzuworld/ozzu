@@ -248,6 +248,30 @@ module.exports = function mcpRoutes(ctx) {
       },
     },
     {
+      name: "get_device_inventory",
+      description: "Get rich device inventory (hardware, OS, security posture, agent info) from telemetry v2. Without device_id returns ALL devices. This is the static 'what IS this device' data, updated on boot or OS change.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          device_id: { type: "string", description: "Device ID, e.g. 'tablet-p610'. Omit for all." },
+        },
+      },
+    },
+    {
+      name: "get_device_telemetry",
+      description: "Get rich LIVE telemetry for a device (CPU, memory, battery, thermal, network, disk, processes, connections, packages, USB, Bluetooth, security — up to 120 fields). Returns the latest snapshot stored on device_state.telemetry by the v2 agent. For historical snapshots use device_id + history=true.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          device_id: { type: "string", description: "Device ID, e.g. 'tablet-p610'" },
+          history: { type: "boolean", description: "If true, return recent telemetry snapshots (5-min intervals, last 7 days)" },
+          since: { type: "string", description: "Only with history=true: ISO timestamp cutoff" },
+          limit: { type: "number", description: "Only with history=true: max rows (default 50)" },
+        },
+        required: ["device_id"],
+      },
+    },
+    {
       name: "gpu_status",
       description: "Get Vast.ai GPU instance status — running instances, SSH connection details, GPU utilization, cost. Use this to check if a GPU is available or to get SSH connection info.",
       inputSchema: {
@@ -1396,6 +1420,52 @@ module.exports = function mcpRoutes(ctx) {
           }
           const rows = await db.getDeviceHistory(args.device_id, { since, limit: args.limit || 100 });
           return { content: [{ type: "text", text: JSON.stringify({ device_id: args.device_id, since: since || null, count: rows.length, history: rows }, null, 2) }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `Query failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "get_device_inventory": {
+        if (!db || !db.isConnected || !db.isConnected()) return { content: [{ type: "text", text: "Database not available" }], isError: true };
+        try {
+          const result = await db.getDeviceInventory(args.device_id || null);
+          if (args.device_id) {
+            if (!result) return { content: [{ type: "text", text: `No inventory for device '${args.device_id}'. The device may not have reported telemetry v2 yet.` }] };
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+          }
+          return { content: [{ type: "text", text: JSON.stringify({ count: result.length, devices: result }, null, 2) }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `Query failed: ${e.message}` }], isError: true };
+        }
+      }
+
+      case "get_device_telemetry": {
+        if (!db || !db.isConnected || !db.isConnected()) return { content: [{ type: "text", text: "Database not available" }], isError: true };
+        if (!args.device_id) return { content: [{ type: "text", text: "device_id is required" }], isError: true };
+        try {
+          if (args.history) {
+            let since = null;
+            if (args.since) {
+              const m = /^(\d+)\s*([hd])$/.exec(String(args.since).trim());
+              if (m) {
+                const hrs = m[2] === "d" ? Number(m[1]) * 24 : Number(m[1]);
+                since = new Date(Date.now() - hrs * 3600 * 1000).toISOString();
+              } else { since = args.since; }
+            }
+            const rows = await db.getDeviceTelemetrySnapshots(args.device_id, { since, limit: args.limit || 50 });
+            return { content: [{ type: "text", text: JSON.stringify({ device_id: args.device_id, count: rows.length, snapshots: rows }, null, 2) }] };
+          }
+          // Latest telemetry from device_state
+          const states = await db.getDeviceStates();
+          const dev = states.find(d => d.device_id === args.device_id);
+          if (!dev) return { content: [{ type: "text", text: `No state for device '${args.device_id}'` }] };
+          const inv = await db.getDeviceInventory(args.device_id);
+          return { content: [{ type: "text", text: JSON.stringify({
+            device_id: args.device_id,
+            status: dev.status, last_seen: dev.last_seen,
+            inventory: inv || null,
+            telemetry: dev.telemetry || {},
+          }, null, 2) }] };
         } catch (e) {
           return { content: [{ type: "text", text: `Query failed: ${e.message}` }], isError: true };
         }

@@ -40,6 +40,7 @@ const positioningRoutes = require("./routes/positioning");
 const mcpRoutes = require("./routes/mcp");
 const infraRoutes = require("./routes/infra");
 const heartbeatRoutes = require("./routes/heartbeat");
+const deviceTelemetryRoutes = require("./routes/device-telemetry");
 const businessEmailRoutes = require("./routes/business-email");
 const vaultRoutes = require("./routes/vault");
 const financeRoutes = require("./routes/finance");
@@ -1572,6 +1573,7 @@ function getRouteHandlers() {
       mcp: mcpRoutes(routeCtx),
       infra: infraRoutes(routeCtx),
       heartbeat: heartbeatRoutes(routeCtx),
+      deviceTelemetry: deviceTelemetryRoutes(routeCtx),
       businessEmail: businessEmailRoutes(routeCtx),
       vault: vaultRoutes(routeCtx),
       finance: financeRoutes(routeCtx),
@@ -1710,6 +1712,7 @@ async function handleRequest(req, res) {
   if (await r.mcp(req, res, pathname, url)) return;
   if (await r.infra(req, res, pathname, url)) return;
   if (await r.heartbeat(req, res, pathname, url)) return;
+  if (await r.deviceTelemetry(req, res, pathname, url)) return;
   if (await r.businessEmail(req, res, pathname, url)) return;
   if (await r.vault(req, res, pathname, url)) return;
   if (await r.finance(req, res, pathname, url)) return;
