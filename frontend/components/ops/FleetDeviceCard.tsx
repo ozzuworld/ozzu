@@ -16,6 +16,7 @@ const DEVICE_META: Record<string, { emoji: string; label: string; color: string 
   "dev-01": { emoji: "🖥️", label: "DEV SERVER", color: "#F59E0B" },
   "orangepi-gsc": { emoji: "📡", label: "GROUND STATION", color: "#22C55E" },
   "rockpi": { emoji: "🧊", label: "ROCK PI", color: "#3B82F6" },
+  "cat-s41": { emoji: "📞", label: "GSM GATEWAY", color: "#EF4444" },
 };
 
 function Bar({ label, value, max, unit, warnPct = 80 }: {

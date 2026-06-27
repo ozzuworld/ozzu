@@ -85,6 +85,7 @@ const DEVICE_EMOJI: Record<string, string> = {
   "dev-01": "🖥️",
   gcp: "☁️",
   router: "📡",
+  "cat-s41": "📞",
 };
 
 const DEVICE_BADGES: Record<string, { label: string; color: string }[]> = {
