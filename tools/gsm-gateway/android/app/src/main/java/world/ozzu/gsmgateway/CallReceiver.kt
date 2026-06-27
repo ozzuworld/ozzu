@@ -14,6 +14,7 @@ class CallReceiver : BroadcastReceiver() {
     companion object {
         private var lastState = TelephonyManager.CALL_STATE_IDLE
         private var incomingNumber: String? = null
+        private var isIncomingCall = false
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -24,42 +25,60 @@ class CallReceiver : BroadcastReceiver() {
 
         when (state) {
             TelephonyManager.EXTRA_STATE_RINGING -> {
+                // RINGING only fires for INCOMING calls — outgoing goes straight to OFFHOOK
+                isIncomingCall = true
                 incomingNumber = number
                 Log.i("OzzuGSM", "Incoming call: $number")
 
-                // Notify bridge
                 if (number != null) {
-                    thread { notifyBridge(number) }
+                    thread {
+                        try { notifyBridge(number) } catch (e: Exception) {
+                            Log.e("OzzuGSM", "Bridge notify error: ${e.message}")
+                        }
+                    }
                 }
 
-                // Auto-answer if enabled
                 if (GatewayApp.autoAnswer && number != null) {
                     thread {
-                        Thread.sleep(500) // Brief delay for ring to register
-                        answerCall(context)
+                        try {
+                            Thread.sleep(1000)
+                            answerCall(context)
+                        } catch (e: Exception) {
+                            Log.e("OzzuGSM", "Auto-answer error: ${e.message}")
+                        }
                     }
                 }
             }
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
-                if (lastState == TelephonyManager.CALL_STATE_RINGING) {
-                    Log.i("OzzuGSM", "Call answered: $incomingNumber")
-                    // Start SIP bridge service to forward audio
-                    val serviceIntent = Intent(context, SipBridgeService::class.java).apply {
-                        action = "start"
+                if (isIncomingCall && lastState == TelephonyManager.CALL_STATE_RINGING) {
+                    Log.i("OzzuGSM", "Incoming call answered: $incomingNumber — starting audio bridge")
+                    try {
+                        val serviceIntent = Intent(context, SipBridgeService::class.java).apply {
+                            action = "start"
+                        }
+                        context.startForegroundService(serviceIntent)
+                    } catch (e: Exception) {
+                        Log.e("OzzuGSM", "Failed to start bridge service: ${e.message}")
                     }
-                    context.startForegroundService(serviceIntent)
+                } else {
+                    // Outgoing call — ignore, don't touch the audio
+                    Log.i("OzzuGSM", "Outgoing call detected — gateway ignoring")
                 }
             }
             TelephonyManager.EXTRA_STATE_IDLE -> {
-                if (lastState == TelephonyManager.CALL_STATE_OFFHOOK) {
-                    Log.i("OzzuGSM", "Call ended: $incomingNumber")
-                    // Stop SIP bridge
-                    val serviceIntent = Intent(context, SipBridgeService::class.java).apply {
-                        action = "stop"
+                if (isIncomingCall && lastState == TelephonyManager.CALL_STATE_OFFHOOK) {
+                    Log.i("OzzuGSM", "Incoming call ended: $incomingNumber — stopping audio bridge")
+                    try {
+                        val serviceIntent = Intent(context, SipBridgeService::class.java).apply {
+                            action = "stop"
+                        }
+                        context.startService(serviceIntent)
+                    } catch (e: Exception) {
+                        Log.e("OzzuGSM", "Failed to stop bridge service: ${e.message}")
                     }
-                    context.startService(serviceIntent)
                 }
                 incomingNumber = null
+                isIncomingCall = false
             }
         }
 
@@ -82,24 +101,20 @@ class CallReceiver : BroadcastReceiver() {
     }
 
     private fun notifyBridge(number: String) {
-        try {
-            val url = URL("${GatewayApp.bridgeUrl}/soc/calls/number")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("Authorization", "Bearer ${GatewayApp.bridgeToken}")
-            conn.doOutput = true
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
+        val url = URL("${GatewayApp.bridgeUrl}/soc/calls/number")
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.setRequestProperty("Authorization", "Bearer ${GatewayApp.bridgeToken}")
+        conn.doOutput = true
+        conn.connectTimeout = 5000
+        conn.readTimeout = 5000
 
-            val body = """{"phone_number":"$number","direction":"incoming","label":"cat-gsm-gateway"}"""
-            conn.outputStream.write(body.toByteArray())
-            conn.outputStream.flush()
-            val code = conn.responseCode
-            Log.i("OzzuGSM", "Bridge notified: $number → HTTP $code")
-            conn.disconnect()
-        } catch (e: Exception) {
-            Log.e("OzzuGSM", "Bridge notify failed: ${e.message}")
-        }
+        val body = """{"phone_number":"$number","direction":"incoming","label":"cat-gsm-gateway"}"""
+        conn.outputStream.write(body.toByteArray())
+        conn.outputStream.flush()
+        val code = conn.responseCode
+        Log.i("OzzuGSM", "Bridge notified: $number → HTTP $code")
+        conn.disconnect()
     }
 }
