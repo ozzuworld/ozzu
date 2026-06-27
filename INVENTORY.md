@@ -33,18 +33,24 @@ Primary compute — always on. All services run here via Docker. See registry §
 WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a container. OpenVPN was decommissioned 2026-05-02 — see registry §4.
 
 ### VPN clients
-**See registry §4 (WireGuard Configuration) for the authoritative peer list.** Briefly: dev-01 / kazuma-pc / orangepi5 active on WG 10.9.0.0/24; ozzu-android config exists but not yet installed.
+**See registry §4 (WireGuard Configuration) for the authoritative peer list.** Briefly: dev-01 / kazuma-pc / orangepi5 / cat-s41 / tablet-p610 active on WG 10.9.0.0/24; ozzu-android config exists but not yet installed.
 
-### Android Phone — WhatsApp Agent
+### CAT S41 (GSM Gateway + WhatsApp Agent)
 | Item | Value |
 |------|-------|
-| Number | 3226033350 |
-| Device | CAT S41 (always on) |
-| Stack | Termux → Node.js → Baileys → WA Web |
-| SSH access | `ssh -p 8023 localhost` (via reverse tunnel GCP:8023→phone:8022) |
-| WA API | GCP:8766 → phone:8765 (reverse tunnel) |
-| Auto-start | Termux:Boot → `~/.termux/boot/start.sh` |
-| Auth | Saved to `~/wa-auth/` — survives restarts |
+| Device | CAT S41 (Bullitt Group, rugged phone, always on) |
+| ADB serial | S411951000454 (USB to dev-01) |
+| OS | Android 8.0.0 (API 26), kernel 4.4.83+ (MediaTek) |
+| Root | **Magisk v28.1** via mtkclient Kamakiri BROM exploit + `seccfg unlock` + `KEEPVERITY=true` |
+| WG IP | **10.9.0.22** (WG app VpnService, tunnel name "cat") |
+| WG config | `/data/data/com.wireguard.android/files/cat.conf` on device |
+| LAN IP | 192.168.1.18 (FAMILIA SUAREZ WiFi) |
+| ADB TCP | 5555 (set by boot script, reachable over WG at 10.9.0.22:5555) |
+| Telemetry | `ozzu-telemetry-android.sh` → `POST /api/device-telemetry` (device_id `cat-s41`, 60s cycle) |
+| Boot services | Magisk `service.d/02-ozzuwg-keepalive.sh` — clock fix, WG tunnel up, IP forwarding, telemetry reporter, 15s watchdog |
+| Role | GSM gateway (Asterisk PBX call intelligence), WhatsApp bridge, L3 relay |
+| **CRITICAL** | Kernel 4.4 silently blackholes root UDP sockets — `ozzuwg` daemon does NOT work. WG must use the app's VpnService driven by broadcast intents. No RTC battery — clock resets to 2009 on reboot; boot script fixes via NTP. |
+| WhatsApp | Number 3226033350, Termux → Node.js → Baileys → WA Web. SSH via `ssh -p 8023 localhost` (reverse tunnel GCP:8023→phone:8022). WA API at GCP:8766→phone:8765. Auto-start via Termux:Boot. |
 
 ### iPhone (King Kazuma)
 - Ozzu app installed via SideStore (self-service sideload, no PC needed for refresh)
