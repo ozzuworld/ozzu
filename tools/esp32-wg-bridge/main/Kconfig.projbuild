@@ -41,7 +41,7 @@ menu "ESP32 WG Bridge"
 
     config ESP_WG_PEER_ENDPOINT
         string "WG hub endpoint host/IP"
-        default "35.222.38.140"
+        default "vpn.ozzu.world"
 
     config ESP_WG_PEER_PORT
         int "WG hub endpoint port"

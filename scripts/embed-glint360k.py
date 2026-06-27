@@ -24,8 +24,8 @@ from queue import Queue, Empty
 from concurrent.futures import ThreadPoolExecutor
 from urllib.request import urlopen, Request
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://34.135.158.92:6333")
-BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://34.135.158.92:3333")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://home.ozzu.world:6333")
+BRIDGE_URL = os.environ.get("BRIDGE_URL", "http://home.ozzu.world:3333")
 COLLECTION = "faces"
 QDRANT_BATCH = 2000
 GPU_BATCH = 256

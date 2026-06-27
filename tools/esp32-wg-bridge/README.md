@@ -10,7 +10,7 @@ Directive: dir_1779990913039 — first working build 2026-05-28.
 [dev-01 10.9.0.5]
        │ wg0
        ▼
-[Bridge VM (WG hub) 35.222.38.140:51820, 10.9.0.1]
+[Bridge VM (WG hub) vpn.ozzu.world:51820, 10.9.0.1]
        │ wg0  (peer XcWZRSG/...: allowed-ips 10.9.0.20/32, <TARGET_LAN>/24)
        ▼
         ~ internet ~
@@ -51,7 +51,7 @@ All secrets in `sdkconfig` (gitignored — never committed). Set via `idf.py men
 | `CONFIG_ESP_WG_LOCAL_NETMASK` | WG-side netmask (default 255.255.255.0) |
 | `CONFIG_ESP_WG_LOCAL_PRIVKEY` | ESP32 WG private key (base64, generated once with `wg genkey`) |
 | `CONFIG_ESP_WG_PEER_PUBKEY` | Bridge VM's WG public key |
-| `CONFIG_ESP_WG_PEER_ENDPOINT` | Bridge VM's public IP (35.222.38.140) |
+| `CONFIG_ESP_WG_PEER_ENDPOINT` | Bridge VM's WG endpoint (vpn.ozzu.world) |
 | `CONFIG_ESP_WG_PEER_PORT` | Bridge VM's WG port (51820) |
 | `CONFIG_ESP_WG_KEEPALIVE` | Persistent keepalive in seconds (default 25) |
 

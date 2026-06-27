@@ -8,7 +8,7 @@ const path = require('path');
 const HOME = '/data/data/com.termux/files/home';
 const AUTH_DIR = path.join(HOME, 'wa-auth');
 const PORT = 8765;
-const BRIDGE_HOST = '34.135.158.92';
+const BRIDGE_HOST = 'home.ozzu.world';
 const BRIDGE_PORT = 3333;
 
 let sock = null;

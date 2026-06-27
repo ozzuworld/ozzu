@@ -19,8 +19,8 @@ for s in site.getsitepackages()+[site.getusersitepackages()]:
     dirs.extend(glob.glob(s+'/nvidia/*/lib'))
 print(':'.join(dirs))" 2>/dev/null)
 export LD_LIBRARY_PATH="${NVIDIA_LIBS}:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
-export QDRANT_URL="${QDRANT_URL:-http://34.135.158.92:6333}"
-export BRIDGE_URL="${BRIDGE_URL:-http://34.135.158.92:3333}"
+export QDRANT_URL="${QDRANT_URL:-http://home.ozzu.world:6333}"
+export BRIDGE_URL="${BRIDGE_URL:-http://home.ozzu.world:3333}"
 export ONNXRUNTIME_LOG_LEVEL=3
 export HF_HOME=/root/.cache/huggingface
 

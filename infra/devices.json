@@ -3,13 +3,14 @@
   "_secrets_doc": "Secret values live in ~/.ozzu-secrets (gitignored; see infra/secrets.example for template). This file references them by env-var name only via *_secret_var fields.",
 
   "gcp": {
-    "hostname": "ozzu-vm.us-central1-a.c.project-80de6b4a-6079-4dcd-a34.internal",
-    "public_ip": "35.222.38.140",
+    "_migration_note": "On VM/account migration: update public_ip + project_id/number + hostname + zone HERE and the DNS A-records (home.ozzu.world, vpn.ozzu.world). public_ip is a RECORD only — code and devices connect via fqdn.* below, NEVER the raw IP. Last rotation 2026-06-27 (Cycle-2: 35.222.38.140 -> 34.10.215.92).",
+    "hostname": "instance-20260626-134353.us-central1-b.c.project-2f3f9831-d29d-4413-ba4.internal",
+    "public_ip": "34.10.215.92",
     "internal_ip": "10.128.0.2",
     "wg_ip": "10.9.0.1",
-    "project_id": "project-80de6b4a-6079-4dcd-a34",
-    "project_number": "700980343543",
-    "zone": "us-central1-a",
+    "project_id": "project-2f3f9831-d29d-4413-ba4",
+    "project_number": "378635557503",
+    "zone": "us-central1-b",
     "fqdn": {
       "apex": "ozzu.world",
       "bridge": "home.ozzu.world",

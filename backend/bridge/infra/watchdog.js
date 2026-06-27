@@ -103,7 +103,7 @@ async function checkTrainingRecovery() {
     const sshPort = gpuDetails.sshPort || "14666";
     const cmd = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p ${sshPort} root@${sshAddr} "` +
       `pgrep -f 'run-all-datasets.sh' > /dev/null 2>&1 && echo 'ORCHESTRATOR_RUNNING' || ` +
-      `(export QDRANT_URL=http://34.135.158.92:6333 BRIDGE_URL=http://34.135.158.92:3333; ` +
+      `(export QDRANT_URL=http://home.ozzu.world:6333 BRIDGE_URL=http://home.ozzu.world:3333; ` +
       `nohup bash /root/run-all-datasets.sh >> /tmp/all-datasets.log 2>&1 & echo 'ORCHESTRATOR_RESTARTED')"`;
     const result = execSync(cmd, { timeout: 30000, stdio: "pipe" }).toString().trim();
     console.log(`[watchdog] Training recovery result: ${result}`);
