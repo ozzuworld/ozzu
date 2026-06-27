@@ -39,20 +39,12 @@
             </intent-filter>
         </service>
 
-        <!-- Call state receiver — works on API 26+ (CAT S41 fallback) -->
-        <receiver
-            android:name=".CallReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.PHONE_STATE" />
-            </intent-filter>
-        </receiver>
-
-        <!-- Foreground service for SIP registration + audio bridge -->
+        <!-- Foreground service — call detection via PhoneStateListener (inside service),
+             NOT via PHONE_STATE broadcast (requires READ_PRIVILEGED_PHONE_STATE on Android 8).
+             No foregroundServiceType attr — that's API 29+, crashes on Android 8/API 26. -->
         <service
             android:name=".SipBridgeService"
-            android:exported="false"
-            android:foregroundServiceType="phoneCall|microphone" />
+            android:exported="false" />
 
         <!-- Boot receiver to auto-start -->
         <receiver
