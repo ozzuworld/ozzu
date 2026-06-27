@@ -42,6 +42,7 @@ class SipBridgeService : Service() {
     private var sipViaBranch: String? = null
     private var remoteRtpPort: Int = 0
     private var localRtpPort: Int = 0
+    private var sipReady = false  // SIP INVITE accepted before OFFHOOK
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -89,27 +90,44 @@ class SipBridgeService : Service() {
                     thread { notifyBridge(number) }
                 }
 
+                // Pre-establish SIP session during RINGING so audio starts instantly at OFFHOOK
+                sipReady = false
+                thread(name = "sip-preconnect") {
+                    try {
+                        rtpSocket = DatagramSocket(0)
+                        localRtpPort = rtpSocket!!.localPort
+                        sipSocket = DatagramSocket()
+                        val asteriskAddr = InetAddress.getByName(GatewayApp.asteriskHost)
+                        remoteRtpPort = sendSipInvite(asteriskAddr)
+                        sipReady = remoteRtpPort > 0
+                        Log.i("OzzuGSM", "SIP pre-connect ${if (sipReady) "OK — RTP $remoteRtpPort" else "FAILED"}")
+                    } catch (e: Exception) {
+                        Log.e("OzzuGSM", "SIP pre-connect error: ${e.message}")
+                    }
+                }
+
                 if (GatewayApp.autoAnswer) {
                     thread {
-                        Thread.sleep(1500)
+                        Thread.sleep(300)
                         answerCall()
                     }
                 }
             }
             TelephonyManager.CALL_STATE_OFFHOOK -> {
                 if (lastCallState == TelephonyManager.CALL_STATE_RINGING) {
-                    Log.i("OzzuGSM", "OFFHOOK — call answered, starting SBC bridge for: $incomingNumber")
+                    Log.i("OzzuGSM", "OFFHOOK — call answered, starting audio bridge for: $incomingNumber")
                     startBridge()
                 } else {
                     Log.i("OzzuGSM", "OFFHOOK — outgoing call, ignoring")
                 }
             }
             TelephonyManager.CALL_STATE_IDLE -> {
-                if (bridging) {
+                if (bridging || sipReady) {
                     Log.i("OzzuGSM", "IDLE — call ended, sending BYE + stopping bridge")
                     thread { sendSipBye() }
                     stopBridge()
                 }
+                sipReady = false
                 incomingNumber = null
             }
         }
@@ -138,22 +156,32 @@ class SipBridgeService : Service() {
         am.isSpeakerphoneOn = true
         Log.i("OzzuGSM", "Audio routed to speakerphone for VOICE_CALL capture")
 
-        thread(name = "sip-invite") {
+        thread(name = "audio-bridge") {
             try {
-                rtpSocket = DatagramSocket(0)
-                localRtpPort = rtpSocket!!.localPort
-                Log.i("OzzuGSM", "RTP socket bound to local port $localRtpPort")
+                // Wait for SIP pre-connect (started during RINGING) — max 3s
+                val deadline = System.currentTimeMillis() + 3000
+                while (!sipReady && System.currentTimeMillis() < deadline) {
+                    Thread.sleep(50)
+                }
 
-                sipSocket = DatagramSocket()
+                if (!sipReady) {
+                    // Fallback: SIP pre-connect failed or timed out, try now
+                    Log.w("OzzuGSM", "SIP pre-connect not ready, establishing now")
+                    if (rtpSocket == null) {
+                        rtpSocket = DatagramSocket(0)
+                        localRtpPort = rtpSocket!!.localPort
+                    }
+                    if (sipSocket == null) sipSocket = DatagramSocket()
+                    val asteriskAddr = InetAddress.getByName(GatewayApp.asteriskHost)
+                    remoteRtpPort = sendSipInvite(asteriskAddr)
+                    sipReady = remoteRtpPort > 0
+                }
 
-                val asteriskAddr = InetAddress.getByName(GatewayApp.asteriskHost)
-                remoteRtpPort = sendSipInvite(asteriskAddr)
-
-                if (remoteRtpPort > 0) {
-                    Log.i("OzzuGSM", "SIP INVITE accepted — Asterisk RTP on port $remoteRtpPort")
+                if (sipReady && remoteRtpPort > 0) {
+                    val asteriskAddr = InetAddress.getByName(GatewayApp.asteriskHost)
+                    Log.i("OzzuGSM", "Audio bridge starting — RTP to ${GatewayApp.asteriskHost}:$remoteRtpPort")
                     startCapture(asteriskAddr, remoteRtpPort)
                     startPlayback()
-                    Log.i("OzzuGSM", "Audio bridge started — RTP to ${GatewayApp.asteriskHost}:$remoteRtpPort")
                 } else {
                     Log.e("OzzuGSM", "SIP INVITE failed — no RTP port from Asterisk")
                     bridging = false
