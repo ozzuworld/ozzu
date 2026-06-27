@@ -310,6 +310,7 @@ let goAwayPartialOutput = ""; // tracks what Gemini was saying before disconnect
 let goAwayNudgeTimer = null;  // retry timer for recovery nudge
 let cipherPipeline = null; // CipherPipeline instance when Cipher is active (Deepgram STT → Claude → Cartesia TTS)
 let cipherPhoneWs = null; // WebSocket of the cipher-voice-capable iPhone (for sending response text)
+let voipClientWs = null;  // WebSocket of the VoIP-registered iPhone (for incoming call push)
 const JUNE_VOICE = "Kore";
 const CIPHER_VOICE = "Orus";
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
@@ -6005,6 +6006,27 @@ server.on("upgrade", (req, socket, head) => {
   } else if (pathname === "/ws") {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
+    });
+  } else if (pathname === "/ws/voip") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      log.ws.info("VoIP client connected");
+      voipClientWs = ws;
+      global.__voipClientWs = ws;
+      ws.on("message", (raw) => {
+        try {
+          const msg = JSON.parse(raw.toString());
+          if (msg.type === "auth") {
+            log.ws.info(`VoIP auth: ${msg.username}`);
+            ws.send(JSON.stringify({ type: "auth_ok" }));
+          } else if (msg.type === "push_token") {
+            log.ws.info(`VoIP push token received: ${msg.token?.substring(0, 16)}...`);
+          }
+        } catch (e) { log.ws.error(`VoIP message parse error: ${e.message}`); }
+      });
+      ws.on("close", () => {
+        log.ws.info("VoIP client disconnected");
+        if (voipClientWs === ws) { voipClientWs = null; global.__voipClientWs = null; }
+      });
     });
   } else {
     socket.destroy();

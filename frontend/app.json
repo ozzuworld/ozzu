@@ -26,6 +26,7 @@
         },
         "UIBackgroundModes": [
           "audio",
+          "voip",
           "bluetooth-peripheral"
         ]
       }
@@ -74,6 +75,7 @@
       "./plugins/signing-config",
       "./plugins/meta-dat-config",
       "./plugins/mediapipe-config",
+      "./plugins/voip-entitlements",
       [
         "expo-notifications",
         {

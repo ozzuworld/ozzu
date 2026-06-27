@@ -10,6 +10,7 @@ import { probeBridgeUrl, resetBridgeUrl } from "../lib/bridge-api";
 import { GlobalApprovalGate } from "../components/GlobalApprovalGate";
 import * as BleBeacon from "../modules/ble-beacon";
 import { registerForPushNotifications } from "../lib/push-notifications";
+import { useVoipCall } from "../lib/useVoipCall";
 
 import { colors } from "../lib/design-tokens";
 if (!__DEV__) {
@@ -139,6 +140,11 @@ console.log = (...a) => { _origLog(...a); remoteLog("log", ...a); };
 console.warn = (...a) => { _origWarn(...a); remoteLog("warn", ...a); };
 console.error = (...a) => { _origError(...a); remoteLog("error", ...a); };
 
+function VoipRegistrar() {
+  useVoipCall();
+  return null;
+}
+
 export default function RootLayout() {
   useEffect(() => {
     remoteLog("boot", `[boot] RootLayout mounted — platform=${Platform.OS}`);
@@ -166,6 +172,7 @@ export default function RootLayout() {
         <HAProvider>
           <GlassesProvider>
             <ImmersiveListener />
+            <VoipRegistrar />
             <GlobalApprovalGate />
             <Stack
               screenOptions={{

@@ -1754,8 +1754,9 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // POST /soc/calls/incoming — GSM gateway live call notification + VoIP push
     // POST /soc/calls/number — add a single number for investigation
-    if (req.method === "POST" && pathname === "/soc/calls/number") {
+    if (req.method === "POST" && (pathname === "/soc/calls/number" || pathname === "/soc/calls/incoming")) {
       const num = (body.phone_number || '').replace(/[^\d+]/g, '');
       if (!num) {
         sendJSON(res, 400, { error: "phone_number required" });
@@ -1767,13 +1768,27 @@ module.exports = function socRoutes(ctx) {
          ON CONFLICT (phone_number, call_time) DO NOTHING`,
         [num, body.direction || 'incoming', body.label || null]
       );
+      // Push incoming call to the VoIP-connected iPhone (CallKit)
+      if (pathname === "/soc/calls/incoming") {
+        const voipWs = global.__voipClientWs;
+        if (voipWs && voipWs.readyState === 1) {
+          voipWs.send(JSON.stringify({
+            type: 'incoming_call',
+            caller: num,
+            caller_name: body.caller_name || '',
+          }));
+          console.log(`[voip] pushed incoming call ${num} to iPhone`);
+        } else {
+          console.log(`[voip] no VoIP client connected — call from ${num} not pushed`);
+        }
+      }
       const exists = await db.query('SELECT 1 FROM call_osint WHERE phone_number=$1', [num]);
       if (!exists.rows.length) {
         runCallOsint(db, [num]).catch(err =>
           console.error('[call-osint] single error:', err.message)
         );
       }
-      sendJSON(res, 200, { ok: true, osint_queued: !exists.rows.length });
+      sendJSON(res, 200, { ok: true, osint_queued: !exists.rows.length, voip_pushed: pathname === "/soc/calls/incoming" });
       return true;
     }
 
