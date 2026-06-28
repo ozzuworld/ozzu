@@ -35,11 +35,12 @@ function connectGpu() {
   gpuWs.on("message", (data) => {
     if (appClients.size === 0) return;
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-    if (buf.length > 0 && buf[0] === 0x56) {
-      const now = Date.now();
-      if (now - lastFrameTime < MIN_FRAME_INTERVAL_MS) return;
-      lastFrameTime = now;
-    }
+    if (buf.length === 0) return;
+    // Only relay video frames; audio goes through Asterisk, not WS
+    if (buf[0] !== 0x56) return;
+    const now = Date.now();
+    if (now - lastFrameTime < MIN_FRAME_INTERVAL_MS) return;
+    lastFrameTime = now;
     for (const client of appClients) {
       if (client.readyState === WebSocket.OPEN) {
         client.send(data);
