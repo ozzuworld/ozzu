@@ -36,6 +36,7 @@ const scheduleRoutes = require("./routes/schedules");
 const profileRoutes = require("./routes/profile");
 const identityRoutes = require("./routes/identity");
 const opsRoutes = require("./routes/ops");
+const avatarProxy = require("./avatar-proxy");
 const positioningRoutes = require("./routes/positioning");
 const mcpRoutes = require("./routes/mcp");
 const infraRoutes = require("./routes/infra");
@@ -2006,6 +2007,27 @@ async function handleRequest(req, res) {
   // GET /status — Tablet fetches activity log
   if (req.method === "GET" && pathname === "/status") {
     sendJSON(res, 200, getStatusEntries());
+    return;
+  }
+
+  // GET /avatar/status — Avatar GPU proxy status
+  if (req.method === "GET" && pathname === "/avatar/status") {
+    sendJSON(res, 200, avatarProxy.getStatus());
+    return;
+  }
+
+  // POST /avatar/speak — Send text to avatar GPU for lip-sync speech
+  if (req.method === "POST" && pathname === "/avatar/speak") {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      try {
+        const { text } = JSON.parse(body);
+        if (!text) return sendJSON(res, 400, { error: "no text" });
+        const sent = avatarProxy.sendText(text);
+        sendJSON(res, 200, { status: sent ? "sent" : "gpu_disconnected" });
+      } catch (e) { sendJSON(res, 400, { error: "invalid json" }); }
+    });
     return;
   }
 
@@ -6006,6 +6028,10 @@ server.on("upgrade", (req, socket, head) => {
   } else if (pathname === "/ws") {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
+    });
+  } else if (pathname === "/ws/avatar") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      avatarProxy.handleAppClient(ws);
     });
   } else if (pathname === "/ws/voip") {
     wss.handleUpgrade(req, socket, head, (ws) => {

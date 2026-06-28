@@ -324,6 +324,11 @@ class JuneSession {
         if (part.inlineData?.mimeType?.startsWith("audio/")) {
           const audioBuf = Buffer.from(part.inlineData.data, "base64");
           this.sendAudioToAsterisk(audioBuf);
+          // Fork audio to avatar GPU for lip-sync
+          try {
+            const avatarProxy = require("./avatar-proxy");
+            avatarProxy.sendAudio(audioBuf);
+          } catch { /* avatar proxy not loaded or GPU disconnected */ }
         }
       }
 
