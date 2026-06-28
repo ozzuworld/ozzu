@@ -17,7 +17,7 @@ import {
   withAlpha,
 } from "../lib/design-tokens";
 import type { CallBriefing, Voicemail } from "../lib/useVoipCall";
-import { JuneAvatar } from "./JuneAvatar";
+import { JuneAvatarLive2D } from "./JuneAvatarLive2D";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
@@ -52,7 +52,7 @@ function BriefingCard({ briefing, onAccept, onDecline }: BriefingProps) {
     <View style={styles.card}>
       {/* June avatar */}
       <View style={styles.avatarWrap}>
-        <JuneAvatar speaking style={{ width: 160, aspectRatio: 1 }} />
+        <JuneAvatarLive2D speaking style={{ width: 160, aspectRatio: 1 }} />
       </View>
 
       {/* Header: live indicator + title */}

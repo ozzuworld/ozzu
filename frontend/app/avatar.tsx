@@ -17,7 +17,7 @@ import {
   spacing,
   withAlpha,
 } from "../lib/design-tokens";
-import { JuneAvatar } from "../components/JuneAvatar";
+import { JuneAvatarLive2D } from "../components/JuneAvatarLive2D";
 import { getBridgeUrl } from "../lib/bridge-api";
 
 export default function AvatarScreen() {
@@ -58,7 +58,7 @@ export default function AvatarScreen() {
         </View>
 
         <View style={styles.avatarWrap}>
-          <JuneAvatar speaking={speaking} />
+          <JuneAvatarLive2D speaking={speaking} />
         </View>
 
         <View style={styles.inputRow}>

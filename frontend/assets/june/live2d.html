@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: transparent; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head><body>
+<canvas id="canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@6/dist/browser/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/live2dcubismcore/live2dcubismcore.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display/dist/cubism4.min.js"></script>
+
+<script>
+const MODEL_URL = "https://cdn.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json";
+
+let model = null;
+let speaking = false;
+let mouthTarget = 0;
+let mouthCurrent = 0;
+let breathPhase = 0;
+
+const app = new PIXI.Application({
+  view: document.getElementById("canvas"),
+  transparent: true,
+  resizeTo: window,
+  antialias: true,
+});
+
+async function init() {
+  try {
+    model = await PIXI.live2d.Live2DModel.from(MODEL_URL);
+    model.anchor.set(0.5, 0.5);
+    model.scale.set(0.3);
+    model.x = app.screen.width / 2;
+    model.y = app.screen.height / 2;
+    app.stage.addChild(model);
+
+    app.ticker.add(animate);
+
+    if (window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: "ready" }));
+    }
+  } catch (e) {
+    if (window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: "error", message: e.message }));
+    }
+  }
+}
+
+function animate(dt) {
+  if (!model) return;
+  const cm = model.internalModel.coreModel;
+
+  // Breathing
+  breathPhase += 0.02 * dt;
+  const breathVal = (Math.sin(breathPhase) + 1) / 2;
+  cm.setParameterValueById("ParamBreath", breathVal);
+
+  // Mouth
+  if (speaking) {
+    const t = performance.now() / 1000;
+    mouthTarget = 0.3 + 0.7 * Math.abs(
+      Math.sin(t * 8.5) * 0.6 +
+      Math.sin(t * 13.7) * 0.25 +
+      Math.sin(t * 21.3) * 0.15
+    );
+    // micro-pauses (simulates word boundaries)
+    if (Math.sin(t * 2.1) > 0.7) mouthTarget *= 0.15;
+  } else {
+    mouthTarget = 0;
+  }
+
+  mouthCurrent += (mouthTarget - mouthCurrent) * 0.3;
+  cm.setParameterValueById("ParamMouthOpenY", Math.min(1, Math.max(0, mouthCurrent)));
+
+  // Subtle idle head movement
+  const now = performance.now() / 1000;
+  cm.setParameterValueById("ParamAngleX", Math.sin(now * 0.5) * 5);
+  cm.setParameterValueById("ParamAngleY", Math.sin(now * 0.37) * 3);
+  cm.setParameterValueById("ParamAngleZ", Math.sin(now * 0.28) * 2);
+}
+
+// API for React Native
+window.setSpeaking = function(val) { speaking = !!val; };
+window.setMouthOpen = function(val) { mouthTarget = val; };
+window.triggerExpression = function(name) {
+  if (model) model.expression(name);
+};
+window.triggerMotion = function(group, idx) {
+  if (model) model.motion(group, idx);
+};
+
+window.addEventListener("resize", () => {
+  if (model) {
+    model.x = app.screen.width / 2;
+    model.y = app.screen.height / 2;
+  }
+});
+
+init();
+</script>
+</body></html>
