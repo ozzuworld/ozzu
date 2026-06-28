@@ -4,23 +4,8 @@ import AVFoundation
 import PushKit
 
 public class VoipCallModule: Module {
-    private var provider: CXProvider?
+    private var delegate: VoipDelegate?
     private var callController: CXCallController?
-    private var voipRegistry: PKPushRegistry?
-    private var sipSession: SipVoipSession?
-    private var activeCalls: [UUID: CallInfo] = [:]
-    private var sipConfig: SipConfig?
-    private var wsTask: URLSessionWebSocketTask?
-    private var wsSession: URLSession?
-    private var wsConnected = false
-    private var wsReconnectTimer: Timer?
-
-    struct CallInfo {
-        let uuid: UUID
-        let callerNumber: String
-        let callerName: String
-        var answered: Bool = false
-    }
 
     struct SipConfig {
         let server: String
@@ -45,13 +30,12 @@ public class VoipCallModule: Module {
 
         OnCreate {
             self.callController = CXCallController()
-            self.configureCXProvider()
+            self.delegate = VoipDelegate(module: self)
         }
 
         OnDestroy {
-            self.wsTask?.cancel(with: .goingAway, reason: nil)
-            self.wsReconnectTimer?.invalidate()
-            self.provider?.invalidate()
+            self.delegate?.teardown()
+            self.delegate = nil
         }
 
         AsyncFunction("configure") { (config: [String: Any]) in
@@ -60,7 +44,7 @@ public class VoipCallModule: Module {
                   let password = config["password"] as? String else {
                 throw NSError(domain: "VoipCall", code: 1, userInfo: [NSLocalizedDescriptionKey: "server, username, password required"])
             }
-            self.sipConfig = SipConfig(
+            self.delegate?.sipConfig = SipConfig(
                 server: server,
                 port: config["port"] as? Int ?? 5060,
                 wsPort: config["wsPort"] as? Int ?? 8088,
@@ -70,17 +54,18 @@ public class VoipCallModule: Module {
         }
 
         AsyncFunction("register") { () -> [String: Any] in
-            guard let config = self.sipConfig else {
+            guard let config = self.delegate?.sipConfig else {
                 throw NSError(domain: "VoipCall", code: 2, userInfo: [NSLocalizedDescriptionKey: "Call configure() first"])
             }
-            self.connectWebSocket(config: config)
-            self.registerPushKit()
+            self.delegate?.connectWebSocket(config: config)
+            self.delegate?.registerPushKit()
             return ["status": "registering", "server": config.server]
         }
 
         AsyncFunction("reportIncomingCall") { (callerNumber: String, callerName: String) -> String in
+            guard let del = self.delegate else { return "" }
             let uuid = UUID()
-            try await self.reportCall(uuid: uuid, callerNumber: callerNumber, callerName: callerName)
+            try await del.reportCall(uuid: uuid, callerNumber: callerNumber, callerName: callerName)
             return uuid.uuidString
         }
 
@@ -92,14 +77,50 @@ public class VoipCallModule: Module {
         }
 
         AsyncFunction("getActiveCalls") { () -> [[String: Any]] in
-            return self.activeCalls.values.map { call in
+            return self.delegate?.activeCalls.values.map { call in
                 ["uuid": call.uuid.uuidString, "caller": call.callerNumber, "name": call.callerName, "answered": call.answered]
-            }
+            } ?? []
         }
 
         Function("isRegistered") { () -> Bool in
-            return self.wsConnected
+            return self.delegate?.wsConnected ?? false
         }
+    }
+}
+
+// MARK: - VoipDelegate (NSObject subclass for CXProviderDelegate + PKPushRegistryDelegate)
+
+class VoipDelegate: NSObject, CXProviderDelegate, PKPushRegistryDelegate {
+    struct CallInfo {
+        let uuid: UUID
+        let callerNumber: String
+        let callerName: String
+        var answered: Bool = false
+    }
+
+    weak var module: VoipCallModule?
+    var sipConfig: VoipCallModule.SipConfig?
+    var activeCalls: [UUID: CallInfo] = [:]
+
+    private var provider: CXProvider?
+    private var voipRegistry: PKPushRegistry?
+    var sipSession: SipVoipSession?
+
+    var wsTask: URLSessionWebSocketTask?
+    private var wsSession: URLSession?
+    var wsConnected = false
+    private var wsReconnectTimer: Timer?
+
+    init(module: VoipCallModule) {
+        self.module = module
+        super.init()
+        configureCXProvider()
+    }
+
+    func teardown() {
+        wsTask?.cancel(with: .goingAway, reason: nil)
+        wsReconnectTimer?.invalidate()
+        provider?.invalidate()
     }
 
     // MARK: - CallKit Provider
@@ -116,7 +137,7 @@ public class VoipCallModule: Module {
         self.provider = p
     }
 
-    private func reportCall(uuid: UUID, callerNumber: String, callerName: String) async throws {
+    func reportCall(uuid: UUID, callerNumber: String, callerName: String) async throws {
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .phoneNumber, value: callerNumber)
         update.localizedCallerName = callerName.isEmpty ? callerNumber : callerName
@@ -129,21 +150,21 @@ public class VoipCallModule: Module {
         activeCalls[uuid] = CallInfo(uuid: uuid, callerNumber: callerNumber, callerName: callerName)
 
         try await provider?.reportNewIncomingCall(with: uuid, update: update)
-        sendEvent("onIncomingCall", ["uuid": uuid.uuidString, "caller": callerNumber, "name": callerName])
+        module?.sendEvent("onIncomingCall", ["uuid": uuid.uuidString, "caller": callerNumber, "name": callerName])
     }
 
     // MARK: - PushKit VoIP Registration
 
-    private func registerPushKit() {
+    func registerPushKit() {
         let registry = PKPushRegistry(queue: .main)
         registry.delegate = self
         registry.desiredPushTypes = [.voIP]
         self.voipRegistry = registry
     }
 
-    // MARK: - WebSocket to Bridge (URLSessionWebSocketTask)
+    // MARK: - WebSocket to Bridge
 
-    private func connectWebSocket(config: SipConfig) {
+    func connectWebSocket(config: VoipCallModule.SipConfig) {
         wsTask?.cancel(with: .goingAway, reason: nil)
         wsReconnectTimer?.invalidate()
 
@@ -160,17 +181,17 @@ public class VoipCallModule: Module {
             if let error = error {
                 print("[VoIP] WS auth send error: \(error)")
                 self?.wsConnected = false
-                self?.sendEvent("onRegistrationFailed", ["error": error.localizedDescription])
+                self?.module?.sendEvent("onRegistrationFailed", ["error": error.localizedDescription])
                 self?.scheduleReconnect(config: config)
             } else {
                 self?.wsConnected = true
-                self?.sendEvent("onRegistered", ["server": config.server])
+                self?.module?.sendEvent("onRegistered", ["server": config.server])
                 self?.wsReadLoop(config: config)
             }
         }
     }
 
-    private func wsReadLoop(config: SipConfig) {
+    private func wsReadLoop(config: VoipCallModule.SipConfig) {
         wsTask?.receive { [weak self] result in
             guard let self = self else { return }
             switch result {
@@ -189,7 +210,7 @@ public class VoipCallModule: Module {
             case .failure(let error):
                 print("[VoIP] WS read error: \(error)")
                 self.wsConnected = false
-                self.sendEvent("onRegistrationFailed", ["error": "WebSocket disconnected"])
+                self.module?.sendEvent("onRegistrationFailed", ["error": "WebSocket disconnected"])
                 self.scheduleReconnect(config: config)
             }
         }
@@ -209,7 +230,7 @@ public class VoipCallModule: Module {
         }
     }
 
-    private func scheduleReconnect(config: SipConfig) {
+    private func scheduleReconnect(config: VoipCallModule.SipConfig) {
         wsReconnectTimer?.invalidate()
         DispatchQueue.main.async {
             self.wsReconnectTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
@@ -229,18 +250,16 @@ public class VoipCallModule: Module {
     private func deactivateAudioSession() {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
-}
 
-// MARK: - CXProviderDelegate
+    // MARK: - CXProviderDelegate
 
-extension VoipCallModule: CXProviderDelegate {
-    public func providerDidReset(_ provider: CXProvider) {
+    func providerDidReset(_ provider: CXProvider) {
         sipSession?.stop()
         sipSession = nil
         activeCalls.removeAll()
     }
 
-    public func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+    func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         guard var call = activeCalls[action.callUUID], let config = sipConfig else {
             action.fail()
             return
@@ -255,56 +274,54 @@ extension VoipCallModule: CXProviderDelegate {
             self?.provider?.reportCall(with: action.callUUID, endedAt: nil, reason: .remoteEnded)
             self?.activeCalls.removeValue(forKey: action.callUUID)
             self?.deactivateAudioSession()
-            self?.sendEvent("onCallEnded", ["uuid": action.callUUID.uuidString, "reason": "remote"])
+            self?.module?.sendEvent("onCallEnded", ["uuid": action.callUUID.uuidString, "reason": "remote"])
         }
         self.sipSession = session
 
         session.start { success in
             if success {
                 action.fulfill()
-                self.sendEvent("onCallAnswered", ["uuid": action.callUUID.uuidString])
+                self.module?.sendEvent("onCallAnswered", ["uuid": action.callUUID.uuidString])
             } else {
                 action.fail()
-                self.sendEvent("onCallFailed", ["uuid": action.callUUID.uuidString, "error": "SIP session failed"])
+                self.module?.sendEvent("onCallFailed", ["uuid": action.callUUID.uuidString, "error": "SIP session failed"])
             }
         }
     }
 
-    public func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+    func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         if let call = activeCalls[action.callUUID], call.answered {
             sipSession?.stop()
             sipSession = nil
         }
         activeCalls.removeValue(forKey: action.callUUID)
         deactivateAudioSession()
-        sendEvent("onCallEnded", ["uuid": action.callUUID.uuidString, "reason": "local"])
+        module?.sendEvent("onCallEnded", ["uuid": action.callUUID.uuidString, "reason": "local"])
         action.fulfill()
     }
 
-    public func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
         sipSession?.audioSessionActivated()
     }
 
-    public func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+    func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
         sipSession?.audioSessionDeactivated()
     }
-}
 
-// MARK: - PKPushRegistryDelegate
+    // MARK: - PKPushRegistryDelegate
 
-extension VoipCallModule: PKPushRegistryDelegate {
-    public func pushRegistry(_ registry: PKPushRegistry, didUpdate pushCredentials: PKPushCredentials, for type: PKPushType) {
+    func pushRegistry(_ registry: PKPushRegistry, didUpdate pushCredentials: PKPushCredentials, for type: PKPushType) {
         let token = pushCredentials.token.map { String(format: "%02x", $0) }.joined()
-        sendEvent("onPushToken", ["token": token])
+        module?.sendEvent("onPushToken", ["token": token])
         if let task = wsTask {
             let msg = "{\"type\":\"push_token\",\"token\":\"\(token)\"}"
             task.send(.string(msg)) { _ in }
         }
     }
 
-    public func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {}
+    func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {}
 
-    public func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload: PKPushPayload, for type: PKPushType, completion: @escaping () -> Void) {
+    func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload: PKPushPayload, for type: PKPushType, completion: @escaping () -> Void) {
         let data = payload.dictionaryPayload
         let caller = data["caller"] as? String ?? "Unknown"
         let name = data["caller_name"] as? String ?? ""
