@@ -5,7 +5,6 @@ import {
   Image,
   StyleSheet,
   View,
-  type ImageSourcePropType,
   type ViewStyle,
 } from "react-native";
 import { colors, withAlpha } from "../lib/design-tokens";
@@ -25,20 +24,24 @@ interface Props {
   style?: ViewStyle;
 }
 
-const SPEAK_CYCLE: Expression[] = ["happy", "amazed", "happy", "smile"];
-const SPEAK_INTERVAL = 180;
 const BLINK_MIN = 2500;
 const BLINK_MAX = 5500;
+
+function pickSpeechFace(): { face: Expression; holdMs: number } {
+  const r = Math.random();
+  if (r < 0.30) return { face: "happy", holdMs: 100 + Math.random() * 120 };
+  if (r < 0.55) return { face: "amazed", holdMs: 80 + Math.random() * 100 };
+  if (r < 0.80) return { face: "smile", holdMs: 60 + Math.random() * 80 };
+  return { face: "smile", holdMs: 150 + Math.random() * 250 };
+}
 
 export function JuneAvatar({ speaking = false, expression, style }: Props) {
   const [currentFace, setCurrentFace] = useState<Expression>("smile");
   const breathAnim = useRef(new Animated.Value(0)).current;
   const blinkAnim = useRef(new Animated.Value(1)).current;
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const speakIndex = useRef(0);
+  const speakTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const blinkTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Breathing animation — gentle continuous scale
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
@@ -60,7 +63,6 @@ export function JuneAvatar({ speaking = false, expression, style }: Props) {
     return () => loop.stop();
   }, [breathAnim]);
 
-  // Blink animation — random interval
   useEffect(() => {
     function scheduleBlink() {
       const delay = BLINK_MIN + Math.random() * (BLINK_MAX - BLINK_MIN);
@@ -86,7 +88,6 @@ export function JuneAvatar({ speaking = false, expression, style }: Props) {
     };
   }, [blinkAnim]);
 
-  // Speaking: cycle through mouth shapes
   useEffect(() => {
     if (expression) {
       setCurrentFace(expression);
@@ -94,32 +95,21 @@ export function JuneAvatar({ speaking = false, expression, style }: Props) {
     }
     if (!speaking) {
       setCurrentFace("smile");
-      speakIndex.current = 0;
+      if (speakTimeout.current) clearTimeout(speakTimeout.current);
       return;
     }
-    setCurrentFace(SPEAK_CYCLE[0]);
-    const timer = setInterval(() => {
-      speakIndex.current = (speakIndex.current + 1) % SPEAK_CYCLE.length;
-      setCurrentFace(SPEAK_CYCLE[speakIndex.current]);
-    }, SPEAK_INTERVAL);
-    return () => clearInterval(timer);
-  }, [speaking, expression]);
 
-  // Cross-fade on expression change
-  useEffect(() => {
-    Animated.sequence([
-      Animated.timing(fadeAnim, {
-        toValue: 0.85,
-        duration: 40,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 60,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [currentFace, fadeAnim]);
+    function nextShape() {
+      const { face, holdMs } = pickSpeechFace();
+      setCurrentFace(face);
+      speakTimeout.current = setTimeout(nextShape, holdMs);
+    }
+    nextShape();
+
+    return () => {
+      if (speakTimeout.current) clearTimeout(speakTimeout.current);
+    };
+  }, [speaking, expression]);
 
   const breathScale = breathAnim.interpolate({
     inputRange: [0, 1],
@@ -133,25 +123,18 @@ export function JuneAvatar({ speaking = false, expression, style }: Props) {
 
   return (
     <View style={[styles.container, style]}>
-      {/* Background gradient circle */}
       <View style={styles.bgCircle}>
         <View style={styles.bgInner} />
       </View>
 
-      {/* Face with breathing + blink */}
       <Animated.View
         style={[
           styles.faceWrap,
           {
-            opacity: fadeAnim,
-            transform: [
-              { scale: breathScale },
-              { translateY: breathY },
-            ],
+            transform: [{ scale: breathScale }, { translateY: breathY }],
           },
         ]}
       >
-        {/* Blink overlay — squishes eyes vertically */}
         <Animated.View style={[styles.faceInner, { transform: [{ scaleY: blinkAnim }] }]}>
           <Image
             source={FACES[currentFace]}
@@ -161,7 +144,6 @@ export function JuneAvatar({ speaking = false, expression, style }: Props) {
         </Animated.View>
       </Animated.View>
 
-      {/* Glow ring when speaking */}
       {speaking && <View style={styles.speakRing} />}
     </View>
   );
