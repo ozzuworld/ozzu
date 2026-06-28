@@ -30,20 +30,23 @@ function connectGpu() {
   gpuWs.on("open", () => {
     console.log("[AvatarProxy] GPU connected");
     gpuAlive = true;
+    broadcastStatus();
   });
 
   gpuWs.on("message", (data) => {
     if (appClients.size === 0) return;
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
     if (buf.length === 0) return;
-    // Only relay video frames; audio goes through Asterisk, not WS
     if (buf[0] !== 0x56) return;
     const now = Date.now();
     if (now - lastFrameTime < MIN_FRAME_INTERVAL_MS) return;
     lastFrameTime = now;
+    // Send as JSON text (RN iOS binary WS is unreliable at this volume)
+    const jpeg = buf.subarray(1).toString("base64");
+    const msg = JSON.stringify({ type: "frame", jpeg });
     for (const client of appClients) {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(data);
+        client.send(msg);
       }
     }
   });
@@ -52,6 +55,7 @@ function connectGpu() {
     console.log("[AvatarProxy] GPU disconnected");
     gpuAlive = false;
     gpuWs = null;
+    broadcastStatus();
     scheduleReconnect();
   });
 
@@ -115,6 +119,15 @@ function sendAudio(pcmBuffer) {
     return true;
   }
   return false;
+}
+
+function broadcastStatus() {
+  const msg = JSON.stringify({ type: "status", gpu_connected: gpuAlive });
+  for (const client of appClients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg);
+    }
+  }
 }
 
 function getStatus() {

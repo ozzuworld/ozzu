@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { getBridgeUrl } from "./bridge-api";
 
-function toBase64(bytes: Uint8Array): string {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
-}
-
 export interface AvatarStreamState {
   connected: boolean;
   gpuConnected: boolean;
@@ -52,32 +48,22 @@ export function useAvatarStream(active: boolean) {
       if (!activeRef.current) return;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
-      ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
         setState((s) => ({ ...s, connected: true }));
       };
 
       ws.onmessage = (evt: MessageEvent) => {
-        if (typeof evt.data === "string") {
-          try {
-            const msg = JSON.parse(evt.data);
-            if (msg.type === "status") {
-              setState((s) => ({ ...s, gpuConnected: msg.gpu_connected }));
-            }
-          } catch {}
-          return;
-        }
-
-        const buf = new Uint8Array(evt.data as ArrayBuffer);
-        if (buf.length < 2) return;
-
-        if (buf[0] === 0x56) {
-          const jpegData = buf.subarray(1);
-          const uri = `data:image/jpeg;base64,${toBase64(jpegData)}`;
-          setState((s) => ({ ...s, frameUri: uri }));
-          frameCountRef.current++;
-        }
+        if (typeof evt.data !== "string") return;
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.type === "status") {
+            setState((s) => ({ ...s, gpuConnected: msg.gpu_connected }));
+          } else if (msg.type === "frame" && msg.jpeg) {
+            setState((s) => ({ ...s, frameUri: `data:image/jpeg;base64,${msg.jpeg}` }));
+            frameCountRef.current++;
+          }
+        } catch {}
       };
 
       ws.onclose = () => {
