@@ -2,7 +2,6 @@ import ExpoModulesCore
 import CallKit
 import AVFoundation
 import PushKit
-import Network
 
 public class VoipCallModule: Module {
     private var provider: CXProvider?
@@ -11,7 +10,9 @@ public class VoipCallModule: Module {
     private var sipSession: SipVoipSession?
     private var activeCalls: [UUID: CallInfo] = [:]
     private var sipConfig: SipConfig?
-    private var wsConnection: NWConnection?
+    private var wsTask: URLSessionWebSocketTask?
+    private var wsSession: URLSession?
+    private var wsConnected = false
     private var wsReconnectTimer: Timer?
 
     struct CallInfo {
@@ -48,7 +49,7 @@ public class VoipCallModule: Module {
         }
 
         OnDestroy {
-            self.wsConnection?.cancel()
+            self.wsTask?.cancel(with: .goingAway, reason: nil)
             self.wsReconnectTimer?.invalidate()
             self.provider?.invalidate()
         }
@@ -97,10 +98,7 @@ public class VoipCallModule: Module {
         }
 
         Function("isRegistered") { () -> Bool in
-            if let ws = self.wsConnection {
-                return ws.state == .ready
-            }
-            return false
+            return self.wsConnected
         }
     }
 
@@ -112,7 +110,6 @@ public class VoipCallModule: Module {
         config.maximumCallsPerCallGroup = 1
         config.supportsVideo = false
         config.supportedHandleTypes = [.phoneNumber]
-        config.iconTemplateImageData = nil
 
         let p = CXProvider(configuration: config)
         p.setDelegate(self, queue: .main)
@@ -144,61 +141,80 @@ public class VoipCallModule: Module {
         self.voipRegistry = registry
     }
 
-    // MARK: - WebSocket to Bridge (notification channel)
+    // MARK: - WebSocket to Bridge (URLSessionWebSocketTask)
 
     private func connectWebSocket(config: SipConfig) {
-        wsConnection?.cancel()
+        wsTask?.cancel(with: .goingAway, reason: nil)
         wsReconnectTimer?.invalidate()
 
         let url = URL(string: "ws://\(config.server):3333/ws/voip")!
-        let params = NWParameters.tcp
-        let ws = NWConnection(to: .url(url)!, using: params)
+        let session = URLSession(configuration: .default)
+        let task = session.webSocketTask(with: url)
+        self.wsSession = session
+        self.wsTask = task
 
-        ws.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .ready:
-                self?.sendEvent("onRegistered", ["server": config.server])
-                self?.wsReadLoop()
-                self?.wsSendAuth(config: config)
-            case .failed, .cancelled:
-                self?.sendEvent("onRegistrationFailed", ["error": "WebSocket disconnected"])
+        task.resume()
+
+        let auth = "{\"type\":\"auth\",\"username\":\"\(config.username)\",\"password\":\"\(config.password)\"}"
+        task.send(.string(auth)) { [weak self] error in
+            if let error = error {
+                print("[VoIP] WS auth send error: \(error)")
+                self?.wsConnected = false
+                self?.sendEvent("onRegistrationFailed", ["error": error.localizedDescription])
                 self?.scheduleReconnect(config: config)
-            default:
-                break
+            } else {
+                self?.wsConnected = true
+                self?.sendEvent("onRegistered", ["server": config.server])
+                self?.wsReadLoop(config: config)
             }
         }
-
-        ws.start(queue: .global(qos: .userInitiated))
-        self.wsConnection = ws
     }
 
-    private func wsSendAuth(config: SipConfig) {
-        guard let ws = wsConnection else { return }
-        let auth = "{\"type\":\"auth\",\"username\":\"\(config.username)\",\"password\":\"\(config.password)\"}"
-        ws.send(content: auth.data(using: .utf8), completion: .idempotent)
-    }
-
-    private func wsReadLoop() {
-        wsConnection?.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
-            guard let self = self, let data = data else { return }
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let type = json["type"] as? String {
-                if type == "incoming_call" {
-                    let caller = json["caller"] as? String ?? "Unknown"
-                    let name = json["caller_name"] as? String ?? ""
-                    Task {
-                        try? await self.reportCall(uuid: UUID(), callerNumber: caller, callerName: name)
+    private func wsReadLoop(config: SipConfig) {
+        wsTask?.receive { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    self.handleWsMessage(text)
+                case .data(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        self.handleWsMessage(text)
                     }
+                @unknown default:
+                    break
                 }
+                self.wsReadLoop(config: config)
+            case .failure(let error):
+                print("[VoIP] WS read error: \(error)")
+                self.wsConnected = false
+                self.sendEvent("onRegistrationFailed", ["error": "WebSocket disconnected"])
+                self.scheduleReconnect(config: config)
             }
-            self.wsReadLoop()
+        }
+    }
+
+    private func handleWsMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else { return }
+
+        if type == "incoming_call" {
+            let caller = json["caller"] as? String ?? "Unknown"
+            let name = json["caller_name"] as? String ?? ""
+            Task {
+                try? await self.reportCall(uuid: UUID(), callerNumber: caller, callerName: name)
+            }
         }
     }
 
     private func scheduleReconnect(config: SipConfig) {
         wsReconnectTimer?.invalidate()
-        wsReconnectTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
-            self?.connectWebSocket(config: config)
+        DispatchQueue.main.async {
+            self.wsReconnectTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
+                self?.connectWebSocket(config: config)
+            }
         }
     }
 
@@ -280,9 +296,9 @@ extension VoipCallModule: PKPushRegistryDelegate {
     public func pushRegistry(_ registry: PKPushRegistry, didUpdate pushCredentials: PKPushCredentials, for type: PKPushType) {
         let token = pushCredentials.token.map { String(format: "%02x", $0) }.joined()
         sendEvent("onPushToken", ["token": token])
-        if let ws = wsConnection {
+        if let task = wsTask {
             let msg = "{\"type\":\"push_token\",\"token\":\"\(token)\"}"
-            ws.send(content: msg.data(using: .utf8), completion: .idempotent)
+            task.send(.string(msg)) { _ in }
         }
     }
 

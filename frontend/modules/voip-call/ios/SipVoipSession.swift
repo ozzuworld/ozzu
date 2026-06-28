@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Network
+import CommonCrypto
 
 class SipVoipSession {
     private let server: String
@@ -15,11 +16,10 @@ class SipVoipSession {
     private var remoteRtpPort: UInt16 = 0
     private var sipCallId: String = ""
     private var sipTag: String = ""
-    private var sipBranch: String = ""
     private var remoteTag: String = ""
+    private var cseq: Int = 1
 
     private var audioEngine: AVAudioEngine?
-    private var inputNode: AVAudioInputNode?
     private var playerNode: AVAudioPlayerNode?
     private var rtpSequence: UInt16 = 0
     private var rtpTimestamp: UInt32 = 0
@@ -36,7 +36,6 @@ class SipVoipSession {
         self.callUUID = callUUID
         self.sipCallId = "ozzu-\(UUID().uuidString.prefix(8))"
         self.sipTag = "tag-\(UUID().uuidString.prefix(8))"
-        self.sipBranch = "z9hG4bK-\(UUID().uuidString.prefix(12))"
     }
 
     func start(completion: @escaping (Bool) -> Void) {
@@ -47,14 +46,7 @@ class SipVoipSession {
 
             do {
                 self.localRtpPort = try self.findFreeUdpPort()
-                try self.sendSipInvite { success in
-                    if success {
-                        self.startAudioBridge()
-                        completion(true)
-                    } else {
-                        completion(false)
-                    }
-                }
+                self.doInvite(authHeader: nil, completion: completion)
             } catch {
                 print("[VoIP] start error: \(error)")
                 completion(false)
@@ -79,11 +71,13 @@ class SipVoipSession {
         audioEngine?.pause()
     }
 
-    // MARK: - SIP Signaling
+    // MARK: - SIP Signaling (with digest auth)
 
-    private func sendSipInvite(completion: @escaping (Bool) -> Void) throws {
+    private func doInvite(authHeader: String?, completion: @escaping (Bool) -> Void) {
         let localIp = getLocalIp()
         let cr = "\r\n"
+        let branch = "z9hG4bK-\(UUID().uuidString.prefix(12))"
+        let sipLocalPort = localRtpPort
 
         let sdp = "v=0" + cr
             + "o=ozzu 1 1 IN IP4 \(localIp)" + cr
@@ -95,75 +89,138 @@ class SipVoipSession {
             + "a=rtpmap:8 PCMA/8000" + cr
             + "a=sendrecv" + cr
 
-        let invite = "INVITE sip:incoming@\(server) SIP/2.0" + cr
-            + "Via: SIP/2.0/UDP \(localIp):\(localRtpPort);branch=\(sipBranch)" + cr
-            + "From: <sip:\(username)@\(server)>;tag=\(sipTag)" + cr
-            + "To: <sip:incoming@\(server)>" + cr
-            + "Call-ID: \(sipCallId)" + cr
-            + "CSeq: 1 INVITE" + cr
-            + "Contact: <sip:\(username)@\(localIp):\(localRtpPort)>" + cr
-            + "Content-Type: application/sdp" + cr
+        var invite = "INVITE sip:601@\(server) SIP/2.0" + cr
+            + "Via: SIP/2.0/UDP \(localIp):\(sipLocalPort);branch=\(branch);rport" + cr
             + "Max-Forwards: 70" + cr
+            + "From: <sip:\(username)@\(server)>;tag=\(sipTag)" + cr
+            + "To: <sip:601@\(server)>" + cr
+            + "Call-ID: \(sipCallId)" + cr
+            + "CSeq: \(cseq) INVITE" + cr
+            + "Contact: <sip:\(username)@\(localIp):\(sipLocalPort)>" + cr
+
+        if let auth = authHeader {
+            invite += "Authorization: \(auth)" + cr
+        }
+
+        invite += "Content-Type: application/sdp" + cr
+            + "Allow: INVITE,ACK,BYE,CANCEL" + cr
             + "User-Agent: Ozzu/1.0" + cr
             + "Content-Length: \(sdp.utf8.count)" + cr
             + cr + sdp
 
         let host = NWEndpoint.Host(server)
         let nwPort = NWEndpoint.Port(integerLiteral: UInt16(port))
-        let conn = NWConnection(host: host, port: nwPort, using: .udp)
 
-        conn.stateUpdateHandler = { state in
-            if case .ready = state {
-                conn.send(content: invite.data(using: .utf8), completion: .contentProcessed({ _ in }))
-
-                self.receiveSipResponse(conn: conn) { response in
-                    if let resp = response, resp.statusCode == 200 {
-                        self.remoteRtpPort = self.extractRtpPort(from: resp.body)
-                        self.remoteTag = self.extractTag(from: resp.headers["To"] ?? "")
-                        self.sendSipAck(conn: conn)
-                        completion(true)
-                    } else {
-                        completion(false)
-                    }
-                }
-            }
+        if udpConnection == nil {
+            let conn = NWConnection(host: host, port: nwPort, using: .udp)
+            conn.start(queue: .global(qos: .userInitiated))
+            self.udpConnection = conn
+            Thread.sleep(forTimeInterval: 0.1)
         }
-        conn.start(queue: .global(qos: .userInitiated))
-        self.udpConnection = conn
-    }
 
-    private func receiveSipResponse(conn: NWConnection, completion: @escaping (SipVoipResponse?) -> Void) {
-        var got200 = false
-        func readNext() {
-            conn.receiveMessage { data, _, _, error in
-                guard let data = data, let str = String(data: data, encoding: .utf8) else {
-                    if !got200 { completion(nil) }
+        guard let conn = udpConnection else { completion(false); return }
+
+        conn.send(content: invite.data(using: .utf8), completion: .contentProcessed({ _ in }))
+
+        receiveSipResponses(conn: conn) { [weak self] response in
+            guard let self = self, let resp = response else {
+                completion(false)
+                return
+            }
+
+            if resp.statusCode == 401 || resp.statusCode == 407 {
+                if authHeader != nil {
+                    print("[VoIP] Digest auth rejected — wrong credentials")
+                    completion(false)
                     return
                 }
-                let resp = SipVoipResponse.parse(str)
-                if resp.statusCode >= 100 && resp.statusCode < 200 {
-                    readNext()
-                } else if resp.statusCode == 200 {
-                    got200 = true
-                    completion(resp)
+                let wwwAuth = resp.headers["WWW-Authenticate"] ?? resp.headers["Proxy-Authenticate"] ?? ""
+                let digestHeader = self.buildDigestAuth(challenge: wwwAuth, method: "INVITE", uri: "sip:601@\(self.server)")
+                self.cseq += 1
+                self.doInvite(authHeader: digestHeader, completion: completion)
+                return
+            }
+
+            if resp.statusCode == 200 {
+                self.remoteRtpPort = self.extractRtpPort(from: resp.body)
+                self.remoteTag = self.extractTag(from: resp.headers["To"] ?? "")
+                self.sendSipAck(conn: conn)
+                if self.remoteRtpPort > 0 {
+                    self.startAudioBridge()
+                    completion(true)
                 } else {
-                    completion(nil)
+                    completion(false)
                 }
+                return
+            }
+
+            print("[VoIP] Unexpected SIP response: \(resp.statusCode)")
+            completion(false)
+        }
+    }
+
+    private func receiveSipResponses(conn: NWConnection, completion: @escaping (SipVoipResponse?) -> Void) {
+        conn.receiveMessage { data, _, _, error in
+            guard let data = data, let str = String(data: data, encoding: .utf8) else {
+                completion(nil)
+                return
+            }
+            let resp = SipVoipResponse.parse(str)
+
+            if resp.statusCode >= 100 && resp.statusCode < 200 {
+                self.receiveSipResponses(conn: conn, completion: completion)
+            } else {
+                completion(resp)
             }
         }
-        readNext()
     }
+
+    // MARK: - SIP Digest Auth
+
+    private func buildDigestAuth(challenge: String, method: String, uri: String) -> String {
+        let realm = extractQuoted(from: challenge, key: "realm") ?? ""
+        let nonce = extractQuoted(from: challenge, key: "nonce") ?? ""
+
+        let ha1 = md5("\(username):\(realm):\(password)")
+        let ha2 = md5("\(method):\(uri)")
+        let response = md5("\(ha1):\(nonce):\(ha2)")
+
+        return "Digest username=\"\(username)\", realm=\"\(realm)\", nonce=\"\(nonce)\", uri=\"\(uri)\", response=\"\(response)\", algorithm=MD5"
+    }
+
+    private func extractQuoted(from header: String, key: String) -> String? {
+        let pattern = "\(key)=\"([^\"]+)\""
+        guard let range = header.range(of: pattern, options: .regularExpression) else { return nil }
+        let match = String(header[range])
+        let start = match.index(match.startIndex, offsetBy: key.count + 2)
+        let end = match.index(before: match.endIndex)
+        return String(match[start..<end])
+    }
+
+    private func md5(_ string: String) -> String {
+        let data = Data(string.utf8)
+        var digest = [UInt8](repeating: 0, count: Int(CC_MD5_DIGEST_LENGTH))
+        data.withUnsafeBytes { bytes in
+            _ = CC_MD5(bytes.baseAddress, CC_LONG(data.count), &digest)
+        }
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    // MARK: - SIP ACK / BYE
 
     private func sendSipAck(conn: NWConnection) {
         let localIp = getLocalIp()
         let cr = "\r\n"
-        let ack = "ACK sip:incoming@\(server) SIP/2.0" + cr
-            + "Via: SIP/2.0/UDP \(localIp):\(localRtpPort);branch=z9hG4bK-\(UUID().uuidString.prefix(12))" + cr
-            + "From: <sip:\(username)@\(server)>;tag=\(sipTag)" + cr
-            + "To: <sip:incoming@\(server)>" + (remoteTag.isEmpty ? "" : ";tag=\(remoteTag)") + cr
-            + "Call-ID: \(sipCallId)" + cr
-            + "CSeq: 1 ACK" + cr
+        let branch = "z9hG4bK-\(UUID().uuidString.prefix(12))"
+        let toTag = remoteTag.isEmpty ? "" : ";tag=\(remoteTag)"
+
+        let ack = "ACK sip:601@\(server) SIP/2.0" + cr
+            + "Via: SIP/2.0/UDP \(localIp):\(localRtpPort);branch=\(branch);rport" + cr
             + "Max-Forwards: 70" + cr
+            + "From: <sip:\(username)@\(server)>;tag=\(sipTag)" + cr
+            + "To: <sip:601@\(server)>\(toTag)" + cr
+            + "Call-ID: \(sipCallId)" + cr
+            + "CSeq: \(cseq) ACK" + cr
             + "Content-Length: 0" + cr + cr
 
         conn.send(content: ack.data(using: .utf8), completion: .idempotent)
@@ -173,13 +230,17 @@ class SipVoipSession {
         guard let conn = udpConnection else { return }
         let localIp = getLocalIp()
         let cr = "\r\n"
-        let bye = "BYE sip:incoming@\(server) SIP/2.0" + cr
-            + "Via: SIP/2.0/UDP \(localIp):\(localRtpPort);branch=z9hG4bK-\(UUID().uuidString.prefix(12))" + cr
-            + "From: <sip:\(username)@\(server)>;tag=\(sipTag)" + cr
-            + "To: <sip:incoming@\(server)>" + (remoteTag.isEmpty ? "" : ";tag=\(remoteTag)") + cr
-            + "Call-ID: \(sipCallId)" + cr
-            + "CSeq: 2 BYE" + cr
+        let branch = "z9hG4bK-\(UUID().uuidString.prefix(12))"
+        let toTag = remoteTag.isEmpty ? "" : ";tag=\(remoteTag)"
+
+        cseq += 1
+        let bye = "BYE sip:601@\(server) SIP/2.0" + cr
+            + "Via: SIP/2.0/UDP \(localIp):\(localRtpPort);branch=\(branch);rport" + cr
             + "Max-Forwards: 70" + cr
+            + "From: <sip:\(username)@\(server)>;tag=\(sipTag)" + cr
+            + "To: <sip:601@\(server)>\(toTag)" + cr
+            + "Call-ID: \(sipCallId)" + cr
+            + "CSeq: \(cseq) BYE" + cr
             + "Content-Length: 0" + cr + cr
 
         conn.send(content: bye.data(using: .utf8), completion: .idempotent)
@@ -196,8 +257,12 @@ class SipVoipSession {
         conn.start(queue: .global(qos: .userInitiated))
         self.rtpConnection = conn
 
-        startRtpReceive(conn: conn)
-        startAudioCapture(conn: conn)
+        let engine = AVAudioEngine()
+        self.audioEngine = engine
+
+        startRtpReceive(conn: conn, engine: engine)
+        startAudioCapture(conn: conn, engine: engine)
+        try? engine.start()
     }
 
     private func stopAudioBridge() {
@@ -206,11 +271,9 @@ class SipVoipSession {
         playerNode = nil
     }
 
-    private func startAudioCapture(conn: NWConnection) {
-        let engine = AVAudioEngine()
+    private func startAudioCapture(conn: NWConnection, engine: AVAudioEngine) {
         let input = engine.inputNode
         let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 8000, channels: 1, interleaved: false)!
-
         let converter = AVAudioConverter(from: input.outputFormat(forBus: 0), to: format)
 
         input.installTap(onBus: 0, bufferSize: 160, format: input.outputFormat(forBus: 0)) { [weak self] buffer, _ in
@@ -227,21 +290,15 @@ class SipVoipSession {
             let rtpPacket = self.buildRtpPacket(payload: pcmu)
             conn.send(content: rtpPacket, completion: .idempotent)
         }
-
-        self.audioEngine = engine
-        try? engine.start()
     }
 
-    private func startRtpReceive(conn: NWConnection) {
-        let player = AVAudioPlayerNode()
+    private func startRtpReceive(conn: NWConnection, engine: AVAudioEngine) {
         let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 8000, channels: 1, interleaved: false)!
-
-        if let engine = audioEngine {
-            engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: format)
-            player.play()
-            self.playerNode = player
-        }
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        player.play()
+        self.playerNode = player
 
         func readRtp() {
             guard self.isRunning else { return }
@@ -333,8 +390,8 @@ class SipVoipSession {
 
     private func buildRtpPacket(payload: Data) -> Data {
         var packet = Data(count: 12 + payload.count)
-        packet[0] = 0x80  // V=2, no padding, no extension, CC=0
-        packet[1] = 0x00  // PT=0 (PCMU), no marker
+        packet[0] = 0x80
+        packet[1] = 0x00
 
         rtpSequence &+= 1
         packet[2] = UInt8(rtpSequence >> 8)
@@ -386,7 +443,7 @@ class SipVoipSession {
             let family = iface.ifa_addr.pointee.sa_family
             guard family == UInt8(AF_INET) else { continue }
             let name = String(cString: iface.ifa_name)
-            guard name == "en0" || name == "utun" || name.hasPrefix("utun") else { continue }
+            guard name == "en0" || name.hasPrefix("utun") else { continue }
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             getnameinfo(iface.ifa_addr, socklen_t(iface.ifa_addr.pointee.sa_len),
                        &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
