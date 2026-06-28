@@ -15,7 +15,7 @@ const appClients = new Set();
 let reconnectTimer = null;
 let healthTimer = null;
 let lastFrameTime = 0;
-const MIN_FRAME_INTERVAL_MS = 80; // ~12fps max to app (lip sync doesn't need more)
+const MIN_FRAME_INTERVAL_MS = 150; // ~6fps to app (saves bandwidth, reduces 1006 disconnects)
 
 function connectGpu() {
   if (!GPU_WS_URL) return;
@@ -45,7 +45,8 @@ function connectGpu() {
     const jpeg = buf.subarray(1).toString("base64");
     const msg = JSON.stringify({ type: "frame", jpeg });
     for (const client of appClients) {
-      if (client.readyState === WebSocket.OPEN) {
+      // Backpressure: skip frame if send buffer > 200KB (prevents 1006 disconnects)
+      if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 200_000) {
         client.send(msg);
       }
     }
@@ -87,17 +88,25 @@ function handleAppClient(ws) {
     }
   });
 
-  ws.on("close", () => {
+  ws.on("close", (code, reason) => {
     appClients.delete(ws);
-    console.log(`[AvatarProxy] App client disconnected (${appClients.size} total)`);
+    console.log(`[AvatarProxy] App client disconnected code=${code} reason=${reason?.toString() || "none"} (${appClients.size} total)`);
   });
 
-  ws.on("error", () => {
+  ws.on("error", (err) => {
     appClients.delete(ws);
+    console.log(`[AvatarProxy] App client error: ${err.message}`);
   });
 
   // Send initial status
   ws.send(JSON.stringify({ type: "status", gpu_connected: gpuAlive }));
+
+  // Ping keep-alive (iOS kills idle WS connections)
+  const pingTimer = setInterval(() => {
+    if (ws.readyState === 1) ws.ping();
+    else clearInterval(pingTimer);
+  }, 15000);
+  ws.on("close", () => clearInterval(pingTimer));
 }
 
 // Send text to GPU for avatar to speak (called from june-voice.js)

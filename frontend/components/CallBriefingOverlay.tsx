@@ -17,7 +17,7 @@ import {
   withAlpha,
 } from "../lib/design-tokens";
 import type { CallBriefing, Voicemail } from "../lib/useVoipCall";
-import { AvatarVideo } from "./AvatarVideo";
+import { JuneAvatar } from "./JuneAvatar";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
@@ -50,8 +50,10 @@ function BriefingCard({ briefing, onAccept, onDecline }: BriefingProps) {
 
   return (
     <View style={styles.card}>
-      {/* June avatar video */}
-      <AvatarVideo active style={styles.avatarVideo} />
+      {/* June avatar */}
+      <View style={styles.avatarWrap}>
+        <JuneAvatar speaking style={{ width: 160, aspectRatio: 1 }} />
+      </View>
 
       {/* Header: live indicator + title */}
       <View style={styles.header}>
@@ -230,11 +232,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border.strong,
     overflow: "hidden",
   },
-  avatarVideo: {
-    width: "100%",
-    aspectRatio: 16 / 9,
-    borderRadius: 0,
-    borderWidth: 0,
+  avatarWrap: {
+    alignItems: "center",
+    paddingVertical: spacing.md,
+    backgroundColor: colors.bg.base,
   },
   header: {
     flexDirection: "row",

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -9,22 +9,39 @@ import {
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { colors, fontSize, fontWeight, radius, spacing } from "../lib/design-tokens";
-import { AvatarVideo } from "../components/AvatarVideo";
+import {
+  colors,
+  fontSize,
+  fontWeight,
+  radius,
+  spacing,
+  withAlpha,
+} from "../lib/design-tokens";
+import { JuneAvatar } from "../components/JuneAvatar";
 import { getBridgeUrl } from "../lib/bridge-api";
 
 export default function AvatarScreen() {
   const [text, setText] = useState("");
+  const [speaking, setSpeaking] = useState(false);
+  const speakTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSend = () => {
     if (!text.trim()) return;
+    const msg = text.trim();
+    setText("");
+
+    setSpeaking(true);
+    if (speakTimer.current) clearTimeout(speakTimer.current);
+    // Approximate speaking duration: ~80ms per character
+    const duration = Math.max(1500, Math.min(msg.length * 80, 8000));
+    speakTimer.current = setTimeout(() => setSpeaking(false), duration);
+
     const url = getBridgeUrl() + "/avatar/speak";
     fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text.trim() }),
+      body: JSON.stringify({ text: msg }),
     }).catch(() => {});
-    setText("");
   };
 
   return (
@@ -34,10 +51,15 @@ export default function AvatarScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <View style={styles.header}>
-          <Text style={styles.title}>June Avatar</Text>
+          <Text style={styles.title}>June</Text>
+          <Text style={styles.subtitle}>
+            {speaking ? "Speaking..." : "Listening"}
+          </Text>
         </View>
 
-        <AvatarVideo active style={styles.video} />
+        <View style={styles.avatarWrap}>
+          <JuneAvatar speaking={speaking} />
+        </View>
 
         <View style={styles.inputRow}>
           <TextInput
@@ -74,20 +96,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: spacing.lg,
-    gap: spacing.lg,
+    gap: spacing.md,
   },
   header: {
-    gap: spacing.xs,
+    alignItems: "center",
+    gap: 2,
   },
   title: {
-    fontSize: fontSize.xxl,
+    fontSize: 28,
     fontWeight: fontWeight.bold,
     color: colors.text.primary,
   },
-  video: {
+  subtitle: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.medium,
+    color: colors.text.tertiary,
+  },
+  avatarWrap: {
     flex: 1,
-    aspectRatio: undefined,
-    borderRadius: radius.xl,
+    alignItems: "center",
+    justifyContent: "center",
   },
   inputRow: {
     flexDirection: "row",
