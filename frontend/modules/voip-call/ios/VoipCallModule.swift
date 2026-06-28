@@ -25,7 +25,9 @@ public class VoipCallModule: Module {
             "onCallFailed",
             "onRegistered",
             "onRegistrationFailed",
-            "onPushToken"
+            "onPushToken",
+            "onCallBriefing",
+            "onVoicemail"
         )
 
         OnCreate {
@@ -227,6 +229,23 @@ class VoipDelegate: NSObject, CXProviderDelegate, PKPushRegistryDelegate {
             Task {
                 try? await self.reportCall(uuid: UUID(), callerNumber: caller, callerName: name)
             }
+        } else if type == "call_briefing" {
+            module?.sendEvent("onCallBriefing", [
+                "call_uuid": json["call_uuid"] as? String ?? "",
+                "caller_name": json["caller_name"] as? String ?? "Unknown",
+                "caller_number": json["caller_number"] as? String ?? "",
+                "wants_to_reach": json["wants_to_reach"] as? String ?? "",
+                "reason": json["reason"] as? String ?? "",
+                "urgency": json["urgency"] as? String ?? "normal",
+            ])
+        } else if type == "voicemail" {
+            module?.sendEvent("onVoicemail", [
+                "call_uuid": json["call_uuid"] as? String ?? "",
+                "caller_name": json["caller_name"] as? String ?? "Unknown",
+                "caller_number": json["caller_number"] as? String ?? "",
+                "message": json["message"] as? String ?? "",
+                "callback_requested": json["callback_requested"] as? Bool ?? false,
+            ])
         }
     }
 

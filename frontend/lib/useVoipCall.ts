@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { AppState, Platform } from "react-native";
-import { getBridgeUrl } from "./bridge-api";
+import { Platform } from "react-native";
+import { getBridgeUrl, getAuthHeaders } from "./bridge-api";
 
 let VoipCallModule: any = null;
 try {
@@ -9,10 +9,29 @@ try {
   }
 } catch {}
 
+export interface CallBriefing {
+  call_uuid: string;
+  caller_name: string;
+  caller_number: string;
+  wants_to_reach: string;
+  reason: string;
+  urgency: "low" | "normal" | "high";
+}
+
+export interface Voicemail {
+  call_uuid: string;
+  caller_name: string;
+  caller_number: string;
+  message: string;
+  callback_requested: boolean;
+}
+
 export interface VoipState {
   registered: boolean;
   activeCall: { uuid: string; caller: string; name: string } | null;
   lastError: string | null;
+  briefing: CallBriefing | null;
+  voicemail: Voicemail | null;
 }
 
 export function useVoipCall() {
@@ -20,6 +39,8 @@ export function useVoipCall() {
     registered: false,
     activeCall: null,
     lastError: null,
+    briefing: null,
+    voicemail: null,
   });
   const initialized = useRef(false);
 
@@ -77,6 +98,14 @@ export function useVoipCall() {
         (e: { token: string }) =>
           console.log("[VoIP] push token:", e.token.substring(0, 16) + "...")
       );
+      VoipCallModule.addListener(
+        "onCallBriefing",
+        (e: CallBriefing) => setState((s) => ({ ...s, briefing: e }))
+      );
+      VoipCallModule.addListener(
+        "onVoicemail",
+        (e: Voicemail) => setState((s) => ({ ...s, voicemail: e, briefing: null }))
+      );
 
       await VoipCallModule.register();
     } catch (e: any) {
@@ -94,5 +123,39 @@ export function useVoipCall() {
     await VoipCallModule.endCall(uuid);
   }, []);
 
-  return { ...state, endCall, available: !!VoipCallModule };
+  const respondToBriefing = useCallback(
+    async (callUuid: string, decision: "accepted" | "declined") => {
+      try {
+        const bridgeUrl = getBridgeUrl();
+        await fetch(`${bridgeUrl}/soc/calls/decision`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify({ call_uuid: callUuid, decision }),
+        });
+        if (decision === "declined") {
+          setState((s) => ({ ...s, briefing: null }));
+        }
+      } catch (e: any) {
+        console.error("[VoIP] decision error:", e.message);
+      }
+    },
+    []
+  );
+
+  const dismissBriefing = useCallback(() => {
+    setState((s) => ({ ...s, briefing: null }));
+  }, []);
+
+  const dismissVoicemail = useCallback(() => {
+    setState((s) => ({ ...s, voicemail: null }));
+  }, []);
+
+  return {
+    ...state,
+    endCall,
+    respondToBriefing,
+    dismissBriefing,
+    dismissVoicemail,
+    available: !!VoipCallModule,
+  };
 }

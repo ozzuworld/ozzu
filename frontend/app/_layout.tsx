@@ -11,6 +11,7 @@ import { GlobalApprovalGate } from "../components/GlobalApprovalGate";
 import * as BleBeacon from "../modules/ble-beacon";
 import { registerForPushNotifications } from "../lib/push-notifications";
 import { useVoipCall } from "../lib/useVoipCall";
+import { CallBriefingOverlay } from "../components/CallBriefingOverlay";
 
 import { colors } from "../lib/design-tokens";
 if (!__DEV__) {
@@ -141,8 +142,16 @@ console.warn = (...a) => { _origWarn(...a); remoteLog("warn", ...a); };
 console.error = (...a) => { _origError(...a); remoteLog("error", ...a); };
 
 function VoipRegistrar() {
-  useVoipCall();
-  return null;
+  const { briefing, voicemail, respondToBriefing, dismissBriefing, dismissVoicemail } = useVoipCall();
+  return (
+    <CallBriefingOverlay
+      briefing={briefing}
+      voicemail={voicemail}
+      onAccept={() => briefing && respondToBriefing(briefing.call_uuid, "accepted")}
+      onDecline={() => briefing && respondToBriefing(briefing.call_uuid, "declined")}
+      onDismissVoicemail={dismissVoicemail}
+    />
+  );
 }
 
 export default function RootLayout() {
