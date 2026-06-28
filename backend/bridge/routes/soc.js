@@ -1792,6 +1792,61 @@ module.exports = function socRoutes(ctx) {
       return true;
     }
 
+    // POST /soc/calls/briefing — June AI stores a call briefing
+    if (req.method === "POST" && pathname === "/soc/calls/briefing") {
+      const body = await readBody(req);
+      const { caller_name, caller_number, wants_to_reach, reason, urgency, call_uuid } = body;
+      await db.query(
+        `INSERT INTO call_briefings (call_uuid, caller_name, caller_number, wants_to_reach, reason, urgency)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (call_uuid) DO UPDATE SET reason = $5, urgency = $6`,
+        [call_uuid, caller_name || 'Unknown', caller_number || 'Unknown', wants_to_reach || '', reason || '', urgency || 'normal']
+      );
+      // Push to VoIP WebSocket for app display
+      if (global.__voipClientWs?.readyState === 1) {
+        global.__voipClientWs.send(JSON.stringify({ type: 'call_briefing', ...body }));
+      }
+      sendJSON(res, 200, { ok: true });
+      return true;
+    }
+
+    // POST /soc/calls/decision — app sends accept/decline for a June-screened call
+    if (req.method === "POST" && pathname === "/soc/calls/decision") {
+      const body = await readBody(req);
+      const { call_uuid, decision } = body;
+      const june = require('../june-voice');
+      const handled = june.handleCallDecision(call_uuid, decision);
+      sendJSON(res, 200, { ok: handled, call_uuid, decision });
+      return true;
+    }
+
+    // POST /soc/calls/transfer — June signals transfer (internal, called by june-voice.js)
+    if (req.method === "POST" && pathname === "/soc/calls/transfer") {
+      const body = await readBody(req);
+      // Signal Asterisk to bridge the call via AMI or channel redirect
+      // For now, log — the AudioSocket session ending triggers Asterisk's next priority
+      console.log(`[June] Transfer requested for call ${body.call_uuid}`);
+      sendJSON(res, 200, { ok: true, status: 'transfer_initiated' });
+      return true;
+    }
+
+    // POST /soc/calls/message — June saves a voicemail/message
+    if (req.method === "POST" && pathname === "/soc/calls/message") {
+      const body = await readBody(req);
+      const { caller_name, caller_number, message, callback_requested, call_uuid } = body;
+      await db.query(
+        `INSERT INTO call_messages (call_uuid, caller_name, caller_number, message, callback_requested)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [call_uuid, caller_name || 'Unknown', caller_number || 'Unknown', message || '', callback_requested || false]
+      );
+      // Push to app
+      if (global.__voipClientWs?.readyState === 1) {
+        global.__voipClientWs.send(JSON.stringify({ type: 'voicemail', ...body }));
+      }
+      sendJSON(res, 200, { ok: true });
+      return true;
+    }
+
     // GET /soc/calls — list all calls with OSINT data joined
     if (req.method === "GET" && pathname === "/soc/calls") {
       const result = await db.query(`
