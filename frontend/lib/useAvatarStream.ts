@@ -1,16 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Platform } from "react-native";
 import { getBridgeUrl } from "./bridge-api";
 
-// React Native doesn't have Blob/URL.createObjectURL — use base64 data URIs
-function uint8ToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  if (typeof btoa === "function") return btoa(binary);
-  // Node/RN fallback
-  return Buffer.from(bytes).toString("base64");
+function toBase64(bytes: Uint8Array): string {
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
 }
 
 export interface AvatarStreamState {
@@ -19,6 +11,8 @@ export interface AvatarStreamState {
   frameUri: string | null;
   fps: number;
 }
+
+const RECONNECT_MS = 3000;
 
 export function useAvatarStream(active: boolean) {
   const [state, setState] = useState<AvatarStreamState>({
@@ -30,6 +24,9 @@ export function useAvatarStream(active: boolean) {
   const wsRef = useRef<WebSocket | null>(null);
   const frameCountRef = useRef(0);
   const fpsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   const sendText = useCallback((text: string) => {
     const ws = wsRef.current;
@@ -42,6 +39,8 @@ export function useAvatarStream(active: boolean) {
     if (!active) {
       wsRef.current?.close();
       wsRef.current = null;
+      if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
       setState((s) => ({ ...s, connected: false, frameUri: null }));
       return;
     }
@@ -49,47 +48,52 @@ export function useAvatarStream(active: boolean) {
     const bridgeUrl = getBridgeUrl();
     const wsUrl = bridgeUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:") + "/ws/avatar";
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    function connect() {
+      if (!activeRef.current) return;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+      ws.binaryType = "arraybuffer";
 
-    ws.binaryType = "arraybuffer";
+      ws.onopen = () => {
+        setState((s) => ({ ...s, connected: true }));
+      };
 
-    ws.onopen = () => {
-      setState((s) => ({ ...s, connected: true }));
-    };
+      ws.onmessage = (evt: MessageEvent) => {
+        if (typeof evt.data === "string") {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (msg.type === "status") {
+              setState((s) => ({ ...s, gpuConnected: msg.gpu_connected }));
+            }
+          } catch {}
+          return;
+        }
 
-    ws.onmessage = (evt: MessageEvent) => {
-      if (typeof evt.data === "string") {
-        try {
-          const msg = JSON.parse(evt.data);
-          if (msg.type === "status") {
-            setState((s) => ({ ...s, gpuConnected: msg.gpu_connected }));
-          }
-        } catch {}
-        return;
-      }
+        const buf = new Uint8Array(evt.data as ArrayBuffer);
+        if (buf.length < 2) return;
 
-      const buf = new Uint8Array(evt.data as ArrayBuffer);
-      if (buf.length < 2) return;
+        if (buf[0] === 0x56) {
+          const jpegData = buf.subarray(1);
+          const uri = `data:image/jpeg;base64,${toBase64(jpegData)}`;
+          setState((s) => ({ ...s, frameUri: uri }));
+          frameCountRef.current++;
+        }
+      };
 
-      const tag = buf[0];
-      if (tag === 0x56) {
-        // 'V' = video frame (JPEG)
-        const jpegData = buf.slice(1);
-        const b64 = uint8ToBase64(jpegData);
-        const uri = `data:image/jpeg;base64,${b64}`;
-        setState((s) => ({ ...s, frameUri: uri }));
-        frameCountRef.current++;
-      }
-    };
+      ws.onclose = () => {
+        setState((s) => ({ ...s, connected: false, gpuConnected: false }));
+        wsRef.current = null;
+        if (activeRef.current) {
+          reconnectRef.current = setTimeout(connect, RECONNECT_MS);
+        }
+      };
 
-    ws.onclose = () => {
-      setState((s) => ({ ...s, connected: false, gpuConnected: false }));
-    };
+      ws.onerror = () => {
+        setState((s) => ({ ...s, connected: false }));
+      };
+    }
 
-    ws.onerror = () => {
-      setState((s) => ({ ...s, connected: false }));
-    };
+    connect();
 
     fpsTimerRef.current = setInterval(() => {
       setState((s) => ({ ...s, fps: frameCountRef.current }));
@@ -97,8 +101,9 @@ export function useAvatarStream(active: boolean) {
     }, 1000);
 
     return () => {
-      ws.close();
+      wsRef.current?.close();
       wsRef.current = null;
+      if (reconnectRef.current) clearTimeout(reconnectRef.current);
       if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
       setState((s) => ({ ...s, connected: false, frameUri: null }));
     };

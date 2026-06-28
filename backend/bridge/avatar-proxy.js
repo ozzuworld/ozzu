@@ -14,6 +14,8 @@ let gpuAlive = false;
 const appClients = new Set();
 let reconnectTimer = null;
 let healthTimer = null;
+let lastFrameTime = 0;
+const MIN_FRAME_INTERVAL_MS = 80; // ~12fps max to app (lip sync doesn't need more)
 
 function connectGpu() {
   if (!GPU_WS_URL) return;
@@ -31,7 +33,13 @@ function connectGpu() {
   });
 
   gpuWs.on("message", (data) => {
-    // Relay binary frames (V+jpeg or A+pcm) to all app clients
+    if (appClients.size === 0) return;
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    if (buf.length > 0 && buf[0] === 0x56) {
+      const now = Date.now();
+      if (now - lastFrameTime < MIN_FRAME_INTERVAL_MS) return;
+      lastFrameTime = now;
+    }
     for (const client of appClients) {
       if (client.readyState === WebSocket.OPEN) {
         client.send(data);
