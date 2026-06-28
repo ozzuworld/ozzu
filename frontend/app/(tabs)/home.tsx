@@ -367,7 +367,7 @@ export default function HomeScreen() {
             ],
             [
               { id: "files", icon: "📦", label: "Files", route: "/files", accent: colors.brand.amber, badge: "" },
-              { id: "music", icon: "🎵", label: "Music", route: "/music", accent: colors.brand.spotify, badge: "" },
+              { id: "june", icon: "👩", label: "June", route: "/avatar", accent: colors.brand.purple, badge: "" },
             ],
           ].map((row, ri) => (
             <View key={ri} style={{ flexDirection: "row", gap: gridGap, marginBottom: gridGap }}>
