@@ -1,72 +1,185 @@
 # Ozzu GSM Gateway
 
-Turns a spare Android phone (CAT S41) into a GSM-to-SIP gateway for the Ozzu SOC call investigation pipeline.
+Turns a cellular modem into a **GSM ↔ SIP gateway** for the Ozzu call pipeline — incoming
+mobile calls are bridged to Asterisk and answered by **June** (the AI receptionist, Gemini
+Live). The goal: King Kazuma's number forwards to the gateway; June screens/answers; legit
+calls ring through to the iPhone via VoIP.
 
-## Purpose
+---
 
-All incoming calls to King Kazuma's Swift number are forwarded to the CAT phone's Colombian SIM. The gateway app auto-answers, captures caller ID, bridges audio to Asterisk (on the bridge VM) via RTP, and notifies the bridge API for real-time OSINT. Screened calls ring through to the iPhone via the Ozzu app (VoIP/CallKit).
+## ⚠️ STATUS (2026-06-30) — read this first
 
-## Architecture
+**The CAT S41 (phone) path is capped at HALF-DUPLEX by a hard MediaTek modem limit.**
+Full reverse-engineering is documented below so nobody re-derives it. **Full-duplex 4G↔SIP
+has pivoted to the Rock Pi 4B + USB SIM modem** (`dir_1782783211595`), because a USB
+cellular modem *exposes the call audio to the host* and the CAT's integrated modem does not.
+
+| Hardware path | How we reach call audio | Duplex | State |
+|---|---|---|---|
+| **CAT S41 (MediaTek MT6757 phone)** | reverse-engineered in-HAL injection | **half-duplex only** (turn-taking) | R&D complete; modem-limited |
+| **Rock Pi 4B + USB SIM modem** | modem exposes audio as a host PCM/USB stream (chan_dongle pattern) | **full-duplex** | next — `dir_1782783211595` |
+
+---
+
+## Why a phone modem is hard, and a USB modem isn't
+
+There are two kinds of cellular modems, and they could not be more different for this use case:
+
+1. **Host-audio modems** (USB dongles, SIM7600, Quectel EC25/EG25, Huawei sticks). The modem
+   hands the call audio to the host as a **clean digital stream** — it shows up as a USB sound
+   card / PCM device. You read the downlink and write the uplink like any audio device.
+   Full-duplex, no DSP hacking, no conflict. This is what Asterisk `chan_dongle` and commercial
+   GSM gateways use. **This is the easy "two sinks" path.**
+
+2. **Integrated phone modems** (the CAT's MT6757). Built for a *phone*, so the modem is wired
+   straight to an **audio codec chip in hardware** — modem → codec → speaker/mic. The host CPU
+   **never sees the audio as data**; it only controls the call (dial/answer). To get the audio
+   you must reverse-engineer the proprietary audio HAL, and you're then limited to whatever taps
+   the *modem firmware* exposes.
+
+The CAT is type 2 — the hard kind. Most modern phones are type 2 (iPhones give **zero** call-audio
+access; most Androids block in-call recording). The CAT got us as far as it did *only* because it's
+a rootable MediaTek with a HAL we could pry open. It's the unusually cooperative phone — and even
+"unusually cooperative" tops out at half-duplex.
+
+---
+
+## R&D Findings — the in-HAL approach and the wall
+
+Goal was full-duplex: capture the caller (downlink) for June **and** inject June (uplink) so the
+caller hears her, **at the same time**. We got **both halves working separately, in the HAL,
+phone-only, with no local noise** — then hit a modem-firmware wall when running them together.
+
+### Architecture that was built
+
+The audio HAL on this Treble phone runs in a separate 32-bit process
+`android.hardware.audio@2.0-service-mediatek`, which loads
+`/system/vendor/lib/hw/audio.primary.mt6757.so` and owns `/dev/ccci_aud` (the modem channel).
+A separate root process can call every HAL function but gets **zero** modem data, so we inject a
+helper **into** that HAL process:
+
+- **Injection:** `patchelf --add-needed libozzubridge.so` on the 32-bit
+  `audio.primary.mt6757.so`; a Magisk module (`ozzu-hal-bridge`) overlays the patched `.so` plus
+  `libozzubridge.so` under `system/vendor/lib[/hw]/`. The lib's constructor spawns a worker thread
+  and resolves live HAL singletons via `dlopen(..., RTLD_NOLOAD)`. **A bad lib crashes the audio
+  HAL → no audio until the module is removed** (`rm -rf /data/adb/modules/ozzu-hal-bridge` +
+  reboot; recoverable over ADB/WG, not a brick).
+- Source: `scratchpad/pcm2way/libozzubridge.c` (in the working session's scratchpad); full symbol
+  map + every gotcha is in Cipher memory `reference_cat_s41_gsm_gateway_audio`.
+
+### What works — CAPTURE (caller → June) ✅
+
+Passively hook the downlink record provider — **no separate input stream** (an input stream
+reconfigures the call routing and kills injection):
+
+- Open `AudioALSACaptureDataProviderVoiceDL` and inline-hook its
+  `provideModemRecordDataToProvider(RingBuf)`; copy the raw downlink out of the ring buffer.
+- The modem record runs at **16 kHz mono S16LE** (HD / AMR-WB), *not* 48 kHz.
+- Proven: one 12 s call captured a **flawless** recording of the caller's voice (clear speech
+  envelope, ~1900× silence-to-speech swing).
+
+### What works — INJECT (June → caller) ✅
+
+- **BGS (Background Sound)**: `SpeechDriverLAD::BGSoundConfig(ulGain,dlGain)` + `BGSoundOn()`
+  sends `MSG_A2M_BGSND_ON` — the **modem** mixes the sound into the uplink so the *remote* party
+  hears it. `BGSPlayer::Write` feeds PCM (gain ~160–200; lower was inaudible). King Kazuma heard
+  injected beeps clearly.
+- **Mic mute:** `SetUplinkSourceMute(true)` = `MSG_A2M_MUTE_SPH_UL_SOURCE` mutes **only the mic**
+  (leaves BGS). `SetUplinkMute` = `MSG_A2M_MUTE_SPH_UL` mutes the **whole** uplink incl. BGS —
+  do not use that one.
+
+### The wall — the modem refuses both at once ❌
+
+Running capture + inject together: data flows perfectly end-to-end (hook captures, buffer hands
+off, BGS is fed at the correct rate) **but BGS goes silent**. Confirmed repeatedly, including with
+a loud clean test beep.
+
+- The downlink record provider's `open()` calls `recordOn(RECORD_TYPE_DL)` which actually issues
+  **`RecordOn(RECORD_TYPE_MIX)`** → `MSG_A2M_PCM_REC_ON` to the modem.
+- The AP-side HAL source shows **no** record↔BGS mutual exclusion (independent status masks), so
+  the exclusion is enforced **inside the closed baseband firmware**: it will not run the
+  **raw-PCM recorder** and the **background-sound injector** simultaneously.
+- Tell: the modem's **encoded** recorder (`persist.af.vm_on`, `VoiceMemoRecordOn`) *does* coexist
+  with BGS — but its output is a modem-defined encoded format, not cleanly decodable, and it does
+  not feed the raw-PCM providers.
+
+### SELinux (needed for the in-HAL hook)
+
+The `mtk_hal_audio` domain (enforcing) lacks the permissions to install an inline hook. Granted
+via a persistent Magisk `sepolicy.rule`:
 
 ```
-Incoming call → Swift 4G → *21* forward → CAT S41 (Colombian SIM)
-                                              │
-                                         GSM Gateway app
-                                         auto-answers
-                                         captures caller ID → bridge API
-                                         bridges audio → RTP → Asterisk
-                                              │
-                                         Asterisk (bridge VM)
-                                         AI screener (DeepSeek)
-                                         SIP header analysis
-                                              │
-                                    ┌─────────┴─────────┐
-                                    │                   │
-                               Spam/Robot           Legit call
-                               → hang up            → ring Ozzu app
-                               → auto-OSINT           on iPhone
-                               → log + probe          via VoIP
+allow mtk_hal_audio mtk_hal_audio process execmem
+allow mtk_hal_audio vendor_file      file    execmod
 ```
 
-## Components
+(Live: `magiskpolicy --live "allow ..."`.) Without `execmem` the trampoline `mprotect` fails;
+without `execmod` restoring the patched `.text` page to executable fails (and executing a
+non-exec page crashes the HAL).
+
+### Why full-duplex is impractical on the CAT
+
+The call audio lives entirely in the **modem's domain** — it never transits AP-tappable hardware
+(the in-call ALSA mixer state is byte-for-byte identical to idle; there is no PCM bus to read).
+The **only** doors are the modem's own features (recorder, BGS injector), and the firmware won't
+open both at once. So it isn't a missing clever hack — the audio simply isn't present where a
+"read two streams" approach would need it.
+
+### What the CAT *can* do: half-duplex June
+
+A call is naturally half-duplex and June (Gemini Live) is turn-based — she listens, then responds.
+So we can work **with** the modem limit:
+
+- caller talking → recorder ON (June listens)
+- June responding → recorder OFF, BGS ON (caller hears June)
+- June done → switch back
+
+Both halves are proven; we just alternate at turn boundaries (no barge-in / can't interrupt June
+mid-sentence). This is viable but was set aside in favor of the full-duplex Rock Pi path.
+
+---
+
+## Conclusion / Decision (2026-06-30)
+
+- **CAT S41 = half-duplex ceiling.** Keep it only if the must-have is "SIM physically in this
+  pocket phone." Otherwise it's the wrong tool for full-duplex.
+- **Full-duplex → Rock Pi 4B (10.9.0.21) + USB SIM modem** (`dir_1782783211595`). A host-audio
+  modem exposes the call audio as a clean stream → full-duplex 4G↔SIP with **no** HAL hacking,
+  no SELinux surgery, no modem conflict. Standard `chan_dongle`/Asterisk pattern.
+- **Or skip the modem entirely:** forward the carrier number to a SIP DID and run June on the
+  Asterisk/Gemini server already built. Needs carrier call-forwarding.
+
+---
+
+## Pipeline context (applies to whichever gateway hardware)
+
+```
+Incoming call → carrier → *21* forward → gateway (SIM)
+                                            │  GSM call presented to Asterisk as a SIP trunk
+                                            ▼
+                                       Asterisk (bridge VM)  → June (AudioSocket → Gemini Live)
+                                            │
+                                  ┌─────────┴─────────┐
+                             Spam/Robot           Legit call
+                             → June handles      → transfer to iPhone via VoIP/CallKit
+```
 
 | Component | Location | Role |
 |---|---|---|
-| GSM Gateway APK | `tools/gsm-gateway/android/` | Android app on CAT S41 — auto-answers GSM, bridges audio to Asterisk |
-| Asterisk PBX | `backend/asterisk/conf/` | Docker container on bridge — receives SIP, runs dialplan + AI screener |
-| Bridge call API | `backend/bridge/routes/soc.js` | REST endpoints for call log, OSINT, analysis |
-| Ozzu app SIP client | `frontend/modules/sip-toolkit/` | iPhone receives screened calls via VoIP |
+| Asterisk PBX | `backend/asterisk/conf/` | SIP trunk endpoint + dialplan |
+| June voice | `backend/bridge/june-voice.js` | AudioSocket ↔ Gemini Live API |
+| Bridge call API | `backend/bridge/routes/soc.js` | call log / OSINT / notifications |
+| Ozzu app SIP client | `frontend/modules/sip-toolkit/` | iPhone receives screened calls (VoIP/CallKit) |
 
-## Configuration
+**Call forwarding:** on the source phone `*21*[gateway-number]#`; cancel `##21#`.
 
-### CAT S41 (Gateway phone)
-1. Install the APK
-2. Open app → set Bridge URL (`http://10.9.0.1:3333`) and token
-3. Set Asterisk Host (`10.9.0.1`)
-4. Tap "Set as Call Screener" → grant the role
-5. Grant all permissions (phone, microphone, call log)
-6. Tap "Save & Start Gateway"
-7. CAT phone must be on WireGuard VPN
+---
 
-### Call forwarding
-On the Swift iPhone: `*21*[CAT-number]#`
-To cancel: `##21#`
+## Historical: the Android-app approach (superseded by the in-HAL R&D)
 
-### Asterisk
-Starts automatically via docker-compose. SIP accounts:
-- `cat-gateway` / `ozzu-gsm-2026` — CAT phone registers here
-- `ozzu-iphone` / `ozzu-sip-2026` — iPhone Ozzu app registers here
-
-## Build
-
-```bash
-cd tools/gsm-gateway/android
-./gradlew assembleRelease
-# APK at app/build/outputs/apk/release/app-release-unsigned.apk
-```
-
-## Limits
-
-- Audio capture quality depends on Android device — VOICE_CALL source (both sides) works on some devices without root, falls back to MIC (local side only) on others
-- CAT S41 minSdk is Android 8 (API 26) but CallScreeningService needs API 29 — check if CAT is on Android 10+, or use the BroadcastReceiver fallback
-- RTP is direct UDP to Asterisk — requires WireGuard tunnel between CAT and bridge
+The first attempt was an Android app on the CAT (`tools/gsm-gateway/android/`) that auto-answered
+the GSM call and bridged audio to Asterisk via RTP using `AudioRecord(VOICE_CALL)`. That source is
+**blocked by Android policy** on the MT6757 ("Invalid capture preset 4") even as a privileged app
+with `CAPTURE_AUDIO_OUTPUT`, so it can only capture the near-end mic — never the caller. That dead
+end is what led to the in-HAL injection R&D above. The app is kept as a historical reference /
+throwaway probe.
