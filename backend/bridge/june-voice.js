@@ -25,6 +25,8 @@ const MAX_MESSAGE_LENGTH = 2000;
 const AS_KIND_HANGUP = 0x00;
 const AS_KIND_UUID = 0x01;
 const AS_KIND_SLIN = 0x10;
+
+const { spawn } = require("child_process");
 const AS_KIND_ERROR = 0xff;
 
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
@@ -207,6 +209,9 @@ class JuneSession {
     this.durationTimer = null;
     this.keepaliveTimer = null;
     this.lastAudioSent = 0;
+    this.dn = null;                 // ffmpeg: Gemini 24kHz -> phone 8kHz
+    this.up = null;                 // ffmpeg: phone 8kHz -> Gemini 16kHz
+    this.outBuf = Buffer.alloc(0);  // accumulate ffmpeg output into 320B SLIN frames
 
     this.socket.on("data", (data) => this.handleAudioSocketData(data));
     this.socket.on("close", () => this.cleanup("socket closed"));
@@ -235,19 +240,14 @@ class JuneSession {
         case AS_KIND_UUID:
           this.callUuid = payload.toString("utf8").replace(/-/g, "").slice(0, 32);
           console.log(`[June] Call UUID: ${this.callUuid}`);
+          this.startAudioPipes();
           this.startKeepalive();
           this.connectGemini();
           break;
 
         case AS_KIND_SLIN:
-          if (this.geminiWs?.readyState === WebSocket.OPEN && this.setupDone) {
-            const b64 = payload.toString("base64");
-            this.geminiWs.send(JSON.stringify({
-              realtimeInput: {
-                mediaChunks: [{ mimeType: "audio/pcm;rate=8000", data: b64 }],
-              },
-            }));
-          }
+          // Caller audio is 8kHz; pipe through ffmpeg -> 16kHz for Gemini.
+          if (this.setupDone) { try { this.up?.stdin.write(payload); } catch {} }
           break;
 
         case AS_KIND_HANGUP:
@@ -333,13 +333,8 @@ class JuneSession {
       const parts = msg.serverContent.modelTurn?.parts || [];
       for (const part of parts) {
         if (part.inlineData?.mimeType?.startsWith("audio/")) {
-          const audioBuf = Buffer.from(part.inlineData.data, "base64");
-          this.sendAudioToAsterisk(audioBuf);
-          // Fork audio to avatar GPU for lip-sync
-          try {
-            const avatarProxy = require("./avatar-proxy");
-            avatarProxy.sendAudio(audioBuf);
-          } catch { /* avatar proxy not loaded or GPU disconnected */ }
+          // Gemini sends 24kHz PCM; pipe through ffmpeg -> 8kHz for the phone.
+          try { this.dn?.stdin.write(Buffer.from(part.inlineData.data, "base64")); } catch {}
         }
       }
 
@@ -360,17 +355,43 @@ class JuneSession {
 
   sendAudioToAsterisk(pcmData) {
     if (!this.alive || this.socket.destroyed) return;
-    this.lastAudioSent = Date.now();
-
-    const chunkSize = 320; // 20ms of 8kHz 16-bit mono
-    for (let i = 0; i < pcmData.length; i += chunkSize) {
-      const chunk = pcmData.subarray(i, Math.min(i + chunkSize, pcmData.length));
-      const frame = Buffer.alloc(3 + chunk.length);
+    // ffmpeg stdout isn't 20ms-aligned — accumulate and emit only full
+    // 320-byte (160-sample) SLIN frames, else ragged short frames click.
+    this.outBuf = Buffer.concat([this.outBuf, pcmData]);
+    while (this.outBuf.length >= 320) {
+      const chunk = this.outBuf.subarray(0, 320);
+      this.outBuf = this.outBuf.subarray(320);
+      const frame = Buffer.alloc(3 + 320);
       frame[0] = AS_KIND_SLIN;
-      frame.writeUInt16BE(chunk.length, 1);
+      frame.writeUInt16BE(320, 1);
       chunk.copy(frame, 3);
       this.socket.write(frame);
+      this.lastAudioSent = Date.now();
     }
+  }
+
+  startAudioPipes() {
+    // Gemini Live is 24kHz out / 16kHz in; the phone path is 8kHz. Resample
+    // with ffmpeg (soxr, anti-aliased) — one process per direction per call.
+    const ff = (inRate, outRate) => spawn("ffmpeg", [
+      "-hide_banner", "-loglevel", "quiet", "-nostdin",
+      "-f", "s16le", "-ac", "1", "-ar", String(inRate), "-i", "pipe:0",
+      "-f", "s16le", "-ac", "1", "-ar", String(outRate), "-flush_packets", "1", "pipe:1",
+    ]);
+    this.dn = ff(24000, 8000); // Gemini -> phone
+    this.dn.stdout.on("data", (pcm8k) => this.sendAudioToAsterisk(pcm8k));
+    this.dn.on("error", (e) => console.error("[June] ffmpeg(out):", e.message));
+    this.dn.stdin.on("error", () => {});
+    this.up = ff(8000, 16000); // phone -> Gemini
+    this.up.stdout.on("data", (pcm16k) => {
+      if (this.geminiWs?.readyState === WebSocket.OPEN && this.setupDone) {
+        this.geminiWs.send(JSON.stringify({
+          realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: pcm16k.toString("base64") }] },
+        }));
+      }
+    });
+    this.up.on("error", (e) => console.error("[June] ffmpeg(in):", e.message));
+    this.up.stdin.on("error", () => {});
   }
 
   startKeepalive() {
@@ -577,6 +598,9 @@ class JuneSession {
 
     if (this.durationTimer) clearTimeout(this.durationTimer);
     if (this.pendingAvailability?.timer) clearTimeout(this.pendingAvailability.timer);
+    if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
+    if (this.dn) { try { this.dn.kill("SIGKILL"); } catch {} this.dn = null; }
+    if (this.up) { try { this.up.kill("SIGKILL"); } catch {} this.up = null; }
 
     if (this.geminiWs) {
       this.geminiWs.close();
