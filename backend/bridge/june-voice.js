@@ -205,6 +205,8 @@ class JuneSession {
     this.toolCallCount = 0;
     this.toolCallsUsed = new Set(); // track which tools have been called
     this.durationTimer = null;
+    this.keepaliveTimer = null;
+    this.lastAudioSent = 0;
 
     this.socket.on("data", (data) => this.handleAudioSocketData(data));
     this.socket.on("close", () => this.cleanup("socket closed"));
@@ -233,6 +235,7 @@ class JuneSession {
         case AS_KIND_UUID:
           this.callUuid = payload.toString("utf8").replace(/-/g, "").slice(0, 32);
           console.log(`[June] Call UUID: ${this.callUuid}`);
+          this.startKeepalive();
           this.connectGemini();
           break;
 
@@ -315,6 +318,14 @@ class JuneSession {
     if (msg.setupComplete) {
       console.log("[June] Gemini setup complete, session active");
       this.setupDone = true;
+      // Gemini Live won't speak until it receives input — nudge June to greet
+      // the caller first instead of both sides waiting in silence.
+      this.geminiWs.send(JSON.stringify({
+        clientContent: {
+          turns: [{ role: "user", parts: [{ text: "(A caller just connected on the phone line. Greet them now with your standard greeting.)" }] }],
+          turnComplete: true,
+        },
+      }));
       return;
     }
 
@@ -349,6 +360,7 @@ class JuneSession {
 
   sendAudioToAsterisk(pcmData) {
     if (!this.alive || this.socket.destroyed) return;
+    this.lastAudioSent = Date.now();
 
     const chunkSize = 320; // 20ms of 8kHz 16-bit mono
     for (let i = 0; i < pcmData.length; i += chunkSize) {
@@ -359,6 +371,22 @@ class JuneSession {
       chunk.copy(frame, 3);
       this.socket.write(frame);
     }
+  }
+
+  startKeepalive() {
+    // AudioSocket drops the call after ~2s of no frames; Gemini's first audio
+    // (the greeting) takes longer, so stream silence until real audio flows and
+    // fill gaps between turns, holding the channel open.
+    this.lastAudioSent = Date.now();
+    this.keepaliveTimer = setInterval(() => {
+      if (!this.alive || this.socket.destroyed) { clearInterval(this.keepaliveTimer); return; }
+      if (Date.now() - this.lastAudioSent >= 60) {
+        const frame = Buffer.alloc(3 + 320);
+        frame[0] = AS_KIND_SLIN;
+        frame.writeUInt16BE(320, 1);
+        try { this.socket.write(frame); } catch {}
+      }
+    }, 20);
   }
 
   async handleToolCall(toolCall) {
