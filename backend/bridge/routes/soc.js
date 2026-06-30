@@ -1665,7 +1665,7 @@ module.exports = function socRoutes(ctx) {
     if (req.method === "POST" && pathname.match(/^\/soc\/engagements\/[^\/]+\/observations\/\d+\/respond$/)) {
       const parts = pathname.split("/");
       const obsId = parts[5];
-      const body = await readBody(req);
+      const body = await parseBody(req);
       if (!body.response) { sendJSON(res, 400, { error: "response required" }); return true; }
       await db.query(
         `UPDATE engagement_observations SET response = $1, status = 'answered', responded_at = NOW() WHERE id = $2`,
@@ -1757,6 +1757,7 @@ module.exports = function socRoutes(ctx) {
     // POST /soc/calls/incoming — GSM gateway live call notification + VoIP push
     // POST /soc/calls/number — add a single number for investigation
     if (req.method === "POST" && (pathname === "/soc/calls/number" || pathname === "/soc/calls/incoming")) {
+      const body = await parseBody(req);
       const num = (body.phone_number || '').replace(/[^\d+]/g, '');
       if (!num) {
         sendJSON(res, 400, { error: "phone_number required" });
@@ -1770,6 +1771,9 @@ module.exports = function socRoutes(ctx) {
       );
       // Push incoming call to the VoIP-connected iPhone (CallKit)
       if (pathname === "/soc/calls/incoming") {
+        // Hand the caller number to June, keyed by the AudioSocket UUID, so her
+        // per-number rate-limit + briefing use the real caller (not "unknown").
+        try { require('../june-voice').setPendingCaller(body.audiosocket_uuid, num); } catch {}
         const voipWs = global.__voipClientWs;
         if (voipWs && voipWs.readyState === 1) {
           voipWs.send(JSON.stringify({
@@ -1794,7 +1798,7 @@ module.exports = function socRoutes(ctx) {
 
     // POST /soc/calls/briefing — June AI stores a call briefing
     if (req.method === "POST" && pathname === "/soc/calls/briefing") {
-      const body = await readBody(req);
+      const body = await parseBody(req);
       const { caller_name, caller_number, wants_to_reach, reason, urgency, call_uuid } = body;
       await db.query(
         `INSERT INTO call_briefings (call_uuid, caller_name, caller_number, wants_to_reach, reason, urgency)
@@ -1812,7 +1816,7 @@ module.exports = function socRoutes(ctx) {
 
     // POST /soc/calls/decision — app sends accept/decline for a June-screened call
     if (req.method === "POST" && pathname === "/soc/calls/decision") {
-      const body = await readBody(req);
+      const body = await parseBody(req);
       const { call_uuid, decision } = body;
       const june = require('../june-voice');
       const handled = june.handleCallDecision(call_uuid, decision);
@@ -1822,7 +1826,7 @@ module.exports = function socRoutes(ctx) {
 
     // POST /soc/calls/transfer — June signals transfer (internal, called by june-voice.js)
     if (req.method === "POST" && pathname === "/soc/calls/transfer") {
-      const body = await readBody(req);
+      const body = await parseBody(req);
       // Signal Asterisk to bridge the call via AMI or channel redirect
       // For now, log — the AudioSocket session ending triggers Asterisk's next priority
       console.log(`[June] Transfer requested for call ${body.call_uuid}`);
@@ -1832,7 +1836,7 @@ module.exports = function socRoutes(ctx) {
 
     // POST /soc/calls/message — June saves a voicemail/message
     if (req.method === "POST" && pathname === "/soc/calls/message") {
-      const body = await readBody(req);
+      const body = await parseBody(req);
       const { caller_name, caller_number, message, callback_requested, call_uuid } = body;
       await db.query(
         `INSERT INTO call_messages (call_uuid, caller_name, caller_number, message, callback_requested)

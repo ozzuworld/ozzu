@@ -238,8 +238,14 @@ class JuneSession {
 
       switch (kind) {
         case AS_KIND_UUID:
-          this.callUuid = payload.toString("utf8").replace(/-/g, "").slice(0, 32);
-          console.log(`[June] Call UUID: ${this.callUuid}`);
+          // AudioSocket sends the UUID as 16 binary bytes -> hex string. This matches
+          // the dialplan's dash-stripped MD5 UUID used as the pendingCallers key.
+          this.callUuid = payload.toString("hex");
+          // Resolve the real caller (dialplan stashed it by this UUID) BEFORE the
+          // rate-check in connectGemini — else every call rate-limits on "unknown".
+          this.callerNumber = pendingCallers.get(this.callUuid) || this.callerNumber;
+          pendingCallers.delete(this.callUuid);
+          console.log(`[June] Call UUID: ${this.callUuid} (caller: ${this.callerNumber})`);
           this.startAudioPipes();
           this.startKeepalive();
           this.connectGemini();
@@ -625,6 +631,7 @@ function sanitizeLogArgs(args) {
 
 // ── Active sessions + concurrency control ──
 const activeSessions = new Map();
+const pendingCallers = new Map(); // AudioSocket UUID -> caller number (dialplan posts it via /soc/calls/incoming before AudioSocket connects)
 
 const server = net.createServer((socket) => {
   // Concurrency limit
@@ -674,4 +681,10 @@ function setCallerNumber(callUuid, number) {
   if (session) session.callerNumber = number;
 }
 
-module.exports = { handleCallDecision, setCallerNumber, activeSessions };
+// Dialplan -> /soc/calls/incoming stashes the caller here, keyed by the AudioSocket
+// UUID (dashes stripped to match this.callUuid), to be picked up on the UUID frame.
+function setPendingCaller(uuid, number) {
+  if (uuid && number) pendingCallers.set(String(uuid).replace(/-/g, "").slice(0, 32), number);
+}
+
+module.exports = { handleCallDecision, setCallerNumber, setPendingCaller, activeSessions };
