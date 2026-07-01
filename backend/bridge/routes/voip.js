@@ -49,48 +49,11 @@ function parseEndpoints(raw) {
   return out;
 }
 
-// ── VoIP gateway as a REAL fleet device ──
-// Emit a device_state heartbeat for "voip-gateway" every 60s so it flows through the
-// SAME pipeline as every other device (/infra/heartbeats → FleetSummaryBanner counts +
-// alerts + staleness, FleetDeviceCard renders it) — not a bolted-on facade card.
-// Reuses this file's own ast()/dockerUp()/parseEndpoints() helpers.
-async function emitGatewayHeartbeat(db) {
-  if (!db || !db.upsertDeviceState) return;
-  const [juneUp, astUp, epRaw, chRaw] = await Promise.all([
-    dockerUp("june-voice"),
-    dockerUp("ozzu-asterisk"),
-    ast("pjsip show endpoint ozzu-iphone"),
-    ast("core show channels count"),
-  ]);
-  const app = parseEndpoints(epRaw).find((e) => e.id === "ozzu-iphone");
-  const appReg = !!(app && String(app.contactStatus || "").toLowerCase() === "avail");
-  const activeCalls = parseInt((chRaw.match(/(\d+)\s+active channel/) || [])[1] || "0", 10);
-  const online = juneUp && astUp;
-  await db.upsertDeviceState({
-    device_id: "voip-gateway",
-    status: online ? "online" : "offline",
-    source: "telemetry-v2",
-    wg_ip: "10.9.0.1",
-    meta: { role: "voip-gateway" },
-  });
-  await db.updateDeviceTelemetry("voip-gateway", {
-    voip: { june: juneUp, asterisk: astUp, appRegistered: appReg, activeCalls },
-    _collected_at: new Date().toISOString(),
-  });
-}
-
-let _hbStarted = false;
-function startGatewayHeartbeat(db) {
-  if (_hbStarted) return;
-  _hbStarted = true;
-  const run = () => emitGatewayHeartbeat(db).catch((e) => console.error("[voip-hb]", e.message));
-  setTimeout(run, 3000);      // once shortly after boot
-  setInterval(run, 60000);    // then every 60s
-}
-
+// The VoIP gateway is a REAL fleet device: ozzu-sbc (the Rock Pi SIM7600 host) runs the
+// ozzu-telemetry-linux.sh agent via systemd, pushing real telemetry to /api/device-telemetry
+// like every other device. (No bridge-faked heartbeat here — that was a facade.)
 module.exports = function voipRoutes(ctx) {
   const { sendJSON, db } = ctx;
-  startGatewayHeartbeat(db);  // register the VoIP gateway as a real fleet device
 
   return async function handleVoipRoutes(req, res, pathname) {
     // GET /voip/status — full live picture of the VoIP stack
