@@ -212,7 +212,9 @@ class JuneSession {
     this.dn = null;                 // ffmpeg: Gemini 24kHz -> phone 8kHz
     this.up = null;                 // ffmpeg: phone 8kHz -> Gemini 16kHz
     this.outBuf = Buffer.alloc(0);  // accumulate ffmpeg output into 320B SLIN frames
-    this.audioQueue = [];           // paced 320B SLIN frames, drained 1/tick by the 20ms pump
+    this.audioQueue = [];           // jitter buffer of 320B SLIN frames, drained by the pump
+    this.playing = false;           // in a talkspurt (draining) vs priming/idle
+    this.bufStart = 0;              // when the current pre-roll fill began
 
     this.socket.on("data", (data) => this.handleAudioSocketData(data));
     this.socket.on("close", () => this.cleanup("socket closed"));
@@ -342,6 +344,8 @@ class JuneSession {
         // immediately instead of finishing the now-stale buffered utterance.
         this.audioQueue = [];
         this.outBuf = Buffer.alloc(0);
+        this.playing = false;
+        this.bufStart = 0;
       }
       const parts = msg.serverContent.modelTurn?.parts || [];
       for (const part of parts) {
@@ -406,21 +410,37 @@ class JuneSession {
   }
 
   startKeepalive() {
-    // AudioSocket drops the call after ~2s of no frames; Gemini's first audio
-    // (the greeting) takes longer, so stream silence until real audio flows and
-    // fill gaps between turns, holding the channel open.
+    // AudioSocket needs a 320B frame ~every 20ms; Gemini streams June's voice in
+    // IRREGULAR bursts with NO silence padding between them (Live API docs), so
+    // forwarding at a fixed cadence drops silence mid-word whenever a burst is a
+    // beat late -> choppy "uneven pace". Google's reference clients never hand-pace;
+    // they use a JITTER BUFFER. So: pre-roll ~160ms before a talkspurt, then drain
+    // 1 frame/20ms — the cushion (Gemini out-paces realtime) absorbs arrival jitter
+    // for gapless speech. Silence ONLY fills between turns / while priming, never
+    // mid-utterance.
+    const PREROLL = 8; // frames (~160ms) buffered before a talkspurt starts
     this.lastAudioSent = Date.now();
     this.keepaliveTimer = setInterval(() => {
       if (!this.alive || this.socket.destroyed) { clearInterval(this.keepaliveTimer); return; }
-      // Audio pump: drain ONE real 320B frame per 20ms tick (realtime pacing so
-      // Asterisk never gets a burst). When the queue is empty, emit silence after
-      // a 60ms gap to hold the AudioSocket open (it drops after ~2s of no frames).
       let chunk = null;
-      if (this.audioQueue.length > 0) {
-        chunk = this.audioQueue.shift();
-        this.lastAudioSent = Date.now();
-      } else if (Date.now() - this.lastAudioSent >= 60) {
-        chunk = Buffer.alloc(320); // silence
+      // Prime: wait for the jitter buffer to fill before starting a talkspurt
+      // (flush early for very short utterances so they aren't stuck buffering).
+      if (!this.playing && this.audioQueue.length > 0) {
+        if (!this.bufStart) this.bufStart = Date.now();
+        if (this.audioQueue.length >= PREROLL || Date.now() - this.bufStart >= 250) {
+          this.playing = true; this.bufStart = 0;
+        }
+      }
+      if (this.playing) {
+        if (this.audioQueue.length > 0) {
+          chunk = this.audioQueue.shift();
+          this.lastAudioSent = Date.now();
+        } else {
+          this.playing = false; // talkspurt drained — re-prime before the next one
+        }
+      }
+      if (!chunk && Date.now() - this.lastAudioSent >= 60) {
+        chunk = Buffer.alloc(320); // keepalive silence (between turns / while priming)
       }
       if (!chunk) return;
       const frame = Buffer.alloc(3 + 320);
