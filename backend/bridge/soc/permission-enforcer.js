@@ -105,6 +105,9 @@ const FILE_EXT_BLOCKLIST = new Set([
   "nmap", "gnmap",
   // dir_1782331844373: Linux directory-name conventions (conf.d, cron.d, etc.)
   "d",
+  // dir_1782870580168: firmware / media file extensions — .dav (Hikvision firmware),
+  // .fw, .rom, .cap (Broadcom), .chk (Netgear), .trx (DD-WRT), .rbi (Technicolor)
+  "dav", "fw", "rom", "cap", "chk", "trx", "rbi",
 ]);
 
 // dir_1780925940313: Python / shell module-method patterns that look like
@@ -119,6 +122,10 @@ const PY_MODULE_BLOCKLIST = new Set([
   "typing", "enum", "dataclasses", "ast", "inspect", "glob", "fnmatch",
   // Common JS / shell namespace fragments
   "process", "console", "document", "window", "JSON", "Math",
+  // dir_1782870580168: short variable names the model uses in inline Python scripts
+  // (sock.recv, conn.getresponse, nm.group, rm.group, resp.read, ctx.wrap_socket)
+  "sock", "conn", "nm", "rm", "resp", "ctx", "fd", "fp", "fh", "hdr", "buf", "msg",
+  "obj", "val", "key", "src", "dst", "tmp", "cfg", "opt", "res", "req", "err", "out",
   // dir_1780926990535: PHP filter wrapper module names
   // (e.g. php://filter/convert.base64-encode/resource=...)
   "convert", "iconv", "zlib", "bzip2", "mcrypt", "mdecrypt",
@@ -137,10 +144,10 @@ function isLikelyFilePath(s) {
   // dir_1780925940313: Python module pattern (re.findall, os.path, etc.) →
   // first dot-separated token is a known module
   if (PY_MODULE_BLOCKLIST.has(head.split(".")[0])) return true;
-  // Single lowercase letter as head (e.g. `h.split`, `x.replace`, `j.parse`) =
-  // almost certainly a loop variable or short var, not a hostname
+  // Short lowercase token as head (e.g. `h.split`, `nm.group`, `fd.read`) =
+  // almost certainly a variable name, not a hostname (real hostnames have ≥3 char labels)
   const headFirst = head.split(".")[0];
-  if (headFirst.length === 1 && /[a-z]/.test(headFirst)) return true;
+  if (headFirst.length <= 2 && /^[a-z]+$/.test(headFirst)) return true;
   // dir_1782343161076: XML/SOAP/XPath method patterns — service.get,
   // device.getSystemDateAndTime, etc. If any dot-segment is a common
   // method verb, it's code not a hostname.
