@@ -215,6 +215,8 @@ class JuneSession {
     this.outBuf = Buffer.alloc(0);  // accumulate ffmpeg output into 320B SLIN frames
     this.audioQueue = [];           // jitter buffer of 320B SLIN frames, drained by the pump
     this.turnAudioBytes = 0;        // audio bytes in the current Gemini turn (empty-turn detect)
+    this.lastRealAudio = Date.now();// last time June produced REAL audio (silence watchdog)
+    this.silenceNudges = 0;         // bounded watchdog nudges when she falls quiet
     this.emptyRetries = 0;          // bounded re-nudges when a turn returns empty (native-audio bug)
     this.turnHadTool = false;       // did this turn make a tool call (a valid no-audio turn)
     this.playing = false;           // in a talkspurt (draining) vs priming/idle
@@ -358,6 +360,7 @@ class JuneSession {
           try {
             const b = Buffer.from(part.inlineData.data, "base64");
             this.turnAudioBytes += b.length;
+            this.lastRealAudio = Date.now();
             this.dn?.stdin.write(b);
           } catch {}
         }
@@ -450,6 +453,18 @@ class JuneSession {
     // mid-utterance.
     const PREROLL = 8; // frames (~160ms) buffered before a talkspurt starts
     this.lastAudioSent = Date.now();
+    // Silence watchdog: the Live model intermittently goes quiet mid-call (empty turn,
+    // or it just stops responding). If June produces no REAL audio for ~7s, nudge her
+    // to re-engage so the caller never sits in dead air. Bounded per call.
+    this.watchdog = setInterval(() => {
+      if (!this.alive || this.socket.destroyed) { clearInterval(this.watchdog); return; }
+      if (this.setupDone && Date.now() - this.lastRealAudio > 7000 && this.silenceNudges < 8) {
+        this.silenceNudges++;
+        this.lastRealAudio = Date.now();
+        auditLog("silence_nudge", { call_uuid: this.callUuid, nudge: this.silenceNudges });
+        this.nudgeGemini("(Several seconds of silence on the line. Warmly re-engage the caller — check they're still there and keep helping; if you're waiting to reach someone, reassure them you're still trying.)");
+      }
+    }, 2500);
     this.keepaliveTimer = setInterval(() => {
       if (!this.alive || this.socket.destroyed) { clearInterval(this.keepaliveTimer); return; }
       let chunk = null;
@@ -677,6 +692,7 @@ class JuneSession {
     if (this.durationTimer) clearTimeout(this.durationTimer);
     if (this.pendingAvailability?.timer) clearTimeout(this.pendingAvailability.timer);
     if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
+    if (this.watchdog) clearInterval(this.watchdog);
     if (this.dn) { try { this.dn.kill("SIGKILL"); } catch {} this.dn = null; }
     if (this.up) { try { this.up.kill("SIGKILL"); } catch {} this.up = null; }
 
