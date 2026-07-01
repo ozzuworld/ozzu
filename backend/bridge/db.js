@@ -1467,6 +1467,8 @@ async function init() {
     // flag verification — membrane shouldn't block. Production engagements
     // stay protected by default.
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS synthetic_lab BOOLEAN DEFAULT false`);
+    // dir_1782872262432: campaign linking — engagements sharing a campaign_id see each other's history
+    await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS campaign_id VARCHAR(50)`);
     await pool.query(`CREATE OR REPLACE FUNCTION check_cipher_exploit_write()
     RETURNS TRIGGER AS $func$
     DECLARE

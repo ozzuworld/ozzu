@@ -665,8 +665,8 @@ module.exports = function socRoutes(ctx) {
           `INSERT INTO pentest_engagements (
              id, client_name, engagement_type, scope, roe, start_date, end_date,
              lead_engineer, sow_url, status, executor_host, executor_adb_target, metadata,
-             permission_mode, autonomous_full_access
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+             permission_mode, autonomous_full_access, campaign_id
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
           [
             engagementId,
             body.client_name,
@@ -685,6 +685,7 @@ module.exports = function socRoutes(ctx) {
             // else full_engagement + full access — so engagements aren't born gated/capped.
             body.permission_mode || metadata.permission_mode || "full_engagement",
             body.autonomous_full_access !== undefined ? body.autonomous_full_access : true,
+            body.campaign_id || null,
           ]
         );
 

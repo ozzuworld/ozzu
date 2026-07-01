@@ -1682,6 +1682,51 @@ async function runAgentV2(engagementId, opts = {}) {
     console.error(`[offense-agent-v2] prior intel briefing build failed:`, e.message);
   }
 
+  // dir_1782872262432: auto-inject campaign history from prior engagements on same targets
+  let campaignBriefing = "";
+  try {
+    const agentTools = require("/app/soc/offense-agent-tools");
+    const history = await agentTools.dispatch("get_campaign_history", { engagement_id: engagementId });
+    if (history && Array.isArray(history.prior_engagements) && history.prior_engagements.length > 0) {
+      const parts = ["\n\n═══ CAMPAIGN HISTORY (prior engagements on these targets) ═══"];
+      for (const prior of history.prior_engagements) {
+        parts.push(`\n── ${prior.engagement_id} (${prior.status}, reached phase: ${prior.phase_reached}) ──`);
+        parts.push(`   Steps: ${prior.total_steps} total, ${prior.succeeded} succeeded, ${prior.failed} failed, ${prior.blocked} blocked`);
+        if (prior.findings.length > 0) {
+          parts.push(`   FINDINGS (use these — they're confirmed):`);
+          for (const f of prior.findings) {
+            parts.push(`     • [${f.severity}${f.kind ? `/${f.kind}` : ""}] ${f.title} (${f.asset || "n/a"})${f.description ? ": " + f.description.substring(0, 150) : ""}`);
+          }
+        }
+        if (prior.credential_findings.length > 0) {
+          parts.push(`   CREDENTIALS FOUND:`);
+          for (const c of prior.credential_findings) {
+            parts.push(`     • ${c.title}: ${c.detail}`);
+          }
+        }
+        if (prior.dead_ends.length > 0) {
+          parts.push(`   ╔══════════════════════════════════════════════╗`);
+          parts.push(`   ║  DEAD ENDS — DO NOT REPEAT THESE STEPS      ║`);
+          parts.push(`   ╚══════════════════════════════════════════════╝`);
+          for (const d of prior.dead_ends.slice(0, 10)) {
+            parts.push(`     ✗ ${d.step} [${d.intent || "?"}] → ${d.error.substring(0, 120) || "failed"}`);
+          }
+        }
+        if (prior.working_notes.length > 0) {
+          parts.push(`   NOTES FROM PRIOR RUN:`);
+          for (const n of prior.working_notes.slice(0, 5)) {
+            parts.push(`     ${n.key}: ${n.content.substring(0, 200)}`);
+          }
+        }
+      }
+      parts.push(`\n═══ END CAMPAIGN HISTORY ═══`);
+      parts.push(`Use this history. Build on what worked. DO NOT repeat dead ends.`);
+      campaignBriefing = parts.join("\n");
+    }
+  } catch (e) {
+    console.error(`[offense-agent-v2] campaign history build failed:`, e.message);
+  }
+
   if (!messages) {
     messages = [
       { role: "system", content: buildSystemPrompt(phase) },
@@ -1689,6 +1734,7 @@ async function runAgentV2(engagementId, opts = {}) {
         `Begin the authorized pentest engagement ${engagementId}.`,
         intent ? `\n\nOPERATOR MISSION (your #1 priority — this OVERRIDES default phase behavior):\n${intent}` : "",
         priorIntelBriefing,
+        campaignBriefing,
         `\nCurrent phase: ${phase}.`,
         "Call get_engagement_state to see scope, ROE, queue history, and executor capabilities.",
       ].filter(Boolean).join("\n") },

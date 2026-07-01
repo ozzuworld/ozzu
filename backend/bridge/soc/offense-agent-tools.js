@@ -580,6 +580,115 @@ async function addFinding(args) {
   };
 }
 
+// ─── dir_1782872262432: campaign history — cross-engagement intelligence ──────
+
+async function getCampaignHistory(args) {
+  const engId = args && args.engagement_id;
+  if (!engId) return { error: "engagement_id required" };
+
+  const eng = await db.query(
+    `SELECT id, scope, campaign_id FROM pentest_engagements WHERE id = $1`, [engId]);
+  if (eng.rows.length === 0) return { error: `engagement ${engId} not found` };
+
+  let scope = eng.rows[0].scope;
+  try { if (typeof scope === "string") scope = JSON.parse(scope || "{}"); } catch (_) { scope = {}; }
+  const targets = Array.isArray(scope && scope.targets) ? scope.targets : [];
+  const campaignId = eng.rows[0].campaign_id;
+
+  if (targets.length === 0 && !campaignId) {
+    return { prior_engagements: [], note: "no targets or campaign_id to match" };
+  }
+
+  // Find prior engagements: same campaign_id OR overlapping targets
+  const priorRows = await db.query(
+    `SELECT id, scope, status, engagement_phase, created_at, campaign_id
+       FROM pentest_engagements
+      WHERE id != $1
+        AND (campaign_id IS NOT NULL AND campaign_id = $2
+             OR scope::text LIKE ANY($3))
+      ORDER BY created_at DESC
+      LIMIT 10`,
+    [engId, campaignId || '__none__', targets.map(t => `%${t}%`)]);
+
+  if (priorRows.rows.length === 0) {
+    return { prior_engagements: [], note: "no prior engagements on these targets" };
+  }
+
+  const summaries = [];
+  for (const prior of priorRows.rows) {
+    const [queueR, findingsR, credsR, notesR] = await Promise.all([
+      db.query(
+        `SELECT title, status, intent_class,
+                LEFT(COALESCE(output, ''), 300) AS output_snippet
+           FROM soc_queue_items
+          WHERE engagement_id = $1
+          ORDER BY seq`, [prior.id]),
+      db.query(
+        `SELECT title, severity, kind, affected_asset,
+                LEFT(COALESCE(description, ''), 300) AS description_preview
+           FROM pentest_findings
+          WHERE engagement_id = $1
+          ORDER BY discovered_at`, [prior.id]),
+      db.query(
+        `SELECT title, description FROM pentest_findings
+          WHERE engagement_id = $1
+            AND (LOWER(title) LIKE '%credential%' OR LOWER(title) LIKE '%password%'
+                 OR LOWER(title) LIKE '%default%cred%' OR LOWER(title) LIKE '%auth%bypass%')
+          ORDER BY discovered_at`, [prior.id]),
+      db.query(
+        `SELECT key, content FROM engagement_notes
+          WHERE engagement_id = $1
+          ORDER BY updated_at`, [prior.id])
+        .catch(() => ({ rows: [] })),
+    ]);
+
+    const steps = queueR.rows || [];
+    const succeeded = steps.filter(s => s.status === "done");
+    const failed = steps.filter(s => s.status === "failed");
+    const blocked = steps.filter(s => s.status === "permission_denied" || s.status === "cancelled");
+
+    // Build dead ends: failed steps with their error snippets
+    const deadEnds = failed.map(s => ({
+      step: s.title,
+      intent: s.intent_class,
+      error: (s.output_snippet || "").substring(0, 200),
+    })).slice(0, 15);
+
+    // Build successful techniques
+    const confirmedTechniques = succeeded.map(s => s.title).slice(0, 20);
+
+    summaries.push({
+      engagement_id: prior.id,
+      status: prior.status,
+      phase_reached: prior.engagement_phase,
+      created_at: prior.created_at,
+      total_steps: steps.length,
+      succeeded: succeeded.length,
+      failed: failed.length,
+      blocked: blocked.length,
+      findings: (findingsR.rows || []).map(f => ({
+        title: f.title,
+        severity: f.severity,
+        kind: f.kind,
+        asset: f.affected_asset,
+        description: f.description_preview,
+      })),
+      credential_findings: (credsR.rows || []).map(c => ({
+        title: c.title,
+        detail: (c.description || "").substring(0, 200),
+      })),
+      dead_ends: deadEnds,
+      successful_steps: confirmedTechniques,
+      working_notes: (notesR.rows || []).map(n => ({ key: n.key, content: (n.content || "").substring(0, 300) })),
+    });
+  }
+
+  return {
+    prior_engagements: summaries,
+    instruction: "USE this history. DO NOT repeat dead_ends. BUILD ON successful_steps and findings. If credentials were found in prior engagements, USE THEM immediately.",
+  };
+}
+
 // ────────────────────────────────── dispatcher ─────────────────────────────────
 
 // Model knowledge tools (dir_1780827444328) — anti-hallucination grounding
@@ -601,6 +710,7 @@ const TOOL_IMPLS = {
   lookup_attack_playbook: mkTools.lookupAttackPlaybook,
   save_note:              saveNote,
   request_observation:    requestObservation,
+  get_campaign_history:   getCampaignHistory,
 };
 
 // Central router. Returns the tool's result as a JSON-serializable object the
@@ -858,6 +968,21 @@ const TOOL_SCHEMAS = [
           context:       { type: "string",  description: "Why you need this information (helps the operator prioritize)" },
         },
         required: ["engagement_id", "question"],
+      },
+    },
+  },
+  // dir_1782872262432: campaign history — cross-engagement intelligence
+  {
+    type: "function",
+    function: {
+      name: "get_campaign_history",
+      description: "Query results from PRIOR engagements on the same target(s). Returns: confirmed findings, dead ends (steps that failed — DO NOT repeat these), successful techniques, credential discoveries, and working notes from previous runs. Call this at the START of your engagement to avoid repeating work. Also call when you're stuck — prior engagements may have found a path you haven't tried.",
+      parameters: {
+        type: "object",
+        properties: {
+          engagement_id: { type: "string", description: "YOUR current engagement ID — the tool looks up prior engagements on the same targets automatically" },
+        },
+        required: ["engagement_id"],
       },
     },
   },
