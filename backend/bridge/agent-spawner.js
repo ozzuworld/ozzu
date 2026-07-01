@@ -1712,6 +1712,10 @@ function smartDeploy(directive) {
         log("HOT deploy complete — OTA published for iOS + Android");
         notify("Update published over-the-air. Reopen Ozzu on your iPhone to load it.");
       }
+      // Backend ALSO changed → restart the bridge NOW that the OTA export is done. A
+      // restart during the export kills it before it publishes (the recurring silent-OTA
+      // bug — verified in the deploy log). (dir_1782944455303)
+      if (bridgeChanged) setTimeout(() => triggerBridgeRestart("post-OTA"), 3000);
     });
   } else {
     // Backend-only / TV-only / firmware-only / docs / cipher meta-work — no phone app build needed.
@@ -1774,24 +1778,34 @@ function smartDeploy(directive) {
   }
 
   // ── BRIDGE RESTART ──
-  // Must be LAST — kills this process, Docker auto-restarts
+  // Must be LAST — kills this process, Docker auto-restarts.
+  // A restart WHILE the OTA export is running kills it before it publishes (the recurring
+  // silent-OTA failure, verified in the deploy log). So when a HOT OTA is in flight, the
+  // OTA's own completion callback (above) fires the restart; otherwise a short timer does.
+  function triggerBridgeRestart(reason) {
+    log(`Triggering bridge restart via POST /restart (${reason})`);
+    const payload = JSON.stringify({});
+    const key = process.env.BRIDGE_API_KEY || "";
+    const req = http.request(
+      `${BRIDGE}/restart`,
+      { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload), ...(key ? { Authorization: `Bearer ${key}` } : {}) } },
+      (res) => { res.on("data", () => {}); }
+    );
+    req.on("error", (e) => log(`Bridge restart request failed: ${e.message}`));
+    req.write(payload);
+    req.end();
+  }
   if (bridgeChanged) {
-    const restartDelay = native.any ? 10000 : 60000; // 60s for OTA (was 90s, now faster without iOS export)
-    log(`Bridge code changed — scheduling restart in ${restartDelay / 1000}s`);
-    notify("Server code changed — will restart after the update finishes.");
-    setTimeout(() => {
-      log("Triggering bridge restart via POST /restart");
-      const payload = JSON.stringify({});
-      const key = process.env.BRIDGE_API_KEY || "";
-      const req = http.request(
-        `${BRIDGE}/restart`,
-        { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload), ...(key ? { Authorization: `Bearer ${key}` } : {}) } },
-        (res) => { res.on("data", () => {}); }
-      );
-      req.on("error", (e) => log(`Bridge restart request failed: ${e.message}`));
-      req.write(payload);
-      req.end();
-    }, restartDelay);
+    const otaInFlight = frontend.any && !native.any; // the in-process OTA export (HOT tier)
+    if (otaInFlight) {
+      log("Bridge code changed — restart deferred until the OTA export finishes");
+      notify("Server code changed — will restart right after the update publishes.");
+    } else {
+      const restartDelay = native.any ? 10000 : 5000;
+      log(`Bridge code changed — scheduling restart in ${restartDelay / 1000}s`);
+      notify("Server code changed — will restart after the update finishes.");
+      setTimeout(() => triggerBridgeRestart("timer"), restartDelay);
+    }
   }
 }
 
