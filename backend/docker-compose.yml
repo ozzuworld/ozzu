@@ -103,7 +103,7 @@ services:
       - /root/.ozzu-secrets:/root/.ozzu-secrets:ro
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GEMINI_MODEL=gemini-2.5-flash-native-audio-preview-12-2025
+      - GEMINI_MODEL=gemini-3.1-flash-live-preview
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ozzu}
       - BRIDGE_API_KEY=${BRIDGE_API_KEY:-}
       - BRIDGE_PIN=${BRIDGE_PIN:-1234}

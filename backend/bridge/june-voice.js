@@ -430,7 +430,7 @@ class JuneSession {
     this.up.stdout.on("data", (pcm16k) => {
       if (this.geminiWs?.readyState === WebSocket.OPEN && this.setupDone) {
         this.geminiWs.send(JSON.stringify({
-          realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: pcm16k.toString("base64") }] },
+          realtimeInput: { audio: { mimeType: "audio/pcm;rate=16000", data: pcm16k.toString("base64") } },
         }));
       }
     });
