@@ -66,6 +66,15 @@
             "command": "/home/gcp/ozzu/.claude/hooks/soc-isolation-guard.sh"
           }
         ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/read-first-gate.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -101,6 +110,15 @@
           {
             "type": "command",
             "command": "/home/gcp/ozzu/.claude/hooks/edit-size-check.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gcp/ozzu/.claude/hooks/track-reads.sh"
           }
         ]
       }
