@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 
-// WebRTC call leg — JsSIP (SIP-over-WSS signaling) + react-native-webrtc (DTLS-SRTP media).
-// registerGlobals() puts RTCPeerConnection / MediaStream / getUserMedia on the global object
-// so JsSIP drives them; RN's global WebSocket already handles wss:// + subprotocols.
+// WebRTC call leg with a native CallKit incoming-call screen.
+//   react-native-webrtc  — media (DTLS-SRTP), registerGlobals() exposes RTCPeerConnection
+//   jssip                — SIP-over-WSS signaling to Asterisk's WebRTC endpoint
+//   react-native-callkeep— native CallKit ring / answer / decline UI (+ speaker/mute)
+//   react-native-incall-manager — audio route
 //
-// ROUND 1 (dir_1782922636595): register to Asterisk's WebRTC endpoint and AUTO-ANSWER an
-// inbound call to prove 2-way audio over WebRTC (no WireGuard needed — WebRTC traverses NAT).
-// The native CallKit UI (react-native-callkeep) + the June briefing hook-up come in Round 2.
+// ROUND 2 (dir_1782922636595): a hand-off Dial(PJSIP/ozzu-iphone) arrives as a JsSIP
+// newRTCSession -> we show the CallKit incoming call (caller ID); King Kazuma answers on the
+// native screen -> we JsSIP-answer + open media. Replaces Round-1 auto-answer AND the old
+// briefing/accept gate (answering the ring IS the accept). Foreground; PushKit = Round 3.
 let rnwebrtc: any = null;
 let JsSIP: any = null;
 let InCallManager: any = null;
+let RNCallKeep: any = null;
 let ready = false;
 try {
   if (Platform.OS === "ios") {
@@ -18,6 +22,7 @@ try {
     rnwebrtc.registerGlobals();
     JsSIP = require("jssip");
     InCallManager = require("react-native-incall-manager").default;
+    RNCallKeep = require("react-native-callkeep").default;
     ready = true;
   }
 } catch (e: any) {
@@ -30,6 +35,14 @@ const SIP_PASS = "75134ecdccb72682abe5b3af85955ebb090b";
 const SIP_DOMAIN = "home.ozzu.world";
 const STUN = "stun:stun.l.google.com:19302";
 
+function uuidv4(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export interface WebrtcState {
   registered: boolean;
   inCall: boolean;
@@ -39,9 +52,53 @@ export interface WebrtcState {
 export function useWebrtcCall() {
   const [state, setState] = useState<WebrtcState>({ registered: false, inCall: false, lastError: null });
   const uaRef = useRef<any>(null);
+  const sessionRef = useRef<any>(null);
+  const callUuidRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!ready || uaRef.current) return;
+
+    const cleanupCall = () => {
+      try { InCallManager.stop(); } catch {}
+      if (callUuidRef.current) { try { RNCallKeep.endCall(callUuidRef.current); } catch {} }
+      sessionRef.current = null;
+      callUuidRef.current = null;
+      setState((s) => ({ ...s, inCall: false }));
+    };
+
+    // ── CallKit setup ──
+    try {
+      RNCallKeep.setup({
+        ios: {
+          appName: "Ozzu",
+          supportsVideo: false,
+          maximumCallGroups: "1",
+          maximumCallsPerCallGroup: "1",
+        },
+      }).then?.(() => RNCallKeep.setAvailable(true)).catch?.((e: any) => console.warn("[callkeep] setup:", e?.message));
+    } catch (e: any) { console.warn("[callkeep] setup err:", e?.message); }
+
+    // King Kazuma taps Answer on the native call screen
+    RNCallKeep.addEventListener("answerCall", ({ callUUID }: any) => {
+      const session = sessionRef.current;
+      if (!session) return;
+      try {
+        InCallManager.start({ media: "audio" });
+        session.answer({
+          mediaConstraints: { audio: true, video: false },
+          pcConfig: { iceServers: [{ urls: STUN }] },
+        });
+        RNCallKeep.setCurrentCallActive(callUUID);
+        setState((s) => ({ ...s, inCall: true }));
+      } catch (e: any) { console.warn("[webrtc] answer error:", e?.message); }
+    });
+    // Decline / hang up from the native UI
+    RNCallKeep.addEventListener("endCall", () => {
+      try { sessionRef.current?.terminate(); } catch {}
+      cleanupCall();
+    });
+
+    // ── JsSIP ──
     try {
       const socket = new JsSIP.WebSocketInterface(WSS);
       const ua = new JsSIP.UA({
@@ -53,37 +110,23 @@ export function useWebrtcCall() {
       });
       uaRef.current = ua;
 
-      ua.on("connected", () => console.log("[webrtc] ws connected"));
-      ua.on("disconnected", () => console.log("[webrtc] ws disconnected"));
-      ua.on("registered", () => {
-        console.log("[webrtc] REGISTERED to Asterisk");
-        setState((s) => ({ ...s, registered: true, lastError: null }));
-      });
+      ua.on("registered", () => { console.log("[webrtc] REGISTERED"); setState((s) => ({ ...s, registered: true, lastError: null })); });
       ua.on("unregistered", () => setState((s) => ({ ...s, registered: false })));
-      ua.on("registrationFailed", (e: any) => {
-        console.warn("[webrtc] registration failed:", e?.cause);
-        setState((s) => ({ ...s, registered: false, lastError: e?.cause || "registration failed" }));
-      });
+      ua.on("registrationFailed", (e: any) => { console.warn("[webrtc] reg failed:", e?.cause); setState((s) => ({ ...s, registered: false, lastError: e?.cause || "reg failed" })); });
 
       ua.on("newRTCSession", (data: any) => {
         const { originator, session } = data;
-        if (originator !== "remote") return; // inbound calls only
-        console.log("[webrtc] incoming call — auto-answering (Round 1)");
-        InCallManager.start({ media: "audio" });
-        // audio-only: react-native-webrtc plays the remote audio track automatically once
-        // the peerconnection receives it; InCallManager owns the route (earpiece/speaker).
-        session.connection?.addEventListener?.("track", () => console.log("[webrtc] remote track received"));
-        session.answer({
-          mediaConstraints: { audio: true, video: false },
-          pcConfig: { iceServers: [{ urls: STUN }] },
-        });
-        setState((s) => ({ ...s, inCall: true }));
-        const end = () => {
-          try { InCallManager.stop(); } catch {}
-          setState((s) => ({ ...s, inCall: false }));
-        };
-        session.on("ended", end);
-        session.on("failed", end);
+        if (originator !== "remote") return; // inbound only
+        sessionRef.current = session;
+        const uuid = uuidv4();
+        callUuidRef.current = uuid;
+        const caller = session.remote_identity?.uri?.user || "Unknown";
+        const name = session.remote_identity?.display_name || `Caller ${caller}`;
+        console.log("[webrtc] incoming call from", caller, "-> CallKit");
+        // Native incoming-call screen (ring + caller ID). Answered via the answerCall event.
+        try { RNCallKeep.displayIncomingCall(uuid, caller, name, "generic", false); } catch (e: any) { console.warn("[callkeep] display:", e?.message); }
+        session.on("ended", cleanupCall);
+        session.on("failed", cleanupCall);
       });
 
       ua.start();
@@ -94,6 +137,10 @@ export function useWebrtcCall() {
 
     return () => {
       try { uaRef.current?.stop(); uaRef.current = null; } catch {}
+      try {
+        RNCallKeep.removeEventListener("answerCall");
+        RNCallKeep.removeEventListener("endCall");
+      } catch {}
     };
   }, []);
 
