@@ -732,7 +732,7 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
       if (!inferred) {
         // dir_1780788278335: in full-access mode, NULL+NULL doesn't gate —
         // operator opted out of approval taxes. ROE block-list already ran.
-        if (item.autonomous_full_access) {
+        if (item.autonomous_full_access || item.permission_mode === "exploitation_auto") {
           try {
             await db.query(
               `INSERT INTO offense_telemetry
@@ -741,14 +741,14 @@ async function maybeAutoExecute(queueItemId, opts = {}) {
                   latency_ms, outcome, outcome_notes)
                VALUES ($1, $2, 'lint', 'unclassified', 0, 0, true, true, 0, 0,
                        'intent_unclassified_full_access',
-                       'model omitted intent_class; no rule inferred; full_access ON — running anyway')`,
+                       'model omitted intent_class; no rule inferred; exploitation_auto or full_access ON — running anyway')`,
               [item.engagement_id, item.id]);
           } catch (_) { /* telemetry never breaks gating */ }
           await db.query(`UPDATE soc_queue_items SET intent_class='unclassified' WHERE id=$1`, [item.id]);
           claimed = "unclassified";
           // Fall through to auto-execute (won't hit AUTO_RUN_INTENTS check below
-          // because full_access bypasses it; mismatch lint can't fire either since
-          // inferred is null).
+          // because full_access/exploitation_auto bypasses it; mismatch lint can't
+          // fire either since inferred is null).
         } else {
           return { autoExecuted: false, reason: "intent_class not declared and command not inferable — gated as safe default" };
         }

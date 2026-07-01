@@ -115,7 +115,10 @@
         "(?i)\\bnikto\\b\\s+(-h|-host|-Host)",
         "(?i)\\bmysql\\b[^\\n]{0,200}(SHOW\\s+(DATABASES|TABLES|GRANTS)|SELECT|INFORMATION_SCHEMA)",
         "(?i)\\bmysqlshow\\b",
-        "(?i)\\bredis-cli\\b[^\\n]{0,200}\\b(INFO|KEYS|CONFIG\\s+GET)\\b"
+        "(?i)\\bredis-cli\\b[^\\n]{0,200}\\b(INFO|KEYS|CONFIG\\s+GET)\\b",
+        "(?i)^\\s*(echo|cat|head|tail|xxd|hexdump|file|strings|base64)\\b",
+        "(?i)^\\s*python3?\\s+-c\\b",
+        "(?i)^\\s*curl\\s+(-s|-k|-m|--silent|--insecure|--max-time|--connect-timeout|\\s)+https?://"
       ]
     }
   ]
