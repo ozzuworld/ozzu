@@ -212,6 +212,7 @@ class JuneSession {
     this.dn = null;                 // ffmpeg: Gemini 24kHz -> phone 8kHz
     this.up = null;                 // ffmpeg: phone 8kHz -> Gemini 16kHz
     this.outBuf = Buffer.alloc(0);  // accumulate ffmpeg output into 320B SLIN frames
+    this.audioQueue = [];           // paced 320B SLIN frames, drained 1/tick by the 20ms pump
 
     this.socket.on("data", (data) => this.handleAudioSocketData(data));
     this.socket.on("close", () => this.cleanup("socket closed"));
@@ -336,6 +337,12 @@ class JuneSession {
     }
 
     if (msg.serverContent) {
+      if (msg.serverContent.interrupted) {
+        // Caller talked over June — drop all queued/pending audio so she stops
+        // immediately instead of finishing the now-stale buffered utterance.
+        this.audioQueue = [];
+        this.outBuf = Buffer.alloc(0);
+      }
       const parts = msg.serverContent.modelTurn?.parts || [];
       for (const part of parts) {
         if (part.inlineData?.mimeType?.startsWith("audio/")) {
@@ -361,18 +368,16 @@ class JuneSession {
 
   sendAudioToAsterisk(pcmData) {
     if (!this.alive || this.socket.destroyed) return;
-    // ffmpeg stdout isn't 20ms-aligned — accumulate and emit only full
-    // 320-byte (160-sample) SLIN frames, else ragged short frames click.
+    // ffmpeg stdout isn't 20ms-aligned — accumulate full 320-byte (160-sample)
+    // SLIN frames and QUEUE them. Gemini delivers a whole utterance as a burst,
+    // and AudioSocket has no receive-side pacing/jitterbuffer — writing the burst
+    // straight to the socket makes Asterisk play it too fast / overflow its write
+    // queue, so the caller hears a brief blast then silence. The 20ms pump
+    // (startKeepalive) drains one frame per tick = smooth realtime playback.
     this.outBuf = Buffer.concat([this.outBuf, pcmData]);
     while (this.outBuf.length >= 320) {
-      const chunk = this.outBuf.subarray(0, 320);
+      this.audioQueue.push(this.outBuf.subarray(0, 320));
       this.outBuf = this.outBuf.subarray(320);
-      const frame = Buffer.alloc(3 + 320);
-      frame[0] = AS_KIND_SLIN;
-      frame.writeUInt16BE(320, 1);
-      chunk.copy(frame, 3);
-      this.socket.write(frame);
-      this.lastAudioSent = Date.now();
     }
   }
 
@@ -407,12 +412,22 @@ class JuneSession {
     this.lastAudioSent = Date.now();
     this.keepaliveTimer = setInterval(() => {
       if (!this.alive || this.socket.destroyed) { clearInterval(this.keepaliveTimer); return; }
-      if (Date.now() - this.lastAudioSent >= 60) {
-        const frame = Buffer.alloc(3 + 320);
-        frame[0] = AS_KIND_SLIN;
-        frame.writeUInt16BE(320, 1);
-        try { this.socket.write(frame); } catch {}
+      // Audio pump: drain ONE real 320B frame per 20ms tick (realtime pacing so
+      // Asterisk never gets a burst). When the queue is empty, emit silence after
+      // a 60ms gap to hold the AudioSocket open (it drops after ~2s of no frames).
+      let chunk = null;
+      if (this.audioQueue.length > 0) {
+        chunk = this.audioQueue.shift();
+        this.lastAudioSent = Date.now();
+      } else if (Date.now() - this.lastAudioSent >= 60) {
+        chunk = Buffer.alloc(320); // silence
       }
+      if (!chunk) return;
+      const frame = Buffer.alloc(3 + 320);
+      frame[0] = AS_KIND_SLIN;
+      frame.writeUInt16BE(320, 1);
+      chunk.copy(frame, 3);
+      try { this.socket.write(frame); } catch {}
     }, 20);
   }
 
