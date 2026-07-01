@@ -6,9 +6,12 @@ Pod::Spec.new do |s|
   s.homepage       = 'https://ozzu.world'
   s.license        = 'MIT'
   s.author         = 'Ozzu'
-  s.platform       = :ios, '13.0'
+  s.platform       = :ios, '15.1'
   s.source         = { :git => '' }
   s.source_files   = '**/*.swift'
   s.dependency 'ExpoModulesCore'
+  # liblinphone (audio-only SIP stack). Resolvable via the Belledonne spec-repo source
+  # line injected by the ./plugins/linphone-config config plugin. (dir_1782918712595)
+  s.dependency 'linphone-sdk-novideo'
   s.frameworks     = 'CallKit', 'AVFoundation', 'PushKit', 'Network'
 end

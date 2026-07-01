@@ -76,6 +76,16 @@
       "./plugins/meta-dat-config",
       "./plugins/mediapipe-config",
       "./plugins/voip-entitlements",
+      "./plugins/linphone-config",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static",
+            "deploymentTarget": "15.1"
+          }
+        }
+      ],
       [
         "expo-notifications",
         {
