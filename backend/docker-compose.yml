@@ -83,6 +83,36 @@ services:
       - redis
       - postgres
 
+  # June AI voice receptionist — extracted to its OWN process (dir_1782876154936) so
+  # real-time audio (20ms AudioSocket pump + live Gemini session) runs on a dedicated
+  # event loop, not starved by the bridge's agent/API/git churn. Same image + code via
+  # the shared ./bridge volume; owns 127.0.0.1:4580 (AudioSocket) + :4581 (hand-off).
+  june-voice:
+    build: ./bridge
+    container_name: june-voice
+    restart: unless-stopped
+    network_mode: host
+    working_dir: /app
+    env_file:
+      - path: .env.email
+        required: false
+    volumes:
+      - ./bridge:/app
+      - /tmp/ozzu-bridge:/tmp/ozzu-bridge
+      - /home/gcp/ozzu:/home/gcp/ozzu
+      - /root/.ozzu-secrets:/root/.ozzu-secrets:ro
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ozzu}
+      - BRIDGE_API_KEY=${BRIDGE_API_KEY:-}
+      - BRIDGE_PIN=${BRIDGE_PIN:-1234}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    # Wait for the shared node_modules (the bridge installs them on the mounted volume).
+    command: sh -c "until [ -d /app/node_modules/ws ]; do echo waiting-for-node_modules; sleep 2; done; node june-voice.js"
+    depends_on:
+      - redis
+      - postgres
+
   postgres:
     image: postgres:16-alpine
     container_name: ozzu-postgres

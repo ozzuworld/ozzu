@@ -723,3 +723,31 @@ function setPendingCaller(uuid, number) {
 }
 
 module.exports = { handleCallDecision, setCallerNumber, setPendingCaller, activeSessions };
+
+// ── Local hand-off endpoint ──────────────────────────────────────────────────
+// June runs as her OWN process now (dir_1782876154936), off the bridge's event
+// loop. The bridge can't call into her in-process anymore, so it forwards the
+// caller number (/pending) and the app's accept/decline (/decision) here.
+const http = require("http");
+const HANDOFF_PORT = 4581;
+http.createServer((req, res) => {
+  if (req.method !== "POST") { res.writeHead(405); return res.end(); }
+  let b = "";
+  req.on("data", (c) => { b += c; if (b.length > 100000) req.destroy(); });
+  req.on("end", () => {
+    let body = {}; try { body = JSON.parse(b || "{}"); } catch {}
+    try {
+      if (req.url === "/pending") {
+        setPendingCaller(body.uuid, body.number);
+        res.writeHead(200, { "Content-Type": "application/json" }); return res.end('{"ok":true}');
+      }
+      if (req.url === "/decision") {
+        const handled = handleCallDecision(body.call_uuid, body.decision);
+        res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ handled }));
+      }
+      res.writeHead(404); res.end();
+    } catch { res.writeHead(500); res.end(); }
+  });
+}).listen(HANDOFF_PORT, "127.0.0.1", () => {
+  console.log(`[June] hand-off endpoint on 127.0.0.1:${HANDOFF_PORT} (caller-ID + app decision)`);
+});

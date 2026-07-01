@@ -6763,8 +6763,9 @@ wss.on("connection", (ws, req) => {
     checkContainerBinaries();
     // AGI call screener for Asterisk (FastAGI on port 4573)
     try { require("./agi-screener"); } catch (e) { log.bridge.error(`AGI screener: ${e.message}`); }
-    // June AI receptionist — AudioSocket server for Gemini Live (port 4580)
-    try { require("./june-voice"); } catch (e) { log.bridge.error(`June voice: ${e.message}`); }
+    // June AI receptionist now runs as its OWN process — compose service "june-voice"
+    // (dir_1782876154936), off the bridge's event loop so real-time audio isn't starved
+    // by agent/API/git churn. Caller-ID + app decisions forward to 127.0.0.1:4581.
     // dir_1780846234615: engagement cron poller — ticks every minute, fires
     // due crons by inserting queue items through the normal gate stack.
     try {

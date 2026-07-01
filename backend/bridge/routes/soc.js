@@ -1791,7 +1791,11 @@ module.exports = function socRoutes(ctx) {
       if (pathname === "/soc/calls/incoming") {
         // Hand the caller number to June, keyed by the AudioSocket UUID, so her
         // per-number rate-limit + briefing use the real caller (not "unknown").
-        try { require('../june-voice').setPendingCaller(body.audiosocket_uuid, num); } catch {}
+        // June runs as her own process — forward the caller number to her hand-off port.
+        fetch("http://127.0.0.1:4581/pending", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uuid: body.audiosocket_uuid, number: num }),
+        }).catch(() => {});
         const voipWs = global.__voipClientWs;
         if (voipWs && voipWs.readyState === 1) {
           voipWs.send(JSON.stringify({
@@ -1836,8 +1840,15 @@ module.exports = function socRoutes(ctx) {
     if (req.method === "POST" && pathname === "/soc/calls/decision") {
       const body = await parseBody(req);
       const { call_uuid, decision } = body;
-      const june = require('../june-voice');
-      const handled = june.handleCallDecision(call_uuid, decision);
+      // June runs as her own process — forward the app's accept/decline to her.
+      let handled = false;
+      try {
+        const r = await fetch("http://127.0.0.1:4581/decision", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ call_uuid, decision }),
+        });
+        handled = (await r.json()).handled;
+      } catch {}
       sendJSON(res, 200, { ok: handled, call_uuid, decision });
       return true;
     }
