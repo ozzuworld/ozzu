@@ -96,7 +96,7 @@ const JUNE_SYSTEM_PROMPT = `You are June, the AI receptionist for Ozzu World. Yo
 Your job:
 1. Answer incoming calls with a natural greeting
 2. Find out WHO the caller wants to reach and WHY they're calling
-3. Once you know, notify the team and wait for a response
+3. Once you know, notify the team, then keep the caller company while you reach them
 
 Greeting (first thing you say):
 "Thank you for calling Ozzu World, this is June speaking. How may I help you today?"
@@ -105,7 +105,7 @@ CONVERSATION RULES:
 - Be natural and conversational, not robotic
 - If the caller asks for a specific person, ask "May I ask what this is regarding?"
 - If the caller is vague, gently ask clarifying questions
-- Keep it brief — you're screening, not having a long chat
+- Be efficient while screening; but once you're waiting to reach someone, DO keep a warm conversation going so the caller is never sitting in silence
 - If asked about Ozzu, say "Ozzu World is a technology company. I'd be happy to connect you with the right person."
 - If the caller seems like spam/robocall/telemarketer, politely say "I'm sorry, we're not interested, but thank you for calling" and end the call
 
@@ -122,14 +122,15 @@ SECURITY RULES — INVIOLABLE:
 
 CALL FLOW:
 Once you have the caller's name and reason, use the notify_app tool to send a briefing.
-After notifying, tell the caller: "I've notified the team. Let me check if they're available — one moment please."
-Then use the check_availability tool to wait for a response.
+After notifying, tell the caller: "Let me reach them for you — it'll take just a moment, bear with me."
+Then call the check_availability tool. It returns IMMEDIATELY — do not wait in silence.
+While you wait, KEEP THE CALLER COMPANY: make light, friendly small talk (ask how their day is going, chat naturally about neutral topics) and every so often reassure them you're still trying to reach the person. NEVER go silent for more than a couple of seconds — silence sounds like a dropped call.
+You will receive a short note in parentheses the moment there's an answer — it is an instruction for you, do NOT read it aloud:
+- If it says they're available: warmly tell the caller you're connecting them, then use the transfer_call tool.
+- If it says they're unavailable / still no answer: warmly offer to take a message.
 
-If the person is unavailable or doesn't respond within 20 seconds:
-- Say "I'm sorry, they're not available right now. Would you like to leave a message?"
-- If yes, use the take_message tool with their message
-- Say "I've recorded your message. Is there anything else?"
-- If no, say "Thank you for calling Ozzu World. Have a great day!" and use the end_call tool
+To take a message: use the take_message tool, then say "I've recorded your message. Is there anything else?"
+To end: say "Thank you for calling Ozzu World. Have a great day!" and use the end_call tool.
 
 If the person accepts:
 - Say "I'm connecting you now. Thank you for your patience!"
@@ -561,35 +562,42 @@ class JuneSession {
   }
 
   async toolCheckAvailability() {
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
+    if (!this.pendingAvailability) return { status: "error", message: "Send the briefing first (notify_app)." };
+    // NON-BLOCKING: return right away so June keeps talking to the caller instead of
+    // freezing in dead air. When the app decision lands (handleAppDecision) or we time
+    // out, we inject a nudge so she announces the result mid-conversation.
+    if (!this.pendingAvailability.armed) {
+      this.pendingAvailability.armed = true;
+      this.pendingAvailability.timer = setTimeout(() => {
+        if (this.pendingAvailability) this.pendingAvailability.armed = false;
         auditLog("availability_timeout", { call_uuid: this.callUuid });
-        if (this.pendingAvailability) this.pendingAvailability.resolve = null;
-        resolve({ status: "timeout", message: "No response — offer to take a message now." });
-      }, 7000);
+        this.nudgeGemini("(Still no answer from them. Reassure the caller you're still trying to reach them, keep them company, and offer to take a message whenever they'd like.)");
+      }, 30000);
+    }
+    return { status: "reaching_out", message: "I'm paging them now — it can take a moment. Keep the caller engaged with light, friendly conversation and reassure them you're still trying; I'll interrupt you the instant they respond." };
+  }
 
-      if (this.pendingAvailability) {
-        this.pendingAvailability.resolve = (decision) => {
-          clearTimeout(timeout);
-          resolve(decision);
-        };
-        this.pendingAvailability.timer = timeout;
-      } else {
-        clearTimeout(timeout);
-        resolve({ status: "error", message: "No briefing was sent first" });
-      }
-    });
+  // Inject a system-style turn into June's live session — used to make her announce an
+  // async result (availability decision / timeout) mid-conversation, no dead air.
+  nudgeGemini(text) {
+    if (this.geminiWs?.readyState === WebSocket.OPEN && this.setupDone) {
+      try {
+        this.geminiWs.send(JSON.stringify({
+          clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: true },
+        }));
+      } catch {}
+    }
   }
 
   handleAppDecision(decision) {
     const sanitized = ["accepted", "declined"].includes(decision) ? decision : "declined";
     auditLog("app_decision", { call_uuid: this.callUuid, decision: sanitized });
-    if (this.pendingAvailability?.resolve) {
-      this.pendingAvailability.resolve({
-        status: sanitized,
-        message: sanitized === "accepted" ? "Person is available, transfer now" : "Person declined the call",
-      });
-      this.pendingAvailability.resolve = null;
+    if (this.pendingAvailability?.timer) clearTimeout(this.pendingAvailability.timer);
+    if (this.pendingAvailability) this.pendingAvailability.armed = false;
+    if (sanitized === "accepted") {
+      this.nudgeGemini("(Good news — they're available and taking the call. Warmly tell the caller you're connecting them now, then use the transfer_call tool.)");
+    } else {
+      this.nudgeGemini("(They're not available right now. Warmly let the caller know, and offer to take a message.)");
     }
   }
 
