@@ -428,9 +428,79 @@ const PHASE_GUIDANCE = {
   ].join("\n"),
 };
 
-function buildSystemPrompt(phase) {
+// dir_1782873321726: intent-aware system prompt. The operator intent is injected
+// INTO the system prompt (not the user message) so it has equal weight to the
+// phase guidance. When the intent mentions firmware/binary analysis, a dedicated
+// mission block overrides the default "try to authenticate" behavior.
+const INTENT_MISSIONS = {
+  firmware: [
+    "╔══════════════════════════════════════════════════════════════╗",
+    "║  OPERATOR MISSION: FIRMWARE BINARY ANALYSIS                 ║",
+    "║  This OVERRIDES default pentest methodology.                ║",
+    "╚══════════════════════════════════════════════════════════════╝",
+    "",
+    "Your PRIMARY objective is to obtain and analyze the device firmware binary.",
+    "Authentication, credential testing, and web enumeration are SECONDARY —",
+    "only pursue them if they help you GET the firmware or if firmware analysis",
+    "reveals credentials to test.",
+    "",
+    "STEP SEQUENCE (follow this order):",
+    "  1. IDENTIFY the exact device model. Use ISAPI/deviceInfo, ONVIF, web UI",
+    "     metadata, serial number prefix, or prior intelligence. You CANNOT",
+    "     download firmware without knowing the model.",
+    "  2. DOWNLOAD the firmware binary. Try IN THIS ORDER:",
+    "     a. From the device itself (authenticated endpoint if you have creds):",
+    "        curl --digest -u admin:PASSWORD http://TARGET/ISAPI/System/configurationData",
+    "     b. From manufacturer CDN / firmware portal (use python3 with proper",
+    "        User-Agent, NOT curl — CDNs block curl). Verify the download is a",
+    "        REAL binary (>1MB, not HTML). A 29KB file is a bot-protection page.",
+    "     c. From third-party firmware archives (firmware.center, firmware-dl sites)",
+    "  3. VERIFY the download: `file firmware.bin` must show data/archive, NOT HTML.",
+    "     If it's HTML, the download failed — try a different source.",
+    "  4. EXTRACT: `apt-get install -y binwalk && binwalk -e firmware.bin`",
+    "  5. ANALYZE the extracted filesystem:",
+    "     • find _firmware.bin.extracted/ -type f | head -80",
+    "     • grep -r 'password\\|secret\\|key\\|backdoor\\|root:\\|admin:' _firmware.bin.extracted/",
+    "     • cat _firmware.bin.extracted/*/etc/passwd _firmware.bin.extracted/*/etc/shadow 2>/dev/null",
+    "     • Look for hardcoded AES/DES keys, API tokens, debug endpoints in .conf files",
+    "     • Check init scripts (rcS, inittab) for telnet/SSH backdoor listeners",
+    "     • grep -r 'system(\\|popen(\\|exec(' _firmware.bin.extracted/ (command injection sinks)",
+    "  6. RECORD every finding immediately with add_finding.",
+    "  7. USE extracted credentials to authenticate back to the device.",
+    "",
+    "WRONG MOVES (these waste iterations):",
+    "  ✗ Brute-forcing HTTP/RTSP credentials before getting the firmware",
+    "  ✗ Spending 10+ steps enumerating JS files for auth bypass",
+    "  ✗ Generic CVE spraying without version-matched research",
+    "  ✗ Treating this like a standard web pentest",
+    "",
+    "The firmware IS the target. Everything else is a means to get it.",
+  ].join("\n"),
+};
+
+function detectIntentMission(intent) {
+  if (!intent) return null;
+  const lower = intent.toLowerCase();
+  if (lower.includes("firmware") || lower.includes("binary analysis") ||
+      lower.includes("binwalk") || lower.includes("firmware analysis") ||
+      lower.includes("reverse engineer")) {
+    return INTENT_MISSIONS.firmware;
+  }
+  return null;
+}
+
+function buildSystemPrompt(phase, intent) {
   const guide = PHASE_GUIDANCE[phase] || PHASE_GUIDANCE.recon;
-  return `${AGENT_SYSTEM_PROMPT_BASE}\n\n────────────────\n${guide}\n────────────────`;
+  const mission = detectIntentMission(intent);
+  const parts = [AGENT_SYSTEM_PROMPT_BASE];
+  if (mission) {
+    parts.push("\n\n" + mission);
+  }
+  if (intent && !mission) {
+    parts.push(`\n\n═══ OPERATOR MISSION (your #1 priority) ═══\n${intent}\n═══ END OPERATOR MISSION ═══`);
+  }
+  parts.push(`\n\n────────────────\n${guide}\n────────────────`);
+  return parts.join("");
 }
 
 // ───────────────────────────── Synthesizer (Step 8) ─────────────────────────────
@@ -1722,6 +1792,29 @@ async function runAgentV2(engagementId, opts = {}) {
       parts.push(`\n═══ END CAMPAIGN HISTORY ═══`);
       parts.push(`Use this history. Build on what worked. DO NOT repeat dead ends.`);
       campaignBriefing = parts.join("\n");
+
+      // dir_1782873321726: campaign-driven phase skip — if prior engagements
+      // already did recon/enum on this target, skip past recon automatically.
+      try {
+        const curPhase = (await db.query(
+          `SELECT engagement_phase FROM pentest_engagements WHERE id = $1`, [engagementId]
+        )).rows[0]?.engagement_phase || "recon";
+        if (curPhase === "recon") {
+          const maxPriorPhase = history.prior_engagements.reduce((best, p) => {
+            const rank = { recon: 0, enumeration: 1, foothold: 2, exploitation: 3, post_exploit: 4, reporting: 5 };
+            return (rank[p.phase_reached] || 0) > (rank[best] || 0) ? p.phase_reached : best;
+          }, "recon");
+          const totalPriorSteps = history.prior_engagements.reduce((sum, p) => sum + (p.total_steps || 0), 0);
+          if (totalPriorSteps >= 5) {
+            const skipTo = (maxPriorPhase === "recon" || maxPriorPhase === "enumeration") ? "enumeration" : "foothold";
+            console.log(`[offense-agent-v2] campaign history has ${totalPriorSteps} prior steps (max phase: ${maxPriorPhase}) — skipping ${engagementId} from recon to ${skipTo}`);
+            await db.query(`UPDATE pentest_engagements SET engagement_phase = $1 WHERE id = $2`, [skipTo, engagementId]);
+            phase = skipTo;
+          }
+        }
+      } catch (e) {
+        console.error(`[offense-agent-v2] campaign phase-skip failed:`, e.message);
+      }
     }
   } catch (e) {
     console.error(`[offense-agent-v2] campaign history build failed:`, e.message);
@@ -1729,10 +1822,9 @@ async function runAgentV2(engagementId, opts = {}) {
 
   if (!messages) {
     messages = [
-      { role: "system", content: buildSystemPrompt(phase) },
+      { role: "system", content: buildSystemPrompt(phase, intent) },
       { role: "user", content: [
         `Begin the authorized pentest engagement ${engagementId}.`,
-        intent ? `\n\nOPERATOR MISSION (your #1 priority — this OVERRIDES default phase behavior):\n${intent}` : "",
         priorIntelBriefing,
         campaignBriefing,
         `\nCurrent phase: ${phase}.`,
@@ -1741,7 +1833,7 @@ async function runAgentV2(engagementId, opts = {}) {
     ];
   } else {
     if (messages[0] && messages[0].role === "system") {
-      messages[0] = { role: "system", content: buildSystemPrompt(phase) };
+      messages[0] = { role: "system", content: buildSystemPrompt(phase, intent) };
     }
     messages.push({ role: "user", content: `(Resuming from iter ${iter}.) ${intent ? `Updated operator intent: ${intent}. ` : ""}Current phase: ${phase}. Call get_engagement_state to see what changed.` });
   }
@@ -1884,7 +1976,7 @@ async function runAgentV2(engagementId, opts = {}) {
 
     // Update system prompt if phase changed
     if (phaseChanged && messages[0] && messages[0].role === "system") {
-      messages[0] = { role: "system", content: buildSystemPrompt(phase) };
+      messages[0] = { role: "system", content: buildSystemPrompt(phase, intent) };
     }
 
     // ── (4) Mentor check — loop detection ──
@@ -2337,12 +2429,12 @@ async function runAgentToolCall(engagementId, opts = {}) {
 
   if (!messages) {
     messages = [
-      { role: "system", content: buildSystemPrompt(phase) },
+      { role: "system", content: buildSystemPrompt(phase, intent) },
       { role: "user", content: `Start the L3 offense loop for engagement ${engagementId}.${intent ? ` Operator intent: ${intent}.` : ""} Current phase: ${phase}. Begin by calling get_engagement_state.` },
     ];
   } else {
     if (messages[0] && messages[0].role === "system") {
-      messages[0] = { role: "system", content: buildSystemPrompt(phase) };
+      messages[0] = { role: "system", content: buildSystemPrompt(phase, intent) };
     }
     messages.push({ role: "user", content: `(Resuming.) ${intent ? `Updated operator intent: ${intent}. ` : ""}Current phase: ${phase}.` });
   }
@@ -2382,7 +2474,7 @@ async function runAgentToolCall(engagementId, opts = {}) {
       if (name === "advance_phase" && result && !result.error && result.phase) { phaseChanged = true; phase = result.phase; }
     }
     if (phaseChanged && messages[0] && messages[0].role === "system") {
-      messages[0] = { role: "system", content: buildSystemPrompt(phase) };
+      messages[0] = { role: "system", content: buildSystemPrompt(phase, intent) };
     }
     await saveStateToolCall(engagementId, messages, iter, endedByModel ? "completed" : "running");
     if (endedByModel) break;
