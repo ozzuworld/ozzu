@@ -180,10 +180,37 @@ async function getEngagementState(args) {
     steps: (h.step_titles || []).slice(0, 15),
   }));
 
+  // dir_1782874853781: inject campaign-wide findings from prior engagements on
+  // same targets so the model knows what's already been discovered and doesn't
+  // waste iterations rediscovering the same things.
+  let campaignFindings = [];
+  try {
+    const scope = typeof engRow.scope === "string" ? JSON.parse(engRow.scope) : engRow.scope;
+    const targets = (scope && scope.targets) || [];
+    if (targets.length > 0) {
+      const priorFindings = await db.query(
+        `SELECT f.title, f.severity, f.kind, f.affected_asset,
+                LEFT(COALESCE(f.description, ''), 300) AS description_preview,
+                f.engagement_id AS source_engagement
+           FROM pentest_findings f
+           JOIN pentest_engagements e ON e.id = f.engagement_id
+          WHERE f.engagement_id != $1
+            AND e.scope::jsonb->'targets' ?| $2
+          ORDER BY f.discovered_at DESC
+          LIMIT 30`,
+        [id, targets]);
+      campaignFindings = priorFindings.rows;
+    }
+  } catch (_) {}
+
   return {
     engagement: engRow,
     hosts: hosts.rows,
     findings: findings.rows,
+    campaign_findings: campaignFindings.length > 0 ? {
+      note: "These findings were discovered in PRIOR engagements on the same targets. Do NOT rediscover them — build on them. If you find new evidence for an existing finding, update your notes instead of creating a duplicate.",
+      items: campaignFindings,
+    } : undefined,
     queue_history: queue.rows,
     per_host_summary: hostWork.length > 0 ? hostWork : undefined,
     executor_identity: getBridgeNetworkIdentity(),
@@ -534,6 +561,33 @@ async function saveNote(args) {
 async function addFinding(args) {
   const { engagement_id, title, severity, description, affected_asset, refs, kind } = args || {};
   if (!engagement_id || !title) return { error: "engagement_id and title required" };
+  // dir_1782874853781: campaign-wide dedup — check if a substantially similar
+  // finding already exists in THIS engagement or any prior engagement on the
+  // same targets. Prevents the model from rediscovering known findings.
+  try {
+    const dupeCheck = await db.query(
+      `SELECT f.id, f.engagement_id, f.title, f.severity, f.kind
+         FROM pentest_findings f
+         JOIN pentest_engagements e ON e.id = f.engagement_id
+        WHERE (f.engagement_id = $1
+               OR e.scope::jsonb->'targets' @> (
+                    SELECT scope::jsonb->'targets'
+                      FROM pentest_engagements WHERE id = $1))
+          AND LOWER(f.title) = LOWER($2)
+        LIMIT 1`,
+      [engagement_id, title]);
+    if (dupeCheck.rows.length > 0) {
+      const d = dupeCheck.rows[0];
+      const same = d.engagement_id === engagement_id;
+      return {
+        duplicate: true,
+        existing_id: d.id,
+        message: same
+          ? `Finding "${d.title}" already exists in THIS engagement (id=${d.id}, ${d.severity}/${d.kind}). Update your notes instead of re-adding.`
+          : `Finding "${d.title}" was already discovered in prior engagement ${d.engagement_id} (id=${d.id}, ${d.severity}/${d.kind}). Focus on NEW discoveries — things the prior engagement didn't find.`,
+      };
+    }
+  } catch (_) {}
   const validSev = ["critical", "high", "medium", "low", "info"];
   const sev = validSev.includes((severity || "").toLowerCase()) ? severity.toLowerCase() : "info";
   const fKind = ["confirmed", "hypothesis"].includes(kind) ? kind : "hypothesis";
