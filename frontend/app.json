@@ -76,6 +76,7 @@
       "./plugins/meta-dat-config",
       "./plugins/mediapipe-config",
       "./plugins/voip-entitlements",
+      "@config-plugins/react-native-webrtc",
       [
         "expo-notifications",
         {

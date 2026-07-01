@@ -11,6 +11,7 @@ import { GlobalApprovalGate } from "../components/GlobalApprovalGate";
 import * as BleBeacon from "../modules/ble-beacon";
 import { registerForPushNotifications } from "../lib/push-notifications";
 import { useVoipCall } from "../lib/useVoipCall";
+import { useWebrtcCall } from "../lib/useWebrtcCall";
 import { CallBriefingOverlay } from "../components/CallBriefingOverlay";
 
 import { colors } from "../lib/design-tokens";
@@ -143,6 +144,7 @@ console.error = (...a) => { _origError(...a); remoteLog("error", ...a); };
 
 function VoipRegistrar() {
   const { briefing, voicemail, respondToBriefing, dismissBriefing, dismissVoicemail } = useVoipCall();
+  useWebrtcCall(); // register to Asterisk's WebRTC endpoint + auto-answer inbound (dir_1782922636595)
   return (
     <CallBriefingOverlay
       briefing={briefing}
