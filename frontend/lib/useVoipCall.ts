@@ -49,15 +49,16 @@ export function useVoipCall() {
     initialized.current = true;
 
     try {
-      const bridgeUrl = getBridgeUrl();
-      const host = new URL(bridgeUrl).hostname;
-
+      // VoIP signaling + media go to Asterisk over WireGuard (private; no public SIP).
+      // server = Asterisk's WG IP (the bridge host on wg0); the iPhone is WG peer 10.9.0.30.
+      // NOT home.ozzu.world — the public path would need TLS/SRTP the hand-rolled client
+      // doesn't speak yet. Requires WireGuard active on the phone. (dir_1782917686079)
       await VoipCallModule.configure({
-        server: host,
+        server: "10.9.0.1",
         port: 5060,
         wsPort: 8088,
         username: "ozzu-iphone",
-        password: "ozzu-sip-2026",
+        password: "75134ecdccb72682abe5b3af85955ebb090b",
       });
 
       VoipCallModule.addListener(
