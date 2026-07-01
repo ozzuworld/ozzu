@@ -233,6 +233,10 @@ services:
     volumes:
       - ./asterisk/conf:/etc/asterisk
       - asterisk-data:/var/lib/asterisk
+      # letsencrypt cert (home.ozzu.world) for the SIP TLS transport (5061) so an
+      # internet-facing native softphone can register with encrypted signaling.
+      # Same shared volume nginx uses. (dir_1782911453601)
+      - letsencrypt:/etc/letsencrypt:ro
     deploy:
       resources:
         limits:
