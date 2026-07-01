@@ -17,6 +17,7 @@ const DEVICE_META: Record<string, { emoji: string; label: string; color: string 
   "orangepi-gsc": { emoji: "📡", label: "GROUND STATION", color: "#22C55E" },
   "rockpi": { emoji: "🧊", label: "ROCK PI", color: "#3B82F6" },
   "cat-s41": { emoji: "📞", label: "GSM GATEWAY", color: "#EF4444" },
+  "voip-gateway": { emoji: "📡", label: "VOIP GATEWAY", color: ACCENT },
 };
 
 function Bar({ label, value, max, unit, warnPct = 80 }: {
@@ -366,6 +367,7 @@ export default function FleetDeviceCard({ device, inventory }: { device: FleetDe
   const connections = t.connections;
   const usb = t.usb;
   const packages = t.packages;
+  const voip = t.voip;
 
   return (
     <Pressable
@@ -425,6 +427,10 @@ export default function FleetDeviceCard({ device, inventory }: { device: FleetDe
         {/* ── Quick stats row ── */}
         {hasTelemetry && (
           <View style={{ flexDirection: "row", marginTop: 10, flexWrap: "wrap" }}>
+            {voip && <Pill label="JUNE" value={voip.june ? "UP" : "DOWN"} color={voip.june ? GREEN : RED} />}
+            {voip && <Pill label="ASTERISK" value={voip.asterisk ? "UP" : "DOWN"} color={voip.asterisk ? GREEN : RED} />}
+            {voip && <Pill label="APP" value={voip.appRegistered ? "READY" : "CLOSED"} color={voip.appRegistered ? GREEN : YELLOW} />}
+            {voip && <Pill label="CALLS" value={`${voip.activeCalls ?? 0}`} color={(voip.activeCalls ?? 0) > 0 ? ACCENT : undefined} />}
             {cpu && <Pill label="LOAD" value={`${cpu.load_1m?.toFixed(1) ?? "—"}`} />}
             {mem && <Pill label="RAM" value={`${mem.used_pct?.toFixed(0) ?? "—"}%`} color={mem.used_pct > 85 ? RED : mem.used_pct > 70 ? YELLOW : undefined} />}
             {t.uptime_s != null && <Pill label="UPTIME" value={formatUptime(t.uptime_s)} />}
