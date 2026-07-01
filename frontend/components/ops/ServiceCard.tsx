@@ -21,6 +21,8 @@ const SERVICE_EMOJI: Record<string, string> = {
   "face-recognition": "👤",
   "osint-tools": "🕵️",
   browser: "🌍",
+  asterisk: "☎️",
+  "june-voice": "🎙️",
   "vast-gpu": "⚡",
 };
 

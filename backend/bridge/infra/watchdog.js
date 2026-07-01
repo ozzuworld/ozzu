@@ -18,6 +18,8 @@ const SERVICES = {
   "face-recognition": { severity: "medium", interval: 30000, timeout: 5000 },
   "osint-tools":    { severity: "low",      interval: 30000, timeout: 5000 },
   browser:          { severity: "low",      interval: 30000, timeout: 3000 },
+  asterisk:         { severity: "critical", interval: 30000, timeout: 5000 },
+  "june-voice":     { severity: "medium",   interval: 30000, timeout: 5000 },
   "vast-gpu":       { severity: "critical", interval: 120000, timeout: 10000 },
 };
 
@@ -288,6 +290,30 @@ async function checkVastGpu() {
   }
 }
 
+async function checkAsterisk() {
+  const start = Date.now();
+  try {
+    const out = execSync('docker inspect --format="{{.State.Running}}" ozzu-asterisk 2>/dev/null || echo false', {
+      timeout: 5000, stdio: "pipe", encoding: "utf8",
+    }).trim();
+    return { ok: out === "true", latencyMs: Date.now() - start };
+  } catch {
+    return { ok: false, latencyMs: Date.now() - start };
+  }
+}
+
+async function checkJuneVoice() {
+  const start = Date.now();
+  try {
+    const out = execSync('docker inspect --format="{{.State.Running}}" june-voice 2>/dev/null || echo false', {
+      timeout: 5000, stdio: "pipe", encoding: "utf8",
+    }).trim();
+    return { ok: out === "true", latencyMs: Date.now() - start };
+  } catch {
+    return { ok: false, latencyMs: Date.now() - start };
+  }
+}
+
 const CHECK_FNS = {
   postgres: checkPostgres,
   redis: checkRedis,
@@ -297,6 +323,8 @@ const CHECK_FNS = {
   "face-recognition": checkFaceRecognition,
   "osint-tools": checkOsintTools,
   browser: checkBrowser,
+  asterisk: checkAsterisk,
+  "june-voice": checkJuneVoice,
   "vast-gpu": checkVastGpu,
 };
 

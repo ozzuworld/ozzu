@@ -14,6 +14,7 @@ import ServiceCard from "../../components/ops/ServiceCard";
 import GpuCard from "../../components/ops/GpuCard";
 import IncidentList from "../../components/ops/IncidentList";
 import VoipStatusView from "../../components/ops/VoipStatusView";
+import VoipGatewayCard from "../../components/ops/VoipGatewayCard";
 import FleetDeviceCard from "../../components/ops/FleetDeviceCard";
 import FleetSummaryBanner from "../../components/ops/FleetSummaryBanner";
 import { GroupNav } from "../../components/GroupNav";
@@ -131,10 +132,11 @@ export default function OpsScreen() {
           {activeTab === "fleet" ? (
             /* ── FLEET TAB ── */
             <>
+              {voip && <VoipGatewayCard status={voip} />}
               {fleetDevices.length === 0 ? (
                 <View style={{ padding: 24, alignItems: "center" }}>
                   <Text style={{ fontFamily: "monospace", fontSize: 11, color: colors.gray[400] }}>
-                    No devices reporting
+                    No mobile devices reporting
                   </Text>
                 </View>
               ) : (
