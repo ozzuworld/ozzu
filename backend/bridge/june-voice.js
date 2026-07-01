@@ -221,6 +221,7 @@ class JuneSession {
     this.turnHadTool = false;       // did this turn make a tool call (a valid no-audio turn)
     this.playing = false;           // in a talkspurt (draining) vs priming/idle
     this.bufStart = 0;              // when the current pre-roll fill began
+    this.transferring = false;      // graceful hand-off in progress: drain then FIN, no hangup frame
 
     this.socket.on("data", (data) => this.handleAudioSocketData(data));
     this.socket.on("close", () => this.cleanup("socket closed"));
@@ -484,7 +485,7 @@ class JuneSession {
           this.playing = false; // talkspurt drained — re-prime before the next one
         }
       }
-      if (!chunk && Date.now() - this.lastAudioSent >= 60) {
+      if (!chunk && !this.transferring && Date.now() - this.lastAudioSent >= 60) {
         chunk = Buffer.alloc(320); // keepalive silence (between turns / while priming)
       }
       if (!chunk) return;
@@ -628,7 +629,30 @@ class JuneSession {
     } catch (e) {
       console.error("[June] Transfer signal error:", e.message);
     }
+    // Release the live channel back to Asterisk so it rings King Kazuma's phone: a graceful
+    // FIN (no 0x00 hangup frame) makes AudioSocket() return and the dialplan fall through to
+    // Dial(PJSIP/ozzu-iphone). See graceCloseForTransfer().
+    this.graceCloseForTransfer();
     return { status: "transferring", message: "Call being transferred" };
+  }
+
+  // Hand the live GSM channel to King Kazuma's phone. Let June's closing line finish, then
+  // close the AudioSocket with a plain TCP FIN and NO 0x00 hangup frame: that makes Asterisk's
+  // AudioSocket() return and fall through to Dial(PJSIP/ozzu-iphone,30,r). (A hangup frame —
+  // what a normal end_call sends — would tear the channel down and never ring the phone; that
+  // was the transfer bug.) Idempotent.
+  graceCloseForTransfer() {
+    if (this.transferring || !this.alive) return;
+    this.transferring = true; // pump stops adding silence keepalive; drains remaining audio only
+    const started = Date.now();
+    const step = () => {
+      if (!this.alive || this.socket.destroyed) return;
+      // wait for the jitter buffer to empty (closing line fully played), bounded to 8s
+      if (this.audioQueue.length > 0 && Date.now() - started < 8000) return setTimeout(step, 150);
+      try { this.socket.end(); } catch {} // FIN -> AudioSocket returns -> dialplan Dials the iPhone
+      // cleanup() runs from the socket 'close' handler
+    };
+    setTimeout(step, 300); // small grace for frames already in flight
   }
 
   async toolTakeMessage(args) {
@@ -670,6 +694,13 @@ class JuneSession {
       turns: this.turnCount,
       tool_calls: this.toolCallCount,
     });
+
+    // "transferred" is a HAND-OFF, not a hangup: close gracefully so Asterisk rings the phone
+    // (Dial fall-through) instead of tearing the channel down with a hangup frame.
+    if (reason === "transferred") {
+      this.graceCloseForTransfer();
+      return { status: "ending", reason };
+    }
 
     setTimeout(() => {
       if (this.alive && !this.socket.destroyed) {
