@@ -8,16 +8,12 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useOpsStatus, useOpsIncidents } from "../../lib/ops-hooks";
-import { useInfraState } from "../../lib/infra-hooks";
+import { useVoipStatus } from "../../lib/voip-hooks";
 import SystemBanner from "../../components/ops/SystemBanner";
 import ServiceCard from "../../components/ops/ServiceCard";
 import GpuCard from "../../components/ops/GpuCard";
 import IncidentList from "../../components/ops/IncidentList";
-import NetworkBanner from "../../components/ops/NetworkBanner";
-import InfraDeviceCard from "../../components/ops/InfraDeviceCard";
-import GcpCard from "../../components/ops/GcpCard";
-import RouterCard from "../../components/ops/RouterCard";
-import PositioningCard from "../../components/ops/PositioningCard";
+import VoipStatusView from "../../components/ops/VoipStatusView";
 import FleetDeviceCard from "../../components/ops/FleetDeviceCard";
 import FleetSummaryBanner from "../../components/ops/FleetSummaryBanner";
 import { GroupNav } from "../../components/GroupNav";
@@ -27,7 +23,7 @@ import { useFleetDevices } from "../../lib/fleet-hooks";
 import { colors } from "../../lib/design-tokens";
 const ACCENT = colors.accent;
 
-type Tab = "fleet" | "infra" | "services";
+type Tab = "fleet" | "voip" | "services";
 
 export default function OpsScreen() {
   const [refreshing, setRefreshing] = useState(false);
@@ -35,20 +31,20 @@ export default function OpsScreen() {
 
   const { services, loading: svcLoading, lastUpdate, forceCheck } = useOpsStatus();
   const { incidents, loading: incidentsLoading, refresh: refreshIncidents } = useOpsIncidents(20);
-  const { state: infra, loading: infraLoading, refresh: refreshInfra } = useInfraState();
+  const { status: voip, loading: voipLoading, refresh: refreshVoip } = useVoipStatus();
   const { devices: fleetDevices, inventory: fleetInventory, loading: fleetLoading, refresh: refreshFleet } = useFleetDevices();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([forceCheck(), refreshIncidents(), refreshInfra(), refreshFleet()]);
+    await Promise.all([forceCheck(), refreshIncidents(), refreshVoip(), refreshFleet()]);
     setRefreshing(false);
-  }, [forceCheck, refreshIncidents, refreshInfra, refreshFleet]);
+  }, [forceCheck, refreshIncidents, refreshVoip, refreshFleet]);
 
   const gridServices = Object.entries(services).filter(([name]) => name !== "vast-gpu");
   const gpuStatus = services["vast-gpu"];
   const downCount = Object.values(services).filter((s) => s.status === "down").length;
 
-  const loading = activeTab === "fleet" ? fleetLoading : activeTab === "services" ? svcLoading : infraLoading;
+  const loading = activeTab === "fleet" ? fleetLoading : activeTab === "services" ? svcLoading : voipLoading;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
@@ -90,7 +86,7 @@ export default function OpsScreen() {
           borderBottomColor: "rgba(255,255,255,0.06)",
         }}
       >
-        {(["fleet", "infra", "services"] as Tab[]).map((tab) => (
+        {(["fleet", "voip", "services"] as Tab[]).map((tab) => (
           <Pressable
             key={tab}
             onPress={() => setActiveTab(tab)}
@@ -111,7 +107,7 @@ export default function OpsScreen() {
                 color: activeTab === tab ? ACCENT : colors.gray[400],
               }}
             >
-              {tab === "fleet" ? "FLEET" : tab === "infra" ? "INFRASTRUCTURE" : "SERVICES"}
+              {tab === "fleet" ? "FLEET" : tab === "voip" ? "VOIP" : "SERVICES"}
             </Text>
           </Pressable>
         ))}
@@ -121,7 +117,7 @@ export default function OpsScreen() {
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={ACCENT} size="large" />
           <Text style={{ fontFamily: "monospace", fontSize: 11, color: colors.gray[400], marginTop: 12 }}>
-            {activeTab === "fleet" ? "Loading fleet..." : activeTab === "infra" ? "Probing infrastructure..." : "Checking services..."}
+            {activeTab === "fleet" ? "Loading fleet..." : activeTab === "voip" ? "Reading VoIP stack..." : "Checking services..."}
           </Text>
         </View>
       ) : (
@@ -150,51 +146,9 @@ export default function OpsScreen() {
                 </>
               )}
             </>
-          ) : activeTab === "infra" ? (
-            /* ── INFRASTRUCTURE TAB ── */
-            <>
-              {/* Network banner */}
-              {infra?.network && (
-                <NetworkBanner network={infra.network} probeTimeMs={infra.probeTimeMs || 0} />
-              )}
-
-              {/* GCP VM */}
-              {infra?.gcp && <GcpCard gcp={infra.gcp} />}
-
-              {/* Physical devices */}
-              {infra?.devices && Object.entries(infra.devices).map(([id, dev]) => (
-                <InfraDeviceCard key={id} id={id} device={dev} />
-              ))}
-
-              {/* Router */}
-              {infra?.router && <RouterCard router={infra.router} />}
-
-              {/* Positioning */}
-              {(infra?.esp32Nodes || infra?.positioningHub) && (
-                <PositioningCard
-                  nodes={infra.esp32Nodes || []}
-                  hub={infra.positioningHub || { service: "unknown" }}
-                />
-              )}
-
-              {/* GPU */}
-              <GpuCard gpu={gpuStatus} />
-
-              {/* Timestamp */}
-              {infra?.timestamp && (
-                <Text
-                  style={{
-                    fontFamily: "monospace",
-                    fontSize: 9,
-                    color: colors.gray[400],
-                    textAlign: "center",
-                    marginTop: 8,
-                  }}
-                >
-                  Last probe: {new Date(infra.timestamp).toLocaleTimeString()}
-                </Text>
-              )}
-            </>
+          ) : activeTab === "voip" ? (
+            /* ── VOIP TAB ── */
+            <VoipStatusView status={voip} />
           ) : (
             /* ── SERVICES TAB ── */
             <>
