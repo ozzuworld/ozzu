@@ -213,6 +213,9 @@ class JuneSession {
     this.up = null;                 // ffmpeg: phone 8kHz -> Gemini 16kHz
     this.outBuf = Buffer.alloc(0);  // accumulate ffmpeg output into 320B SLIN frames
     this.audioQueue = [];           // jitter buffer of 320B SLIN frames, drained by the pump
+    this.turnAudioBytes = 0;        // audio bytes in the current Gemini turn (empty-turn detect)
+    this.emptyRetries = 0;          // bounded re-nudges when a turn returns empty (native-audio bug)
+    this.turnHadTool = false;       // did this turn make a tool call (a valid no-audio turn)
     this.playing = false;           // in a talkspurt (draining) vs priming/idle
     this.bufStart = 0;              // when the current pre-roll fill began
 
@@ -351,11 +354,36 @@ class JuneSession {
       for (const part of parts) {
         if (part.inlineData?.mimeType?.startsWith("audio/")) {
           // Gemini sends 24kHz PCM; pipe through ffmpeg -> 8kHz for the phone.
-          try { this.dn?.stdin.write(Buffer.from(part.inlineData.data, "base64")); } catch {}
+          try {
+            const b = Buffer.from(part.inlineData.data, "base64");
+            this.turnAudioBytes += b.length;
+            this.dn?.stdin.write(b);
+          } catch {}
         }
       }
 
       if (msg.serverContent.turnComplete) {
+        // Native-audio bug: after a few exchanges a turn can come back with ~no audio
+        // (turnComplete, no tool call) -> the caller hears dead air. Re-nudge June to
+        // actually answer, bounded so it can never loop; reset the budget once she
+        // speaks normally. ~2400B @24kHz/16-bit = ~50ms, i.e. effectively silent.
+        const emptyTurn = this.setupDone && this.turnAudioBytes < 2400 && !this.turnHadTool && !msg.toolCall;
+        this.turnAudioBytes = 0;
+        this.turnHadTool = false;
+        if (emptyTurn && this.emptyRetries < 3) {
+          this.emptyRetries++;
+          auditLog("empty_turn_renudge", { call_uuid: this.callUuid, caller_number: this.callerNumber, retry: this.emptyRetries });
+          try {
+            this.geminiWs.send(JSON.stringify({
+              clientContent: {
+                turns: [{ role: "user", parts: [{ text: "(You went quiet — please respond to the caller out loud now.)" }] }],
+                turnComplete: true,
+              },
+            }));
+          } catch {}
+          return;
+        }
+        if (!emptyTurn) this.emptyRetries = 0;
         this.turnCount++;
         if (this.turnCount >= MAX_TURNS) {
           auditLog("turn_limit", { call_uuid: this.callUuid, caller_number: this.callerNumber, turns: this.turnCount });
@@ -366,6 +394,7 @@ class JuneSession {
     }
 
     if (msg.toolCall) {
+      this.turnHadTool = true;
       this.handleToolCall(msg.toolCall);
     }
   }
