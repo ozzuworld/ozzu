@@ -126,9 +126,17 @@ export default function SOCNewScreen() {
     }
   }, [selected]);
 
-  // Auto-scan the moment you land on the Wi-Fi step with a device chosen + no results yet.
+  // Auto-scan ONCE when landing on the Wi-Fi step with a device chosen.
+  // dir_1782865268116: use a ref to prevent infinite loops — if the scan
+  // returns 200 with empty networks (e.g. ADB unauthorized swallowed),
+  // the old deps-based guard would re-fire endlessly.
+  const autoScanned = useState({ done: false })[0];
   useEffect(() => {
-    if (step === 2 && selected && networks.length === 0 && !scanning && !scanError) scanWifi();
+    if (step === 2 && selected && networks.length === 0 && !scanning && !scanError && !autoScanned.done) {
+      autoScanned.done = true;
+      scanWifi();
+    }
+    if (step !== 2) autoScanned.done = false;
   }, [step, selected, networks.length, scanning, scanError, scanWifi]);
 
   // Gate verdict — derived from the picked network's `current` flag (is the device ON it?).

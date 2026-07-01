@@ -4488,7 +4488,7 @@ async function upsertDeviceState(s) {
        wg_ip = COALESCE(EXCLUDED.wg_ip, device_state.wg_ip),
        wg_handshake_age_s = EXCLUDED.wg_handshake_age_s,
        battery_pct = COALESCE(EXCLUDED.battery_pct, device_state.battery_pct),
-       meta = COALESCE(EXCLUDED.meta, device_state.meta),
+       meta = CASE WHEN EXCLUDED.meta IS NULL THEN device_state.meta WHEN device_state.meta IS NULL THEN EXCLUDED.meta ELSE device_state.meta || EXCLUDED.meta END,
        last_seen = COALESCE(EXCLUDED.last_seen, NOW()), updated_at = NOW()`,
     [s.device_id, s.status || null, s.source || null, s.wifi_ssid || null, s.lan_ip || null,
      s.public_ip || null, s.wg_ip || null, s.wg_handshake_age_s ?? null, s.battery_pct ?? null,

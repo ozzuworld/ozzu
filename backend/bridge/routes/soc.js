@@ -335,15 +335,22 @@ module.exports = function socRoutes(ctx) {
           return true;
         }
 
-        const out = await new Promise((resolve, reject) => {
+        const { stdout: out, stderr: scanStderr } = await new Promise((resolve, reject) => {
           const p = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
           let o = "", e = "";
           const t = setTimeout(() => p.kill("SIGKILL"), 25000);
           p.stdout.on("data", (d) => (o += d));
           p.stderr.on("data", (d) => (e += d));
           p.on("error", (err) => { clearTimeout(t); reject(err); });
-          p.on("close", () => { clearTimeout(t); resolve(o || ""); });
+          p.on("close", () => { clearTimeout(t); resolve({ stdout: o || "", stderr: e || "" }); });
         });
+        // dir_1782865268116: detect ADB authorization failure — without this, an
+        // unauthorized ADB returns 200 with empty networks and the frontend
+        // auto-scan useEffect loops infinitely.
+        if (kind === "android" && /unauthorized|not found|cannot connect|error/i.test(scanStderr) && !out.trim()) {
+          sendJSON(res, 502, { error: `ADB scan failed on ${deviceId}: ${scanStderr.trim().split("\n")[0]}` });
+          return true;
+        }
 
         // Normalize to [{ ssid, signal(0-100), security }], strongest first, deduped by SSID.
         const byssid = new Map();
