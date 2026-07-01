@@ -1701,6 +1701,9 @@ function smartDeploy(directive) {
     exec(`cd ${WORKDIR} && ./scripts/ota-deploy.sh --restart`, {
       cwd: WORKDIR,
       timeout: 5 * 60 * 1000,
+      // expo export dumps hundreds of asset lines to stdout — well over exec's default
+      // 1 MB maxBuffer, which silently kills the export mid-run before it publishes. (dir_1782938777934)
+      maxBuffer: 64 * 1024 * 1024,
     }, (err) => {
       if (err) {
         log(`HOT deploy failed: ${err.message}`);
@@ -1724,6 +1727,7 @@ function smartDeploy(directive) {
       exec(`cd ${WORKDIR} && ./scripts/ota-deploy-tv.sh`, {
         cwd: WORKDIR,
         timeout: 5 * 60 * 1000,
+        maxBuffer: 64 * 1024 * 1024, // same as the app OTA: expo export overflows exec's 1 MB default
       }, (err) => {
         if (err) {
           log(`TV OTA deploy failed: ${err.message}`);
