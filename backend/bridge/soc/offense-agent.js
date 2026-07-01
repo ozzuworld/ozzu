@@ -1821,15 +1821,29 @@ async function runAgentV2(engagementId, opts = {}) {
   }
 
   if (!messages) {
+    // dir_1782873321726 fix: intent-first user message.
+    // DeepSeek ignores system-prompt mission blocks — the firmware mission was
+    // there but the model still did generic credential testing for 16 steps.
+    // Fix: put the intent directive as the FIRST thing in the user message,
+    // before "Begin the engagement", so the model reads it as its opening order.
+    const mission = detectIntentMission(intent);
+    const userParts = [];
+    if (mission) {
+      userParts.push(mission);
+      userParts.push(`\nBegin engagement ${engagementId}. Your FIRST action must follow the STEP SEQUENCE above — start at step 1 (identify device model), NOT generic credential testing.`);
+    } else if (intent) {
+      userParts.push(`═══ OPERATOR MISSION (your #1 priority) ═══\n${intent}\n═══ END OPERATOR MISSION ═══`);
+      userParts.push(`\nBegin the authorized pentest engagement ${engagementId}. Follow the operator mission above.`);
+    } else {
+      userParts.push(`Begin the authorized pentest engagement ${engagementId}.`);
+    }
+    userParts.push(priorIntelBriefing);
+    userParts.push(campaignBriefing);
+    userParts.push(`\nCurrent phase: ${phase}.`);
+    userParts.push("Call get_engagement_state to see scope, ROE, queue history, and executor capabilities.");
     messages = [
       { role: "system", content: buildSystemPrompt(phase, intent) },
-      { role: "user", content: [
-        `Begin the authorized pentest engagement ${engagementId}.`,
-        priorIntelBriefing,
-        campaignBriefing,
-        `\nCurrent phase: ${phase}.`,
-        "Call get_engagement_state to see scope, ROE, queue history, and executor capabilities.",
-      ].filter(Boolean).join("\n") },
+      { role: "user", content: userParts.filter(Boolean).join("\n") },
     ];
   } else {
     if (messages[0] && messages[0].role === "system") {
@@ -1991,10 +2005,13 @@ async function runAgentV2(engagementId, opts = {}) {
           name: "queue_step", args: r.title,
           result: `[${r.status}] ${(r.cmd || "").replace(/\s+/g, " ").slice(0, 100)}`,
         })).reverse();
+        const mentorMission = detectIntentMission(intent);
         const guidance = await performMentor({
           agentType: "offense agent (v2 tool-calling)",
-          subtaskDescription: `Phase: ${phase}. Steps queued: ${stepsQueued}.`,
-          agentPrompt: "I'm an autonomous pentesting agent with full tool access. I should diversify approaches when one fails.",
+          subtaskDescription: `Phase: ${phase}. Steps queued: ${stepsQueued}.${intent ? ` OPERATOR INTENT: ${intent.slice(0, 200)}` : ""}`,
+          agentPrompt: mentorMission
+            ? `I'm an autonomous pentesting agent. My PRIMARY mission is: ${mentorMission.slice(0, 500)}`
+            : "I'm an autonomous pentesting agent with full tool access. I should diversify approaches when one fails.",
           recentMessages: [],
           executedToolCalls: executedCalls,
           lastToolName: toolCalls[toolCalls.length - 1] && toolCalls[toolCalls.length - 1].function && toolCalls[toolCalls.length - 1].function.name || "unknown",
@@ -2003,7 +2020,10 @@ async function runAgentV2(engagementId, opts = {}) {
         });
         monitor.reset();
         if (guidance) {
-          messages.push({ role: "user", content: `[MENTOR — your approach is looping. Change strategy.]\n${guidance}\n\nDo NOT repeat the same command shape. Try a different tool, target, or technique.` });
+          const intentReminder = mentorMission
+            ? `\n\nREMINDER: Your mission is FIRMWARE BINARY ANALYSIS. If you have been testing credentials or doing generic web enumeration, STOP and switch to the firmware step sequence (identify model → download firmware → binwalk extract → analyze filesystem).`
+            : intent ? `\n\nREMINDER: Operator mission: ${intent.slice(0, 200)}` : "";
+          messages.push({ role: "user", content: `[MENTOR — your approach is looping. Change strategy.]\n${guidance}${intentReminder}\n\nDo NOT repeat the same command shape. Try a different tool, target, or technique.` });
         }
         try {
           await db.query(
@@ -2118,8 +2138,11 @@ async function runAgentV2(engagementId, opts = {}) {
           ? extraHosts.map(w => `  ${w.ip}: ${w.n} steps [${(w.intents || []).join(",")}]`).join("\n")
           : "";
 
+        const stateMission = detectIntentMission(intent);
         const stateMsg = [
           `[STATE CHECK — ${stepsQueued} steps completed, phase: ${phase}]`,
+          stateMission ? `\n⚡ MISSION REMINDER: Your operator mission is FIRMWARE BINARY ANALYSIS.\nIf your last ${stepsQueued} steps were credential testing or web enumeration, you are OFF MISSION.\nFollow the firmware step sequence: identify model → download firmware → binwalk extract → analyze filesystem.` : "",
+          intent && !stateMission ? `\n⚡ OPERATOR MISSION: ${intent.slice(0, 200)}` : "",
           ``,
           `DISCOVERED HOSTS (${hostCount}):`,
           hostSummary,
