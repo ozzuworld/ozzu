@@ -565,8 +565,8 @@ class JuneSession {
       const timeout = setTimeout(() => {
         auditLog("availability_timeout", { call_uuid: this.callUuid });
         if (this.pendingAvailability) this.pendingAvailability.resolve = null;
-        resolve({ status: "timeout", message: "No response within 20 seconds" });
-      }, 20000);
+        resolve({ status: "timeout", message: "No response — offer to take a message now." });
+      }, 7000);
 
       if (this.pendingAvailability) {
         this.pendingAvailability.resolve = (decision) => {
