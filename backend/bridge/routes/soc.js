@@ -300,9 +300,7 @@ module.exports = function socRoutes(ctx) {
         const dev = dr.rows[0] || (deviceId === "dev-01" ? { device_id: "dev-01", wifi_ssid: null, wg_ip: null, executor_adb_target: null } : null);
         if (!dev) { sendJSON(res, 404, { error: `unknown device ${deviceId}` }); return true; }
 
-        // If the device self-reports its scan via heartbeat (the tablet's reporter runs `iw scan`
-        // locally and posts meta.wifi_networks), serve THAT — no ssh/adb chain. This is how the
-        // tablet is scannable at all: the bridge's adb isn't authorized on it, only dev-01's is.
+        // If the device self-reports its scan via heartbeat, serve that directly.
         const selfScan = dev.meta && Array.isArray(dev.meta.wifi_networks) ? dev.meta.wifi_networks : null;
         if (selfScan && selfScan.length) {
           const cur0 = (dev.wifi_ssid || "").trim().toLowerCase();
@@ -313,6 +311,18 @@ module.exports = function socRoutes(ctx) {
             current: !!cur0 && String(n.ssid).trim().toLowerCase() === cur0,
           })).sort((a, b) => b.signal - a.signal);
           sendJSON(res, 200, { device_id: deviceId, current_ssid: dev.wifi_ssid || null, count: networks.length, networks, source: "device-reported" });
+          return true;
+        }
+        // dir_1782865268116: if the device heartbeats its current wifi_ssid but
+        // has no full scan AND we can't ADB into it, return the known SSID as a
+        // single-entry network. The wizard only needs to know WHICH network the
+        // device is on — a full scan list is nice-to-have, not required.
+        if (dev.wifi_ssid && /tab|p610|android|phone/i.test(deviceId)) {
+          sendJSON(res, 200, {
+            device_id: deviceId, current_ssid: dev.wifi_ssid, count: 1,
+            networks: [{ ssid: dev.wifi_ssid, signal: 100, security: "secured", current: true }],
+            source: "heartbeat-ssid",
+          });
           return true;
         }
 
