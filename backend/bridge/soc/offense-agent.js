@@ -386,6 +386,20 @@ const PHASE_GUIDANCE = {
     "Goal: gain initial access AND PROVE IMPACT using the attack vector from enumeration.",
     "If you haven't called lookup_attack_playbook yet for your target, DO IT NOW — it has the exact exploitation commands.",
     "Right moves: follow the playbook techniques, exploit the specific CVE/default-cred/unauth-endpoint you identified. Use real public PoCs.",
+    "",
+    "FIRMWARE ANALYSIS PATH (highest-value when firmware version is known):",
+    "  If you have the firmware version from prior intelligence or enumeration, THIS is your primary attack vector:",
+    "  1. Identify the exact device model from the serial number, ISAPI, or web UI metadata.",
+    "  2. Download the firmware binary — try the manufacturer's CDN, firmware mirrors, or the device itself (curl firmware download URLs).",
+    "  3. Extract with binwalk: `apt-get install -y binwalk && binwalk -e firmware.bin`",
+    "  4. Analyze extracted filesystem: `find _firmware.bin.extracted/ -type f | head -50` then:",
+    "     • `grep -r 'password\\|secret\\|key\\|backdoor\\|debug\\|root\\|admin' _firmware.bin.extracted/`",
+    "     • Check /etc/passwd, /etc/shadow, any .conf files for hardcoded credentials",
+    "     • Look for CGI scripts with command injection sinks: grep for system(), popen(), exec(), os.system",
+    "     • Check for telnet/SSH backdoor listeners in init scripts",
+    "     • Look for hardcoded AES/DES keys, API tokens, debug endpoints",
+    "  5. Every credential, backdoor, or injection sink found = a CRITICAL or HIGH finding. Record immediately.",
+    "",
     "IMPORTANT: for IoT devices, a foothold does NOT require a shell. Confirmed unauthenticated access to camera streams, admin panels, or config data IS a foothold.",
     "PROVE IT — don't just confirm access exists, DEMONSTRATE what you can do with it:",
     "  • API access confirmed → extract sensitive data (configs, credentials, device info), test write operations (rename, reconfigure, reboot)",
@@ -1568,6 +1582,33 @@ async function runAgentV2(engagementId, opts = {}) {
   const modelOverride = opts.model_override || null;
   const intent = opts.intent || null;
 
+  // dir_1782869832451 Fix: when prior_intelligence exists in scope, auto-advance
+  // past recon and inject intel directly into the first message so the model
+  // doesn't waste iterations rediscovering what we already know.
+  try {
+    const engCheck = await db.query(
+      `SELECT scope, engagement_phase FROM pentest_engagements WHERE id = $1`, [engagementId]);
+    if (engCheck.rows.length > 0) {
+      const scope = typeof engCheck.rows[0].scope === "string"
+        ? JSON.parse(engCheck.rows[0].scope) : engCheck.rows[0].scope;
+      const pi = scope && scope.prior_intelligence;
+      const currentPhase = engCheck.rows[0].engagement_phase || "recon";
+      if (pi && currentPhase === "recon") {
+        // Has prior intel — skip recon, start at enumeration (or foothold if
+        // ports+services+firmware are all known)
+        const hasFirewall = pi.firmware && (pi.firmware.web_version || pi.firmware.version);
+        const hasPorts = pi.confirmed_ports && Object.keys(pi.confirmed_ports).length > 0;
+        const startPhase = (hasFirewall && hasPorts) ? "foothold" : "enumeration";
+        console.log(`[offense-agent-v2] prior_intelligence detected — auto-advancing ${engagementId} from recon to ${startPhase}`);
+        await db.query(
+          `UPDATE pentest_engagements SET engagement_phase = $1 WHERE id = $2`,
+          [startPhase, engagementId]);
+      }
+    }
+  } catch (e) {
+    console.error(`[offense-agent-v2] prior_intelligence phase-skip failed:`, e.message);
+  }
+
   let prior;
   try {
     prior = await loadOrInitState(engagementId);
@@ -1581,15 +1622,76 @@ async function runAgentV2(engagementId, opts = {}) {
   let phase    = prior.phase;
   const resumed = !!messages;
 
+  // dir_1782869832451 Fix 2: build prior-intelligence briefing for the first
+  // message so the model sees it BEFORE its first tool call, not buried in
+  // get_engagement_state's JSON blob where it gets ignored.
+  let priorIntelBriefing = "";
+  try {
+    const scopeRow = await db.query(
+      `SELECT scope FROM pentest_engagements WHERE id = $1`, [engagementId]);
+    if (scopeRow.rows.length > 0) {
+      const scope = typeof scopeRow.rows[0].scope === "string"
+        ? JSON.parse(scopeRow.rows[0].scope) : scopeRow.rows[0].scope;
+      const pi = scope && scope.prior_intelligence;
+      if (pi) {
+        const parts = [];
+        parts.push("\n═══════════════════════════════════════════════════════");
+        parts.push("PRIOR INTELLIGENCE — THIS IS CONFIRMED DATA, DO NOT RE-DISCOVER IT");
+        parts.push("═══════════════════════════════════════════════════════");
+        if (pi.device_type) parts.push(`Device: ${pi.device_type}`);
+        if (pi.firmware) {
+          const fw = pi.firmware;
+          parts.push(`Firmware: ${fw.web_version || fw.version || "unknown"}${fw.build_date ? ` (built ${fw.build_date})` : ""}${fw.plugin_version ? `, plugin ${fw.plugin_version}` : ""}`);
+        }
+        if (pi.device_identity) {
+          const di = pi.device_identity;
+          parts.push(`Serial: ${di.serial || "unknown"}, activated: ${di.activated}, security questions: ${di.security_questions_configured}`);
+        }
+        if (pi.confirmed_ports) {
+          parts.push("Confirmed ports:");
+          for (const [port, desc] of Object.entries(pi.confirmed_ports)) {
+            parts.push(`  ${port}: ${desc}`);
+          }
+        }
+        if (pi.unauthenticated_endpoints) {
+          parts.push("Unauthenticated endpoints (confirmed accessible without auth):");
+          for (const ep of pi.unauthenticated_endpoints) {
+            parts.push(`  • ${ep}`);
+          }
+        }
+        if (pi.failed_approaches) {
+          parts.push("");
+          parts.push("╔══════════════════════════════════════════════════╗");
+          parts.push("║  DO NOT REPEAT THESE — ALL CONFIRMED FAILURES   ║");
+          parts.push("╚══════════════════════════════════════════════════╝");
+          for (const [approach, result] of Object.entries(pi.failed_approaches)) {
+            parts.push(`  ✘ ${approach}: ${result}`);
+          }
+          parts.push("Repeating ANY of the above is a WASTED ITERATION — they have been tested and failed.");
+        }
+        if (pi.exploitation_strategy) {
+          parts.push("");
+          parts.push("OPERATOR EXPLOITATION STRATEGY (follow this):");
+          parts.push(pi.exploitation_strategy);
+        }
+        parts.push("═══════════════════════════════════════════════════════");
+        priorIntelBriefing = parts.join("\n");
+      }
+    }
+  } catch (e) {
+    console.error(`[offense-agent-v2] prior intel briefing build failed:`, e.message);
+  }
+
   if (!messages) {
     messages = [
       { role: "system", content: buildSystemPrompt(phase) },
       { role: "user", content: [
         `Begin the authorized pentest engagement ${engagementId}.`,
-        intent ? `Operator intent: ${intent}.` : "",
-        `Current phase: ${phase}.`,
-        "Start by calling get_engagement_state to see scope, ROE, recon hosts, queue history, and executor capabilities.",
-      ].filter(Boolean).join(" ") },
+        intent ? `\n\nOPERATOR MISSION (your #1 priority — this OVERRIDES default phase behavior):\n${intent}` : "",
+        priorIntelBriefing,
+        `\nCurrent phase: ${phase}.`,
+        "Call get_engagement_state to see scope, ROE, queue history, and executor capabilities.",
+      ].filter(Boolean).join("\n") },
     ];
   } else {
     if (messages[0] && messages[0].role === "system") {
