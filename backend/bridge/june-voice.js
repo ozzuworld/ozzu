@@ -489,18 +489,18 @@ class JuneSession {
       // Global tool call rate limit
       if (this.toolCallCount > MAX_TOOL_CALLS_PER_SESSION) {
         auditLog("tool_rate_limit", { call_uuid: this.callUuid, tool: fc.name, total_calls: this.toolCallCount });
-        results.push({ functionResponse: { name: fc.name, response: { error: "Tool call limit reached for this session" } } });
+        results.push({ functionResponse: { id: fc.id, name: fc.name, response: { error: "Tool call limit reached for this session" } } });
         continue;
       }
 
       // Per-tool dedup (notify_app, take_message can only be called once)
       if (["notify_app", "take_message"].includes(fc.name) && this.toolCallsUsed.has(fc.name)) {
         auditLog("tool_duplicate", { call_uuid: this.callUuid, tool: fc.name });
-        results.push({ functionResponse: { name: fc.name, response: { error: `${fc.name} already called this session` } } });
+        results.push({ functionResponse: { id: fc.id, name: fc.name, response: { error: `${fc.name} already called this session` } } });
         continue;
       }
 
-      auditLog("tool_call", { call_uuid: this.callUuid, caller_number: this.callerNumber, tool: fc.name, args: sanitizeLogArgs(fc.args) });
+      auditLog("tool_call", { call_uuid: this.callUuid, caller_number: this.callerNumber, tool: fc.name, fc_id: fc.id, args: sanitizeLogArgs(fc.args) });
 
       let result;
       try {
@@ -510,7 +510,7 @@ class JuneSession {
         console.error(`[June] Tool error: ${e.message}`);
         result = { error: "Internal error" };
       }
-      results.push({ functionResponse: { name: fc.name, response: result } });
+      results.push({ functionResponse: { id: fc.id, name: fc.name, response: result } });
     }
 
     if (this.geminiWs?.readyState === WebSocket.OPEN) {
