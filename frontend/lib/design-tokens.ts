@@ -133,6 +133,7 @@ export const fontSize = {
   xl: 16,
   xxl: 18,
   title: 22,
+  display: 34, // hero/verdict — used with restraint (one per screen)
 } as const;
 
 export const fontWeight = {
