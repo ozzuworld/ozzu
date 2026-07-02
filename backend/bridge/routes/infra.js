@@ -99,13 +99,36 @@ module.exports = function infraRoutes(ctx) {
         const rows = await db.getDeviceStates();
         const nowMs = Date.now();
         const STALE_MS = 150_000; // 2.5× the 60s heartbeat interval
+
+        // Server-observed liveness (dir_1783018868180): a device with a FRESH WireGuard
+        // handshake is up even if its telemetry agent stopped pushing — a flaky reporter
+        // (e.g. the CAT's) must never make a reachable device read as dead. wg-state.json is
+        // written host-side by the wg poller (~60s); we join it to devices by their wg_ip.
+        const WG_FRESH_S = 200; // poller cadence (60s) + WG's ~2min rekey, with margin
+        const wgByIp = {};
+        try {
+          const wg = JSON.parse(fs.readFileSync("/home/gcp/ozzu/data/infra/wg-state.json", "utf8"));
+          for (const p of wg.peers || []) {
+            const ip = String(p.allowed_ips || "").split("/")[0];
+            if (ip) wgByIp[ip] = p.handshake_age_s;
+          }
+        } catch {}
+
         const devices = rows.map(r => {
           const lastSeenMs = r.last_seen ? new Date(r.last_seen).getTime() : null;
           const ageS = lastSeenMs ? Math.round((nowMs - lastSeenMs) / 1000) : null;
-          // Pull-side safety net: a device that stopped pushing is offline even if
-          // its last stored status says "online" (the lockdown-killswitch case).
-          const effectiveStatus = (lastSeenMs && nowMs - lastSeenMs > STALE_MS) ? "offline" : r.status;
-          return { ...r, last_seen_age_s: ageS, effective_status: effectiveStatus };
+          const telemetryFresh = lastSeenMs && (nowMs - lastSeenMs) <= STALE_MS;
+          const wgAge = r.wg_ip ? wgByIp[r.wg_ip] : undefined;
+          const wgFresh = typeof wgAge === "number" && wgAge <= WG_FRESH_S;
+          // Fresh telemetry keeps the stored status; otherwise fall back to WG liveness
+          // (reachable on the tunnel = online). Offline only when BOTH signals are stale.
+          const effectiveStatus = telemetryFresh ? r.status : (wgFresh ? "online" : "offline");
+          return {
+            ...r,
+            last_seen_age_s: ageS,
+            wg_handshake_age_s: typeof wgAge === "number" ? wgAge : r.wg_handshake_age_s,
+            effective_status: effectiveStatus,
+          };
         });
         sendJSON(res, 200, { count: devices.length, devices }, req);
       } catch (e) {
