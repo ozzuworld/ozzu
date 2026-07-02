@@ -158,7 +158,8 @@ export default function UploadScreen() {
       setSending(true);
       try {
         if (mode === "TEXT") {
-          bridgeRef.current.sendUpload(target, "text", textContent);
+          const r = await bridgeRef.current.uploadHttp(target, "text", textContent);
+          if (!r.ok) throw new Error(r.error || "Upload failed");
         } else if (files.length > 0) {
           for (const f of files) {
             const useBinary = f.contentType === "image" || isBinaryFile(f.name, f.mimeType);
@@ -167,7 +168,9 @@ export default function UploadScreen() {
                 ? FileSystem.EncodingType.Base64
                 : FileSystem.EncodingType.UTF8,
             });
-            bridgeRef.current.sendUpload(target, f.contentType, data, f.name);
+            if (!data) throw new Error(`Couldn't read ${f.name} — try again`);
+            const r = await bridgeRef.current.uploadHttp(target, f.contentType, data, f.name);
+            if (!r.ok) throw new Error(r.error || `Failed to send ${f.name}`);
           }
         } else {
           setSending(false);

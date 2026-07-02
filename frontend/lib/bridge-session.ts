@@ -372,6 +372,34 @@ export class BridgeSession {
     }
   }
 
+  /**
+   * Reliable upload over plain HTTP (request/response), independent of the
+   * realtime socket — so a screenshot no longer silently queues into a dead
+   * WebSocket. Resolves with the bridge's result; the caller should only show
+   * "sent" on `ok`. Uses the public base (reachable on LAN and cellular).
+   */
+  async uploadHttp(
+    target: "cipher" | "june",
+    contentType: "image" | "document" | "text",
+    data: string,
+    filename?: string,
+  ): Promise<{ ok: boolean; savedAs?: string; error?: string }> {
+    try {
+      const res = await fetch(`${PUBLIC_BASE}/images/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target, contentType, data, filename }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok || !json?.ok) {
+        return { ok: false, error: json?.error || `HTTP ${res.status}` };
+      }
+      return { ok: true, savedAs: json.savedAs };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || "network error" };
+    }
+  }
+
   sendPinResponse(approvalId: string, pin: string): void {
     const msg = JSON.stringify({ type: "pinResponse", approvalId, pin });
     if (this.ws?.readyState === WebSocket.OPEN) {

@@ -2312,6 +2312,71 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── HTTP image/file upload — reliable request/response path (mirrors the WS
+  // "upload" handler: persist to disk + route to cipher/june). A screenshot no
+  // longer depends on the realtime device socket staying open. Reached via nginx
+  // /bridge/images/upload; parseBody grants 20MB for this URL. ──
+  if (pathname === "/images/upload" && req.method === "POST") {
+    let b;
+    try {
+      b = await parseBody(req);
+    } catch (e) {
+      sendJSON(res, /too large/i.test(e.message) ? 413 : 400, { ok: false, error: e.message });
+      return;
+    }
+    const { target, contentType, data, filename } = b || {};
+    if (!target || !contentType || !data) {
+      sendJSON(res, 400, { ok: false, error: "missing target, contentType, or data" });
+      return;
+    }
+    let savedAs = null;
+    try {
+      const fs = require("fs");
+      const uploadsDir = "/home/gcp/ozzu/data/uploads";
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      const ts = Date.now();
+      const safeName = (filename || `upload-${ts}`).replace(/[^a-zA-Z0-9._-]/g, "_");
+      savedAs = `${uploadsDir}/${ts}-${target}-${safeName}`;
+      const binaryExts = [".glb", ".gltf", ".obj", ".usdz", ".zip", ".bin"];
+      const dot = (filename || "").lastIndexOf(".");
+      const ext = dot >= 0 ? (filename || "").substring(dot).toLowerCase() : "";
+      const isBinary = contentType === "image" || binaryExts.includes(ext);
+      if (isBinary) fs.writeFileSync(savedAs, Buffer.from(data, "base64"));
+      else fs.writeFileSync(savedAs, data, "utf8");
+      fs.writeFileSync(`${savedAs}.meta.json`, JSON.stringify({ timestamp: ts, target, contentType, filename, via: "http", savedAs }, null, 2));
+      log.bridge.info(`HTTP upload persisted: ${savedAs}`);
+    } catch (persistErr) {
+      log.bridge.warn(`HTTP upload persist failed: ${persistErr.message}`);
+    }
+    if (currentConversationId) {
+      db.addConversationTurn(currentConversationId, "user", `[Upload: ${filename || "(unnamed)"}]`, turnIndex++, null, "upload", {
+        filename: filename || null, contentType, target, via: "http",
+      }).catch((err) => log.pg.warn("upload turn log:", err.message));
+    }
+    if (target === "cipher") {
+      if (cipherPipeline && typeof cipherPipeline === "object") {
+        if (contentType === "image") {
+          const iext = (filename || "").split(".").pop()?.toLowerCase() || "jpg";
+          const mediaType = iext === "png" ? "image/png" : iext === "gif" ? "image/gif" : iext === "webp" ? "image/webp" : "image/jpeg";
+          cipherPipeline.sendImage(data, mediaType, filename);
+        } else {
+          cipherPipeline.sendText(filename ? `[UPLOAD] File "${filename}" from King Kazuma:\n${data}` : `[UPLOAD] Content from King Kazuma:\n${data}`);
+        }
+      }
+    } else if (target === "june") {
+      if (geminiReady && geminiWs && geminiWs.readyState === 1) {
+        if (contentType === "image") {
+          const mimeType = filename && /\.png$/i.test(filename) ? "image/png" : "image/jpeg";
+          geminiWs.send(JSON.stringify({ clientContent: { turns: [{ role: "user", parts: [{ text: `[King Kazuma uploaded an image${filename ? `: ${filename}` : ""}]` }, { inlineData: { mimeType, data } }] }], turnComplete: true } }));
+        } else {
+          sendToGeminiText(filename ? `[King Kazuma uploaded "${filename}"]:\n${data}` : `[King Kazuma shared text]:\n${data}`);
+        }
+      }
+    }
+    sendJSON(res, 200, { ok: true, savedAs });
+    return;
+  }
+
   // ── Device logs (remote console from app) ──
   if (pathname === "/api/device-logs") {
     if (req.method === "POST") {
