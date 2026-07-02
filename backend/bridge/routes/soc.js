@@ -1794,7 +1794,7 @@ module.exports = function socRoutes(ctx) {
         // June runs as her own process — forward the caller number to her hand-off port.
         fetch("http://127.0.0.1:4581/pending", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uuid: body.audiosocket_uuid, number: num }),
+          body: JSON.stringify({ uuid: body.audiosocket_uuid, number: num, mode: body.mode }),
         }).catch(() => {});
         const voipWs = global.__voipClientWs;
         if (voipWs && voipWs.readyState === 1) {

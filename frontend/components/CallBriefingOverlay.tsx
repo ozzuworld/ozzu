@@ -16,7 +16,7 @@ import {
   spacing,
   withAlpha,
 } from "../lib/design-tokens";
-import type { CallBriefing, Voicemail } from "../lib/useVoipCall";
+import type { CallBriefing, Voicemail } from "../lib/useCallBriefing";
 import { JuneAvatarLive2D } from "./JuneAvatarLive2D";
 
 const { width: SCREEN_W } = Dimensions.get("window");

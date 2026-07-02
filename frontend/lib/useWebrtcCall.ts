@@ -7,10 +7,13 @@ import { Platform } from "react-native";
 //   react-native-callkeep— native CallKit ring / answer / decline UI (+ speaker/mute)
 //   react-native-incall-manager — audio route
 //
-// ROUND 2 (dir_1782922636595): a hand-off Dial(PJSIP/ozzu-iphone) arrives as a JsSIP
-// newRTCSession -> we show the CallKit incoming call (caller ID); King Kazuma answers on the
-// native screen -> we JsSIP-answer + open media. Replaces Round-1 auto-answer AND the old
-// briefing/accept gate (answering the ring IS the accept). Foreground; PushKit = Round 3.
+// SCREENING GATE (dir_1783001909368): June screens the caller and King Kazuma taps Accept
+// on the briefing (useCallBriefing), which ARMS auto-answer (voip-handoff). June then
+// transfers, the Dial(PJSIP/ozzu-iphone) arrives here as a JsSIP newRTCSession, and we
+// answer it in one tap. If an INVITE ever arrives WITHOUT a prior accept (e.g. a future
+// PushKit background ring), we fall back to the native CallKit incoming screen.
+// Foreground today; PushKit = cert-window.
+import { consumeAutoAnswer } from "./voip-handoff";
 let rnwebrtc: any = null;
 let JsSIP: any = null;
 let InCallManager: any = null;
@@ -122,11 +125,31 @@ export function useWebrtcCall() {
         callUuidRef.current = uuid;
         const caller = session.remote_identity?.uri?.user || "Unknown";
         const name = session.remote_identity?.display_name || `Caller ${caller}`;
-        console.log("[webrtc] incoming call from", caller, "-> CallKit");
-        // Native incoming-call screen (ring + caller ID). Answered via the answerCall event.
-        try { RNCallKeep.displayIncomingCall(uuid, caller, name, "generic", false); } catch (e: any) { console.warn("[callkeep] display:", e?.message); }
         session.on("ended", cleanupCall);
         session.on("failed", cleanupCall);
+
+        // King Kazuma already tapped Accept on the briefing, which armed auto-answer — so
+        // connect this transfer INVITE straight away (one tap, no second ring). Report it to
+        // CallKit as an active call for the audio session + system UI.
+        if (consumeAutoAnswer()) {
+          console.log("[webrtc] accepted transfer -> auto-answering", caller);
+          try {
+            InCallManager.start({ media: "audio" });
+            session.answer({
+              mediaConstraints: { audio: true, video: false },
+              pcConfig: { iceServers: [{ urls: STUN }] },
+            });
+            RNCallKeep.startCall(uuid, caller, name, "generic", false);
+            RNCallKeep.setCurrentCallActive(uuid);
+            setState((s) => ({ ...s, inCall: true }));
+          } catch (e: any) { console.warn("[webrtc] auto-answer error:", e?.message); }
+          return;
+        }
+
+        // Fallback: an INVITE with no prior in-app accept (e.g. a future PushKit background
+        // ring) — show the native CallKit incoming screen; answered via the answerCall event.
+        console.log("[webrtc] incoming call from", caller, "-> CallKit ring");
+        try { RNCallKeep.displayIncomingCall(uuid, caller, name, "generic", false); } catch (e: any) { console.warn("[callkeep] display:", e?.message); }
       });
 
       ua.start();

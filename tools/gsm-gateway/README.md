@@ -161,7 +161,8 @@ Incoming call → carrier → *21* forward → gateway (SIM)
                                             │
                                   ┌─────────┴─────────┐
                              Spam/Robot           Legit call
-                             → June handles      → transfer to iPhone via VoIP/CallKit
+                             → June handles      → June briefs the app; on King Kazuma's
+                                                   Accept, transfer to iPhone (WebRTC/CallKit)
 ```
 
 | Component | Location | Role |
@@ -169,7 +170,7 @@ Incoming call → carrier → *21* forward → gateway (SIM)
 | Asterisk PBX | `backend/asterisk/conf/` | SIP trunk endpoint + dialplan |
 | June voice | `backend/bridge/june-voice.js` | AudioSocket ↔ Gemini Live API |
 | Bridge call API | `backend/bridge/routes/soc.js` | call log / OSINT / notifications |
-| Ozzu app SIP client | `frontend/modules/sip-toolkit/` | iPhone receives screened calls (VoIP/CallKit) |
+| Ozzu app call leg | `frontend/lib/useWebrtcCall.ts` + `useCallBriefing.ts` | iPhone: WebRTC/CallKit media + the screening-gate briefing (accept/decline). The old native SIP modules (`modules/voip-call`, `modules/sip-toolkit`) are inactive. |
 
 **Call forwarding:** on the source phone `*21*[gateway-number]#`; cancel `##21#`.
 

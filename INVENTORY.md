@@ -35,7 +35,7 @@ WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a contain
 ### VPN clients
 **See registry §4 (WireGuard Configuration) for the authoritative peer list.** Briefly: dev-01 / kazuma-pc / orangepi5 / cat-s41 / tablet-p610 active on WG 10.9.0.0/24; ozzu-android config exists but not yet installed.
 
-### CAT S41 (GSM Gateway + WhatsApp Agent)
+### CAT S41 (WhatsApp Agent + L3 relay)
 | Item | Value |
 |------|-------|
 | Device | CAT S41 (Bullitt Group, rugged phone, always on) |
@@ -48,7 +48,7 @@ WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a contain
 | ADB TCP | 5555 (set by boot script, reachable over WG at 10.9.0.22:5555) |
 | Telemetry | `ozzu-telemetry-android.sh` → `POST /api/device-telemetry` (device_id `cat-s41`, 60s cycle) |
 | Boot services | Magisk `service.d/02-ozzuwg-keepalive.sh` — clock fix, WG tunnel up, IP forwarding, telemetry reporter, 15s watchdog |
-| Role | GSM gateway (Asterisk PBX call intelligence), WhatsApp bridge, L3 relay |
+| Role | WhatsApp bridge, L3 relay. **GSM/VOIP-gateway role moved to ozzu-sbc** (Rock Pi 4B) — the CAT's MediaTek modem is half-duplex-capped, so June's call gateway now runs on the SBC. |
 | **CRITICAL** | Kernel 4.4 silently blackholes root UDP sockets — `ozzuwg` daemon does NOT work. WG must use the app's VpnService driven by broadcast intents. No RTC battery — clock resets to 2009 on reboot; boot script fixes via NTP. |
 | WhatsApp | Number 3226033350, Termux → Node.js → Baileys → WA Web. SSH via `ssh -p 8023 localhost` (reverse tunnel GCP:8023→phone:8022). WA API at GCP:8766→phone:8765. Auto-start via Termux:Boot. |
 
@@ -243,7 +243,7 @@ sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
 | executor-agent (dev-01 HTTP shim) | 2026-06-24 | dev-01 out of offense pipeline |
 
 **NOT decommissioned (corrected):**
-- **Rock Pi 4B** — reactivated 2026-05-28 as WG bridge (10.9.0.21). Was wrongly listed as decommissioned.
+- **Rock Pi 4B** — reactivated 2026-05-28 as WG bridge (10.9.0.21). Was wrongly listed as decommissioned. Now also **ozzu-sbc**, the production VOIP/GSM gateway: SIM7600A-H 4G HAT + chan_quectel + a local Asterisk that trunks GSM calls to the bridge Asterisk over WG. Reports real hardware telemetry as a fleet device (device_id `ozzu-sbc`).
 - **dev-01** — out of the OFFENSE pipeline, but still a WG peer used for device pairing and SSH jump.
 
 ---

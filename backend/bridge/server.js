@@ -6048,6 +6048,10 @@ server.on("upgrade", (req, socket, head) => {
             log.ws.info(`VoIP auth: ${msg.username}`);
             ws.send(JSON.stringify({ type: "auth_ok" }));
           } else if (msg.type === "push_token") {
+            // Captured for PushKit (apns-voip.js). Inert until the Apple Dev cert + the
+            // native VoIP-push registration land (cert-window build). Ephemeral — the app
+            // re-sends on each connect, so a bridge restart just re-learns it.
+            global.__voipPushToken = msg.token || null;
             log.ws.info(`VoIP push token received: ${msg.token?.substring(0, 16)}...`);
           }
         } catch (e) { log.ws.error(`VoIP message parse error: ${e.message}`); }
@@ -6764,8 +6768,6 @@ wss.on("connection", (ws, req) => {
   server.listen(PORT, "0.0.0.0", () => {
     log.bridge.info(`listening on :${PORT}`);
     checkContainerBinaries();
-    // AGI call screener for Asterisk (FastAGI on port 4573)
-    try { require("./agi-screener"); } catch (e) { log.bridge.error(`AGI screener: ${e.message}`); }
     // June AI receptionist now runs as its OWN process — compose service "june-voice"
     // (dir_1782876154936), off the bridge's event loop so real-time audio isn't starved
     // by agent/API/git churn. Caller-ID + app decisions forward to 127.0.0.1:4581.

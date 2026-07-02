@@ -10,7 +10,7 @@ import { probeBridgeUrl, resetBridgeUrl } from "../lib/bridge-api";
 import { GlobalApprovalGate } from "../components/GlobalApprovalGate";
 import * as BleBeacon from "../modules/ble-beacon";
 import { registerForPushNotifications } from "../lib/push-notifications";
-import { useVoipCall } from "../lib/useVoipCall";
+import { useCallBriefing } from "../lib/useCallBriefing";
 import { useWebrtcCall } from "../lib/useWebrtcCall";
 import { CallBriefingOverlay } from "../components/CallBriefingOverlay";
 
@@ -143,8 +143,8 @@ console.warn = (...a) => { _origWarn(...a); remoteLog("warn", ...a); };
 console.error = (...a) => { _origError(...a); remoteLog("error", ...a); };
 
 function VoipRegistrar() {
-  const { briefing, voicemail, respondToBriefing, dismissBriefing, dismissVoicemail } = useVoipCall();
-  useWebrtcCall(); // register to Asterisk's WebRTC endpoint + auto-answer inbound (dir_1782922636595)
+  const { briefing, voicemail, respondToBriefing, dismissVoicemail } = useCallBriefing();
+  useWebrtcCall(); // register to Asterisk's WebRTC endpoint; auto-answers an accepted transfer (dir_1783001909368)
   return (
     <CallBriefingOverlay
       briefing={briefing}
