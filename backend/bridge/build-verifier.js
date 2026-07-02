@@ -140,6 +140,9 @@ async function verifyBackendChanges(changedFiles) {
   let allPassed = true;
   for (const file of jsFiles) {
     const fullPath = path.join(WORKDIR, file);
+    // A diff includes deletions — nothing to syntax-check on a removed file, and node -c
+    // on a missing path fails. Skip it. (Was blocking any .js deletion from deploy.)
+    if (!fs.existsSync(fullPath)) { results.push(`Skipped (deleted): ${file}`); continue; }
     try {
       await execAsync(`node -c "${fullPath}"`, { timeout: 10000 });
       results.push(`Syntax OK: ${file}`);
@@ -275,6 +278,9 @@ async function verifyFrontendNativeChanges(changedFiles) {
   let allPassed = true;
   for (const file of jsFiles) {
     const fullPath = path.join(WORKDIR, file);
+    // A diff includes deletions — nothing to syntax-check on a removed file, and node -c
+    // on a missing path fails. Skip it. (Was blocking any .js deletion from deploy.)
+    if (!fs.existsSync(fullPath)) { results.push(`Skipped (deleted): ${file}`); continue; }
     try {
       await execAsync(`node -c "${fullPath}"`, { timeout: 10000 });
       results.push(`Syntax OK: ${file}`);
@@ -391,6 +397,7 @@ async function verify(directive) {
       verificationLog.push("--- Other JS file verification ---");
       for (const file of jsFiles) {
         const fullPath = path.join(WORKDIR, file);
+        if (!fs.existsSync(fullPath)) { verificationLog.push(`Skipped (deleted): ${file}`); continue; }
         try {
           await execAsync(`node -c "${fullPath}"`, { timeout: 10000 });
           verificationLog.push(`Syntax OK: ${file}`);
