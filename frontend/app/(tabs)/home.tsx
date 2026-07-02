@@ -7,7 +7,6 @@ import {
   Pressable,
   RefreshControl,
   Animated,
-  Platform,
   AccessibilityInfo,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -22,45 +21,36 @@ import {
   fontSize as fs,
   fontWeight as fw,
   withAlpha,
+  statusPillStyle,
 } from "../../lib/design-tokens";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ozzuLogo = require("../../assets/ozzu-logo.png");
 
-// True monospace on the iPhone. RN's "monospace" only resolves on Android; iOS
-// needs a named face (Menlo ships with iOS). The whole screen reads as Cipher's
-// telemetry, so the data face has to actually be fixed-width on-device.
-const MONO = Platform.select({ ios: "Menlo", default: "monospace" }) as string;
+type Item = { id: string; title: string; status: string; emoji: string };
 
-type Flag = { id: string; title: string; status: string; emoji: string };
-
-// ── Live system state: is Cipher OK, and what needs King Kazuma? ──
-function useConsoleState() {
+// ── Live state: is everything running, and what needs King Kazuma? ──
+function useHomeData() {
   const { directives, summary, buildStatus, error, refresh } = useDirectives();
   const { projects } = useBusiness();
 
-  // Prefer the server-computed summary; derive from the list if it isn't loaded.
-  const derivedFlags: Flag[] = directives
+  const derived: Item[] = directives
     .filter((d) => ["blocked", "deploy_failed", "failed"].includes(d.status))
     .map((d) => ({ id: d.id, title: d.title, status: d.status, emoji: d.emoji || "•" }));
 
-  const flags: Flag[] =
-    summary?.needsAttention && summary.needsAttention.length > 0
-      ? summary.needsAttention
-      : derivedFlags;
+  const flags: Item[] =
+    summary?.needsAttention && summary.needsAttention.length > 0 ? summary.needsAttention : derived;
 
   const flagCount = summary?.needsAttentionCount ?? flags.length;
-
   const activeCount =
     summary?.activeCount ??
     directives.filter((d) =>
       ["in_progress", "planning", "planned", "approved", "pending"].includes(d.status),
     ).length;
-
   const completedToday = summary?.completedToday ?? 0;
   const ventureCount = (projects || []).filter((p: any) => p.status === "active").length;
 
-  const inFlight: Flag[] = directives
+  const inFlight: Item[] = directives
     .filter((d) => d.status === "in_progress")
     .slice(0, 3)
     .map((d) => ({ id: d.id, title: d.title, status: d.status, emoji: d.emoji || "▶" }));
@@ -80,45 +70,33 @@ function useConsoleState() {
       ? "warn"
       : "clear";
 
-  return {
-    flags,
-    flagCount,
-    inFlight,
-    activeCount,
-    completedToday,
-    ventureCount,
-    building,
-    severity,
-    online: !error,
-    refresh,
-  };
+  return { flags, flagCount, inFlight, activeCount, completedToday, ventureCount, building, severity, online: !error, refresh };
 }
 
-function clock(): string {
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+function today(): string {
   const d = new Date();
-  const h = d.getHours();
-  const m = d.getMinutes();
-  return `${h < 10 ? "0" : ""}${h}:${m < 10 ? "0" : ""}${m}`;
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const mons = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${days[d.getDay()]}, ${mons[d.getMonth()]} ${d.getDate()}`;
 }
 
 export default function HomeScreen() {
   const router = useRouter();
   const { insets, screenWidth } = usePhoneLayout();
-  const st = useConsoleState();
+  const st = useHomeData();
   const [refreshing, setRefreshing] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
-  const [now, setNow] = useState(clock());
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(clock()), 15_000);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     let alive = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((v) => { if (alive) setReduceMotion(v); })
-      .catch(() => {});
+    AccessibilityInfo.isReduceMotionEnabled().then((v) => { if (alive) setReduceMotion(v); }).catch(() => {});
     return () => { alive = false; };
   }, []);
 
@@ -130,26 +108,15 @@ export default function HomeScreen() {
 
   const W = screenWidth;
   const SIDE = 20;
-  const GAP = 10;
-  const tileW = (W - SIDE * 2 - GAP * 2) / 3;
-
-  const toneColor =
-    st.severity === "error" ? colors.error : st.severity === "warn" ? colors.warning : colors.accent;
+  const GAP = 12;
+  const colW = (W - SIDE * 2 - GAP) / 2;
 
   const flagged = st.flagCount > 0;
-  const verdict = flagged ? "NEEDS YOU" : "ALL CLEAR";
+  const tone = st.severity === "error" ? colors.error : st.severity === "warn" ? colors.warning : colors.success;
   const rows = flagged ? st.flags.slice(0, 3) : st.inFlight;
-  const eyebrow = flagged ? "FLAGGED" : "IN FLIGHT";
   const overflow = flagged ? st.flagCount - Math.min(3, st.flags.length) : 0;
-  const telemetry = flagged
-    ? `${st.activeCount} ACTIVE · ${st.flagCount} FLAGGED`
-    : st.completedToday > 0
-      ? `${st.activeCount} ACTIVE · ${st.completedToday} SHIPPED TODAY`
-      : `${st.activeCount} ACTIVE`;
 
-  // Destinations Cipher doesn't already put in the bottom bar (each carries its
-  // own identity color + a live count where one exists).
-  const DESTS: Array<{ id: string; icon: string; label: string; route: string; color: string; count?: number }> = [
+  const shortcuts: Array<{ id: string; icon: string; label: string; route: string; color: string; count?: number }> = [
     { id: "directives", icon: "⚡", label: "Directives", route: "/directives", color: colors.accent, count: st.activeCount },
     { id: "soc", icon: "🔐", label: "SOC", route: "/soc", color: colors.error },
     { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", color: colors.brand.amber, count: st.ventureCount },
@@ -158,79 +125,70 @@ export default function HomeScreen() {
     { id: "voice", icon: "🎙️", label: "Voice", route: "/cipher", color: colors.brand.cyanLight },
   ];
 
-  // Motion: one entrance for the console, one heartbeat on the online dot.
+  // One gentle entrance for the card stack.
   const enter = useRef(new Animated.Value(0)).current;
-  const pulse = useRef(new Animated.Value(1)).current;
-
   useEffect(() => {
     if (reduceMotion) { enter.setValue(1); return; }
-    Animated.timing(enter, { toValue: 1, duration: 420, useNativeDriver: true }).start();
+    Animated.timing(enter, { toValue: 1, duration: 380, useNativeDriver: true }).start();
   }, [reduceMotion, enter]);
-
-  useEffect(() => {
-    if (reduceMotion || !st.online) { pulse.setValue(1); return; }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 0.25, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [reduceMotion, st.online, pulse]);
-
-  const enterStyle = {
+  const rise = {
     opacity: enter,
-    transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
+    transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
+  };
+
+  const StatusRow = ({ item }: { item: Item }) => {
+    const pill = statusPillStyle(item.status);
+    return (
+      <Pressable
+        onPress={() => router.push(`/directive/${item.id}` as any)}
+        style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, opacity: pressed ? 0.55 : 1 })}
+      >
+        <Text style={{ fontSize: 20 }}>{item.emoji}</Text>
+        <Text numberOfLines={1} style={{ flex: 1, color: colors.text.primary, fontSize: fs.lg }}>
+          {item.title}
+        </Text>
+        <View style={{ backgroundColor: pill.bg, paddingHorizontal: 9, paddingVertical: 3, borderRadius: radius.full }}>
+          <Text style={{ color: pill.text, fontSize: fs.sm, fontWeight: fw.medium }}>
+            {HUMAN_STATUS[item.status] || item.status}
+          </Text>
+        </View>
+      </Pressable>
+    );
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
       <StatusBar style="light" />
 
-      {/* Ambient wash — the screen's temperature tracks system state */}
-      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: W * 0.9, overflow: "hidden" }}>
+      {/* Soft ambient warmth at the top — subtle, not alarming */}
+      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: 260, overflow: "hidden" }}>
         <View style={{
-          position: "absolute",
-          top: -W * 0.28,
-          left: W * 0.08,
-          width: W * 0.84,
-          height: W * 0.84,
-          borderRadius: W * 0.42,
-          backgroundColor: withAlpha(toneColor, 0.1),
+          position: "absolute", top: -120, alignSelf: "center",
+          width: W * 0.9, height: 240, borderRadius: 999,
+          backgroundColor: withAlpha(colors.accent, 0.07),
         }} />
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + 10, paddingBottom: insets.bottom + 92 }}
+        contentContainerStyle={{ paddingTop: insets.top + 14, paddingBottom: insets.bottom + 96 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text.tertiary} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Identity bar ── */}
-        <View style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingHorizontal: SIDE,
-          height: 44,
-        }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <Image source={ozzuLogo} style={{ width: 30, height: 30, borderRadius: 15 }} resizeMode="contain" />
-            <Text style={{ color: colors.text.primary, fontFamily: MONO, fontSize: fs.lg, fontWeight: fw.semibold, letterSpacing: 3 }}>
-              CIPHER
+        {/* ── Header ── */}
+        <View style={{ paddingHorizontal: SIDE, flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.text.primary, fontSize: 26, fontWeight: fw.bold, letterSpacing: -0.6 }}>
+              {greeting()}
+            </Text>
+            <Text style={{ color: colors.text.tertiary, fontSize: fs.base, marginTop: 4 }}>
+              {today()} · {st.activeCount} active
             </Text>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Animated.View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: st.online ? colors.success : colors.text.disabled, opacity: pulse }} />
-            <Text style={{ color: colors.text.tertiary, fontFamily: MONO, fontSize: fs.sm, letterSpacing: 1 }}>
-              {st.online ? "ONLINE" : "OFFLINE"}
-            </Text>
-            <Text style={{ color: colors.text.disabled, fontFamily: MONO, fontSize: fs.sm }}>{now}</Text>
-          </View>
+          <Image source={ozzuLogo} style={{ width: 42, height: 42, borderRadius: 21 }} resizeMode="contain" />
         </View>
 
-        {/* ── Status console — the hero / signature ── */}
-        <Animated.View style={[{ marginHorizontal: SIDE, marginTop: 14 }, enterStyle]}>
+        {/* ── Status card ── */}
+        <Animated.View style={[{ marginHorizontal: SIDE }, rise]}>
           <Pressable
             onPress={() => router.push("/directives" as any)}
             style={({ pressed }) => ({
@@ -239,145 +197,124 @@ export default function HomeScreen() {
               borderWidth: 1,
               borderColor: colors.border.default,
               borderLeftWidth: 3,
-              borderLeftColor: toneColor,
-              paddingVertical: 20,
-              paddingHorizontal: 20,
-              opacity: pressed ? 0.94 : 1,
+              borderLeftColor: tone,
+              padding: 18,
+              shadowColor: "#000",
+              shadowOpacity: 0.35,
+              shadowRadius: 18,
+              shadowOffset: { width: 0, height: 10 },
+              transform: [{ scale: pressed ? 0.99 : 1 }],
             })}
           >
-            {/* verdict */}
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: toneColor }} />
-              <Text style={{ color: toneColor, fontFamily: MONO, fontSize: fs.display, fontWeight: fw.bold, letterSpacing: -0.5 }}>
-                {verdict}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 11 }}>
+              <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: tone }} />
+              <Text style={{ color: colors.text.primary, fontSize: fs.xxl, fontWeight: fw.semibold, letterSpacing: -0.3, flex: 1 }}>
+                {flagged ? "Needs your attention" : "All caught up"}
               </Text>
+              {flagged && (
+                <View style={{ backgroundColor: withAlpha(tone, 0.16), borderRadius: radius.full, paddingHorizontal: 11, paddingVertical: 3 }}>
+                  <Text style={{ color: tone, fontSize: fs.lg, fontWeight: fw.bold }}>{st.flagCount}</Text>
+                </View>
+              )}
             </View>
 
-            {/* telemetry */}
-            <Text style={{ color: colors.text.secondary, fontFamily: MONO, fontSize: fs.md, letterSpacing: 0.6, marginTop: 8 }}>
-              {telemetry}{st.building ? "  ·  BUILDING" : ""}
+            <Text style={{ color: colors.text.secondary, fontSize: fs.base, marginTop: 6, lineHeight: 19 }}>
+              {flagged
+                ? `${st.activeCount} directives active`
+                : st.completedToday > 0
+                  ? `${st.completedToday} shipped today · ${st.activeCount} in progress`
+                  : `${st.activeCount} in progress`}
+              {st.building ? " · building now" : ""}
             </Text>
 
-            {/* live rows: what's flagged, or what's in flight */}
             {rows.length > 0 && (
-              <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: withAlpha(colors.border.default, 0.6), paddingTop: 12, gap: 10 }}>
-                <Text style={{ color: colors.text.tertiary, fontFamily: MONO, fontSize: fs.xs, letterSpacing: 1.5 }}>
-                  {eyebrow}
-                </Text>
-                {rows.map((r) => (
-                  <Pressable
-                    key={r.id}
-                    onPress={() => router.push(`/directive/${r.id}` as any)}
-                    style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, opacity: pressed ? 0.5 : 1 })}
-                  >
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.status[r.status] || colors.text.tertiary }} />
-                    <Text style={{ fontSize: fs.lg }}>{r.emoji}</Text>
-                    <Text numberOfLines={1} style={{ flex: 1, color: colors.text.primary, fontSize: fs.lg }}>
-                      {r.title}
-                    </Text>
-                    <Text style={{ color: colors.status[r.status] || colors.text.tertiary, fontFamily: MONO, fontSize: fs.xs, letterSpacing: 0.5 }}>
-                      {(HUMAN_STATUS[r.status] || r.status).toUpperCase()}
-                    </Text>
-                  </Pressable>
+              <View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: colors.border.subtle, paddingTop: 6 }}>
+                {rows.map((item) => (
+                  <StatusRow key={item.id} item={item} />
                 ))}
                 {overflow > 0 && (
-                  <Pressable onPress={() => router.push("/directives" as any)} style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-                    <Text style={{ color: toneColor, fontFamily: MONO, fontSize: fs.sm, letterSpacing: 0.5 }}>
-                      +{overflow} more →
+                  <Pressable onPress={() => router.push("/directives" as any)} style={({ pressed }) => ({ paddingTop: 8, opacity: pressed ? 0.5 : 1 })}>
+                    <Text style={{ color: colors.accent, fontSize: fs.base, fontWeight: fw.medium }}>
+                      View {overflow} more →
                     </Text>
                   </Pressable>
                 )}
               </View>
             )}
-
-            {/* calm empty state — an invitation, not a void */}
-            {rows.length === 0 && (
-              <Text style={{ color: colors.text.tertiary, fontSize: fs.base, marginTop: 12 }}>
-                Nothing in flight. Tap to queue Cipher's next directive.
-              </Text>
-            )}
           </Pressable>
         </Animated.View>
 
-        {/* ── Launcher ── */}
-        <Text style={{ color: colors.text.tertiary, fontFamily: MONO, fontSize: fs.xs, letterSpacing: 1.5, marginTop: 26, marginBottom: 12, paddingHorizontal: SIDE }}>
-          JUMP TO
+        {/* ── Shortcuts ── */}
+        <Text style={{ color: colors.text.secondary, fontSize: fs.lg, fontWeight: fw.semibold, marginTop: 28, marginBottom: 12, paddingHorizontal: SIDE }}>
+          Shortcuts
         </Text>
-        <View style={{ paddingHorizontal: SIDE }}>
-          {[DESTS.slice(0, 3), DESTS.slice(3, 6)].map((row, ri) => (
-            <View key={ri} style={{ flexDirection: "row", gap: GAP, marginBottom: GAP }}>
-              {row.map((d) => (
-                <Pressable
-                  key={d.id}
-                  onPress={() => router.push(d.route as any)}
-                  style={({ pressed }) => ({
-                    width: tileW,
-                    height: tileW * 0.82,
-                    backgroundColor: colors.bg.elevated,
-                    borderRadius: radius.lg,
-                    borderWidth: 1,
-                    borderColor: colors.border.default,
-                    padding: 12,
-                    justifyContent: "space-between",
-                    transform: [{ scale: pressed ? 0.96 : 1 }],
-                    opacity: pressed ? 0.85 : 1,
-                  })}
-                >
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: d.color, marginTop: 4 }} />
-                    {typeof d.count === "number" && d.count > 0 && (
-                      <Text style={{ color: d.color, fontFamily: MONO, fontSize: fs.sm, fontWeight: fw.semibold }}>{d.count}</Text>
-                    )}
-                  </View>
-                  <View>
-                    <Text style={{ fontSize: fs.xxl }}>{d.icon}</Text>
-                    <Text style={{ color: colors.text.secondary, fontSize: fs.md, fontWeight: fw.medium, marginTop: 4 }}>{d.label}</Text>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
+        <View style={{ paddingHorizontal: SIDE, flexDirection: "row", flexWrap: "wrap", gap: GAP }}>
+          {shortcuts.map((s) => (
+            <Pressable
+              key={s.id}
+              onPress={() => router.push(s.route as any)}
+              style={({ pressed }) => ({
+                width: colW,
+                backgroundColor: colors.bg.elevated,
+                borderRadius: radius.xl,
+                borderWidth: 1,
+                borderColor: colors.border.subtle,
+                padding: 14,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+                transform: [{ scale: pressed ? 0.97 : 1 }],
+                opacity: pressed ? 0.9 : 1,
+              })}
+            >
+              <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: withAlpha(s.color, 0.16), alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 20 }}>{s.icon}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.semibold }} numberOfLines={1}>
+                  {s.label}
+                </Text>
+                {typeof s.count === "number" && s.count > 0 && (
+                  <Text style={{ color: colors.text.tertiary, fontSize: fs.md, marginTop: 2 }}>{s.count} active</Text>
+                )}
+              </View>
+            </Pressable>
           ))}
         </View>
 
-        {/* ── Upload action ── */}
+        {/* ── Upload ── */}
         <Pressable
           onPress={() => router.push("/upload" as any)}
           style={({ pressed }) => ({
             marginHorizontal: SIDE,
-            marginTop: 4,
+            marginTop: GAP,
             flexDirection: "row",
             alignItems: "center",
             gap: 12,
             backgroundColor: colors.bg.elevated,
-            borderRadius: radius.lg,
+            borderRadius: radius.xl,
             borderWidth: 1,
-            borderColor: colors.border.default,
-            paddingVertical: 14,
-            paddingHorizontal: 16,
-            opacity: pressed ? 0.85 : 1,
+            borderColor: colors.border.subtle,
+            padding: 14,
+            opacity: pressed ? 0.9 : 1,
             transform: [{ scale: pressed ? 0.99 : 1 }],
           })}
         >
-          <Text style={{ fontSize: fs.xl }}>📤</Text>
-          <Text style={{ flex: 1, color: colors.text.secondary, fontSize: fs.lg, fontWeight: fw.medium }}>Upload to Cipher</Text>
-          <Text style={{ color: colors.text.disabled, fontFamily: MONO, fontSize: fs.base }}>›</Text>
+          <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: withAlpha(colors.accent, 0.16), alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ fontSize: 20 }}>📤</Text>
+          </View>
+          <Text style={{ flex: 1, color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.semibold }}>Upload to Cipher</Text>
+          <Text style={{ color: colors.text.disabled, fontSize: fs.xxl }}>›</Text>
         </Pressable>
       </ScrollView>
 
       {/* ── Bottom nav (Expo tab bar is display:none; this is the real nav) ── */}
       <View style={{
-        position: "absolute",
-        bottom: 0,
-        left: 0,
-        right: 0,
-        paddingBottom: insets.bottom + 4,
-        paddingTop: 10,
-        backgroundColor: withAlpha(colors.bg.base, 0.96),
-        borderTopWidth: 1,
-        borderTopColor: withAlpha(colors.border.default, 0.6),
-        flexDirection: "row",
-        justifyContent: "space-around",
-        alignItems: "center",
+        position: "absolute", bottom: 0, left: 0, right: 0,
+        paddingBottom: insets.bottom + 6, paddingTop: 10,
+        backgroundColor: withAlpha(colors.bg.base, 0.97),
+        borderTopWidth: 1, borderTopColor: colors.border.subtle,
+        flexDirection: "row", justifyContent: "space-around", alignItems: "center",
       }}>
         {[
           { icon: "⌂", label: "Home", route: null, active: true },
@@ -389,23 +326,10 @@ export default function HomeScreen() {
           <Pressable
             key={i}
             onPress={() => (tab.route ? router.push(tab.route as any) : null)}
-            style={({ pressed }) => ({
-              alignItems: "center",
-              paddingHorizontal: 12,
-              paddingVertical: 4,
-              opacity: pressed ? 0.6 : 1,
-              transform: [{ scale: pressed ? 0.95 : 1 }],
-            })}
+            style={({ pressed }) => ({ alignItems: "center", paddingHorizontal: 12, paddingVertical: 4, opacity: pressed ? 0.6 : 1, transform: [{ scale: pressed ? 0.95 : 1 }] })}
           >
-            <Text style={{ fontSize: 20, color: tab.active ? colors.accent : colors.text.disabled, marginBottom: 3 }}>
-              {tab.icon}
-            </Text>
-            <Text style={{
-              fontSize: 9,
-              fontWeight: tab.active ? fw.semibold : fw.normal,
-              color: tab.active ? colors.accent : colors.text.disabled,
-              letterSpacing: 0.3,
-            }}>
+            <Text style={{ fontSize: 21, color: tab.active ? colors.accent : colors.text.disabled, marginBottom: 3 }}>{tab.icon}</Text>
+            <Text style={{ fontSize: 10, fontWeight: tab.active ? fw.semibold : fw.normal, color: tab.active ? colors.accent : colors.text.disabled }}>
               {tab.label}
             </Text>
           </Pressable>
