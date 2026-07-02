@@ -129,8 +129,11 @@ export function useWebrtcCall() {
         session.on("failed", cleanupCall);
 
         // King Kazuma already tapped Accept on the briefing, which armed auto-answer — so
-        // connect this transfer INVITE straight away (one tap, no second ring). Report it to
-        // CallKit as an active call for the audio session + system UI.
+        // connect this transfer INVITE straight away (one tap, no second ring). Foreground:
+        // use the PROVEN Round-1 audio path — InCallManager + session.answer, and deliberately
+        // NO CallKit. Reporting to CallKit would seize the iOS audio session and then need the
+        // RTCAudioSession manual-mode handshake (unimplemented); Round 1 proved clean 2-way
+        // audio without it. CallKit stays reserved for the backgrounded PushKit ring (cert-window).
         if (consumeAutoAnswer()) {
           console.log("[webrtc] accepted transfer -> auto-answering", caller);
           try {
@@ -139,8 +142,6 @@ export function useWebrtcCall() {
               mediaConstraints: { audio: true, video: false },
               pcConfig: { iceServers: [{ urls: STUN }] },
             });
-            RNCallKeep.startCall(uuid, caller, name, "generic", false);
-            RNCallKeep.setCurrentCallActive(uuid);
             setState((s) => ({ ...s, inCall: true }));
           } catch (e: any) { console.warn("[webrtc] auto-answer error:", e?.message); }
           return;

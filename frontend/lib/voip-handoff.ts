@@ -7,7 +7,10 @@
 let armed = false;
 let disarmTimer: ReturnType<typeof setTimeout> | null = null;
 
-const DISARM_MS = 15000;
+// Wide enough to survive June's closing line + up to 8s jitter-buffer drain + Gemini
+// latency before the transfer INVITE lands; short enough that a failed transfer can't
+// auto-answer a much-later, unrelated call.
+const DISARM_MS = 45000;
 
 export function armAutoAnswer() {
   armed = true;

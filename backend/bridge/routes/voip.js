@@ -69,8 +69,7 @@ module.exports = function voipRoutes(ctx) {
         ...e,
         role:
           e.id === "ozzu-iphone" ? "iPhone app (WebRTC/CallKit)" :
-          e.id === "ozzu-gateway" ? "GSM/SIP trunk (SBC gateway)" :
-          e.id === "bridge-agent" ? "Bridge AI screener" : e.id,
+          e.id === "ozzu-gateway" ? "GSM/SIP trunk (SBC gateway)" : e.id,
         registered: !!(e.contactStatus && /avail/i.test(e.contactStatus)),
       }));
 

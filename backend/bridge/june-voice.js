@@ -217,6 +217,7 @@ class JuneSession {
     this.playing = false;           // in a talkspurt (draining) vs priming/idle
     this.bufStart = 0;              // when the current pre-roll fill began
     this.transferring = false;      // graceful hand-off in progress: drain then FIN, no hangup frame
+    this.acceptedForTransfer = false; // code-enforced gate: transfer_call is refused until King Kazuma accepts (handleAppDecision)
 
     this.socket.on("data", (data) => this.handleAudioSocketData(data));
     this.socket.on("close", () => this.cleanup("socket closed"));
@@ -602,6 +603,7 @@ class JuneSession {
     auditLog("app_decision", { call_uuid: this.callUuid, decision: sanitized });
     if (this.pendingAvailability?.timer) clearTimeout(this.pendingAvailability.timer);
     if (sanitized === "accepted") {
+      this.acceptedForTransfer = true; // unlock the code-enforced gate in toolTransferCall
       this.nudgeGemini("(King Kazuma accepted — he will take the call. Warmly tell the caller you're connecting them now, then use the transfer_call tool.)");
     } else {
       this.nudgeGemini("(King Kazuma isn't available right now. Warmly let the caller know, and offer to take a message.)");
@@ -609,6 +611,13 @@ class JuneSession {
   }
 
   async toolTransferCall() {
+    // Code-enforced screening gate: never ring King Kazuma unless he actually accepted
+    // (handleAppDecision set acceptedForTransfer). The prompt tells June to wait, but Gemini
+    // can break character under caller pressure — this makes the gate real, not advisory.
+    if (!this.acceptedForTransfer) {
+      auditLog("transfer_blocked_no_accept", { call_uuid: this.callUuid, caller_number: this.callerNumber });
+      return { status: "denied", message: "You cannot connect this call yet — King Kazuma has not accepted it. Keep the caller company and keep waiting, or offer to take a message." };
+    }
     auditLog("transfer", { call_uuid: this.callUuid, caller_number: this.callerNumber });
     try {
       await fetch(`${BRIDGE_URL}/soc/calls/transfer`, {

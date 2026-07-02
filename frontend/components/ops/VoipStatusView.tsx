@@ -24,7 +24,7 @@ function StatChip({ emoji, label, value, color }: { emoji: string; label: string
   );
 }
 
-const EP_EMOJI: Record<string, string> = { "ozzu-iphone": "📱", "ozzu-gateway": "📡", "bridge-agent": "🤖" };
+const EP_EMOJI: Record<string, string> = { "ozzu-iphone": "📱", "ozzu-gateway": "📡" };
 
 function EndpointCard({ e }: { e: VoipEndpoint }) {
   // The gateway is an IP-identified static trunk — an "Unavailable" endpoint state is
