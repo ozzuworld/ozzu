@@ -28,8 +28,7 @@ function selectModel(eventKey) {
       eventKey.startsWith("service_down:redis") ||
       eventKey.startsWith("service_down:nginx") ||
       eventKey.startsWith("deploy_failed:") ||
-      eventKey.startsWith("blocked:") ||
-      eventKey.startsWith("kairos:")) {
+      eventKey.startsWith("blocked:")) {
     return MODEL_SONNET;
   }
   // Investigation, status checks, idle monitoring → Haiku
@@ -522,30 +521,30 @@ function getAutoDreamStatus() {
   };
 }
 
-// ── KAIROS — 24/7 autonomous tick ──
-// Inspired by Claude Code leak: every 15 min, checks system state and acts on urgent issues.
-// Has 15-second blocking budget. Sends push notifications. Append-only audit log.
+// ── Alert monitor — 24/7 tick (reduced from the old KAIROS subsystem) ──
+// Every 15 min: check system state (stuck directives, services down, backup overdue) and
+// push an alert to King Kazuma. WhatsApp agent-management, OSINT auto-enrichment/collection,
+// and autonomous critical-fix spawning were removed (dir_1783007257869) — this is now purely
+// the proactive-alerting loop.
 
 const KAIROS_INTERVAL_MS = 15 * 60 * 1000;
-const KAIROS_ACT_COOLDOWN_MS = 60 * 60 * 1000;   // min 1hr between autonomous actions
-const KAIROS_AUDIT_LOG = "/home/gcp/ozzu/logs/kairos-audit.log";
+const KAIROS_AUDIT_LOG = "/home/gcp/ozzu/logs/alert-monitor.log";
 
 let _kairosTimer = null;
 let _kairosRunning = false;
-let _lastKairosActionAt = 0;
 
 function startKairos() {
   const fs = require("fs");
   const path = require("path");
   try { fs.mkdirSync(path.dirname(KAIROS_AUDIT_LOG), { recursive: true }); } catch {}
   _kairosTimer = setInterval(kairosTickSafe, KAIROS_INTERVAL_MS);
-  kairosAuditLog("KAIROS started");
-  log("[KAIROS] Started — ticking every 15 min");
+  kairosAuditLog("alert monitor started");
+  log("[monitor] Started — ticking every 15 min");
 }
 
 function stopKairos() {
   if (_kairosTimer) { clearInterval(_kairosTimer); _kairosTimer = null; }
-  kairosAuditLog("KAIROS stopped");
+  kairosAuditLog("alert monitor stopped");
 }
 
 function kairosAuditLog(msg) {
@@ -555,55 +554,8 @@ function kairosAuditLog(msg) {
 
 async function kairosTickSafe() {
   try { await kairosTick(); } catch (err) {
-    log(`[KAIROS] Tick error: ${err.message}`);
+    log(`[monitor] Tick error: ${err.message}`);
     kairosAuditLog(`TICK_ERROR: ${err.message}`);
-  }
-}
-
-// Session lock — written by cipher.sh, removed on exit
-const KAIROS_SESSION_LOCK = "/tmp/cipher-session.lock";
-
-function isHumanSessionActive() {
-  try {
-    if (fs.existsSync(KAIROS_SESSION_LOCK)) return true;
-  } catch {}
-  // Fallback: check if a claude process is running
-  try {
-    const { execSync } = require("child_process");
-    const out = execSync("pgrep -f 'claude ' 2>/dev/null || true", { encoding: "utf8" }).trim();
-    return out.length > 0;
-  } catch {}
-  return false;
-}
-
-// Track WA restart attempts to avoid infinite loops
-let _waRestartAttempts = 0;
-const WA_RESTART_COOLDOWN_MS = 30 * 60 * 1000; // 30 min between restart attempts
-let _lastWaRestartAt = 0;
-
-async function restartWaAgent() {
-  const { execSync } = require("child_process");
-  try {
-    // Kill existing process
-    execSync("ssh -p 8023 -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes localhost 'pkill -f \"node index.js\" 2>/dev/null; true'", { timeout: 8000 });
-    await new Promise(r => setTimeout(r, 2000));
-    // Restart agent
-    execSync("ssh -p 8023 -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes localhost 'cd ~/wa-agent && node index.js > ~/wa-agent.log 2>&1 &'", { timeout: 8000 });
-    // Wait for it to connect
-    await new Promise(r => setTimeout(r, 8000));
-    // Check if ready
-    const http = require("http");
-    const status = await new Promise((resolve) => {
-      const req = http.request({ hostname: "localhost", port: 8766, path: "/status", method: "GET", timeout: 5000 },
-        (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } }); });
-      req.on("error", () => resolve(null));
-      req.on("timeout", () => { req.destroy(); resolve(null); });
-      req.end();
-    });
-    return status?.ready === true;
-  } catch (err) {
-    log(`[KAIROS] WA restart SSH error: ${err.message}`);
-    return false;
   }
 }
 
@@ -612,62 +564,14 @@ async function kairosTick() {
   _kairosRunning = true;
   try {
     const snapshot = await buildKairosSnapshot();
-
-    // Auto-fix WA agent if disconnected — silently before checking other urgents
-    const waDisconnected = snapshot.issues.find(i => i.type === "wa_disconnected");
-    if (waDisconnected) {
-      const now = Date.now();
-      if (now - _lastWaRestartAt > WA_RESTART_COOLDOWN_MS) {
-        _lastWaRestartAt = now;
-        _waRestartAttempts++;
-        log(`[KAIROS] WA agent disconnected — attempting restart (attempt ${_waRestartAttempts})`);
-        kairosAuditLog(`WA_RESTART_ATTEMPT: #${_waRestartAttempts}`);
-        const recovered = await restartWaAgent();
-        if (recovered) {
-          log(`[KAIROS] WA agent recovered successfully`);
-          kairosAuditLog(`WA_RESTART_SUCCESS`);
-          _waRestartAttempts = 0;
-          // Remove wa_disconnected from issues since it's fixed
-          snapshot.issues.splice(snapshot.issues.indexOf(waDisconnected), 1);
-        } else {
-          log(`[KAIROS] WA agent restart failed`);
-          kairosAuditLog(`WA_RESTART_FAILED`);
-          // Alert King Kazuma directly via bridge HTTP (WA is down so we log only)
-          snapshot.issues.push({ type: "wa_failed", attempts: _waRestartAttempts });
-        }
-      }
-    } else {
-      _waRestartAttempts = 0; // reset counter when WA is healthy
-    }
-
-    // OSINT: process un-enriched observations via Claude NLP (non-blocking, every tick)
-    await kairosOsintEnrich();
-
-    // OSINT: check if any subjects are due for re-collection
-    await kairosOsintAutoCollect(snapshot);
-
     const urgent = detectUrgent(snapshot);
     if (!urgent) return;
 
     kairosAuditLog(`URGENT: ${urgent.type} — ${urgent.message}`);
-    log(`[KAIROS] Urgent detected: ${urgent.type}`);
+    log(`[monitor] Urgent detected: ${urgent.type}`);
 
-    // Always send push notification (non-destructive, even during human session)
+    // Alert King Kazuma via push — the whole point of this loop now.
     await kairosPush(urgent);
-
-    // Only spawn autonomous fix when NO human session is active
-    const humanActive = isHumanSessionActive();
-    if (humanActive) {
-      log(`[KAIROS] Human session active — push sent, auto-fix deferred`);
-      kairosAuditLog(`DEFERRED (human session active): ${urgent.type}`);
-      return;
-    }
-
-    // Spawn autonomous fix for critical issues (rate-limited to 1/hr)
-    if (urgent.severity === "critical" && Date.now() - _lastKairosActionAt > KAIROS_ACT_COOLDOWN_MS) {
-      _lastKairosActionAt = Date.now();
-      spawnKairosAction(urgent);
-    }
   } finally {
     _kairosRunning = false;
   }
@@ -692,19 +596,6 @@ async function buildKairosSnapshot() {
     const status = watchdog.getStatus();
     const down = Object.entries(status).filter(([, v]) => v?.status === "down").map(([k]) => k);
     if (down.length > 0) issues.push({ type: "services_down", services: down });
-  } catch {}
-
-  // Check WA agent connectivity
-  try {
-    const http = require("http");
-    const waStatus = await new Promise((resolve) => {
-      const req = http.request({ hostname: "localhost", port: 8766, path: "/status", method: "GET", timeout: 3000 },
-        (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } }); });
-      req.on("error", () => resolve(null));
-      req.on("timeout", () => { req.destroy(); resolve(null); });
-      req.end();
-    });
-    if (!waStatus?.ready) issues.push({ type: "wa_disconnected" });
   } catch {}
 
   // Check backup age
@@ -734,12 +625,6 @@ function detectUrgent(snapshot) {
   const stuck = snapshot.issues.find(i => i.type === "stuck_directives");
   if (stuck) return { type: "stuck_directives", severity: "medium", message: `${stuck.count} directive(s) stuck: ${(stuck.items || []).join(", ")}` };
 
-  const waFailed = snapshot.issues.find(i => i.type === "wa_failed");
-  if (waFailed) return { type: "wa_failed", severity: "high", message: `WhatsApp agent down after ${waFailed.attempts} restart attempt(s) — manual intervention needed` };
-
-  const osintDiff = snapshot.issues.find(i => i.type === "osint_diff");
-  if (osintDiff) return { type: "osint_diff", severity: "medium", message: `🔍 ${osintDiff.subject} profile changed: ${osintDiff.changes.join(", ")}` };
-
   return null;
 }
 
@@ -755,7 +640,7 @@ async function kairosPush(urgent) {
     const now = Date.now();
     const lastPush = _lastPushAt[urgent.type] || 0;
     if (now - lastPush < PUSH_COOLDOWN_MS) {
-      log(`[KAIROS] Push suppressed (cooldown): ${urgent.type}`);
+      log(`[monitor] Push suppressed (cooldown): ${urgent.type}`);
       return;
     }
     _lastPushAt[urgent.type] = now;
@@ -765,232 +650,27 @@ async function kairosPush(urgent) {
     const owner = await Person.owner(_ctx.db);
     if (!owner) return;
 
-    const titles = { services_down: "⚠️ Service Alert", backup_overdue: "💾 Backup Overdue", stuck_directives: "🔧 Pipeline Alert", wa_failed: "📵 WhatsApp Down", osint_diff: "🔍 Profile Change Detected" };
+    const titles = { services_down: "⚠️ Service Alert", backup_overdue: "💾 Backup Overdue", stuck_directives: "🔧 Pipeline Alert" };
     const title = titles[urgent.type] || "⚡ Ozzu Alert";
 
-    // Try APNs push first — falls back to WhatsApp if no devices registered
     if (owner.devices.length > 0) {
       await owner.notify(title, urgent.message, { type: urgent.type });
       kairosAuditLog(`PUSH_SENT: ${urgent.type} → ${owner.devices.length} device(s)`);
-      log(`[KAIROS] Push sent: ${urgent.message}`);
+      log(`[monitor] Push sent: ${urgent.message}`);
     } else {
-      // APNs unavailable (no signed build) — reach via WhatsApp
-      const waChannel = owner.channels.find(c => c.type === "whatsapp");
-      if (waChannel) {
-        await owner.reach(`${title}\n${urgent.message}`, "whatsapp");
-        kairosAuditLog(`WA_SENT: ${urgent.type} → ${waChannel.address}`);
-        log(`[KAIROS] WhatsApp alert sent: ${urgent.message}`);
-      } else {
-        log(`[KAIROS] No delivery channel available for owner`);
-      }
+      log(`[monitor] No registered device for owner — alert not delivered: ${urgent.message}`);
     }
   } catch (err) {
-    log(`[KAIROS] Push failed: ${err.message}`);
+    log(`[monitor] Push failed: ${err.message}`);
     kairosAuditLog(`PUSH_FAILED: ${err.message}`);
-  }
-}
-
-function spawnKairosAction(urgent) {
-  const prompt = urgent.type === "services_down"
-    ? `KAIROS autonomous action: Services DOWN: ${urgent.services?.join(", ")}. Check docker compose ps, logs, attempt restart. Report findings.`
-    : `KAIROS autonomous action: ${urgent.message}. Investigate and fix if possible.`;
-
-  spawnClaude({ eventKey: `kairos:${urgent.type}`, prompt, reason: `KAIROS: ${urgent.type}`, model: MODEL_SONNET });
-  kairosAuditLog(`ACTION_SPAWNED: ${urgent.type}`);
-}
-
-// ── KAIROS OSINT — NLP enrichment via Claude Max (zero extra cost) ──
-
-const OSINT_BATCH_SIZE = 5;  // process up to 5 observations per tick
-let _osintEnrichRunning = false;
-
-async function kairosOsintEnrich() {
-  if (_osintEnrichRunning || !_ctx?.db) return;
-  _osintEnrichRunning = true;
-
-  try {
-    const unenriched = await _ctx.db.kgGetUnenrichedObservations(OSINT_BATCH_SIZE);
-    if (unenriched.length === 0) return;
-
-    log(`[KAIROS-OSINT] ${unenriched.length} observation(s) to enrich`);
-    kairosAuditLog(`OSINT_ENRICH: processing ${unenriched.length} observations`);
-
-    for (const obs of unenriched) {
-      try {
-        // Build prompt for Claude NLP extraction
-        const data = typeof obs.raw_data === "string" ? JSON.parse(obs.raw_data) : (obs.raw_data || {});
-        const content = obs.content || "";
-        const combined = { ...data, content_text: content, platform: obs.platform, type: obs.observation_type };
-
-        const prompt = [
-          "You are an OSINT intelligence analyst. Extract structured intelligence from this social media observation.",
-          `Subject: "${obs.subject_name}" (ID: ${obs.subject_id})`,
-          `Platform: ${obs.platform}, Type: ${obs.observation_type}`,
-          "",
-          "DATA:",
-          JSON.stringify(combined, null, 2),
-          "",
-          'Return ONLY valid JSON:',
-          '{"entities":[{"name":"...","type":"person|org|location","role":"..."}],',
-          '"relationships":[{"from":"...","to":"...","type":"works_at|knows|follows|mentions","confidence":0-100}],',
-          '"sentiment":"positive|negative|neutral",',
-          '"inferred_facts":[{"category":"employment|location|education|interest|skill","key":"...","value":"...","confidence":0-100}],',
-          '"topics":["..."],',
-          '"changes_detected":["..."],',
-          '"summary":"1-sentence intelligence summary"}',
-        ].join("\n");
-
-        const { execSync } = require("child_process");
-        const env = { ...process.env };
-        delete env.CLAUDECODE;
-        delete env.CLAUDE_CODE_ENTRYPOINT;
-
-        const output = execSync(
-          `claude -p ${JSON.stringify(prompt)} --model claude-haiku-4-5-20251001 --output-format text`,
-          { cwd: "/tmp", encoding: "utf8", timeout: 30000, env }
-        );
-
-        // Parse Claude's response (strip markdown code fences)
-        const cleaned = output.replace(/```json\s*/g, "").replace(/```\s*/g, "");
-        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const nlpResult = JSON.parse(jsonMatch[0]);
-          await _ctx.db.kgMarkObservationEnriched(obs.id, nlpResult);
-
-          // Store inferred facts into KG
-          for (const fact of nlpResult.inferred_facts || []) {
-            await _ctx.db.kgAddFact({
-              subject_id: obs.subject_id,
-              category: fact.category,
-              key: fact.key,
-              value: typeof fact.value === "string" ? fact.value : JSON.stringify(fact.value),
-              source: "kairos:nlp",
-              confidence: fact.confidence || 50,
-            });
-          }
-
-          // Store new connections
-          for (const rel of nlpResult.relationships || []) {
-            // Try to find target subject
-            const targets = await _ctx.db.kgGetSubjects({ search: rel.to });
-            if (targets.length > 0) {
-              try {
-                await _ctx.db.kgAddConnection({
-                  source_id: obs.subject_id,
-                  target_id: targets[0].id,
-                  relationship: rel.type || "mentions",
-                  confidence: rel.confidence || 50,
-                  source: "kairos:nlp",
-                });
-              } catch {} // ignore duplicates
-            }
-          }
-
-          log(`[KAIROS-OSINT] Enriched obs #${obs.id}: ${nlpResult.summary || "done"}`);
-        } else {
-          // Mark enriched even on parse failure to avoid infinite retries
-          await _ctx.db.kgMarkObservationEnriched(obs.id, { error: "parse_failed", raw: output.slice(0, 500) });
-          log(`[KAIROS-OSINT] Failed to parse NLP for obs #${obs.id}`);
-        }
-      } catch (err) {
-        log(`[KAIROS-OSINT] Enrichment error for obs #${obs.id}: ${err.message}`);
-        // Mark as enriched with error to avoid retrying forever
-        await _ctx.db.kgMarkObservationEnriched(obs.id, { error: err.message }).catch(() => {});
-      }
-    }
-
-    kairosAuditLog(`OSINT_ENRICH_DONE: ${unenriched.length} processed`);
-  } catch (err) {
-    log(`[KAIROS-OSINT] Enrich batch error: ${err.message}`);
-  } finally {
-    _osintEnrichRunning = false;
-  }
-}
-
-// ── KAIROS OSINT — Auto-collection for active subjects ──
-
-const COLLECTOR_URL = process.env.COLLECTOR_URL || "http://172.17.0.1:3335";
-
-async function kairosOsintAutoCollect(snapshot) {
-  if (!_ctx?.db) return;
-
-  try {
-    const due = await _ctx.db.kgGetSubjectsDueForCollection();
-    if (due.length === 0) return;
-
-    log(`[KAIROS-OSINT] ${due.length} subject(s) due for collection`);
-    kairosAuditLog(`OSINT_AUTOCOLLECT: ${due.length} subjects due`);
-
-    // Only collect 1 subject per tick to stay within time budget
-    const subject = due[0];
-
-    // Get anchors to know what platforms to collect from
-    const anchors = await _ctx.db.kgGetAnchors(subject.id);
-    const twitterAnchor = anchors.find(a => a.anchor_type === "twitter" || a.anchor_type === "x");
-
-    if (twitterAnchor) {
-      try {
-        const resp = await fetch(`${COLLECTOR_URL}/collect`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            platform: "twitter",
-            action: "profile",
-            subject_id: subject.id,
-            target: twitterAnchor.value,
-          }),
-          signal: AbortSignal.timeout(10000),
-        });
-        const result = await resp.json();
-        if (result.ok) {
-          await _ctx.db.kgMarkSubjectCollected(subject.id);
-          log(`[KAIROS-OSINT] Auto-collected ${subject.name} on twitter`);
-          kairosAuditLog(`OSINT_COLLECTED: ${subject.name} (twitter)`);
-
-          // Also check for diffs
-          const diffs = await _ctx.db.kgGetObservationDiffs(subject.id, "twitter");
-          if (diffs.length > 0) {
-            log(`[KAIROS-OSINT] Diffs detected for ${subject.name}: ${diffs.map(d => d.field).join(", ")}`);
-            kairosAuditLog(`OSINT_DIFF: ${subject.name} changed: ${diffs.map(d => d.field).join(", ")}`);
-
-            // Store diff as timeline event
-            await _ctx.db.kgAddEvent({
-              subject_id: subject.id,
-              event_type: "profile_change",
-              title: `Profile changes detected: ${diffs.map(d => d.field).join(", ")}`,
-              description: JSON.stringify(diffs),
-              source: "kairos:diff",
-            });
-
-            // Push notification for significant diffs
-            if (diffs.some(d => ["display_name", "bio", "location", "verified"].includes(d.field))) {
-              snapshot.issues.push({
-                type: "osint_diff",
-                subject: subject.name,
-                changes: diffs.map(d => d.field),
-              });
-            }
-          }
-        }
-      } catch (err) {
-        log(`[KAIROS-OSINT] Auto-collect failed for ${subject.name}: ${err.message}`);
-      }
-    } else {
-      // No twitter anchor — just mark as collected to avoid retrying
-      await _ctx.db.kgMarkSubjectCollected(subject.id);
-    }
-  } catch (err) {
-    log(`[KAIROS-OSINT] Auto-collect error: ${err.message}`);
   }
 }
 
 function getKairosStatus() {
   return {
     running: !_kairosRunning,
-    lastActionAt: _lastKairosActionAt ? new Date(_lastKairosActionAt).toISOString() : null,
     auditLog: KAIROS_AUDIT_LOG,
     intervalMinutes: KAIROS_INTERVAL_MS / 60000,
-    osint: { enrichRunning: _osintEnrichRunning },
   };
 }
 

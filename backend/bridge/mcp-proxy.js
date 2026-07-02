@@ -7,7 +7,6 @@ const https = require("https");
 const { EventEmitter } = require("events");
 
 const UPSTREAMS = {
-  "whatsapp-mcp":   { transport: "sse",  url: "http://localhost:8081/sse" },
   "gmail-personal": { transport: "http", url: "http://localhost:8000/mcp" },
   "gmail-ozzu":     { transport: "http", url: "http://localhost:8001/mcp" },
 };

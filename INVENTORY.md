@@ -26,16 +26,13 @@ Primary compute — always on. All services run here via Docker. See registry §
 | browser | 3334 | Headless browser for web tasks | ✅ running |
 | obico-server-web | 3334 | Obico (Spaghetti Detective) print failure detection | ✅ running |
 | obico-server-ml_api | — | Obico ML inference | ✅ running |
-| whatsapp-bridge | 8180 | WhatsApp MCP — whatsmeow Go bridge (41 tools) | ⚠️ check `docker ps` |
-| whatsapp-mcp | 8081 | WhatsApp MCP — Python MCP server (SSE) | ⚠️ check `docker ps` |
-| whatsapp-web-ui | 8090 | WhatsApp MCP — QR pairing + webhook UI | ⚠️ check `docker ps` |
 
 WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a container. OpenVPN was decommissioned 2026-05-02 — see registry §4.
 
 ### VPN clients
 **See registry §4 (WireGuard Configuration) for the authoritative peer list.** Briefly: dev-01 / kazuma-pc / orangepi5 / cat-s41 / tablet-p610 active on WG 10.9.0.0/24; ozzu-android config exists but not yet installed.
 
-### CAT S41 (WhatsApp Agent + L3 relay)
+### CAT S41 (L3 relay)
 | Item | Value |
 |------|-------|
 | Device | CAT S41 (Bullitt Group, rugged phone, always on) |
@@ -48,9 +45,8 @@ WireGuard runs on the host kernel (interface `wg0`, udp/51820), not as a contain
 | ADB TCP | 5555 (set by boot script, reachable over WG at 10.9.0.22:5555) |
 | Telemetry | `ozzu-telemetry-android.sh` → `POST /api/device-telemetry` (device_id `cat-s41`, 60s cycle) |
 | Boot services | Magisk `service.d/02-ozzuwg-keepalive.sh` — clock fix, WG tunnel up, IP forwarding, telemetry reporter, 15s watchdog |
-| Role | WhatsApp bridge, L3 relay. **GSM/VOIP-gateway role moved to ozzu-sbc** (Rock Pi 4B) — the CAT's MediaTek modem is half-duplex-capped, so June's call gateway now runs on the SBC. |
+| Role | L3 relay. **GSM/VOIP-gateway role moved to ozzu-sbc** (Rock Pi 4B) — the CAT's MediaTek modem is half-duplex-capped, so June's call gateway now runs on the SBC. |
 | **CRITICAL** | Kernel 4.4 silently blackholes root UDP sockets — `ozzuwg` daemon does NOT work. WG must use the app's VpnService driven by broadcast intents. No RTC battery — clock resets to 2009 on reboot; boot script fixes via NTP. |
-| WhatsApp | Number 3226033350, Termux → Node.js → Baileys → WA Web. SSH via `ssh -p 8023 localhost` (reverse tunnel GCP:8023→phone:8022). WA API at GCP:8766→phone:8765. Auto-start via Termux:Boot. |
 
 ### iPhone (King Kazuma)
 - Ozzu app installed via SideStore (self-service sideload, no PC needed for refresh)
@@ -253,12 +249,10 @@ sudo du -sh /var/lib/docker/{overlay2,volumes,image,containers} 2>/dev/null
 | Server | URL | Purpose |
 |--------|-----|---------|
 | ozzu-bridge | http://localhost:3333/mcp | Main bridge — directives, pipeline, SOC, services, infra |
-| whatsapp-mcp | http://localhost:8081/mcp | WhatsApp Extended — 41 tools. **Containers DOWN — check `docker ps` before use.** |
 | gmail-personal | http://localhost:8000/mcp | Gmail (eng.hsuarezp). **DOWN since 2026-06-03 — creds wiped, parked.** |
 | gmail-ozzu | http://localhost:8001/mcp | Gmail (eng.ozzu). **DOWN since 2026-06-03 — same.** |
 | codegraph | stdio (`codegraph serve --mcp`) | Code knowledge graph — AST + FTS5 + graph. Index at `.codegraph/`. |
 
-**WhatsApp MCP**: `cd whatsapp-mcp && docker compose up -d` (separate compose, not in backend/)
 **Gmail MCP**: `./scripts/start-gmail-mcp.sh` — **DOWN, requires re-setup of Google OAuth credentials**
 
 ---

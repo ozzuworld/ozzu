@@ -11,16 +11,9 @@ interface MessageApprovalModalProps {
 }
 
 const TOOL_LABELS: Record<string, string> = {
-  send_whatsapp: "WhatsApp",
-  send_message: "WhatsApp",
-  send_file: "WhatsApp File",
-  send_audio_message: "WhatsApp Audio",
   send_email: "Email",
   send_gmail_message: "Gmail",
   reach_person: "Reach Person",
-  "WhatsApp": "WhatsApp",
-  "WhatsApp File": "WhatsApp File",
-  "WhatsApp Audio": "WhatsApp Audio",
   "Gmail (personal)": "Gmail (personal)",
   "Gmail (ozzu)": "Gmail (ozzu)",
   "Chat (personal)": "Chat (personal)",

@@ -53,7 +53,7 @@ Expandable health card for services.
 | `BuildRunBadge` | `components/directives/BuildRunBadge.tsx` | CI/CD build status badge |
 | `PlanReviewModal` | `components/directives/PlanReviewModal.tsx` | Markdown plan review + approve/reject |
 | `StatusChangeSheet` | `components/directives/StatusChangeSheet.tsx` | Status transition bottom sheet |
-| `MessageApprovalModal` | `components/directives/MessageApprovalModal.tsx` | WhatsApp/Gmail approval gate |
+| `MessageApprovalModal` | `components/directives/MessageApprovalModal.tsx` | Gmail/Email approval gate |
 
 ## Business Components
 

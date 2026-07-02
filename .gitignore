@@ -44,7 +44,6 @@ CLAUDE.local.md.bak
 # OS
 .DS_Store
 Thumbs.db
-whatsapp-mcp/
 
 # All .env files anywhere under backend/ — names like .env.gmail, .env.email, .env.encrypted,
 # backend/bridge/.env, etc. have repeatedly leaked plaintext secrets into git history

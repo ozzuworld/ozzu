@@ -3,11 +3,6 @@
 "use strict";
 
 const GATED_TOOLS = {
-  "whatsapp-mcp": {
-    send_message:       { label: "WhatsApp",       extract: (a) => ({ recipient: a.recipient, message: a.message }) },
-    send_file:          { label: "WhatsApp File",   extract: (a) => ({ recipient: a.recipient, message: `File: ${a.media_path || a.file_path || "attachment"}` }) },
-    send_audio_message: { label: "WhatsApp Audio",  extract: (a) => ({ recipient: a.recipient, message: `Audio: ${a.media_path || a.file_path || "voice message"}` }) },
-  },
   "gmail-personal": {
     send_gmail_message: { label: "Gmail (personal)", extract: (a) => ({ recipient: a.to, message: `Subject: ${a.subject}` }) },
     send_message:       { label: "Chat (personal)",  extract: (a) => ({ recipient: a.recipient, message: a.message }) },

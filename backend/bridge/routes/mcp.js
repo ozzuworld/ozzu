@@ -291,10 +291,10 @@ module.exports = function mcpRoutes(ctx) {
         },
       },
     },
-    // send_whatsapp, read_whatsapp, request_human_takeover removed — now handled by whatsapp-mcp server (localhost:8081)
+    // WhatsApp tools removed (dir_1783007257869) — the WhatsApp integration is retired
     {
       name: "list_persons",
-      description: "List all known persons in Ozzu — their name, relationship, channels (WhatsApp, email, push), devices, and linked faces.",
+      description: "List all known persons in Ozzu — their name, relationship, channels (email, push), devices, and linked faces.",
       inputSchema: { type: "object", properties: {} },
     },
     {
@@ -310,14 +310,14 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "reach_person",
-      description: "Send a message to a person through their primary channel (WhatsApp, email, or push). Cipher uses this instead of raw send_whatsapp/send_email when talking to known contacts.",
+      description: "Send a message to a person through their primary channel (email or push). Cipher uses this instead of raw send_email when talking to known contacts.",
       inputSchema: {
         type: "object",
         properties: {
           name: { type: "string", description: "Person name (partial match)" },
           id: { type: "string", description: "Person UUID" },
           message: { type: "string", description: "Message to send" },
-          via: { type: "string", enum: ["whatsapp", "email", "push"], description: "Force a specific channel (optional — defaults to primary)" },
+          via: { type: "string", enum: ["email", "push"], description: "Force a specific channel (optional — defaults to primary)" },
         },
         required: ["message"],
       },
@@ -331,7 +331,6 @@ module.exports = function mcpRoutes(ctx) {
           name: { type: "string", description: "Full name" },
           nickname: { type: "string", description: "Nickname or alias" },
           relationship: { type: "string", enum: ["trusted", "contact", "recognized", "unknown"], description: "Relationship to King Kazuma" },
-          whatsapp: { type: "string", description: "WhatsApp phone number (digits only, with country code)" },
           email: { type: "string", description: "Email address" },
           notes: { type: "string", description: "Any notes about this person" },
         },
@@ -1213,7 +1212,7 @@ module.exports = function mcpRoutes(ctx) {
         return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
       }
 
-      // send_whatsapp, read_whatsapp, request_human_takeover — removed, now handled by whatsapp-mcp server
+      // WhatsApp tools removed (dir_1783007257869) — the WhatsApp integration is retired
 
       case "create_venture": {
         const http = require("http");
@@ -3021,8 +3020,7 @@ ${result.narrative}
         const { Person } = require("../person");
         if (!args.name) return { content: [{ type: "text", text: "name is required" }], isError: true };
         const channels = [];
-        if (args.whatsapp) channels.push({ type: "whatsapp", address: args.whatsapp.replace(/\D/g, ""), is_primary: true });
-        if (args.email) channels.push({ type: "email", address: args.email, is_primary: !args.whatsapp });
+        if (args.email) channels.push({ type: "email", address: args.email, is_primary: true });
         const p = await Person.create(ctx.db, {
           name: args.name,
           nickname: args.nickname,

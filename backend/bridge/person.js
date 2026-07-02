@@ -75,15 +75,7 @@ async function ensureTables(db) {
     // Migrate owner_profile channels
     const ownerProfile = await db.query(`SELECT phone, email FROM owner_profile LIMIT 1`).catch(() => ({ rows: [] }));
     if (ownerProfile.rows.length > 0) {
-      const { phone, email } = ownerProfile.rows[0];
-      if (phone) {
-        const cleanPhone = phone.replace(/\D/g, "");
-        await db.query(
-          `INSERT INTO person_channels (person_id, type, address, is_primary, verified)
-           VALUES ($1, 'whatsapp', $2, TRUE, TRUE) ON CONFLICT (type, address) DO NOTHING`,
-          [ownerId, cleanPhone]
-        ).catch(() => {});
-      }
+      const { email } = ownerProfile.rows[0];
       if (email) {
         await db.query(
           `INSERT INTO person_channels (person_id, type, address, is_primary, verified)
@@ -123,7 +115,7 @@ class Person {
   }
 
   // THE OZ MOVE — reach this person through the right channel
-  // via: 'whatsapp' | 'email' | 'push' | null (auto-pick primary)
+  // via: 'email' | 'push' | null (auto-pick primary)
   async reach(text, via = null) {
     const channel = via
       ? this.channels.find(c => c.type === via)
@@ -132,19 +124,6 @@ class Person {
     if (!channel) throw new Error(`No channel configured for ${this.name}`);
 
     switch (channel.type) {
-      case "whatsapp": {
-        const http = require("http");
-        const payload = JSON.stringify({ to: channel.address, message: text });
-        return new Promise((resolve, reject) => {
-          const req = http.request(
-            { hostname: "localhost", port: 3333, path: "/whatsapp/send", method: "POST",
-              headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
-            (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => resolve(JSON.parse(d))); }
-          );
-          req.on("error", reject);
-          req.write(payload); req.end();
-        });
-      }
       case "email": {
         const http = require("http");
         const payload = JSON.stringify({ to: channel.address, subject: "Ozzu", body: text });

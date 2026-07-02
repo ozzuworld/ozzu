@@ -46,7 +46,6 @@ const deviceTelemetryRoutes = require("./routes/device-telemetry");
 const businessEmailRoutes = require("./routes/business-email");
 const vaultRoutes = require("./routes/vault");
 const financeRoutes = require("./routes/finance");
-const whatsappRoutes = require("./routes/whatsapp");
 const octoprintRoutes = require("./routes/octoprint");
 const socRoutes = require("./routes/soc");
 const watchdog = require("./infra/watchdog");
@@ -1581,7 +1580,6 @@ function getRouteHandlers() {
       businessEmail: businessEmailRoutes(routeCtx),
       vault: vaultRoutes(routeCtx),
       finance: financeRoutes(routeCtx),
-      whatsapp: whatsappRoutes(routeCtx),
       octoprint: octoprintRoutes(routeCtx),
       soc: socRoutes(routeCtx),
       ozzuSource: ozzuSourceRoutes(routeCtx),
@@ -1721,7 +1719,6 @@ async function handleRequest(req, res) {
   if (await r.businessEmail(req, res, pathname, url)) return;
   if (await r.vault(req, res, pathname, url)) return;
   if (await r.finance(req, res, pathname, url)) return;
-  if (await r.whatsapp(req, res, pathname, url)) return;
   if (await r.octoprint(req, res, pathname, url)) return;
   if (await r.soc(req, res, pathname, url)) return;
   if (await r.ozzuSource(req, res, pathname, url)) return;
@@ -6871,7 +6868,6 @@ wss.on("connection", (ws, req) => {
     proactiveReporter.start({ db, redis, broadcastToAll, sendNotification, getDirectives });
     // Boot Person identity layer — ensure tables + seed owner
     require("./person").ensureTables(db).catch(e => log.bridge.error("person ensureTables:", e.message));
-    // wa-service proxies to Android agent — no local connection needed on start
     metrics.startFlushTimer();
     // Notify June about restart if this isn't the first boot
     if (_restartCount > 0 && _previousStartedAt) {
