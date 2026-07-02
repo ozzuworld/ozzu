@@ -116,14 +116,20 @@ export default function HomeScreen() {
   const rows = flagged ? st.flags.slice(0, 3) : st.inFlight;
   const overflow = flagged ? st.flagCount - Math.min(3, st.flags.length) : 0;
 
-  const shortcuts: Array<{ id: string; icon: string; label: string; route: string; color: string; count?: number }> = [
-    { id: "directives", icon: "⚡", label: "Directives", route: "/directives", color: colors.accent, count: st.activeCount },
-    { id: "soc", icon: "🔐", label: "SOC", route: "/soc", color: colors.error },
-    { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", color: colors.brand.amber, count: st.ventureCount },
+  // Bento hierarchy: one featured card, a medium pair, a compact trio — so the
+  // set reads as a designed layout, not a repeating row of icons.
+  const dirSubMain = `${st.activeCount} active`;
+  const dirSubExtra = flagged ? `${st.flagCount} need attention` : st.building ? "building now" : "";
+  const mediumCards = [
+    { id: "soc", icon: "🔐", label: "SOC", route: "/soc", color: colors.error, sub: "Security ops" },
+    { id: "ventures", icon: "🚀", label: "Ventures", route: "/business", color: colors.brand.amber, sub: `${st.ventureCount} active` },
+  ];
+  const compactCards = [
     { id: "june", icon: "👩", label: "June", route: "/avatar", color: colors.brand.purple },
     { id: "files", icon: "📦", label: "Files", route: "/files", color: colors.brand.blue },
     { id: "voice", icon: "🎙️", label: "Voice", route: "/cipher", color: colors.brand.cyanLight },
   ];
+  const compW = (W - SIDE * 2 - GAP * 2) / 3;
 
   // One gentle entrance for the card stack.
   const enter = useRef(new Animated.Value(0)).current;
@@ -244,12 +250,49 @@ export default function HomeScreen() {
           </Pressable>
         </Animated.View>
 
-        {/* ── Shortcuts ── */}
+        {/* ── Shortcuts (bento: featured → medium pair → compact trio) ── */}
         <Text style={{ color: colors.text.secondary, fontSize: fs.lg, fontWeight: fw.semibold, marginTop: 28, marginBottom: 12, paddingHorizontal: SIDE }}>
           Shortcuts
         </Text>
-        <View style={{ paddingHorizontal: SIDE, flexDirection: "row", flexWrap: "wrap", gap: GAP }}>
-          {shortcuts.map((s) => (
+
+        {/* Featured — the primary surface, given real weight */}
+        <Pressable
+          onPress={() => router.push("/directives" as any)}
+          style={({ pressed }) => ({
+            marginHorizontal: SIDE,
+            backgroundColor: colors.bg.surface,
+            borderRadius: radius.xl,
+            borderWidth: 1,
+            borderColor: colors.border.default,
+            padding: 18,
+            overflow: "hidden",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 14,
+            shadowColor: "#000",
+            shadowOpacity: 0.3,
+            shadowRadius: 16,
+            shadowOffset: { width: 0, height: 8 },
+            transform: [{ scale: pressed ? 0.99 : 1 }],
+          })}
+        >
+          <View pointerEvents="none" style={{ position: "absolute", top: -34, right: -24, width: 140, height: 140, borderRadius: 999, backgroundColor: withAlpha(colors.accent, 0.1) }} />
+          <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: withAlpha(colors.accent, 0.18), alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ fontSize: 26 }}>⚡</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.text.primary, fontSize: fs.xxl, fontWeight: fw.semibold }}>Directives</Text>
+            <Text style={{ fontSize: fs.base, marginTop: 3 }}>
+              <Text style={{ color: colors.text.secondary }}>{dirSubMain}</Text>
+              {dirSubExtra ? <Text style={{ color: flagged ? tone : colors.text.tertiary }}>{"  ·  " + dirSubExtra}</Text> : null}
+            </Text>
+          </View>
+          <Text style={{ color: colors.accent, fontSize: 26, fontWeight: fw.bold }}>{st.activeCount}</Text>
+        </Pressable>
+
+        {/* Medium pair */}
+        <View style={{ flexDirection: "row", gap: GAP, paddingHorizontal: SIDE, marginTop: GAP }}>
+          {mediumCards.map((s) => (
             <Pressable
               key={s.id}
               onPress={() => router.push(s.route as any)}
@@ -259,25 +302,47 @@ export default function HomeScreen() {
                 borderRadius: radius.xl,
                 borderWidth: 1,
                 borderColor: colors.border.subtle,
-                padding: 14,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 12,
+                padding: 15,
+                shadowColor: "#000",
+                shadowOpacity: 0.22,
+                shadowRadius: 10,
+                shadowOffset: { width: 0, height: 5 },
                 transform: [{ scale: pressed ? 0.97 : 1 }],
+                opacity: pressed ? 0.92 : 1,
+              })}
+            >
+              <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: withAlpha(s.color, 0.16), alignItems: "center", justifyContent: "center", marginBottom: 11 }}>
+                <Text style={{ fontSize: 21 }}>{s.icon}</Text>
+              </View>
+              <Text style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.semibold }}>{s.label}</Text>
+              <Text style={{ color: colors.text.tertiary, fontSize: fs.md, marginTop: 2 }}>{s.sub}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {/* Compact trio */}
+        <View style={{ flexDirection: "row", gap: GAP, paddingHorizontal: SIDE, marginTop: GAP }}>
+          {compactCards.map((s) => (
+            <Pressable
+              key={s.id}
+              onPress={() => router.push(s.route as any)}
+              style={({ pressed }) => ({
+                width: compW,
+                backgroundColor: colors.bg.elevated,
+                borderRadius: radius.lg,
+                borderWidth: 1,
+                borderColor: colors.border.subtle,
+                paddingVertical: 14,
+                alignItems: "center",
+                gap: 8,
+                transform: [{ scale: pressed ? 0.96 : 1 }],
                 opacity: pressed ? 0.9 : 1,
               })}
             >
-              <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: withAlpha(s.color, 0.16), alignItems: "center", justifyContent: "center" }}>
-                <Text style={{ fontSize: 20 }}>{s.icon}</Text>
+              <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: withAlpha(s.color, 0.16), alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 19 }}>{s.icon}</Text>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.semibold }} numberOfLines={1}>
-                  {s.label}
-                </Text>
-                {typeof s.count === "number" && s.count > 0 && (
-                  <Text style={{ color: colors.text.tertiary, fontSize: fs.md, marginTop: 2 }}>{s.count} active</Text>
-                )}
-              </View>
+              <Text style={{ color: colors.text.secondary, fontSize: fs.md, fontWeight: fw.medium }}>{s.label}</Text>
             </Pressable>
           ))}
         </View>
