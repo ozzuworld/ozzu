@@ -1,0 +1,23 @@
+[Unit]
+# Ozzu fleet telemetry agent (Linux). Installed by onboard-device.sh, which
+# substitutes __DEVICE_ID__ / __ROLE__ and writes this to
+# /etc/systemd/system/ozzu-telemetry.service. Restart=always is the supervision
+# the bare host process (PID 552, unsupervised) never had.
+Description=Ozzu fleet telemetry agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=TELEMETRY_DEVICE_ID=__DEVICE_ID__
+Environment=TELEMETRY_BRIDGE_URL=http://10.9.0.1:3333/api/device-telemetry
+Environment=TELEMETRY_TOKEN_FILE=/root/.ozzu-hb/token
+Environment=TELEMETRY_ROLE=__ROLE__
+ExecStart=/usr/local/bin/ozzu-telemetry-linux.sh
+Restart=always
+RestartSec=10
+# Never let a wedged tick pin a core.
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
