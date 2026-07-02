@@ -1,0 +1,9 @@
+{
+  "name": "ozzu-preview",
+  "private": true,
+  "type": "module",
+  "description": "Local react-native-web preview harness — render real RN screens at iPhone size for headless screenshots. Dev tooling, not shipped.",
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}
