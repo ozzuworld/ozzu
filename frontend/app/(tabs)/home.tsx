@@ -259,13 +259,13 @@ export default function HomeScreen() {
         <Pressable
           onPress={() => router.push("/directives" as any)}
           style={({ pressed }) => ({
+            width: W - SIDE * 2,
             marginHorizontal: SIDE,
             backgroundColor: colors.bg.surface,
             borderRadius: radius.xl,
             borderWidth: 1,
             borderColor: colors.border.default,
             padding: 18,
-            overflow: "hidden",
             flexDirection: "row",
             alignItems: "center",
             gap: 14,
@@ -276,7 +276,6 @@ export default function HomeScreen() {
             transform: [{ scale: pressed ? 0.99 : 1 }],
           })}
         >
-          <View pointerEvents="none" style={{ position: "absolute", top: -34, right: -24, width: 140, height: 140, borderRadius: 999, backgroundColor: withAlpha(colors.accent, 0.1) }} />
           <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: withAlpha(colors.accent, 0.18), alignItems: "center", justifyContent: "center" }}>
             <Text style={{ fontSize: 26 }}>⚡</Text>
           </View>
@@ -351,6 +350,7 @@ export default function HomeScreen() {
         <Pressable
           onPress={() => router.push("/upload" as any)}
           style={({ pressed }) => ({
+            width: W - SIDE * 2,
             marginHorizontal: SIDE,
             marginTop: GAP,
             flexDirection: "row",
