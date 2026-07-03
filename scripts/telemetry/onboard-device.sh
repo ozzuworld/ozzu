@@ -105,8 +105,14 @@ if [ -f "$KA" ]; then
   grep -v 'ozzu-telemetry-android.sh' "$KA" | grep -v 'telemetry reporter started' > /data/local/tmp/ka.new
   cp /data/local/tmp/ka.new "$KA"; chmod 755 "$KA"; rm -f /data/local/tmp/ka.new
 fi
-pkill -f ozzu-telemetry-android 2>/dev/null
-pkill -f 03-ozzu-telemetry 2>/dev/null
+# Kill ALL telemetry procs — the new agent, any supervisor, AND a legacy agent under
+# a different name (e.g. the tablet's ozzu-telemetry.sh) — then start fresh below.
+# Proc-scan, NOT `pkill -f`: toybox/busybox pkill -f cmdline matching varies across
+# builds (worked on the CAT's toybox, silently no-op on the tablet's toybox 0.8.12).
+for p in /proc/[0-9]*; do
+  c=$(cat "$p/cmdline" 2>/dev/null | tr '\0' ' ')
+  case "$c" in *ozzu-telemetry*) kill -9 "${p#/proc/}" 2>/dev/null;; esac
+done
 sleep 1
 echo ozzu-telemetry > /sys/power/wake_lock 2>/dev/null
 # start the supervisor (boot-persist/watchdog) AND kick the agent now (supervisor
