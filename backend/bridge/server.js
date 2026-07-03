@@ -2317,6 +2317,49 @@ async function handleRequest(req, res) {
   // longer depends on the realtime device socket staying open. Reached via nginx
   // /bridge/images/upload; parseBody grants 20MB for this URL. ──
   if (pathname === "/images/upload" && req.method === "POST") {
+    const uploadCt = (req.headers["content-type"] || "").toLowerCase();
+    // Raw image POST (iOS Shortcut / share sheet, one tap): body is the image
+    // bytes; target + filename come from the query string. Leaves the JSON path
+    // below untouched.
+    if (uploadCt.startsWith("image/") || uploadCt === "application/octet-stream") {
+      const q = new URL(req.url, "http://x").searchParams;
+      const rawTarget = q.get("target") || "cipher";
+      const rawName = (q.get("filename") || `share-${Date.now()}.png`).replace(/[^a-zA-Z0-9._-]/g, "_");
+      const chunks = [];
+      let rawSize = 0;
+      let rawAborted = false;
+      req.on("data", (c) => {
+        rawSize += c.length;
+        if (rawSize > MAX_IMAGE_BODY_SIZE) { rawAborted = true; req.destroy(); return; }
+        chunks.push(c);
+      });
+      req.on("error", () => {});
+      req.on("end", () => {
+        if (rawAborted) { try { sendJSON(res, 413, { ok: false, error: "too large" }); } catch {} return; }
+        const buf = Buffer.concat(chunks);
+        if (!buf.length) { sendJSON(res, 400, { ok: false, error: "empty body" }); return; }
+        let savedAs = null;
+        try {
+          const fs = require("fs");
+          const uploadsDir = "/home/gcp/ozzu/data/uploads";
+          fs.mkdirSync(uploadsDir, { recursive: true });
+          const ts = Date.now();
+          savedAs = `${uploadsDir}/${ts}-${rawTarget}-${rawName}`;
+          fs.writeFileSync(savedAs, buf);
+          fs.writeFileSync(`${savedAs}.meta.json`, JSON.stringify({ timestamp: ts, target: rawTarget, contentType: "image", filename: rawName, via: "http-raw", savedAs }, null, 2));
+          log.bridge.info(`HTTP raw upload persisted: ${savedAs}`);
+        } catch (e) {
+          log.bridge.warn(`HTTP raw upload persist failed: ${e.message}`);
+        }
+        if (rawTarget === "cipher" && cipherPipeline && typeof cipherPipeline === "object") {
+          const iext = rawName.split(".").pop()?.toLowerCase() || "png";
+          const mediaType = iext === "jpg" || iext === "jpeg" ? "image/jpeg" : iext === "gif" ? "image/gif" : iext === "webp" ? "image/webp" : "image/png";
+          try { cipherPipeline.sendImage(buf.toString("base64"), mediaType, rawName); } catch {}
+        }
+        sendJSON(res, 200, { ok: true, savedAs });
+      });
+      return;
+    }
     let b;
     try {
       b = await parseBody(req);
