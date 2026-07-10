@@ -67,7 +67,7 @@ function sanitizeString(s, maxLen = MAX_STRING_LENGTH) {
 // reply_latency / silence_nudge audit events: too high and quiet speech reads as
 // silence (watchdog talks over the caller again); too low and 3G line noise reads as
 // speech (watchdog never fires on real dead air).
-const CALLER_VAD_THRESHOLD = 400;
+const CALLER_VAD_THRESHOLD = 100;
 function callerSpeechLevel(buf) {
   if (!buf || buf.length < 2) return 0;
   let sum = 0, n = 0;
@@ -284,10 +284,20 @@ class JuneSession {
             try { this.up?.stdin.write(payload); } catch {}
             // Track when the CALLER is actually speaking (not line noise) so the silence
             // watchdog measures true two-way dead air, and to time caller-stop -> reply.
-            if (callerSpeechLevel(payload) > CALLER_VAD_THRESHOLD) {
+            const lvl = callerSpeechLevel(payload);
+            if (lvl > CALLER_VAD_THRESHOLD) {
               this.lastCallerAudio = Date.now();
               this.lastCallerSpeechTs = Date.now();
               this.awaitingReply = true;
+            }
+            // CALIBRATION (dir_1783721367982): log this line's real caller-audio levels
+            // once/sec so the VAD threshold is set from data, not a guess.
+            this._lvMax = Math.max(this._lvMax || 0, lvl);
+            this._lvSum = (this._lvSum || 0) + lvl; this._lvN = (this._lvN || 0) + 1;
+            if (!this._lvT) this._lvT = Date.now();
+            if (Date.now() - this._lvT >= 1000) {
+              console.log(`[June] caller-lvl avg=${(this._lvSum / this._lvN) | 0} max=${this._lvMax | 0} thr=${CALLER_VAD_THRESHOLD}`);
+              this._lvT = Date.now(); this._lvMax = 0; this._lvSum = 0; this._lvN = 0;
             }
           }
           break;
