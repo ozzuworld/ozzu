@@ -354,6 +354,9 @@ class JuneSession {
               silenceDurationMs: 500,
             },
           },
+          // Full verbatim transcript of BOTH sides -> durable audit table. (dir_1783725864084)
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
           systemInstruction: {
             parts: [{ text: JUNE_SYSTEM_PROMPT }],
           },
@@ -408,6 +411,9 @@ class JuneSession {
         this.playing = false;
         this.bufStart = 0;
       }
+      // Accumulate the verbatim transcript (both sides) as Gemini streams it. (dir_1783725864084)
+      if (msg.serverContent.inputTranscription?.text) this.callerText = (this.callerText || "") + msg.serverContent.inputTranscription.text;
+      if (msg.serverContent.outputTranscription?.text) this.juneText = (this.juneText || "") + msg.serverContent.outputTranscription.text;
       const parts = msg.serverContent.modelTurn?.parts || [];
       for (const part of parts) {
         if (part.inlineData?.mimeType?.startsWith("audio/")) {
@@ -437,6 +443,11 @@ class JuneSession {
         // (~2400B @24kHz/16-bit = ~50ms = effectively silent.) (dir_1783723640717)
         const emptyTurn = this.setupDone && this.turnAudioBytes < 2400 && !this.turnHadTool && !msg.toolCall;
         if (emptyTurn) auditLog("empty_turn", { call_uuid: this.callUuid, caller_number: this.callerNumber });
+        // Flush this exchange's verbatim transcript (durable). (dir_1783725864084)
+        if ((this.callerText || "").trim() || (this.juneText || "").trim()) {
+          auditLog("transcript", { call_uuid: this.callUuid, caller: (this.callerText || "").trim(), june: (this.juneText || "").trim() });
+          this.callerText = ""; this.juneText = "";
+        }
         this.turnAudioBytes = 0;
         this.turnHadTool = false;
         this.turnCount++;
