@@ -339,6 +339,18 @@ class JuneSession {
               },
             },
           },
+          // Let GEMINI own turn-taking natively (was unset -> sluggish default VAD, and we
+          // fought it with hand-rolled nudges). HIGH start-sensitivity = crisp barge-in +
+          // catches a quiet caller; short silenceDuration = she replies promptly after you
+          // stop, without cutting off brief pauses. (dir_1783723640717)
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
+              endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
+              prefixPaddingMs: 20,
+              silenceDurationMs: 500,
+            },
+          },
           systemInstruction: {
             parts: [{ text: JUNE_SYSTEM_PROMPT }],
           },
@@ -416,27 +428,14 @@ class JuneSession {
       }
 
       if (msg.serverContent.turnComplete) {
-        // Native-audio bug: after a few exchanges a turn can come back with ~no audio
-        // (turnComplete, no tool call) -> the caller hears dead air. Re-nudge June to
-        // actually answer, bounded so it can never loop; reset the budget once she
-        // speaks normally. ~2400B @24kHz/16-bit = ~50ms, i.e. effectively silent.
+        // A turn can come back with ~no audio. We used to inject a clientContent user-turn
+        // to prod her — but that FIGHTS Gemini's turn-taking and pushed her a turn behind.
+        // Just record it; Gemini's native VAD + the caller re-engaging handle recovery.
+        // (~2400B @24kHz/16-bit = ~50ms = effectively silent.) (dir_1783723640717)
         const emptyTurn = this.setupDone && this.turnAudioBytes < 2400 && !this.turnHadTool && !msg.toolCall;
+        if (emptyTurn) auditLog("empty_turn", { call_uuid: this.callUuid, caller_number: this.callerNumber });
         this.turnAudioBytes = 0;
         this.turnHadTool = false;
-        if (emptyTurn && this.emptyRetries < 3) {
-          this.emptyRetries++;
-          auditLog("empty_turn_renudge", { call_uuid: this.callUuid, caller_number: this.callerNumber, retry: this.emptyRetries });
-          try {
-            this.geminiWs.send(JSON.stringify({
-              clientContent: {
-                turns: [{ role: "user", parts: [{ text: "(You went quiet — please respond to the caller out loud now.)" }] }],
-                turnComplete: true,
-              },
-            }));
-          } catch {}
-          return;
-        }
-        if (!emptyTurn) this.emptyRetries = 0;
         this.turnCount++;
         if (this.turnCount >= MAX_TURNS) {
           auditLog("turn_limit", { call_uuid: this.callUuid, caller_number: this.callerNumber, turns: this.turnCount });
@@ -500,25 +499,12 @@ class JuneSession {
     // 1 frame/20ms — the cushion (Gemini out-paces realtime) absorbs arrival jitter
     // for gapless speech. Silence ONLY fills between turns / while priming, never
     // mid-utterance.
-    const PREROLL = 8; // frames (~160ms) buffered before a talkspurt starts
+    const PREROLL = 4; // frames (~80ms) before a talkspurt — lower response latency, still gapless (dir_1783723640717)
     this.lastAudioSent = Date.now();
-    // Silence watchdog: the Live model intermittently goes quiet mid-call (empty turn,
-    // or it just stops responding). If June produces no REAL audio for ~7s, nudge her
-    // to re-engage so the caller never sits in dead air. Bounded per call.
-    this.watchdog = setInterval(() => {
-      if (!this.alive || this.socket.destroyed) { clearInterval(this.watchdog); return; }
-      // Fire ONLY on true two-way silence — neither June nor the caller has made sound for
-      // the window. Previously keyed on June's audio alone, so it nudged (and talked over)
-      // the caller whenever they spoke for >7s. (dir_1783721367982)
-      const quietMs = Date.now() - Math.max(this.lastRealAudio, this.lastCallerAudio);
-      if (this.setupDone && quietMs > 7000 && this.silenceNudges < 8) {
-        this.silenceNudges++;
-        this.lastRealAudio = Date.now();
-        this.lastCallerAudio = Date.now(); // re-arm: wait a full window before nudging again
-        auditLog("silence_nudge", { call_uuid: this.callUuid, nudge: this.silenceNudges });
-        this.nudgeGemini("(Several seconds of silence on the line. Warmly re-engage the caller — check they're still there and keep helping; if you're waiting to reach someone, reassure them you're still trying.)");
-      }
-    }, 2500);
+    // NO silence watchdog. It used to inject a clientContent "re-engage" turn on dead air,
+    // but any injected user-turn fights Gemini's native turn-taking and pushes her a turn
+    // behind — the exact bug we're removing. Gemini's VAD owns turns now; if she ever truly
+    // stalls, the caller re-engaging drives the next turn naturally. (dir_1783723640717)
     this.keepaliveTimer = setInterval(() => {
       if (!this.alive || this.socket.destroyed) { clearInterval(this.keepaliveTimer); return; }
       let chunk = null;
@@ -526,7 +512,7 @@ class JuneSession {
       // (flush early for very short utterances so they aren't stuck buffering).
       if (!this.playing && this.audioQueue.length > 0) {
         if (!this.bufStart) this.bufStart = Date.now();
-        if (this.audioQueue.length >= PREROLL || Date.now() - this.bufStart >= 250) {
+        if (this.audioQueue.length >= PREROLL || Date.now() - this.bufStart >= 120) {
           this.playing = true; this.bufStart = 0;
         }
       }
