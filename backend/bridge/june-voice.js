@@ -60,6 +60,21 @@ function sanitizeString(s, maxLen = MAX_STRING_LENGTH) {
     .slice(0, maxLen);
 }
 
+// ── Caller voice-activity detection ──
+// Mean-absolute amplitude of s16le PCM. A cheap VAD to tell caller SPEECH from line
+// silence/noise, so the silence watchdog measures TRUE two-way dead air instead of
+// firing whenever June (correctly) stops talking to listen. Tune against the
+// reply_latency / silence_nudge audit events: too high and quiet speech reads as
+// silence (watchdog talks over the caller again); too low and 3G line noise reads as
+// speech (watchdog never fires on real dead air).
+const CALLER_VAD_THRESHOLD = 400;
+function callerSpeechLevel(buf) {
+  if (!buf || buf.length < 2) return 0;
+  let sum = 0, n = 0;
+  for (let i = 0; i + 1 < buf.length; i += 2) { sum += Math.abs(buf.readInt16LE(i)); n++; }
+  return n ? sum / n : 0;
+}
+
 // ── Audit logger (postgres) ──
 let db;
 try { db = require("./db"); } catch { db = null; }
@@ -211,6 +226,9 @@ class JuneSession {
     this.audioQueue = [];           // jitter buffer of 320B SLIN frames, drained by the pump
     this.turnAudioBytes = 0;        // audio bytes in the current Gemini turn (empty-turn detect)
     this.lastRealAudio = Date.now();// last time June produced REAL audio (silence watchdog)
+    this.lastCallerAudio = Date.now();// last time the CALLER actually spoke (energy VAD)
+    this.lastCallerSpeechTs = 0;    // caller's most-recent speech frame (freezes at their stop)
+    this.awaitingReply = false;     // caller spoke; timing June's first audio back
     this.silenceNudges = 0;         // bounded watchdog nudges when she falls quiet
     this.emptyRetries = 0;          // bounded re-nudges when a turn returns empty (native-audio bug)
     this.turnHadTool = false;       // did this turn make a tool call (a valid no-audio turn)
@@ -262,7 +280,16 @@ class JuneSession {
 
         case AS_KIND_SLIN:
           // Caller audio is 8kHz; pipe through ffmpeg -> 16kHz for Gemini.
-          if (this.setupDone) { try { this.up?.stdin.write(payload); } catch {} }
+          if (this.setupDone) {
+            try { this.up?.stdin.write(payload); } catch {}
+            // Track when the CALLER is actually speaking (not line noise) so the silence
+            // watchdog measures true two-way dead air, and to time caller-stop -> reply.
+            if (callerSpeechLevel(payload) > CALLER_VAD_THRESHOLD) {
+              this.lastCallerAudio = Date.now();
+              this.lastCallerSpeechTs = Date.now();
+              this.awaitingReply = true;
+            }
+          }
           break;
 
         case AS_KIND_HANGUP:
@@ -363,6 +390,15 @@ class JuneSession {
           try {
             const b = Buffer.from(part.inlineData.data, "base64");
             this.turnAudioBytes += b.length;
+            // Reply-latency: first June audio after the caller spoke. Measures the
+            // bridge+Gemini portion (VAD end-of-turn wait + model + API RTT) — NOT the
+            // fixed 3G leg, which is outside the bridge. (dir_1783721367982)
+            if (this.awaitingReply) {
+              this.awaitingReply = false;
+              const ms = Date.now() - this.lastCallerSpeechTs;
+              auditLog("reply_latency", { call_uuid: this.callUuid, ms });
+              console.log(`[June] reply latency ${ms}ms (caller-stop -> June-first-audio)`);
+            }
             this.lastRealAudio = Date.now();
             this.dn?.stdin.write(b);
           } catch {}
@@ -461,9 +497,14 @@ class JuneSession {
     // to re-engage so the caller never sits in dead air. Bounded per call.
     this.watchdog = setInterval(() => {
       if (!this.alive || this.socket.destroyed) { clearInterval(this.watchdog); return; }
-      if (this.setupDone && Date.now() - this.lastRealAudio > 7000 && this.silenceNudges < 8) {
+      // Fire ONLY on true two-way silence — neither June nor the caller has made sound for
+      // the window. Previously keyed on June's audio alone, so it nudged (and talked over)
+      // the caller whenever they spoke for >7s. (dir_1783721367982)
+      const quietMs = Date.now() - Math.max(this.lastRealAudio, this.lastCallerAudio);
+      if (this.setupDone && quietMs > 7000 && this.silenceNudges < 8) {
         this.silenceNudges++;
         this.lastRealAudio = Date.now();
+        this.lastCallerAudio = Date.now(); // re-arm: wait a full window before nudging again
         auditLog("silence_nudge", { call_uuid: this.callUuid, nudge: this.silenceNudges });
         this.nudgeGemini("(Several seconds of silence on the line. Warmly re-engage the caller — check they're still there and keep helping; if you're waiting to reach someone, reassure them you're still trying.)");
       }
