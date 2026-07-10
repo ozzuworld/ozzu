@@ -290,13 +290,16 @@ class JuneSession {
               this.lastCallerSpeechTs = Date.now();
               this.awaitingReply = true;
             }
-            // CALIBRATION (dir_1783721367982): log this line's real caller-audio levels
-            // once/sec so the VAD threshold is set from data, not a guess.
+            // Record the caller's real audio levels once/sec to the DURABLE audit table
+            // (console logs rotate out of docker's buffer). Shows each talk attempt + lets
+            // us set the VAD threshold from data. Capped per call. (dir_1783725037734)
             this._lvMax = Math.max(this._lvMax || 0, lvl);
             this._lvSum = (this._lvSum || 0) + lvl; this._lvN = (this._lvN || 0) + 1;
             if (!this._lvT) this._lvT = Date.now();
             if (Date.now() - this._lvT >= 1000) {
-              console.log(`[June] caller-lvl avg=${(this._lvSum / this._lvN) | 0} max=${this._lvMax | 0} thr=${CALLER_VAD_THRESHOLD}`);
+              if ((this._lvLogs = (this._lvLogs || 0) + 1) <= 120) {
+                auditLog("caller_level", { call_uuid: this.callUuid, avg: (this._lvSum / this._lvN) | 0, max: this._lvMax | 0, thr: CALLER_VAD_THRESHOLD, speaking: this._lvMax > CALLER_VAD_THRESHOLD });
+              }
               this._lvT = Date.now(); this._lvMax = 0; this._lvSum = 0; this._lvN = 0;
             }
           }
