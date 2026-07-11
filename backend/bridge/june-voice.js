@@ -225,12 +225,8 @@ class JuneSession {
     this.outBuf = Buffer.alloc(0);  // accumulate ffmpeg output into 320B SLIN frames
     this.audioQueue = [];           // jitter buffer of 320B SLIN frames, drained by the pump
     this.turnAudioBytes = 0;        // audio bytes in the current Gemini turn (empty-turn detect)
-    this.lastRealAudio = Date.now();// last time June produced REAL audio (silence watchdog)
-    this.lastCallerAudio = Date.now();// last time the CALLER actually spoke (energy VAD)
     this.lastCallerSpeechTs = 0;    // caller's most-recent speech frame (freezes at their stop)
-    this.awaitingReply = false;     // caller spoke; timing June's first audio back
-    this.silenceNudges = 0;         // bounded watchdog nudges when she falls quiet
-    this.emptyRetries = 0;          // bounded re-nudges when a turn returns empty (native-audio bug)
+    this.awaitingReply = false;     // caller spoke; timing June's first audio back (reply_latency)
     this.turnHadTool = false;       // did this turn make a tool call (a valid no-audio turn)
     this.playing = false;           // in a talkspurt (draining) vs priming/idle
     this.bufStart = 0;              // when the current pre-roll fill began
@@ -282,25 +278,11 @@ class JuneSession {
           // Caller audio is 8kHz; pipe through ffmpeg -> 16kHz for Gemini.
           if (this.setupDone) {
             try { this.up?.stdin.write(payload); } catch {}
-            // Track when the CALLER is actually speaking (not line noise) so the silence
-            // watchdog measures true two-way dead air, and to time caller-stop -> reply.
-            const lvl = callerSpeechLevel(payload);
-            if (lvl > CALLER_VAD_THRESHOLD) {
-              this.lastCallerAudio = Date.now();
+            // Light energy-VAD: mark when the CALLER is actually speaking (not line noise)
+            // so we can time caller-stop -> June-reply (reply_latency).
+            if (callerSpeechLevel(payload) > CALLER_VAD_THRESHOLD) {
               this.lastCallerSpeechTs = Date.now();
               this.awaitingReply = true;
-            }
-            // Record the caller's real audio levels once/sec to the DURABLE audit table
-            // (console logs rotate out of docker's buffer). Shows each talk attempt + lets
-            // us set the VAD threshold from data. Capped per call. (dir_1783725037734)
-            this._lvMax = Math.max(this._lvMax || 0, lvl);
-            this._lvSum = (this._lvSum || 0) + lvl; this._lvN = (this._lvN || 0) + 1;
-            if (!this._lvT) this._lvT = Date.now();
-            if (Date.now() - this._lvT >= 1000) {
-              if ((this._lvLogs = (this._lvLogs || 0) + 1) <= 120) {
-                auditLog("caller_level", { call_uuid: this.callUuid, avg: (this._lvSum / this._lvN) | 0, max: this._lvMax | 0, thr: CALLER_VAD_THRESHOLD, speaking: this._lvMax > CALLER_VAD_THRESHOLD });
-              }
-              this._lvT = Date.now(); this._lvMax = 0; this._lvSum = 0; this._lvN = 0;
             }
           }
           break;
@@ -422,15 +404,14 @@ class JuneSession {
             const b = Buffer.from(part.inlineData.data, "base64");
             this.turnAudioBytes += b.length;
             // Reply-latency: first June audio after the caller spoke. Measures the
-            // bridge+Gemini portion (VAD end-of-turn wait + model + API RTT) — NOT the
-            // fixed 3G leg, which is outside the bridge. (dir_1783721367982)
+            // bridge+Gemini portion (VAD end-of-turn wait + model + API RTT) — not the
+            // cellular leg, which is outside the bridge.
             if (this.awaitingReply) {
               this.awaitingReply = false;
               const ms = Date.now() - this.lastCallerSpeechTs;
               auditLog("reply_latency", { call_uuid: this.callUuid, ms });
               console.log(`[June] reply latency ${ms}ms (caller-stop -> June-first-audio)`);
             }
-            this.lastRealAudio = Date.now();
             this.dn?.stdin.write(b);
           } catch {}
         }
@@ -774,7 +755,6 @@ class JuneSession {
     if (this.durationTimer) clearTimeout(this.durationTimer);
     if (this.pendingAvailability?.timer) clearTimeout(this.pendingAvailability.timer);
     if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
-    if (this.watchdog) clearInterval(this.watchdog);
     if (this.dn) { try { this.dn.kill("SIGKILL"); } catch {} this.dn = null; }
     if (this.up) { try { this.up.kill("SIGKILL"); } catch {} this.up = null; }
 
