@@ -1233,6 +1233,20 @@ export interface TenderDetail {
   garantias: { tipo: string; porcentaje: string; vigencia: string }[];
   documentos: { name: string; ext: string; size: number; url: string }[];
   model?: string | null;
+  brief?: ProposalBrief;
+}
+export interface ProposalBrief {
+  que_es?: string;
+  implicaciones_tecnicas?: { resumen?: string; requiere?: string[]; riesgos?: string[] };
+  implicaciones_financieras?: { resumen?: string; costos_clave?: string[]; consideracion?: string };
+  recomendacion?: { decision?: string; razon?: string };
+}
+export async function decideOffer(id: string, decision: "accepted" | "rejected" | "pending"): Promise<{ ok: boolean }> {
+  return apiFetch(`/secop/licitaciones/${encodeURIComponent(id)}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision }),
+  });
 }
 export async function fetchTenderDetail(id: string): Promise<{ status: "ready" | "building" | "error"; detail?: TenderDetail; previous_error?: string | null }> {
   return apiFetch(`/secop/licitaciones/${encodeURIComponent(id)}/detail`);

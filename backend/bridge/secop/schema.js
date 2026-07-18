@@ -127,6 +127,16 @@ async function ensureSchema(db) {
       updated_at       TIMESTAMPTZ DEFAULT now()
     )
   `);
+  await db.query(`ALTER TABLE secop_tender_detail ADD COLUMN IF NOT EXISTS brief JSONB DEFAULT '{}'`);
+
+  // Ofertas inbox decisions — reject clears it from the queue forever.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS secop_decisions (
+      id_proceso TEXT PRIMARY KEY,
+      decision   TEXT NOT NULL DEFAULT 'pending',
+      decided_at TIMESTAMPTZ DEFAULT now()
+    )
+  `);
 
   // Authoritative UNSPSC family index (names from OCDS) — defines the relevance filter.
   await db.query(`
@@ -257,6 +267,9 @@ async function listLicitaciones(db, f = {}) {
   if (f.all !== true && f.all !== "true") where.push("is_open = TRUE");
   if (f.relevant === true || f.relevant === "true") {
     where.push("(l.family_code IN (SELECT family_code FROM secop_unspsc_families WHERE relevant) OR cardinality(l.overlay_categories) > 0)");
+  }
+  if (f.inbox === true || f.inbox === "true") {
+    where.push("NOT EXISTS (SELECT 1 FROM secop_decisions d WHERE d.id_proceso = l.id_proceso AND d.decision IN ('rejected','accepted'))");
   }
   if (f.segment) add("segment_code = ?", String(f.segment));
   if (f.overlay) add("? = ANY(overlay_categories)", String(f.overlay));
@@ -394,10 +407,24 @@ async function upsertTenderDetail(db, id, d) {
   );
 }
 
+async function setBrief(db, id, brief) {
+  await db.query(`UPDATE secop_tender_detail SET brief = $2, updated_at = now() WHERE id_proceso = $1`, [id, JSON.stringify(brief || {})]);
+}
+
+async function setDecision(db, id, decision) {
+  await db.query(
+    `INSERT INTO secop_decisions (id_proceso, decision, decided_at) VALUES ($1, $2, now())
+     ON CONFLICT (id_proceso) DO UPDATE SET decision = $2, decided_at = now()`,
+    [id, decision]
+  );
+}
+
 module.exports = {
   INSERT_COLS,
   ensureSchema,
   seedCategories,
+  setBrief,
+  setDecision,
   upsertLicitacion,
   closeExpired,
   startIngestRun,

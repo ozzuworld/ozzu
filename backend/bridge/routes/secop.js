@@ -6,7 +6,7 @@
 const schema = require("../secop/schema");
 
 module.exports = function secopRoutes(ctx) {
-  const { sendJSON, db, log } = ctx;
+  const { sendJSON, parseBody, db, log } = ctx;
 
   return async function (req, res, pathname, url) {
     // GET /secop/stats — summary: open count, total value, by-department, last ingest
@@ -45,6 +45,22 @@ module.exports = function secopRoutes(ctx) {
           offset: q.get("offset"),
         });
         sendJSON(res, 200, result);
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // POST /secop/licitaciones/:id/decision — Aceptar/Rechazar (rejected clears the queue)
+    const decisionMatch = pathname.match(/^\/secop\/licitaciones\/(.+)\/decision$/);
+    if (req.method === "POST" && decisionMatch) {
+      try {
+        const id = decodeURIComponent(decisionMatch[1]);
+        const body = await parseBody(req);
+        if (!["accepted", "rejected", "pending"].includes(body.decision)) {
+          sendJSON(res, 400, { error: "decision must be accepted | rejected | pending" });
+          return true;
+        }
+        await schema.setDecision(db, id, body.decision);
+        sendJSON(res, 200, { ok: true, id, decision: body.decision });
       } catch (err) { sendJSON(res, 500, { error: err.message }); }
       return true;
     }

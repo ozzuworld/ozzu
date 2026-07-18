@@ -108,4 +108,41 @@ async function extractTenderDetailFromDocs(docs, opts = {}) {
   }
 }
 
-module.exports = { extractTenderDetail, extractTenderDetailFromDocs, SCHEMA_HINT };
+// Decision brief: synthesize the tech + financial implications from the extracted
+// detail, tailored to Skyline (Herbert = senior connectivity/network + software eng).
+const BRIEF_SCHEMA = `{
+  "que_es": "1-2 frases claras: qué contrata la entidad y para qué",
+  "implicaciones_tecnicas": {
+    "resumen": "qué exige técnicamente y qué tan viable/complejo es para nosotros",
+    "requiere": ["capacidad, tecnología o perfil concreto que haría falta"],
+    "riesgos": ["riesgo o dificultad técnica relevante"]
+  },
+  "implicaciones_financieras": {
+    "resumen": "lectura financiera: valor, margen probable y si compensa el esfuerzo",
+    "costos_clave": ["costo o compromiso relevante, p.ej. garantía 10% de vigencia N"],
+    "consideracion": "una frase: qué mirar antes de comprometer plata"
+  },
+  "recomendacion": { "decision": "go | no-go | revisar", "razon": "1 frase directa" }
+}`;
+
+async function generateBrief(detail, context = {}) {
+  const payload = {
+    entidad: context.entidad, modalidad: context.modalidad, valor: context.valor,
+    competitividad: context.competitividad, objeto: detail.objeto,
+    requisitos_habilitantes: detail.requisitos_habilitantes || detail.habilitantes,
+    criterios_evaluacion: detail.criterios_evaluacion || detail.evaluacion,
+    especificaciones: (detail.especificaciones_tecnicas || detail.especificaciones || []).slice(0, 25),
+    garantias: detail.garantias, plazo: detail.plazo_ejecucion,
+  };
+  const prompt =
+    "Eres asesor de licitaciones públicas para Skyline en Colombia. El decisor es un ingeniero senior de " +
+    "conectividad/redes y software (puede ejecutar trabajo de TI, software, redes e ingeniería, remoto). " +
+    "Con la siguiente información de un proceso SECOP II, redacta un BRIEF de decisión en JSON con este esquema EXACTO:\n" +
+    BRIEF_SCHEMA +
+    "\nSé conciso, directo y honesto sobre si conviene ofertar. Enfócate en IMPLICACIONES (técnicas y financieras), no en repetir datos. " +
+    "Responde ÚNICAMENTE el JSON.\n\n=== DATOS ===\n" + JSON.stringify(payload);
+  const result = await runClaude(["-p", "--output-format", "json", "--allowedTools", ""], prompt);
+  return parseJSONFromText(result);
+}
+
+module.exports = { extractTenderDetail, extractTenderDetailFromDocs, generateBrief, SCHEMA_HINT };

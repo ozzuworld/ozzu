@@ -7,7 +7,7 @@
 
 const https = require("https");
 const schema = require("./schema");
-const { extractTenderDetailFromDocs } = require("./extract");
+const { extractTenderDetailFromDocs, generateBrief } = require("./extract");
 const { socrataHeaders } = require("./socrata");
 
 const DOCS_DATASET = process.env.SECOP_DOCS_DATASET || "dmgg-8hin";
@@ -149,6 +149,16 @@ async function buildTenderDetail(db, idProceso) {
     detail.model = model;
 
     await schema.upsertTenderDetail(db, idProceso, detail);
+
+    // Decision brief: tech + financial implications (Claude, best-effort).
+    try {
+      const brief = await generateBrief(detail, {
+        entidad: lic.entidad, modalidad: lic.modalidad, valor: lic.precio_base,
+        competitividad: lic.competitividad,
+      });
+      await schema.setBrief(db, idProceso, brief);
+    } catch (e) { /* detail already stored; brief can be regenerated */ }
+
     return { ok: true, model, docs_used, doc_count: docList.length };
   } catch (err) {
     await schema.setTenderDetailStatus(db, idProceso, "error", err.message);
