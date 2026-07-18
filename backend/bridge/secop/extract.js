@@ -51,14 +51,30 @@ function parseJSONFromText(t) {
   return JSON.parse(t);
 }
 
-// Serialize ALL Claude sessions in this process. The box has no swap, so two
-// concurrent `claude` runs (background worker + an on-open build) spike memory and
-// get OOM-killed. This mutex guarantees one at a time regardless of caller.
-let _claudeChain = Promise.resolve();
+// Bound concurrent Claude sessions (not serial). The ~2-3 min latency is queue-wait,
+// not compute — so N sessions wait concurrently for ~N× throughput, and the wait
+// doesn't consume the plan. Bounded by a semaphore so the no-swap box never OOMs from
+// too many at once. Tune with SECOP_CONCURRENCY.
+const MAX_CONCURRENT = parseInt(process.env.SECOP_CONCURRENCY) || 5;
+let _active = 0;
+const _waiters = [];
+function _acquire() {
+  return new Promise((resolve) => {
+    if (_active < MAX_CONCURRENT) { _active++; resolve(); }
+    else _waiters.push(resolve);
+  });
+}
+function _release() {
+  _active--;
+  if (_waiters.length && _active < MAX_CONCURRENT) { _active++; _waiters.shift()(); }
+}
 function runClaude(args, prompt, cwd) {
-  const run = _claudeChain.then(() => _runClaudeRaw(args, prompt, cwd), () => _runClaudeRaw(args, prompt, cwd));
-  _claudeChain = run.then(() => {}, () => {});
-  return run;
+  return _acquire().then(() =>
+    _runClaudeRaw(args, prompt, cwd).then(
+      (v) => { _release(); return v; },
+      (e) => { _release(); throw e; }
+    )
+  );
 }
 
 // Run the claude CLI headless; pipe the prompt on stdin, return the result text.
