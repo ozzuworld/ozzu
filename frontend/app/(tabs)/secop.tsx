@@ -27,7 +27,7 @@ export default function OfertasScreen() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetchLicitaciones({ relevant: true, inbox: true, sort: "competitividad", limit: 100 });
+      const r = await fetchLicitaciones({ relevant: true, inbox: true, analyzed: true, sort: "deadline", limit: 100 });
       setItems(r.items);
     } catch { setItems([]); }
     setLoading(false);

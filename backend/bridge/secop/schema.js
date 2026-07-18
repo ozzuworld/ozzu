@@ -271,6 +271,9 @@ async function listLicitaciones(db, f = {}) {
   if (f.inbox === true || f.inbox === "true") {
     where.push("NOT EXISTS (SELECT 1 FROM secop_decisions d WHERE d.id_proceso = l.id_proceso AND d.decision IN ('rejected','accepted'))");
   }
+  if (f.analyzed === true || f.analyzed === "true") {
+    where.push("EXISTS (SELECT 1 FROM secop_tender_detail t WHERE t.id_proceso = l.id_proceso AND t.status = 'ok' AND t.brief ? 'recomendacion')");
+  }
   if (f.segment) add("segment_code = ?", String(f.segment));
   if (f.overlay) add("? = ANY(overlay_categories)", String(f.overlay));
   if (f.modalidad) add("modalidad = ?", String(f.modalidad));
@@ -291,11 +294,13 @@ async function listLicitaciones(db, f = {}) {
             l.estado_resumen, l.precio_base, l.fecha_publicacion, l.fecha_recepcion,
             l.unspsc_code, l.segment_code, l.segment_name, l.overlay_categories, l.url_proceso, l.is_open,
             bp.id AS linked_venture_id, uf.display_category AS family_display,
-            es.adjudicated_total AS es_adj, es.single_rate AS es_rate, es.avg_bidders AS es_avg
+            es.adjudicated_total AS es_adj, es.single_rate AS es_rate, es.avg_bidders AS es_avg,
+            td.brief->'card' AS card, td.brief->'recomendacion'->>'decision' AS reco
      FROM secop_licitaciones l
      LEFT JOIN business_projects bp ON bp.secop_id = l.id_proceso AND bp.status <> 'archived'
      LEFT JOIN secop_entity_stats es ON es.nit_entidad = l.nit_entidad
      LEFT JOIN secop_unspsc_families uf ON uf.family_code = l.family_code
+     LEFT JOIN secop_tender_detail td ON td.id_proceso = l.id_proceso
      ${whereSql}
      ORDER BY ${orderSql}
      LIMIT ${limit} OFFSET ${offset}`,

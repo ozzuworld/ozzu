@@ -1184,6 +1184,8 @@ export interface Licitacion {
   linked_venture_id: number | null;
   competitividad?: Competitividad;
   family_display?: string | null;
+  card?: { emoji?: string; titulo?: string; contexto?: string } | null;
+  reco?: string | null;
 }
 export interface Competitividad {
   score: number;

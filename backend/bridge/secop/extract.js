@@ -111,6 +111,11 @@ async function extractTenderDetailFromDocs(docs, opts = {}) {
 // Decision brief: synthesize the tech + financial implications from the extracted
 // detail, tailored to Skyline (Herbert = senior connectivity/network + software eng).
 const BRIEF_SCHEMA = `{
+  "card": {
+    "emoji": "un emoji que represente el objeto del contrato",
+    "titulo": "título corto y claro de qué es (máx 6 palabras, no el código del proceso)",
+    "contexto": "una sola línea de contexto útil para decidir de un vistazo"
+  },
   "que_es": "1-2 frases claras: qué contrata la entidad y para qué",
   "implicaciones_tecnicas": {
     "resumen": "qué exige técnicamente y qué tan viable/complejo es para nosotros",
