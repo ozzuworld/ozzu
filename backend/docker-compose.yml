@@ -51,6 +51,8 @@ services:
       - /root/.ozzu-secrets:/root/.ozzu-secrets:ro
     environment:
       - BRIDGE_PIN=${BRIDGE_PIN:-1234}
+      - SOCRATA_KEY_ID=${SOCRATA_KEY_ID}
+      - SOCRATA_KEY_SECRET=${SOCRATA_KEY_SECRET}
       - HA_URL=${HA_URL:-http://localhost:8123}
       - HA_TOKEN=${HA_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}

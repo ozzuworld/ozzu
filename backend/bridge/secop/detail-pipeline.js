@@ -8,6 +8,7 @@
 const https = require("https");
 const schema = require("./schema");
 const { extractTenderDetailFromDocs } = require("./extract");
+const { socrataHeaders } = require("./socrata");
 
 const DOCS_DATASET = process.env.SECOP_DOCS_DATASET || "dmgg-8hin";
 const MAX_DOCS = parseInt(process.env.SECOP_DETAIL_MAX_DOCS) || 4;
@@ -28,9 +29,7 @@ const APP_TOKEN = process.env.SOCRATA_APP_TOKEN || null;
 
 function fetchJSONOnce(url) {
   return new Promise((resolve, reject) => {
-    const headers = { "User-Agent": UA, Accept: "application/json" };
-    if (APP_TOKEN) headers["X-App-Token"] = APP_TOKEN;
-    https.get(url, { headers, timeout: 60000 }, (res) => {
+    https.get(url, { headers: socrataHeaders(), timeout: 60000 }, (res) => {
       let d = "";
       res.on("data", (c) => (d += c));
       res.on("end", () => {

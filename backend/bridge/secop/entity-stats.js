@@ -7,6 +7,7 @@
 // Single-bidder is a PROXY, not proof — surfaced honestly in the UI.
 
 const https = require("https");
+const { socrataHeaders } = require("./socrata");
 
 const DATASET = process.env.SECOP_DATASET || "p6dx-8zbt";
 const BASE = `https://www.datos.gov.co/resource/${DATASET}.json`;
@@ -61,9 +62,7 @@ function scoreTender(lic, stat) {
 function fetchJSON(url, tries = 4) {
   const once = () =>
     new Promise((resolve, reject) => {
-      const headers = { "User-Agent": "ozzu-secop/1.0", Accept: "application/json" };
-      if (APP_TOKEN) headers["X-App-Token"] = APP_TOKEN;
-      https.get(url, { headers, timeout: 120000 }, (res) => {
+      https.get(url, { headers: socrataHeaders(), timeout: 120000 }, (res) => {
         let d = "";
         res.on("data", (c) => (d += c));
         res.on("end", () => {

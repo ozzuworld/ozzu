@@ -12,6 +12,7 @@
 const https = require("https");
 const schema = require("./schema");
 const { deriveCategory } = require("./categories");
+const { socrataHeaders } = require("./socrata");
 
 const DATASET = process.env.SECOP_DATASET || "p6dx-8zbt";
 const BASE = `https://www.datos.gov.co/resource/${DATASET}.json`;
@@ -39,8 +40,7 @@ function log(...a) { console.log(`[secop-ingest ${new Date().toISOString()}]`, .
 
 function fetchJSON(url) {
   return new Promise((resolve, reject) => {
-    const headers = { "User-Agent": "ozzu-secop-ingest/1.0", Accept: "application/json" };
-    if (APP_TOKEN) headers["X-App-Token"] = APP_TOKEN;
+    const headers = socrataHeaders();
     const req = https.get(url, { headers, timeout: 60000 }, (res) => {
       let data = "";
       res.on("data", (c) => (data += c));
