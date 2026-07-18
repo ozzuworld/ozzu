@@ -96,6 +96,20 @@ These took 1 week to build and tune on embed-pipeline-v2.py:
 
 ---
 
+## SECOP II — Licitaciones ingester (dir_1784390326425)
+
+Ingests currently-OPEN Colombian public-procurement opportunities from datos.gov.co
+(Socrata dataset `p6dx-8zbt`), indexes them in postgres, categorizes by UNSPSC + a tunable
+Skyline overlay. **If you need government-tender data, USE THIS — do not re-scrape SECOP.**
+
+- **Code**: `backend/bridge/secop/` (ingest.js, schema.js, categories.js, unspsc.json, overlay.json, README.md), `routes/secop.js`, `scripts/secop-ingest.sh`.
+- **Tables**: `secop_licitaciones` (+ `secop_categories`, `secop_ingest_runs`) — auto-created by `db.js init()`.
+- **Refresh**: `./scripts/secop-ingest.sh` (cron-safe) · re-tag after editing overlay.json: `--recategorize`.
+- **API**: `GET /secop/{stats,categories,licitaciones,licitaciones/:id}`, `POST /secop/{ingest,recategorize}`.
+- **Tune categories**: edit `backend/bridge/secop/overlay.json`, then `--recategorize` (no re-fetch).
+
+---
+
 ## Face DB
 
 - **Live count**: always `curl -s http://localhost:6333/collections/faces` — NEVER guess

@@ -48,6 +48,7 @@ const vaultRoutes = require("./routes/vault");
 const financeRoutes = require("./routes/finance");
 const octoprintRoutes = require("./routes/octoprint");
 const socRoutes = require("./routes/soc");
+const secopRoutes = require("./routes/secop");
 const watchdog = require("./infra/watchdog");
 const recoveryEngine = require("./infra/recovery-engine");
 const cipherDaemon = require("./cipher-agent/cipher-agent");
@@ -1583,6 +1584,7 @@ function getRouteHandlers() {
       octoprint: octoprintRoutes(routeCtx),
       soc: socRoutes(routeCtx),
       ozzuSource: ozzuSourceRoutes(routeCtx),
+      secop: secopRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1721,6 +1723,7 @@ async function handleRequest(req, res) {
   if (await r.finance(req, res, pathname, url)) return;
   if (await r.octoprint(req, res, pathname, url)) return;
   if (await r.soc(req, res, pathname, url)) return;
+  if (await r.secop(req, res, pathname, url)) return;
   if (await r.ozzuSource(req, res, pathname, url)) return;
 
   // GET /api/training-stats — Face DB training pipeline stats

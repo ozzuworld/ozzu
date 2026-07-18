@@ -1594,6 +1594,14 @@ async function init() {
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_dts_device_time ON device_telemetry_snapshots(device_id, collected_at DESC)`);
 
+    // SECOP II licitaciones — self-contained schema module owns the DDL + seeding.
+    try {
+      await require("./secop/schema").ensureSchema({ query });
+      console.log("[pg] SECOP II schema ensured");
+    } catch (e) {
+      console.error("[pg] SECOP schema ensure failed:", e.message);
+    }
+
     console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph + agent_audit_log + recon_hosts + infra_state + device_telemetry_v2)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);

@@ -1,0 +1,47 @@
+{
+  "_comment": "TUNABLE 'relevant-to-us' overlay for Skyline. A licitación gets tagged with an overlay category if its UNSPSC segment/family matches OR any keyword appears in the entity/name/description (accent- and case-insensitive). A record can carry several overlay tags, or none. Edit freely: add categories, add/remove keywords, add UNSPSC segment (2-digit) or family (4-digit) codes. Re-run the ingester (or the recategorize command) to apply.",
+  "categories": [
+    {
+      "name": "Redes y Telecomunicaciones",
+      "emoji": "🌐",
+      "unspsc_segments": ["43"],
+      "unspsc_families": ["4322", "8111", "8116"],
+      "keywords": ["red de datos", "cableado estructurado", "fibra optica", "telecomunicac", "conectividad", "wifi", "wi-fi", "wlan", "wan", "lan ", "canal de internet", "canal dedicado", "ancho de banda", "enrutador", "router", "switch", "firewall", "vpn", "ip mpls", "radioenlace", "microondas", "ptp", "ptmp", "acceso a internet", "internet dedicado"]
+    },
+    {
+      "name": "Infraestructura y Servicios TI",
+      "emoji": "🖥️",
+      "unspsc_segments": ["43", "81"],
+      "unspsc_families": ["4321", "4323", "8112", "8115"],
+      "keywords": ["servidor", "datacenter", "data center", "centro de datos", "almacenamiento", "storage", "virtualizacion", "nube", "cloud", "software", "licenciamiento", "licencias", "sistema de informacion", "aplicativo", "desarrollo de software", "mesa de ayuda", "soporte tecnico", "hosting", "backup", "respaldo", "computador", "portatil", "impresora", "ups"]
+    },
+    {
+      "name": "Seguridad Electrónica",
+      "emoji": "📹",
+      "unspsc_segments": ["46"],
+      "unspsc_families": ["4617", "4620", "4623", "4627"],
+      "keywords": ["cctv", "video vigilancia", "videovigilancia", "camaras de seguridad", "circuito cerrado", "control de acceso", "biometr", "alarma", "deteccion de incendio", "sistema de seguridad", "monitoreo", "cerca electrica"]
+    },
+    {
+      "name": "Ingeniería y Consultoría",
+      "emoji": "📐",
+      "unspsc_segments": ["80", "81"],
+      "unspsc_families": ["8010", "8101", "8014", "8016"],
+      "keywords": ["consultoria", "interventoria", "diseño", "estudios y diseños", "ingenieria", "supervision tecnica", "asesoria tecnica", "estructuracion"]
+    },
+    {
+      "name": "Energía y Eléctrico",
+      "emoji": "⚡",
+      "unspsc_segments": ["26", "39"],
+      "unspsc_families": ["2611", "3910", "3911", "3912"],
+      "keywords": ["energia solar", "fotovoltaic", "paneles solares", "planta electrica", "grupo electrogeno", "subestacion", "transformador", "iluminacion", "alumbrado publico", "instalacion electrica", "red electrica", "media tension", "baja tension"]
+    },
+    {
+      "name": "Obra Civil e Infraestructura",
+      "emoji": "🏗️",
+      "unspsc_segments": ["72", "30", "95"],
+      "unspsc_families": ["7210", "7212", "7215", "9512"],
+      "keywords": ["construccion", "adecuacion", "mantenimiento de infraestructura", "obra publica", "pavimento", "via ", "edificacion", "remodelacion", "reforzamiento"]
+    }
+  ]
+}

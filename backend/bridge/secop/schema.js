@@ -1,0 +1,275 @@
+"use strict";
+
+// SECOP II data layer: table DDL (idempotent), reference-table seeding, and all
+// query helpers used by both the ingester and the /secop API routes.
+//
+// `db` is any object exposing `query(text, params)` (the bridge db.js module, or a
+// thin wrapper around a standalone pg Pool — see ingest.js). No pool is created here.
+
+const categories = require("./categories");
+
+// Columns written on ingest (search_tsv is GENERATED; first_seen/updated_at handled below).
+const INSERT_COLS = [
+  "id_proceso", "referencia", "entidad", "nit_entidad", "orden_entidad",
+  "departamento", "ciudad", "nombre", "descripcion", "modalidad", "fase",
+  "estado", "estado_resumen", "precio_base", "duracion", "unidad_duracion",
+  "fecha_publicacion", "fecha_recepcion", "fecha_apertura", "tipo_contrato",
+  "subtipo_contrato", "unspsc_raw", "unspsc_code", "segment_code", "segment_name",
+  "family_code", "categorias_adicionales", "overlay_categories", "url_proceso", "raw",
+];
+
+async function ensureSchema(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS secop_licitaciones (
+      id_proceso             TEXT PRIMARY KEY,
+      referencia             TEXT,
+      entidad                TEXT,
+      nit_entidad            TEXT,
+      orden_entidad          TEXT,
+      departamento           TEXT,
+      ciudad                 TEXT,
+      nombre                 TEXT,
+      descripcion            TEXT,
+      modalidad              TEXT,
+      fase                   TEXT,
+      estado                 TEXT,
+      estado_resumen         TEXT,
+      precio_base            NUMERIC,
+      duracion               NUMERIC,
+      unidad_duracion        TEXT,
+      fecha_publicacion      TIMESTAMPTZ,
+      fecha_recepcion        TIMESTAMPTZ,
+      fecha_apertura         TIMESTAMPTZ,
+      tipo_contrato          TEXT,
+      subtipo_contrato       TEXT,
+      unspsc_raw             TEXT,
+      unspsc_code            TEXT,
+      segment_code           TEXT,
+      segment_name           TEXT,
+      family_code            TEXT,
+      categorias_adicionales TEXT,
+      overlay_categories     TEXT[] DEFAULT '{}',
+      url_proceso            TEXT,
+      raw                    JSONB,
+      is_open                BOOLEAN DEFAULT TRUE,
+      first_seen             TIMESTAMPTZ DEFAULT now(),
+      last_seen              TIMESTAMPTZ DEFAULT now(),
+      updated_at             TIMESTAMPTZ DEFAULT now(),
+      search_tsv             tsvector GENERATED ALWAYS AS (
+        to_tsvector('spanish',
+          coalesce(entidad,'') || ' ' || coalesce(nombre,'') || ' ' || coalesce(descripcion,''))
+      ) STORED
+    )
+  `);
+
+  for (const idx of [
+    `CREATE INDEX IF NOT EXISTS idx_secop_modalidad    ON secop_licitaciones(modalidad)`,
+    `CREATE INDEX IF NOT EXISTS idx_secop_departamento ON secop_licitaciones(departamento)`,
+    `CREATE INDEX IF NOT EXISTS idx_secop_segment      ON secop_licitaciones(segment_code)`,
+    `CREATE INDEX IF NOT EXISTS idx_secop_recepcion    ON secop_licitaciones(fecha_recepcion)`,
+    `CREATE INDEX IF NOT EXISTS idx_secop_precio       ON secop_licitaciones(precio_base)`,
+    `CREATE INDEX IF NOT EXISTS idx_secop_open         ON secop_licitaciones(is_open)`,
+    `CREATE INDEX IF NOT EXISTS idx_secop_overlay      ON secop_licitaciones USING GIN(overlay_categories)`,
+    `CREATE INDEX IF NOT EXISTS idx_secop_search       ON secop_licitaciones USING GIN(search_tsv)`,
+  ]) {
+    await db.query(idx);
+  }
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS secop_categories (
+      kind   TEXT NOT NULL,
+      code   TEXT NOT NULL,
+      name   TEXT NOT NULL,
+      emoji  TEXT,
+      meta   JSONB DEFAULT '{}',
+      PRIMARY KEY (kind, code)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS secop_ingest_runs (
+      id          SERIAL PRIMARY KEY,
+      started_at  TIMESTAMPTZ DEFAULT now(),
+      finished_at TIMESTAMPTZ,
+      status      TEXT DEFAULT 'running',
+      fetched     INT DEFAULT 0,
+      upserted    INT DEFAULT 0,
+      closed      INT DEFAULT 0,
+      error       TEXT,
+      params      JSONB DEFAULT '{}'
+    )
+  `);
+
+  await seedCategories(db);
+}
+
+// Idempotent upsert of the reference taxonomy (UNSPSC segments + overlay defs).
+async function seedCategories(db) {
+  for (const s of categories.unspscSegmentList()) {
+    await db.query(
+      `INSERT INTO secop_categories (kind, code, name) VALUES ('unspsc_segment', $1, $2)
+       ON CONFLICT (kind, code) DO UPDATE SET name = EXCLUDED.name`,
+      [s.code, s.name]
+    );
+  }
+  for (const o of categories.overlayCategoryList()) {
+    await db.query(
+      `INSERT INTO secop_categories (kind, code, name, emoji, meta)
+       VALUES ('overlay', $1, $2, $3, $4)
+       ON CONFLICT (kind, code) DO UPDATE SET name=EXCLUDED.name, emoji=EXCLUDED.emoji, meta=EXCLUDED.meta`,
+      [o.name, o.name, o.emoji, JSON.stringify({ unspsc_segments: o.unspsc_segments, unspsc_families: o.unspsc_families })]
+    );
+  }
+}
+
+// Upsert one normalized record (from ingest.js buildRecord). Last-write-wins; reseen
+// rows are re-opened and re-categorized. first_seen is preserved on conflict.
+async function upsertLicitacion(db, rec) {
+  const ph = INSERT_COLS.map((_, i) => `$${i + 1}`).join(", ");
+  const updates = INSERT_COLS.filter((c) => c !== "id_proceso")
+    .map((c) => `${c} = EXCLUDED.${c}`)
+    .join(", ");
+  const vals = INSERT_COLS.map((c) => {
+    if (c === "raw") return rec.raw == null ? null : JSON.stringify(rec.raw);
+    return rec[c] === undefined ? null : rec[c];
+  });
+  await db.query(
+    `INSERT INTO secop_licitaciones (${INSERT_COLS.join(", ")})
+     VALUES (${ph})
+     ON CONFLICT (id_proceso) DO UPDATE SET
+       ${updates}, is_open = TRUE, last_seen = now(), updated_at = now()`,
+    vals
+  );
+}
+
+// Mark opportunities whose offer deadline has passed as closed (kept for history).
+async function closeExpired(db) {
+  const r = await db.query(
+    `UPDATE secop_licitaciones SET is_open = FALSE, updated_at = now()
+     WHERE is_open = TRUE AND fecha_recepcion IS NOT NULL AND fecha_recepcion < now()`
+  );
+  return r.rowCount || 0;
+}
+
+// ── Ingest-run bookkeeping ──
+async function startIngestRun(db, params) {
+  const r = await db.query(
+    `INSERT INTO secop_ingest_runs (params) VALUES ($1) RETURNING id`,
+    [JSON.stringify(params || {})]
+  );
+  return r.rows[0].id;
+}
+async function finishIngestRun(db, id, patch) {
+  await db.query(
+    `UPDATE secop_ingest_runs
+     SET finished_at = now(), status = $2, fetched = $3, upserted = $4, closed = $5, error = $6
+     WHERE id = $1`,
+    [id, patch.status, patch.fetched || 0, patch.upserted || 0, patch.closed || 0, patch.error || null]
+  );
+}
+async function lastIngestRun(db) {
+  const r = await db.query(`SELECT * FROM secop_ingest_runs ORDER BY id DESC LIMIT 1`);
+  return r.rows[0] || null;
+}
+
+// ── Read API used by routes/secop.js ──
+const SORTS = {
+  deadline: "fecha_recepcion ASC NULLS LAST",
+  newest: "fecha_publicacion DESC NULLS LAST",
+  value_desc: "precio_base DESC NULLS LAST",
+  value_asc: "precio_base ASC NULLS LAST",
+  seen: "first_seen DESC",
+};
+
+async function listLicitaciones(db, f = {}) {
+  const where = [];
+  const args = [];
+  const add = (sql, val) => { args.push(val); where.push(sql.replace("?", `$${args.length}`)); };
+
+  if (f.all !== true && f.all !== "true") where.push("is_open = TRUE");
+  if (f.segment) add("segment_code = ?", String(f.segment));
+  if (f.overlay) add("? = ANY(overlay_categories)", String(f.overlay));
+  if (f.modalidad) add("modalidad = ?", String(f.modalidad));
+  if (f.departamento) add("departamento = ?", String(f.departamento));
+  if (f.entidad) add("entidad ILIKE ?", `%${f.entidad}%`);
+  if (f.min_value) add("precio_base >= ?", Number(f.min_value));
+  if (f.max_value) add("precio_base <= ?", Number(f.max_value));
+  if (f.q) add("search_tsv @@ plainto_tsquery('spanish', ?)", String(f.q));
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const orderSql = SORTS[f.sort] || SORTS.deadline;
+  const limit = Math.min(Math.max(parseInt(f.limit) || 50, 1), 200);
+  const offset = Math.max(parseInt(f.offset) || 0, 0);
+
+  const totalRes = await db.query(`SELECT count(*)::int AS n FROM secop_licitaciones ${whereSql}`, args);
+  const rowsRes = await db.query(
+    `SELECT id_proceso, referencia, entidad, departamento, ciudad, nombre, modalidad,
+            estado_resumen, precio_base, fecha_publicacion, fecha_recepcion,
+            unspsc_code, segment_code, segment_name, overlay_categories, url_proceso, is_open
+     FROM secop_licitaciones ${whereSql}
+     ORDER BY ${orderSql}
+     LIMIT ${limit} OFFSET ${offset}`,
+    args
+  );
+  return { total: totalRes.rows[0].n, limit, offset, items: rowsRes.rows };
+}
+
+async function getLicitacion(db, id) {
+  const r = await db.query(`SELECT * FROM secop_licitaciones WHERE id_proceso = $1`, [id]);
+  return r.rows[0] || null;
+}
+
+async function browseCategories(db, openOnly = true) {
+  const openClause = openOnly ? "l.is_open = TRUE AND" : "";
+  const unspsc = await db.query(
+    `SELECT segment_code, segment_name, count(*)::int AS count,
+            coalesce(sum(precio_base),0)::numeric AS total_value
+     FROM secop_licitaciones l
+     WHERE ${openClause} segment_code IS NOT NULL
+     GROUP BY segment_code, segment_name
+     ORDER BY count DESC`
+  );
+  const overlay = await db.query(
+    `SELECT cat AS name, count(*)::int AS count,
+            coalesce(sum(precio_base),0)::numeric AS total_value
+     FROM secop_licitaciones l
+     CROSS JOIN LATERAL unnest(l.overlay_categories) AS cat
+     WHERE ${openClause} cardinality(l.overlay_categories) > 0
+     GROUP BY cat
+     ORDER BY count DESC`
+  );
+  return { unspsc: unspsc.rows, overlay: overlay.rows };
+}
+
+async function getStats(db) {
+  const [open, all, byDept, run, distinctEnt] = await Promise.all([
+    db.query(`SELECT count(*)::int AS n, coalesce(sum(precio_base),0)::numeric AS v FROM secop_licitaciones WHERE is_open = TRUE`),
+    db.query(`SELECT count(*)::int AS n FROM secop_licitaciones`),
+    db.query(`SELECT departamento, count(*)::int AS count FROM secop_licitaciones WHERE is_open = TRUE AND departamento IS NOT NULL GROUP BY departamento ORDER BY count DESC LIMIT 15`),
+    lastIngestRun(db),
+    db.query(`SELECT count(DISTINCT entidad)::int AS n FROM secop_licitaciones WHERE is_open = TRUE`),
+  ]);
+  return {
+    open_count: open.rows[0].n,
+    open_total_value: open.rows[0].v,
+    all_count: all.rows[0].n,
+    distinct_entities: distinctEnt.rows[0].n,
+    by_departamento: byDept.rows,
+    last_ingest: run,
+  };
+}
+
+module.exports = {
+  INSERT_COLS,
+  ensureSchema,
+  seedCategories,
+  upsertLicitacion,
+  closeExpired,
+  startIngestRun,
+  finishIngestRun,
+  lastIngestRun,
+  listLicitaciones,
+  getLicitacion,
+  browseCategories,
+  getStats,
+};
