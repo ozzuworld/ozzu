@@ -1,0 +1,15 @@
+{
+  "_comment": "Scope excludes for relevance (dir_1784414113380). A tender is relevant if its UNSPSC family is in the relevant set (secop_unspsc_families) AND its objeto/nombre does NOT match any of these fragments. These are accent-folded, lowercased substrings matched against lower(nombre||descripcion) — write them accent-free. They kill the observed noise (interventoría de obras, hardware supply, industrial/physical maintenance, reselling) so the worker never wastes Claude tokens on out-of-scope tenders. Edit freely; restart the bridge to apply.",
+  "exclude_keywords": [
+    "interventor",
+    "obra civil", "obra publica", "malla vial", "pavimento", "rehabilitacion de la via", "rehabilitacion y mantenimiento de la via", "placa huella", "alcantarillado", "acueducto",
+    "mecatronic", "escaner lidar", "instrumentacion industrial", "banco de mecatronic", "planta electrica", "grupo electrogeno", "aire acondicionado", "aires acondicionado", "ascensor",
+    "bolsa de repuesto", "material inhibidor",
+    "gestion documental", "socioeconomico", "alumbrado publico",
+    "zonas verdes", "silvicultural", "arboreo", "poda",
+    "materiales de formacion", "material de formacion", "dotacion", "elementos de proteccion personal",
+    "vehiculo", "combustible",
+    "vigilancia y seguridad privada", "aseo y cafeteria", "cafeteria", "servicio de alimentacion",
+    "examenes medicos", "vacunacion"
+  ]
+}

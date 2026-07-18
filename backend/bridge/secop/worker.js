@@ -25,8 +25,7 @@ async function pickFull(db, skip) {
     SELECT l.id_proceso
     FROM secop_licitaciones l
     WHERE l.is_open
-      AND (l.family_code IN (SELECT family_code FROM secop_unspsc_families WHERE relevant)
-           OR cardinality(l.overlay_categories) > 0)
+      AND ${schema.relevanceClause("l")}
       AND NOT (l.id_proceso = ANY($1))
       AND NOT EXISTS (SELECT 1 FROM secop_decisions d
                       WHERE d.id_proceso = l.id_proceso AND d.decision IN ('rejected','accepted'))
@@ -45,8 +44,7 @@ async function pickBriefRegen(db, skip) {
     JOIN secop_licitaciones l ON l.id_proceso = t.id_proceso
     WHERE t.status = 'ok' AND (t.brief ? 'recomendacion') AND NOT (t.brief ? 'card')
       AND l.is_open
-      AND (l.family_code IN (SELECT family_code FROM secop_unspsc_families WHERE relevant)
-           OR cardinality(l.overlay_categories) > 0)
+      AND ${schema.relevanceClause("l")}
       AND NOT (l.id_proceso = ANY($1))
       AND NOT EXISTS (SELECT 1 FROM secop_decisions d
                       WHERE d.id_proceso = l.id_proceso AND d.decision IN ('rejected','accepted'))

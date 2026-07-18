@@ -9,6 +9,21 @@
 const categories = require("./categories");
 const entityStats = require("./entity-stats");
 const UNSPSC_FAMILIES = require("./unspsc-families.json");
+const SCOPE = require("./scope.json");
+
+// Relevance = a relevant UNSPSC family AND the objeto does NOT match a scope-exclude
+// keyword (interventoría, obra, hardware supply, physical maintenance…). Keywords are
+// accent-folded substrings; the objeto keeps accents, so we drop the accents in SQL via
+// translate() to match the accent-free fragments. Shared by the list API and the worker.
+const EXCLUDE_RX = (SCOPE.exclude_keywords || [])
+  .map((k) => String(k).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join("|");
+function relevanceClause(a = "l") {
+  const fam = `${a}.family_code IN (SELECT family_code FROM secop_unspsc_families WHERE relevant)`;
+  if (!EXCLUDE_RX) return `(${fam})`;
+  const objeto = `translate(lower(coalesce(${a}.nombre,'') || ' ' || coalesce(${a}.descripcion,'')), 'áéíóúñü', 'aeiounu')`;
+  return `(${fam} AND ${objeto} !~ '${EXCLUDE_RX}')`;
+}
 
 // Columns written on ingest (search_tsv is GENERATED; first_seen/updated_at handled below).
 const INSERT_COLS = [
@@ -266,7 +281,7 @@ async function listLicitaciones(db, f = {}) {
 
   if (f.all !== true && f.all !== "true") where.push("is_open = TRUE");
   if (f.relevant === true || f.relevant === "true") {
-    where.push("(l.family_code IN (SELECT family_code FROM secop_unspsc_families WHERE relevant) OR cardinality(l.overlay_categories) > 0)");
+    where.push(relevanceClause("l"));
   }
   if (f.inbox === true || f.inbox === "true") {
     where.push("NOT EXISTS (SELECT 1 FROM secop_decisions d WHERE d.id_proceso = l.id_proceso AND d.decision IN ('rejected','accepted'))");
@@ -428,6 +443,7 @@ module.exports = {
   INSERT_COLS,
   ensureSchema,
   seedCategories,
+  relevanceClause,
   setBrief,
   setDecision,
   upsertLicitacion,
