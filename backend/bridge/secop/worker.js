@@ -22,6 +22,9 @@ let cooldownUntil = 0;
 const inFlight = new Set();
 
 // Next un-analyzed relevant/open/undecided tender (full build), excluding in-flight.
+// Re-pick guard: skip 'ok' forever, 'building' for 30min (so a crashed in-flight analysis
+// retries), and 'error' for 1h (so a permanent "no downloadable PDF" failure isn't re-grabbed
+// every 15s tick — that stalled the whole drain when 2 no-doc tenders ate 2 of 3 slots).
 async function pickFull(db, skip) {
   const r = await db.query(`
     SELECT l.id_proceso
@@ -32,7 +35,10 @@ async function pickFull(db, skip) {
       AND NOT EXISTS (SELECT 1 FROM secop_decisions d
                       WHERE d.id_proceso = l.id_proceso AND d.decision IN ('rejected','accepted'))
       AND NOT EXISTS (SELECT 1 FROM secop_tender_detail t
-                      WHERE t.id_proceso = l.id_proceso AND t.status IN ('ok','building'))
+                      WHERE t.id_proceso = l.id_proceso
+                        AND (t.status = 'ok'
+                          OR (t.status = 'building' AND t.updated_at > now() - interval '30 minutes')
+                          OR (t.status = 'error'    AND t.updated_at > now() - interval '1 hour')))
     ORDER BY l.fecha_recepcion ASC NULLS LAST
     LIMIT 1`, [skip]);
   return r.rows[0] ? r.rows[0].id_proceso : null;
