@@ -5,6 +5,9 @@
 
 const schema = require("../secop/schema");
 
+// In-flight brief regenerations (detail exists but brief missing) — avoid stacking.
+const _briefRegen = new Set();
+
 module.exports = function secopRoutes(ctx) {
   const { sendJSON, parseBody, db, log } = ctx;
 
@@ -85,7 +88,25 @@ module.exports = function secopRoutes(ctx) {
       try {
         const id = decodeURIComponent(detailMatch[1]);
         const existing = await schema.getTenderDetail(db, id);
-        if (existing && existing.status === "ok") { sendJSON(res, 200, { status: "ready", detail: existing }); return true; }
+        if (existing && existing.status === "ok") {
+          const hasBrief = existing.brief && existing.brief.recomendacion;
+          if (hasBrief) { sendJSON(res, 200, { status: "ready", detail: existing }); return true; }
+          // Detail ready but the brief (the actual decision doc) is missing → generate it.
+          if (!_briefRegen.has(id)) {
+            _briefRegen.add(id);
+            (async () => {
+              try {
+                const { generateBrief } = require("../secop/extract");
+                const lic = await schema.getLicitacion(db, id);
+                const brief = await generateBrief(existing, { entidad: lic.entidad, modalidad: lic.modalidad, valor: lic.precio_base, competitividad: lic.competitividad });
+                await schema.setBrief(db, id, brief);
+              } catch (e) { log?.error?.(`[secop] brief regen ${id}: ${e.message}`); }
+              finally { _briefRegen.delete(id); }
+            })();
+          }
+          sendJSON(res, 200, { status: "building" });
+          return true;
+        }
         if (existing && existing.status === "building") { sendJSON(res, 200, { status: "building" }); return true; }
         const { buildTenderDetail } = require("../secop/detail-pipeline");
         buildTenderDetail(db, id)

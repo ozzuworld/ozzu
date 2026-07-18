@@ -45,6 +45,7 @@ export function ProposalDocument({
   const [detail, setDetail] = useState<TenderDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "building" | "ready" | "error">("loading");
   const [deciding, setDeciding] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
     if (!visible || !licId) { setLic(null); setDetail(null); setStatus("loading"); return; }
@@ -150,28 +151,38 @@ export function ProposalDocument({
                   </Block>
                 ) : null}
 
-                {/* Requisitos habilitantes (soporte) */}
+                {/* Supporting detail — collapsed so the brief IS the document */}
                 {(() => {
                   const h = detail?.habilitantes || {};
                   const all = [...(h.juridicos || []), ...(h.financieros || []), ...(h.tecnicos || []), ...(h.experiencia || [])];
-                  return all.length ? (
-                    <Block label={`REQUISITOS HABILITANTES (${all.length})`}><Bullets items={all.slice(0, 8)} /></Block>
-                  ) : null;
-                })()}
-
-                {/* Cronograma clave */}
-                {detail?.cronograma?.length ? (
-                  <Block label="CRONOGRAMA">
-                    <View style={{ gap: 5 }}>
-                      {detail.cronograma.slice(0, 6).map((c, i) => (
-                        <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
-                          <Text style={{ color: colors.gray[300], fontSize: 12.5, flex: 1 }}>{c.hito}</Text>
-                          <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 11.5 }}>{String(c.fecha || "").slice(0, 10)}</Text>
+                  if (!all.length && !detail?.cronograma?.length) return null;
+                  return (
+                    <View style={{ borderTopWidth: 0.5, borderTopColor: "rgba(255,255,255,0.06)", paddingTop: 14 }}>
+                      <Pressable onPress={() => setShowDetails((v) => !v)} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
+                        <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: "600" }}>
+                          {showDetails ? "▾ Ocultar detalles del proceso" : "▸ Ver detalles del proceso (requisitos, cronograma)"}
+                        </Text>
+                      </Pressable>
+                      {showDetails ? (
+                        <View style={{ gap: 16, marginTop: 12 }}>
+                          {all.length ? <Block label={`REQUISITOS HABILITANTES (${all.length})`}><Bullets items={all} /></Block> : null}
+                          {detail?.cronograma?.length ? (
+                            <Block label="CRONOGRAMA">
+                              <View style={{ gap: 5 }}>
+                                {detail.cronograma.slice(0, 8).map((c, i) => (
+                                  <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+                                    <Text style={{ color: colors.gray[300], fontSize: 12.5, flex: 1 }}>{c.hito}</Text>
+                                    <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 11.5 }}>{String(c.fecha || "").slice(0, 10)}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            </Block>
+                          ) : null}
                         </View>
-                      ))}
+                      ) : null}
                     </View>
-                  </Block>
-                ) : null}
+                  );
+                })()}
 
                 {url ? (
                   <Pressable onPress={() => Linking.openURL(url)} style={({ pressed }) => ({ alignSelf: "flex-start", opacity: pressed ? 0.7 : 1, borderColor: colors.border.default, borderWidth: 1, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 })}>
