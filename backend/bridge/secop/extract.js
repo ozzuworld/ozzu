@@ -1,20 +1,21 @@
 "use strict";
 
-// Self-hosted tender-detail extraction (dir_1784397346001). Turns the text of a
-// SECOP pliego / estudios previos into structured JSON via Gemini (GEMINI_API_KEY —
-// same key June uses; no third-party licitaciones service). Proven 2026-07-18 on a
-// real Estudios Previos: habilitantes/evaluación/garantías/especificaciones extracted.
+// Self-hosted tender-detail extraction (dir_1784406309892). Turns a SECOP pliego /
+// estudios previos into structured JSON via Claude on King Kazuma's Max plan — the
+// `claude` CLI headless (`-p`), auth from /root/.claude.json, no API key, flat-rate
+// (feedback_claude_sdk_over_gemini). PDFs are read natively by Claude's Read tool
+// (handles scanned docs via vision); no pdftotext needed.
 
-const https = require("https");
+const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 
-const MODELS = (process.env.SECOP_EXTRACT_MODELS
-  ? process.env.SECOP_EXTRACT_MODELS.split(",")
-  : ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-).map((s) => s.trim());
+const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
+const WORKROOT = process.env.SECOP_EXTRACT_WORKDIR || "/tmp/ozzu-bridge/secop-extract";
+const TIMEOUT_MS = parseInt(process.env.SECOP_EXTRACT_TIMEOUT_MS) || 240000;
+const MAX_DOCS = parseInt(process.env.SECOP_EXTRACT_MAX_DOCS) || 5;
 
-const MAX_DOC_CHARS = parseInt(process.env.SECOP_EXTRACT_MAX_CHARS) || 200000;
-
-// The structured shape we pull out of a tender's documents.
 const SCHEMA_HINT = `{
   "objeto": "",
   "valor_estimado": "",
@@ -29,142 +30,82 @@ const SCHEMA_HINT = `{
   "documentos_requeridos": []
 }`;
 
-function buildPrompt(text) {
+function buildPrompt(source) {
   return (
-    "Eres analista de licitaciones públicas de Colombia (SECOP II). A partir del texto de los " +
-    "documentos del proceso (pliego de condiciones / estudios previos / invitación), extrae la " +
-    "información en JSON con este esquema EXACTO (usa arreglos vacíos si un dato no aparece; no inventes):\n" +
+    "Eres analista de licitaciones públicas de Colombia (SECOP II). " +
+    source +
+    "\nExtrae la información del proceso en JSON con este esquema EXACTO (usa arreglos vacíos si un dato no aparece; no inventes):\n" +
     SCHEMA_HINT +
-    "\nResponde SOLO con el JSON válido.\n\n=== DOCUMENTOS ===\n" +
-    String(text || "").slice(0, MAX_DOC_CHARS)
+    "\nResponde ÚNICAMENTE con el JSON válido, sin texto ni explicación adicional."
   );
 }
 
-function callGemini(model, prompt, apiKey) {
-  const body = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { responseMimeType: "application/json", temperature: 0.1 },
-  });
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+// Parse the JSON object out of Claude's answer (may be fenced or have prose).
+function parseJSONFromText(t) {
+  t = String(t || "").trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  const s = t.indexOf("{");
+  const e = t.lastIndexOf("}");
+  if (s >= 0 && e > s) t = t.slice(s, e + 1);
+  return JSON.parse(t);
+}
+
+// Run the claude CLI headless; pipe the prompt on stdin, return the result text.
+function runClaude(args, prompt, cwd) {
   return new Promise((resolve, reject) => {
-    const req = https.request(
-      url,
-      { method: "POST", headers: { "Content-Type": "application/json" }, timeout: 120000 },
-      (res) => {
-        let data = "";
-        res.on("data", (c) => (data += c));
-        res.on("end", () => {
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            return reject(new Error(`Gemini HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
-          }
-          try {
-            const j = JSON.parse(data);
-            const txt = j.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!txt) return reject(new Error("Gemini: empty candidate"));
-            resolve(JSON.parse(txt));
-          } catch (e) {
-            reject(new Error(`Gemini parse: ${e.message}`));
-          }
-        });
-      }
-    );
-    req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("Gemini timeout")); });
-    req.write(body);
-    req.end();
+    const proc = spawn(CLAUDE_BIN, args, { cwd, env: process.env });
+    let out = "", err = "";
+    const timer = setTimeout(() => { proc.kill("SIGKILL"); reject(new Error("claude timeout")); }, TIMEOUT_MS);
+    proc.stdout.on("data", (c) => (out += c));
+    proc.stderr.on("data", (c) => (err += c));
+    proc.on("error", (e) => { clearTimeout(timer); reject(new Error(`claude spawn: ${e.message}`)); });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(`claude exit ${code}: ${(err || out).slice(0, 200)}`));
+      try {
+        const j = JSON.parse(out);
+        if (j.is_error) return reject(new Error(`claude error: ${String(j.result).slice(0, 200)}`));
+        resolve(j.result || "");
+      } catch (e) { reject(new Error(`claude output parse: ${e.message} :: ${out.slice(0, 150)}`)); }
+    });
+    proc.stdin.write(prompt);
+    proc.stdin.end();
   });
 }
 
-// Multimodal call: send PDF bytes straight to Gemini (no pdftotext needed — the
-// bridge container has none, and Gemini reads PDFs natively incl. tables/scans).
-function callGeminiDocs(model, parts, apiKey) {
-  const body = JSON.stringify({
-    contents: [{ parts }],
-    generationConfig: { responseMimeType: "application/json", temperature: 0.1 },
-  });
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  return new Promise((resolve, reject) => {
-    const req = https.request(
-      url,
-      { method: "POST", headers: { "Content-Type": "application/json" }, timeout: 180000 },
-      (res) => {
-        let data = "";
-        res.on("data", (c) => (data += c));
-        res.on("end", () => {
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            return reject(new Error(`Gemini HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
-          }
-          try {
-            const j = JSON.parse(data);
-            const txt = j.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!txt) return reject(new Error("Gemini: empty candidate"));
-            resolve(JSON.parse(txt));
-          } catch (e) {
-            reject(new Error(`Gemini parse: ${e.message}`));
-          }
-        });
-      }
-    );
-    req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("Gemini timeout")); });
-    req.write(body);
-    req.end();
-  });
-}
-
-// Total inline payload cap (Gemini inline_data ~20MB request limit; leave headroom).
-const MAX_INLINE_BYTES = parseInt(process.env.SECOP_EXTRACT_MAX_BYTES) || 15 * 1024 * 1024;
-
-// Extract from PDF documents directly. docs = [{ name, base64 }] (PDF). Sends the
-// most important docs up to the size cap. Returns { ok, model, detail, docs_used }.
-async function extractTenderDetailFromDocs(docs, opts = {}) {
-  const apiKey = opts.apiKey || process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY not set");
-  if (!Array.isArray(docs) || docs.length === 0) throw new Error("no documents to extract");
-
-  const parts = [];
-  const used = [];
-  let bytes = 0;
-  for (const d of docs) {
-    if (!d.base64) continue;
-    const sz = Math.floor((d.base64.length * 3) / 4);
-    if (bytes + sz > MAX_INLINE_BYTES) continue;
-    parts.push({ inline_data: { mime_type: "application/pdf", data: d.base64 } });
-    used.push(d.name);
-    bytes += sz;
-  }
-  if (parts.length === 0) throw new Error("all documents exceeded the size cap");
-  parts.push({ text: buildPrompt("(ver documentos PDF adjuntos)") });
-
-  let lastErr;
-  for (const model of MODELS) {
-    try {
-      const detail = await callGeminiDocs(model, parts, apiKey);
-      return { ok: true, model, detail, docs_used: used };
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error("all extraction models failed");
-}
-
-// Extract structured tender detail from concatenated document text.
-// Returns { ok, model, detail } or throws.
+// Extract from concatenated document text (no file reading needed).
 async function extractTenderDetail(text, opts = {}) {
-  const apiKey = opts.apiKey || process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY not set");
   if (!text || text.trim().length < 200) throw new Error("document text too short to extract");
-  const prompt = buildPrompt(text);
-  let lastErr;
-  for (const model of MODELS) {
-    try {
-      const detail = await callGemini(model, prompt, apiKey);
-      return { ok: true, model, detail };
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error("all extraction models failed");
+  const prompt = buildPrompt("A partir del siguiente texto de los documentos del proceso:\n\n" + text.slice(0, 200000));
+  const result = await runClaude(["-p", "--output-format", "json", "--allowedTools", ""], prompt);
+  return { ok: true, model: "claude", detail: parseJSONFromText(result) };
 }
 
-module.exports = { extractTenderDetail, extractTenderDetailFromDocs, MODELS, SCHEMA_HINT };
+// Extract from PDF documents — Claude reads them directly (Read tool). docs = [{name, base64}].
+async function extractTenderDetailFromDocs(docs, opts = {}) {
+  if (!Array.isArray(docs) || docs.length === 0) throw new Error("no documents to extract");
+  const work = path.join(WORKROOT, crypto.randomUUID());
+  fs.mkdirSync(work, { recursive: true });
+  try {
+    const used = [];
+    const files = [];
+    for (const d of docs.slice(0, MAX_DOCS)) {
+      if (!d.base64) continue;
+      const fn = `doc${files.length + 1}.pdf`;
+      fs.writeFileSync(path.join(work, fn), Buffer.from(d.base64, "base64"));
+      files.push(fn);
+      used.push(d.name);
+    }
+    if (files.length === 0) throw new Error("no valid PDF documents");
+    const prompt = buildPrompt(
+      `Lee y analiza los siguientes archivos PDF (pliego de condiciones / estudios previos / invitación) ubicados en el directorio actual: ${files.join(", ")}.`
+    );
+    const result = await runClaude(["-p", "--output-format", "json", "--allowedTools", "Read"], prompt, work);
+    return { ok: true, model: "claude", detail: parseJSONFromText(result), docs_used: used };
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
+
+module.exports = { extractTenderDetail, extractTenderDetailFromDocs, SCHEMA_HINT };

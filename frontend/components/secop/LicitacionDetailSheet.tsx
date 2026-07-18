@@ -156,7 +156,7 @@ export function LicitacionDetailSheet({
         if (!alive) return;
         if (r.status === "ready" && r.detail) { setDetail(r.detail); setDetailStatus("ready"); return; }
         setDetailStatus("building");
-        if (tries++ < 18) timer = setTimeout(poll, 5000);
+        if (tries++ < 45) timer = setTimeout(poll, 6000);
         else setDetailStatus("error");
       } catch { if (alive) setDetailStatus("error"); }
     };
@@ -291,7 +291,7 @@ export function LicitacionDetailSheet({
                 {detailStatus === "building" ? (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, backgroundColor: colors.gray[800], borderRadius: 10 }}>
                     <ActivityIndicator color={colors.accent} size="small" />
-                    <Text style={{ color: colors.text.secondary, fontSize: 12.5 }}>Analizando pliegos con IA… (unos segundos)</Text>
+                    <Text style={{ color: colors.text.secondary, fontSize: 12.5 }}>Analizando pliegos con IA… (puede tardar 1–2 min)</Text>
                   </View>
                 ) : detailStatus === "ready" && detail ? (
                   <TenderDetailView d={detail} />
