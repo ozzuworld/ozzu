@@ -1182,6 +1182,15 @@ export interface Licitacion {
   url_proceso: string | null;
   is_open: boolean;
   linked_venture_id: number | null;
+  competitividad?: Competitividad;
+}
+export interface Competitividad {
+  score: number;
+  label: string;
+  single_rate: number;
+  avg_bidders: number | null;
+  adjudicated_total: number;
+  basis: "entidad" | "modalidad";
 }
 export interface LicitacionListResult { total: number; limit: number; offset: number; items: Licitacion[]; }
 export interface SecopCategory { name?: string; segment_code?: string; segment_name?: string; count: number; total_value: number | string; }

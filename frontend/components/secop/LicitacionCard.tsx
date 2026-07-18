@@ -1,7 +1,7 @@
 import { View, Text, Pressable } from "react-native";
 import { colors } from "../../lib/design-tokens";
 import { formatCOPCompact } from "../../lib/format";
-import { categoryStyle, deadlineInfo, toNum } from "../../lib/secop-format";
+import { categoryStyle, deadlineInfo, toNum, compColor } from "../../lib/secop-format";
 import type { Licitacion } from "../../lib/bridge-api";
 
 function Pill({ text, color, bg }: { text: string; color: string; bg?: string }) {
@@ -53,6 +53,12 @@ export function LicitacionCard({ lic, onPress }: { lic: Licitacion; onPress: () 
           <Text style={{ color: colors.accentLight, fontFamily: "monospace", fontSize: 12, fontWeight: "700" }}>
             {formatCOPCompact(toNum(lic.precio_base))}
           </Text>
+          {lic.competitividad ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: compColor(lic.competitividad.label) + "1a", borderRadius: 5, paddingHorizontal: 7, paddingVertical: 3 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: compColor(lic.competitividad.label) }} />
+              <Text style={{ color: compColor(lic.competitividad.label), fontSize: 10, fontWeight: "600" }}>{lic.competitividad.label}</Text>
+            </View>
+          ) : null}
           {lic.departamento ? <Pill text={lic.departamento} color={colors.text.secondary} bg={colors.gray[700]} /> : null}
           {overlay ? <Pill text={overlay} color={style.color} /> : null}
           <View style={{ flex: 1 }} />

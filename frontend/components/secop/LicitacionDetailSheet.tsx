@@ -3,7 +3,7 @@ import { View, Text, ScrollView, Pressable, Modal, ActivityIndicator, Linking, A
 import { useRouter } from "expo-router";
 import { colors } from "../../lib/design-tokens";
 import { formatCOP } from "../../lib/format";
-import { categoryStyle, deadlineInfo, toNum } from "../../lib/secop-format";
+import { categoryStyle, deadlineInfo, toNum, compColor } from "../../lib/secop-format";
 import { fetchLicitacion, createVentureFromLicitacion, fetchTenderDetail, type Licitacion, type TenderDetail } from "../../lib/bridge-api";
 
 function fmtDate(s?: string | null): string {
@@ -235,6 +235,27 @@ export function LicitacionDetailSheet({
                   </View>
                   <Text style={{ color: dl.color, fontSize: 15, fontWeight: "800" }}>{dl.label}</Text>
                 </View>
+
+                {/* Competitiveness / amarrado-risk */}
+                {lic.competitividad ? (
+                  <View style={{ backgroundColor: compColor(lic.competitividad.label) + "14", borderRadius: 10, padding: 12, borderWidth: 1, borderColor: compColor(lic.competitividad.label) + "33" }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                      <View>
+                        <Text style={{ color: colors.text.tertiary, fontFamily: "monospace", fontSize: 9, letterSpacing: 1 }}>COMPETENCIA</Text>
+                        <Text style={{ color: compColor(lic.competitividad.label), fontSize: 15, fontWeight: "800", marginTop: 2 }}>{lic.competitividad.label}</Text>
+                      </View>
+                      <Text style={{ color: compColor(lic.competitividad.label), fontFamily: "monospace", fontSize: 24, fontWeight: "800" }}>{lic.competitividad.score}</Text>
+                    </View>
+                    <Text style={{ color: colors.gray[300], fontSize: 12, marginTop: 8, lineHeight: 17 }}>
+                      {lic.competitividad.basis === "entidad"
+                        ? `Esta entidad ha adjudicado ${lic.competitividad.adjudicated_total} procesos con ${lic.competitividad.avg_bidders ?? "—"} oferentes en promedio; ${lic.competitividad.single_rate}% tuvieron un solo oferente.`
+                        : `Sin historial suficiente de esta entidad — estimado por modalidad: ~${lic.competitividad.single_rate}% de estos procesos tienen un solo oferente.`}
+                    </Text>
+                    <Text style={{ color: colors.text.tertiary, fontSize: 10.5, marginTop: 5, fontStyle: "italic" }}>
+                      Un solo oferente sugiere posible pliego a la medida — señal, no prueba.
+                    </Text>
+                  </View>
+                ) : null}
 
                 {/* Facts */}
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>

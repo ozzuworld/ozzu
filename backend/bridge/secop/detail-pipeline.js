@@ -82,9 +82,14 @@ function downloadBase64(url) {
 const urlOf = (v) => (v && typeof v === "object" ? v.url : v) || null;
 
 // Cronograma fallback from the Socrata process dates when the docs don't yield one.
+function ymd(v) {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
 function cronogramaFromDates(lic) {
   const out = [];
-  const push = (hito, v) => { if (v) out.push({ hito, fecha: String(v).slice(0, 10) }); };
+  const push = (hito, v) => { const f = ymd(v); if (f) out.push({ hito, fecha: f }); };
   push("Publicación del proceso", lic.fecha_publicacion);
   push("Apertura de ofertas", lic.fecha_apertura);
   push("Cierre — presentación de ofertas", lic.fecha_recepcion);

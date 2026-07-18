@@ -33,19 +33,20 @@ export default function SecopScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"deadline" | "competitividad" | "value_desc">("deadline");
   const [filter, setFilter] = useState<Filter>(null);
   const [cats, setCats] = useState<{ unspsc: SecopCategory[]; overlay: SecopCategory[] } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
 
   const buildParams = useCallback(() => {
-    const p: Record<string, any> = { sort: "deadline", limit: 100 };
+    const p: Record<string, any> = { sort, limit: 100 };
     if (query.trim()) p.q = query.trim();
     if (filter) { p[filter.kind] = filter.value; }
     else if (activeTab === "relevantes") p.relevant = true;
     else if (activeTab === "minima") { p.relevant = true; p.modalidad = "Mínima cuantía"; }
     return p;
-  }, [activeTab, query, filter]);
+  }, [activeTab, query, filter, sort]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -120,6 +121,11 @@ export default function SecopScreen() {
             <Text style={{ color: colors.text.tertiary, fontFamily: "monospace", fontSize: 10 }}>
               {loading ? "…" : `${total} oportunidad${total === 1 ? "" : "es"}`}
             </Text>
+            {([["deadline", "Cierre"], ["competitividad", "Ganables"], ["value_desc", "Valor"]] as const).map(([k, lbl]) => (
+              <Pressable key={k} onPress={() => setSort(k)} style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 5, backgroundColor: sort === k ? ACCENT + "22" : "transparent", borderWidth: 1, borderColor: sort === k ? ACCENT + "44" : colors.border.subtle }}>
+                <Text style={{ color: sort === k ? ACCENT : colors.text.tertiary, fontSize: 10, fontWeight: "600" }}>{lbl}</Text>
+              </Pressable>
+            ))}
             {filter ? (
               <Pressable onPress={() => setFilter(null)} style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: ACCENT + "1a", borderRadius: 5, paddingHorizontal: 8, paddingVertical: 3 }}>
                 <Text style={{ color: ACCENT, fontSize: 10, fontWeight: "600" }}>{filter.label}  ✕</Text>

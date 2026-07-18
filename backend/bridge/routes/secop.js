@@ -118,6 +118,18 @@ module.exports = function secopRoutes(ctx) {
       return true;
     }
 
+    // POST /secop/entity-stats/refresh — recompute per-entity competitiveness (background)
+    if (req.method === "POST" && pathname === "/secop/entity-stats/refresh") {
+      try {
+        const { buildEntityStats } = require("../secop/entity-stats");
+        buildEntityStats(db)
+          .then((r) => log?.info?.(`[secop] entity-stats: ${JSON.stringify(r)}`))
+          .catch((e) => log?.error?.(`[secop] entity-stats failed: ${e.message}`));
+        sendJSON(res, 202, { ok: true, message: "entity-stats refresh started" });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
     // POST /secop/recategorize — re-apply overlay.json/unspsc.json (background, 202)
     if (req.method === "POST" && pathname === "/secop/recategorize") {
       try {

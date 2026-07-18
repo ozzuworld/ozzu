@@ -7,6 +7,7 @@
 // thin wrapper around a standalone pg Pool — see ingest.js). No pool is created here.
 
 const categories = require("./categories");
+const entityStats = require("./entity-stats");
 
 // Columns written on ingest (search_tsv is GENERATED; first_seen/updated_at handled below).
 const INSERT_COLS = [
@@ -126,6 +127,18 @@ async function ensureSchema(db) {
     )
   `);
 
+  // Per-entity historical competitiveness (single-bidder rate) — powers the score.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS secop_entity_stats (
+      nit_entidad       TEXT PRIMARY KEY,
+      adjudicated_total INT DEFAULT 0,
+      single_bidder     INT DEFAULT 0,
+      avg_bidders       NUMERIC,
+      single_rate       NUMERIC,
+      updated_at        TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+
   // Link column on ventures (business_projects) so a licitación can become a venture.
   // business_projects is created earlier in db.js init(); guard in case of ordering.
   try {
@@ -214,6 +227,7 @@ const SORTS = {
   value_desc: "precio_base DESC NULLS LAST",
   value_asc: "precio_base ASC NULLS LAST",
   seen: "first_seen DESC",
+  competitividad: "COALESCE(es.single_rate, 0.35) ASC, fecha_recepcion ASC NULLS LAST",
 };
 
 async function listLicitaciones(db, f = {}) {
@@ -242,26 +256,39 @@ async function listLicitaciones(db, f = {}) {
     `SELECT l.id_proceso, l.referencia, l.entidad, l.departamento, l.ciudad, l.nombre, l.modalidad,
             l.estado_resumen, l.precio_base, l.fecha_publicacion, l.fecha_recepcion,
             l.unspsc_code, l.segment_code, l.segment_name, l.overlay_categories, l.url_proceso, l.is_open,
-            bp.id AS linked_venture_id
+            bp.id AS linked_venture_id,
+            es.adjudicated_total AS es_adj, es.single_rate AS es_rate, es.avg_bidders AS es_avg
      FROM secop_licitaciones l
      LEFT JOIN business_projects bp ON bp.secop_id = l.id_proceso AND bp.status <> 'archived'
+     LEFT JOIN secop_entity_stats es ON es.nit_entidad = l.nit_entidad
      ${whereSql}
      ORDER BY ${orderSql}
      LIMIT ${limit} OFFSET ${offset}`,
     args
   );
-  return { total: totalRes.rows[0].n, limit, offset, items: rowsRes.rows };
+  const items = rowsRes.rows.map((r) => {
+    const { es_adj, es_rate, es_avg, ...rest } = r;
+    const stat = es_adj != null ? { adjudicated_total: es_adj, single_rate: es_rate, avg_bidders: es_avg } : null;
+    return { ...rest, competitividad: entityStats.scoreTender(rest, stat) };
+  });
+  return { total: totalRes.rows[0].n, limit, offset, items };
 }
 
 async function getLicitacion(db, id) {
   const r = await db.query(
-    `SELECT l.*, bp.id AS linked_venture_id
+    `SELECT l.*, bp.id AS linked_venture_id,
+            es.adjudicated_total AS es_adj, es.single_rate AS es_rate, es.avg_bidders AS es_avg
      FROM secop_licitaciones l
      LEFT JOIN business_projects bp ON bp.secop_id = l.id_proceso AND bp.status <> 'archived'
+     LEFT JOIN secop_entity_stats es ON es.nit_entidad = l.nit_entidad
      WHERE l.id_proceso = $1`,
     [id]
   );
-  return r.rows[0] || null;
+  const row = r.rows[0];
+  if (!row) return null;
+  const { es_adj, es_rate, es_avg, ...rest } = row;
+  const stat = es_adj != null ? { adjudicated_total: es_adj, single_rate: es_rate, avg_bidders: es_avg } : null;
+  return { ...rest, competitividad: entityStats.scoreTender(rest, stat) };
 }
 
 async function browseCategories(db, openOnly = true) {

@@ -33,6 +33,14 @@ export function deadlineInfo(dateStr?: string | null): { label: string; color: s
   return { label: `cierra en ${days}d`, color, days };
 }
 
+// Competitiveness label → color (green winnable, amber moderate, red rigged-risk).
+export function compColor(label?: string | null): string {
+  if (label === "Competitivo") return colors.success;
+  if (label === "Moderado") return colors.brand.amber;
+  if (label === "Riesgo amarrado") return colors.error;
+  return colors.text.tertiary;
+}
+
 export function toNum(v: number | string | null | undefined): number {
   if (v == null) return 0;
   const n = typeof v === "number" ? v : Number(v);
