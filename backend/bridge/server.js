@@ -984,6 +984,12 @@ async function initStorage() {
         if (res.rowCount > 0) log.pg.info(`Auto-closed ${res.rowCount} stale conversation(s)`);
       } catch (err) { log.pg.error("conversation cleanup:", err.message); }
     }, 60 * 60 * 1000));
+
+    // SECOP background pre-analysis worker — pre-builds detail+brief so offers land analyzed
+    try {
+      const _secopWorker = require("./secop/worker").startWorker(db);
+      if (_secopWorker) _intervals.push(_secopWorker);
+    } catch (err) { log.pg.error("secop worker start:", err.message); }
   }
 
   // ── Orphan commit scanner — every 30 minutes ──
