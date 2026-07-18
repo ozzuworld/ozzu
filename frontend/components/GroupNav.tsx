@@ -15,6 +15,7 @@ const GROUPS: Record<GroupKey, Entry[]> = {
   ],
   work: [
     { icon: "🚀", label: "Ventures", route: "/business" },
+    { icon: "📋", label: "Licitaciones", route: "/secop" },
     { icon: "🔐", label: "SOC", route: "/soc" },
   ],
   me: [

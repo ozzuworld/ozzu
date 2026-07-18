@@ -1,47 +1,59 @@
 {
-  "_comment": "TUNABLE 'relevant-to-us' overlay for Skyline. A licitación gets tagged with an overlay category if its UNSPSC segment/family matches OR any keyword appears in the entity/name/description (accent- and case-insensitive). A record can carry several overlay tags, or none. Edit freely: add categories, add/remove keywords, add UNSPSC segment (2-digit) or family (4-digit) codes. Re-run the ingester (or the recategorize command) to apply.",
+  "_comment": "Skyline relevance overlay — scoped to IT / software / computer-science work deliverable ONLINE/remote (King Kazuma 2026-07-18). A licitación is tagged if its UNSPSC family matches (high precision: 4323=Software, 8111=IT services) OR a TIGHT multi-word phrase appears in entity+name+description (accent/case-folded). Single overloaded Spanish words (aplicación, desarrollo, licencia, sistema) are AVOIDED on purpose — they match vaccines/roads/permits. Edit freely; re-run `--recategorize` to apply. Physical/hardware/obra categories were dropped — the canonical UNSPSC segments still cover the broad view.",
   "categories": [
     {
-      "name": "Redes y Telecomunicaciones",
-      "emoji": "🌐",
-      "unspsc_segments": ["43"],
-      "unspsc_families": ["4322", "8111", "8116"],
-      "keywords": ["red de datos", "cableado estructurado", "fibra optica", "telecomunicac", "conectividad", "wifi", "wi-fi", "wlan", "wan", "lan ", "canal de internet", "canal dedicado", "ancho de banda", "enrutador", "router", "switch", "firewall", "vpn", "ip mpls", "radioenlace", "microondas", "ptp", "ptmp", "acceso a internet", "internet dedicado"]
+      "name": "Desarrollo de Software",
+      "emoji": "💻",
+      "unspsc_segments": [],
+      "unspsc_families": ["4323"],
+      "keywords": [
+        "desarrollo de software", "fabrica de software", "software a la medida",
+        "aplicacion web", "aplicativo web", "aplicacion movil", "aplicativo movil",
+        "app movil", "pagina web", "sitio web", "portal web", "portal transaccional",
+        "sistema de informacion", "gestor de contenidos", "api rest", "microservicios",
+        "software como servicio", "saas", "modernizacion de aplicaciones"
+      ]
     },
     {
-      "name": "Infraestructura y Servicios TI",
-      "emoji": "🖥️",
-      "unspsc_segments": ["43", "81"],
-      "unspsc_families": ["4321", "4323", "8112", "8115"],
-      "keywords": ["servidor", "datacenter", "data center", "centro de datos", "almacenamiento", "storage", "virtualizacion", "nube", "cloud", "software", "licenciamiento", "licencias", "sistema de informacion", "aplicativo", "desarrollo de software", "mesa de ayuda", "soporte tecnico", "hosting", "backup", "respaldo", "computador", "portatil", "impresora", "ups"]
+      "name": "Servicios y Soporte TI",
+      "emoji": "🛠️",
+      "unspsc_segments": [],
+      "unspsc_families": ["8111"],
+      "keywords": [
+        "soporte tecnico", "mesa de ayuda", "mesa de servicio", "outsourcing tic",
+        "outsourcing de ti", "area tic", "servicios tic", "administracion de sistemas",
+        "mantenimiento de software", "actualizacion de software", "licenciamiento de software",
+        "licencia de software", "suscripcion de software", "computacion en la nube",
+        "servicios en la nube", "servicio en la nube", "hosting", "alojamiento web",
+        "correo electronico institucional", "administracion de base de datos",
+        "administracion de red", "monitoreo de red", "gestion de red"
+      ]
     },
     {
-      "name": "Seguridad Electrónica",
-      "emoji": "📹",
-      "unspsc_segments": ["46"],
-      "unspsc_families": ["4617", "4620", "4623", "4627"],
-      "keywords": ["cctv", "video vigilancia", "videovigilancia", "camaras de seguridad", "circuito cerrado", "control de acceso", "biometr", "alarma", "deteccion de incendio", "sistema de seguridad", "monitoreo", "cerca electrica"]
+      "name": "Ciberseguridad",
+      "emoji": "🛡️",
+      "unspsc_segments": [],
+      "unspsc_families": [],
+      "keywords": [
+        "ciberseguridad", "seguridad informatica", "seguridad de la informacion",
+        "seguridad digital", "firewall", "waf", "next generation firewall",
+        "pentest", "ethical hacking", "prueba de intrusion", "siem",
+        "gestion de vulnerabilidades", "respuesta a incidentes", "proteccion de datos",
+        "antivirus", "endpoint protection", "correlacion de eventos"
+      ]
     },
     {
-      "name": "Ingeniería y Consultoría",
-      "emoji": "📐",
-      "unspsc_segments": ["80", "81"],
-      "unspsc_families": ["8010", "8101", "8014", "8016"],
-      "keywords": ["consultoria", "interventoria", "diseño", "estudios y diseños", "ingenieria", "supervision tecnica", "asesoria tecnica", "estructuracion"]
-    },
-    {
-      "name": "Energía y Eléctrico",
-      "emoji": "⚡",
-      "unspsc_segments": ["26", "39"],
-      "unspsc_families": ["2611", "3910", "3911", "3912"],
-      "keywords": ["energia solar", "fotovoltaic", "paneles solares", "planta electrica", "grupo electrogeno", "subestacion", "transformador", "iluminacion", "alumbrado publico", "instalacion electrica", "red electrica", "media tension", "baja tension"]
-    },
-    {
-      "name": "Obra Civil e Infraestructura",
-      "emoji": "🏗️",
-      "unspsc_segments": ["72", "30", "95"],
-      "unspsc_families": ["7210", "7212", "7215", "9512"],
-      "keywords": ["construccion", "adecuacion", "mantenimiento de infraestructura", "obra publica", "pavimento", "via ", "edificacion", "remodelacion", "reforzamiento"]
+      "name": "Datos e Inteligencia Artificial",
+      "emoji": "📊",
+      "unspsc_segments": [],
+      "unspsc_families": [],
+      "keywords": [
+        "analitica de datos", "analisis de datos", "business intelligence",
+        "inteligencia de negocios", "ciencia de datos", "big data", "mineria de datos",
+        "machine learning", "aprendizaje automatico", "inteligencia artificial",
+        "tablero de control", "visualizacion de datos", "bodega de datos", "data warehouse",
+        "integracion de datos", "etl"
+      ]
     }
   ]
 }

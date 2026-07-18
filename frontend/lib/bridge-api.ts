@@ -1160,3 +1160,51 @@ export function formatCurrency(amount: number | null | undefined, currency: stri
   if (currency === "USD") return "$" + rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return "$" + rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
+
+// ── SECOP II — Colombian public-procurement opportunities (dir_1784393004608) ──
+export interface Licitacion {
+  id_proceso: string;
+  referencia: string | null;
+  entidad: string | null;
+  departamento: string | null;
+  ciudad: string | null;
+  nombre: string | null;
+  descripcion?: string | null;
+  modalidad: string | null;
+  estado_resumen: string | null;
+  precio_base: number | string | null;
+  fecha_publicacion: string | null;
+  fecha_recepcion: string | null;
+  unspsc_code: string | null;
+  segment_code: string | null;
+  segment_name: string | null;
+  overlay_categories: string[];
+  url_proceso: string | null;
+  is_open: boolean;
+  linked_venture_id: number | null;
+}
+export interface LicitacionListResult { total: number; limit: number; offset: number; items: Licitacion[]; }
+export interface SecopCategory { name?: string; segment_code?: string; segment_name?: string; count: number; total_value: number | string; }
+
+export async function fetchLicitaciones(params: Record<string, string | number | boolean | undefined> = {}): Promise<LicitacionListResult> {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+  }
+  return apiFetch(`/secop/licitaciones?${qs.toString()}`);
+}
+export async function fetchLicitacion(id: string): Promise<Licitacion> {
+  return apiFetch(`/secop/licitaciones/${encodeURIComponent(id)}`);
+}
+export async function fetchSecopCategories(): Promise<{ unspsc: SecopCategory[]; overlay: SecopCategory[] }> {
+  return apiFetch(`/secop/categories`);
+}
+export async function fetchSecopStats(): Promise<any> {
+  return apiFetch(`/secop/stats`);
+}
+export async function createVentureFromLicitacion(id: string): Promise<{ ok: boolean; created: boolean; venture_id: number; task_count?: number }> {
+  return apiFetch(`/secop/licitaciones/${encodeURIComponent(id)}/create-venture`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}

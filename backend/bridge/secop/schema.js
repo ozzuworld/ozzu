@@ -100,6 +100,15 @@ async function ensureSchema(db) {
     )
   `);
 
+  // Link column on ventures (business_projects) so a licitación can become a venture.
+  // business_projects is created earlier in db.js init(); guard in case of ordering.
+  try {
+    await db.query(`ALTER TABLE business_projects ADD COLUMN IF NOT EXISTS secop_id TEXT`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_business_projects_secop ON business_projects(secop_id)`);
+  } catch (e) {
+    console.error("[secop] business_projects link column skipped:", e.message);
+  }
+
   await seedCategories(db);
 }
 
@@ -187,6 +196,7 @@ async function listLicitaciones(db, f = {}) {
   const add = (sql, val) => { args.push(val); where.push(sql.replace("?", `$${args.length}`)); };
 
   if (f.all !== true && f.all !== "true") where.push("is_open = TRUE");
+  if (f.relevant === true || f.relevant === "true") where.push("cardinality(overlay_categories) > 0");
   if (f.segment) add("segment_code = ?", String(f.segment));
   if (f.overlay) add("? = ANY(overlay_categories)", String(f.overlay));
   if (f.modalidad) add("modalidad = ?", String(f.modalidad));
@@ -203,10 +213,13 @@ async function listLicitaciones(db, f = {}) {
 
   const totalRes = await db.query(`SELECT count(*)::int AS n FROM secop_licitaciones ${whereSql}`, args);
   const rowsRes = await db.query(
-    `SELECT id_proceso, referencia, entidad, departamento, ciudad, nombre, modalidad,
-            estado_resumen, precio_base, fecha_publicacion, fecha_recepcion,
-            unspsc_code, segment_code, segment_name, overlay_categories, url_proceso, is_open
-     FROM secop_licitaciones ${whereSql}
+    `SELECT l.id_proceso, l.referencia, l.entidad, l.departamento, l.ciudad, l.nombre, l.modalidad,
+            l.estado_resumen, l.precio_base, l.fecha_publicacion, l.fecha_recepcion,
+            l.unspsc_code, l.segment_code, l.segment_name, l.overlay_categories, l.url_proceso, l.is_open,
+            bp.id AS linked_venture_id
+     FROM secop_licitaciones l
+     LEFT JOIN business_projects bp ON bp.secop_id = l.id_proceso AND bp.status <> 'archived'
+     ${whereSql}
      ORDER BY ${orderSql}
      LIMIT ${limit} OFFSET ${offset}`,
     args
@@ -215,7 +228,13 @@ async function listLicitaciones(db, f = {}) {
 }
 
 async function getLicitacion(db, id) {
-  const r = await db.query(`SELECT * FROM secop_licitaciones WHERE id_proceso = $1`, [id]);
+  const r = await db.query(
+    `SELECT l.*, bp.id AS linked_venture_id
+     FROM secop_licitaciones l
+     LEFT JOIN business_projects bp ON bp.secop_id = l.id_proceso AND bp.status <> 'archived'
+     WHERE l.id_proceso = $1`,
+    [id]
+  );
   return r.rows[0] || null;
 }
 

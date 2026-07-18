@@ -15,6 +15,7 @@ export default function TabLayout() {
       <Tabs.Screen name="directives" />
       <Tabs.Screen name="cipher" />
       <Tabs.Screen name="business" />
+      <Tabs.Screen name="secop" />
       <Tabs.Screen name="files" />
       <Tabs.Screen name="music" />
       <Tabs.Screen name="ops" />

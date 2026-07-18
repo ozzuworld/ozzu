@@ -31,6 +31,7 @@ module.exports = function secopRoutes(ctx) {
         const q = url.searchParams;
         const result = await schema.listLicitaciones(db, {
           all: q.get("all"),
+          relevant: q.get("relevant"),
           segment: q.get("segment"),
           overlay: q.get("overlay"),
           modalidad: q.get("modalidad"),
@@ -44,6 +45,20 @@ module.exports = function secopRoutes(ctx) {
           offset: q.get("offset"),
         });
         sendJSON(res, 200, result);
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // POST /secop/licitaciones/:id/create-venture — spin up a Skyline venture (bid pipeline)
+    const cvMatch = pathname.match(/^\/secop\/licitaciones\/(.+)\/create-venture$/);
+    if (req.method === "POST" && cvMatch) {
+      try {
+        const id = decodeURIComponent(cvMatch[1]);
+        const lic = await schema.getLicitacion(db, id);
+        if (!lic) { sendJSON(res, 404, { error: "licitación not found" }); return true; }
+        const { createVentureFromLicitacion } = require("../secop/venture");
+        const result = await createVentureFromLicitacion(db, lic);
+        sendJSON(res, result.created ? 201 : 200, { ok: true, secop_id: id, ...result });
       } catch (err) { sendJSON(res, 500, { error: err.message }); }
       return true;
     }
