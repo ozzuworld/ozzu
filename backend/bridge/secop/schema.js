@@ -8,6 +8,7 @@
 
 const categories = require("./categories");
 const entityStats = require("./entity-stats");
+const UNSPSC_FAMILIES = require("./unspsc-families.json");
 
 // Columns written on ingest (search_tsv is GENERATED; first_seen/updated_at handled below).
 const INSERT_COLS = [
@@ -127,6 +128,24 @@ async function ensureSchema(db) {
     )
   `);
 
+  // Authoritative UNSPSC family index (names from OCDS) — defines the relevance filter.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS secop_unspsc_families (
+      family_code      TEXT PRIMARY KEY,
+      name             TEXT,
+      display_category TEXT,
+      relevant         BOOLEAN DEFAULT false
+    )
+  `);
+  for (const f of UNSPSC_FAMILIES.families || []) {
+    await db.query(
+      `INSERT INTO secop_unspsc_families (family_code, name, display_category, relevant)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (family_code) DO UPDATE SET name=EXCLUDED.name, display_category=EXCLUDED.display_category, relevant=EXCLUDED.relevant`,
+      [f.code, f.name, f.display, f.relevant === true]
+    );
+  }
+
   // Per-entity historical competitiveness (single-bidder rate) — powers the score.
   await db.query(`
     CREATE TABLE IF NOT EXISTS secop_entity_stats (
@@ -236,7 +255,9 @@ async function listLicitaciones(db, f = {}) {
   const add = (sql, val) => { args.push(val); where.push(sql.replace("?", `$${args.length}`)); };
 
   if (f.all !== true && f.all !== "true") where.push("is_open = TRUE");
-  if (f.relevant === true || f.relevant === "true") where.push("cardinality(overlay_categories) > 0");
+  if (f.relevant === true || f.relevant === "true") {
+    where.push("(l.family_code IN (SELECT family_code FROM secop_unspsc_families WHERE relevant) OR cardinality(l.overlay_categories) > 0)");
+  }
   if (f.segment) add("segment_code = ?", String(f.segment));
   if (f.overlay) add("? = ANY(overlay_categories)", String(f.overlay));
   if (f.modalidad) add("modalidad = ?", String(f.modalidad));
@@ -251,16 +272,17 @@ async function listLicitaciones(db, f = {}) {
   const limit = Math.min(Math.max(parseInt(f.limit) || 50, 1), 200);
   const offset = Math.max(parseInt(f.offset) || 0, 0);
 
-  const totalRes = await db.query(`SELECT count(*)::int AS n FROM secop_licitaciones ${whereSql}`, args);
+  const totalRes = await db.query(`SELECT count(*)::int AS n FROM secop_licitaciones l ${whereSql}`, args);
   const rowsRes = await db.query(
     `SELECT l.id_proceso, l.referencia, l.entidad, l.departamento, l.ciudad, l.nombre, l.modalidad,
             l.estado_resumen, l.precio_base, l.fecha_publicacion, l.fecha_recepcion,
             l.unspsc_code, l.segment_code, l.segment_name, l.overlay_categories, l.url_proceso, l.is_open,
-            bp.id AS linked_venture_id,
+            bp.id AS linked_venture_id, uf.display_category AS family_display,
             es.adjudicated_total AS es_adj, es.single_rate AS es_rate, es.avg_bidders AS es_avg
      FROM secop_licitaciones l
      LEFT JOIN business_projects bp ON bp.secop_id = l.id_proceso AND bp.status <> 'archived'
      LEFT JOIN secop_entity_stats es ON es.nit_entidad = l.nit_entidad
+     LEFT JOIN secop_unspsc_families uf ON uf.family_code = l.family_code
      ${whereSql}
      ORDER BY ${orderSql}
      LIMIT ${limit} OFFSET ${offset}`,

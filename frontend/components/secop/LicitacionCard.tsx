@@ -15,7 +15,7 @@ function Pill({ text, color, bg }: { text: string; color: string; bg?: string })
 export function LicitacionCard({ lic, onPress }: { lic: Licitacion; onPress: () => void }) {
   const style = categoryStyle(lic.overlay_categories);
   const dl = deadlineInfo(lic.fecha_recepcion);
-  const overlay = lic.overlay_categories?.[0];
+  const overlay = lic.overlay_categories?.[0] || lic.family_display;
 
   return (
     <Pressable

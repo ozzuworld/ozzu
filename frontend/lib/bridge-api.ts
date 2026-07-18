@@ -1183,6 +1183,7 @@ export interface Licitacion {
   is_open: boolean;
   linked_venture_id: number | null;
   competitividad?: Competitividad;
+  family_display?: string | null;
 }
 export interface Competitividad {
   score: number;

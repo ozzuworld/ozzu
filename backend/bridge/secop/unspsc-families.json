@@ -1,0 +1,14 @@
+{
+  "_comment": "Authoritative UNSPSC family index. Names come from SECOP's OCDS classification feed (NOT an LLM). relevant=true = the sectors King Kazuma can deliver (IT / software / telecom / engineering / consulting), curated 2026-07-18. This set DEFINES the 'Relevantes' filter — edit `relevant` to widen/narrow, then rebuild the table (bridge restart seeds it).",
+  "families": [
+    { "code": "4323", "name": "Software", "display": "Software", "relevant": true },
+    { "code": "4322", "name": "Equipos y plataformas de redes de datos, voz y multimedia", "display": "Redes y Telecom", "relevant": true },
+    { "code": "4321", "name": "Equipo informático y accesorios", "display": "Hardware y Equipos", "relevant": true },
+    { "code": "4320", "name": "Componentes para TI, difusión o telecomunicaciones", "display": "Componentes TI", "relevant": true },
+    { "code": "4319", "name": "Dispositivos de comunicaciones y accesorios", "display": "Comunicaciones", "relevant": true },
+    { "code": "8111", "name": "Servicios informáticos", "display": "Servicios TI", "relevant": true },
+    { "code": "8110", "name": "Servicios profesionales de ingeniería", "display": "Ingeniería", "relevant": true },
+    { "code": "8116", "name": "Entrega de servicios de tecnología de información", "display": "Servicios TI", "relevant": true },
+    { "code": "8010", "name": "Servicios de asesoría de gestión", "display": "Consultoría", "relevant": true }
+  ]
+}
