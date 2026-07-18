@@ -35,6 +35,8 @@ module.exports = function secopRoutes(ctx) {
         const result = await schema.listLicitaciones(db, {
           all: q.get("all"),
           relevant: q.get("relevant"),
+          inbox: q.get("inbox"),
+          analyzed: q.get("analyzed"),
           segment: q.get("segment"),
           overlay: q.get("overlay"),
           modalidad: q.get("modalidad"),
