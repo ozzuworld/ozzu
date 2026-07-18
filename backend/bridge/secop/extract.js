@@ -51,8 +51,18 @@ function parseJSONFromText(t) {
   return JSON.parse(t);
 }
 
-// Run the claude CLI headless; pipe the prompt on stdin, return the result text.
+// Serialize ALL Claude sessions in this process. The box has no swap, so two
+// concurrent `claude` runs (background worker + an on-open build) spike memory and
+// get OOM-killed. This mutex guarantees one at a time regardless of caller.
+let _claudeChain = Promise.resolve();
 function runClaude(args, prompt, cwd) {
+  const run = _claudeChain.then(() => _runClaudeRaw(args, prompt, cwd), () => _runClaudeRaw(args, prompt, cwd));
+  _claudeChain = run.then(() => {}, () => {});
+  return run;
+}
+
+// Run the claude CLI headless; pipe the prompt on stdin, return the result text.
+function _runClaudeRaw(args, prompt, cwd) {
   return new Promise((resolve, reject) => {
     const proc = spawn(CLAUDE_BIN, args, { cwd, env: process.env });
     let out = "", err = "";
