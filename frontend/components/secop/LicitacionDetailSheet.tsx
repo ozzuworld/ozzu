@@ -4,7 +4,7 @@ import { useRouter } from "expo-router";
 import { colors } from "../../lib/design-tokens";
 import { formatCOP } from "../../lib/format";
 import { categoryStyle, deadlineInfo, toNum } from "../../lib/secop-format";
-import { fetchLicitacion, createVentureFromLicitacion, type Licitacion } from "../../lib/bridge-api";
+import { fetchLicitacion, createVentureFromLicitacion, fetchTenderDetail, type Licitacion, type TenderDetail } from "../../lib/bridge-api";
 
 function fmtDate(s?: string | null): string {
   if (!s) return "—";
@@ -23,6 +23,119 @@ function Fact({ label, value, color }: { label: string; value: string; color?: s
   );
 }
 
+function SecLabel({ children }: { children: string }) {
+  return <Text style={{ color: colors.accentLight, fontFamily: "monospace", fontSize: 10, letterSpacing: 1.5, marginBottom: 8 }}>{children}</Text>;
+}
+
+function Bullets({ items, max }: { items: string[]; max?: number }) {
+  const list = max ? items.slice(0, max) : items;
+  return (
+    <View style={{ gap: 5 }}>
+      {list.map((t, i) => (
+        <View key={i} style={{ flexDirection: "row", gap: 7 }}>
+          <Text style={{ color: colors.text.tertiary, fontSize: 12 }}>•</Text>
+          <Text style={{ color: colors.gray[300], fontSize: 12.5, lineHeight: 18, flex: 1 }}>{String(t)}</Text>
+        </View>
+      ))}
+      {max && items.length > max ? (
+        <Text style={{ color: colors.text.tertiary, fontSize: 11, marginLeft: 14, fontStyle: "italic" }}>+{items.length - max} más</Text>
+      ) : null}
+    </View>
+  );
+}
+
+// The AI-extracted tender structure, rendered natively (no PDF, no portal).
+function TenderDetailView({ d }: { d: TenderDetail }) {
+  const h = d.habilitantes || {};
+  const habGroups: [string, string[]][] = [
+    ["Jurídicos", h.juridicos || []], ["Financieros", h.financieros || []],
+    ["Técnicos", h.tecnicos || []], ["Experiencia", h.experiencia || []],
+  ];
+  return (
+    <View style={{ gap: 18 }}>
+      {d.cronograma?.length ? (
+        <View>
+          <SecLabel>CRONOGRAMA</SecLabel>
+          <View style={{ gap: 6 }}>
+            {d.cronograma.map((c, i) => (
+              <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <Text style={{ color: colors.gray[300], fontSize: 12.5, flex: 1 }}>{c.hito}</Text>
+                <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 11.5 }}>{String(c.fecha || "").slice(0, 16)}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {habGroups.some(([, v]) => v.length) ? (
+        <View>
+          <SecLabel>REQUISITOS HABILITANTES</SecLabel>
+          <View style={{ gap: 12 }}>
+            {habGroups.filter(([, v]) => v.length).map(([name, items]) => (
+              <View key={name}>
+                <Text style={{ color: colors.text.secondary, fontSize: 11, fontWeight: "700", marginBottom: 5 }}>{name}</Text>
+                <Bullets items={items} max={6} />
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {d.evaluacion?.length ? (
+        <View>
+          <SecLabel>EVALUACIÓN</SecLabel>
+          <View style={{ gap: 6 }}>
+            {d.evaluacion.map((c, i) => (
+              <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+                <Text style={{ color: colors.gray[300], fontSize: 12.5, flex: 1 }}>{c.factor}</Text>
+                <Text style={{ color: colors.accentLight, fontFamily: "monospace", fontSize: 11.5, fontWeight: "700" }}>{String(c.puntaje)}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {d.garantias?.length ? (
+        <View>
+          <SecLabel>GARANTÍAS</SecLabel>
+          <View style={{ gap: 8 }}>
+            {d.garantias.map((g, i) => (
+              <View key={i} style={{ backgroundColor: colors.gray[800], borderRadius: 8, padding: 10 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
+                  <Text style={{ color: colors.gray[50], fontSize: 12.5, fontWeight: "600", flex: 1 }}>{g.tipo}</Text>
+                  {g.porcentaje ? <Text style={{ color: colors.accentLight, fontFamily: "monospace", fontSize: 12, fontWeight: "700" }}>{g.porcentaje}</Text> : null}
+                </View>
+                {g.vigencia ? <Text style={{ color: colors.text.tertiary, fontSize: 11, marginTop: 3 }}>Vigencia: {g.vigencia}</Text> : null}
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {d.especificaciones?.length ? (
+        <View>
+          <SecLabel>ESPECIFICACIONES TÉCNICAS</SecLabel>
+          <Bullets items={d.especificaciones} max={10} />
+        </View>
+      ) : null}
+
+      {d.documentos?.length ? (
+        <View>
+          <SecLabel>{`DOCUMENTOS (${d.documentos.length})`}</SecLabel>
+          <View style={{ gap: 4 }}>
+            {d.documentos.slice(0, 12).map((doc, i) => (
+              <Pressable key={i} onPress={() => doc.url && Linking.openURL(doc.url)} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}>
+                <Text style={{ color: colors.text.tertiary, fontFamily: "monospace", fontSize: 9, width: 30 }}>{(doc.ext || "").toUpperCase()}</Text>
+                <Text style={{ color: colors.accentLight, fontSize: 12, flex: 1 }} numberOfLines={1}>{doc.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 export function LicitacionDetailSheet({
   licId, visible, onClose, onChanged,
 }: { licId: string | null; visible: boolean; onClose: () => void; onChanged: () => void }) {
@@ -30,6 +143,26 @@ export function LicitacionDetailSheet({
   const [lic, setLic] = useState<Licitacion | null>(null);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [detail, setDetail] = useState<TenderDetail | null>(null);
+  const [detailStatus, setDetailStatus] = useState<"idle" | "building" | "ready" | "error">("idle");
+
+  // Lazy-build + poll the AI-extracted tender detail while the sheet is open.
+  useEffect(() => {
+    if (!visible || !licId) { setDetail(null); setDetailStatus("idle"); return; }
+    let alive = true, tries = 0, timer: any;
+    const poll = async () => {
+      try {
+        const r = await fetchTenderDetail(licId);
+        if (!alive) return;
+        if (r.status === "ready" && r.detail) { setDetail(r.detail); setDetailStatus("ready"); return; }
+        setDetailStatus("building");
+        if (tries++ < 18) timer = setTimeout(poll, 5000);
+        else setDetailStatus("error");
+      } catch { if (alive) setDetailStatus("error"); }
+    };
+    poll();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [visible, licId]);
 
   useEffect(() => {
     if (!visible || !licId) { setLic(null); return; }
@@ -131,6 +264,18 @@ export function LicitacionDetailSheet({
                     <Text style={{ color: colors.text.tertiary, fontFamily: "monospace", fontSize: 9, letterSpacing: 1, marginBottom: 6 }}>OBJETO</Text>
                     <Text style={{ color: colors.gray[300], fontSize: 13, lineHeight: 19 }}>{lic.descripcion}</Text>
                   </View>
+                ) : null}
+
+                {/* AI-extracted tender detail (native — no PDF, no portal) */}
+                {detailStatus === "building" ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, backgroundColor: colors.gray[800], borderRadius: 10 }}>
+                    <ActivityIndicator color={colors.accent} size="small" />
+                    <Text style={{ color: colors.text.secondary, fontSize: 12.5 }}>Analizando pliegos con IA… (unos segundos)</Text>
+                  </View>
+                ) : detailStatus === "ready" && detail ? (
+                  <TenderDetailView d={detail} />
+                ) : detailStatus === "error" ? (
+                  <Text style={{ color: colors.text.tertiary, fontSize: 11.5, fontStyle: "italic" }}>No se pudo extraer el detalle de los pliegos automáticamente.</Text>
                 ) : null}
 
                 {/* Open in SECOP */}

@@ -63,6 +63,37 @@ module.exports = function secopRoutes(ctx) {
       return true;
     }
 
+    // GET /secop/licitaciones/:id/detail — structured tender detail (lazy-built, pollable)
+    const detailMatch = pathname.match(/^\/secop\/licitaciones\/(.+)\/detail$/);
+    if (req.method === "GET" && detailMatch) {
+      try {
+        const id = decodeURIComponent(detailMatch[1]);
+        const existing = await schema.getTenderDetail(db, id);
+        if (existing && existing.status === "ok") { sendJSON(res, 200, { status: "ready", detail: existing }); return true; }
+        if (existing && existing.status === "building") { sendJSON(res, 200, { status: "building" }); return true; }
+        const { buildTenderDetail } = require("../secop/detail-pipeline");
+        buildTenderDetail(db, id)
+          .then((r) => log?.info?.(`[secop] detail built ${id}: ${JSON.stringify(r)}`))
+          .catch((e) => log?.error?.(`[secop] detail failed ${id}: ${e.message}`));
+        sendJSON(res, existing && existing.status === "error" ? 200 : 202, { status: "building", previous_error: existing?.error || null });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // POST /secop/licitaciones/:id/detail/rebuild — force re-extraction (background)
+    const rebuildMatch = pathname.match(/^\/secop\/licitaciones\/(.+)\/detail\/rebuild$/);
+    if (req.method === "POST" && rebuildMatch) {
+      try {
+        const id = decodeURIComponent(rebuildMatch[1]);
+        const { buildTenderDetail } = require("../secop/detail-pipeline");
+        buildTenderDetail(db, id)
+          .then((r) => log?.info?.(`[secop] detail rebuilt ${id}`))
+          .catch((e) => log?.error?.(`[secop] detail rebuild failed ${id}: ${e.message}`));
+        sendJSON(res, 202, { status: "building" });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
     // GET /secop/licitaciones/:id — full record (id may contain dots, e.g. CO1.REQ.123)
     const idMatch = pathname.match(/^\/secop\/licitaciones\/(.+)$/);
     if (req.method === "GET" && idMatch) {

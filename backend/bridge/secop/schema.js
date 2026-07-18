@@ -100,6 +100,32 @@ async function ensureSchema(db) {
     )
   `);
 
+  // Structured tender detail extracted from the pliego/estudios (Gemini). One row
+  // per licitación, built lazily on first open + refreshable.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS secop_tender_detail (
+      id_proceso       TEXT PRIMARY KEY,
+      objeto           TEXT,
+      valor_estimado   TEXT,
+      plazo_ejecucion  TEXT,
+      lugar_ejecucion  TEXT,
+      cronograma       JSONB DEFAULT '[]',
+      habilitantes     JSONB DEFAULT '{}',
+      evaluacion       JSONB DEFAULT '[]',
+      especificaciones JSONB DEFAULT '[]',
+      obligaciones     JSONB DEFAULT '[]',
+      garantias        JSONB DEFAULT '[]',
+      documentos       JSONB DEFAULT '[]',
+      detail           JSONB DEFAULT '{}',
+      source_docs      JSONB DEFAULT '[]',
+      model            TEXT,
+      status           TEXT DEFAULT 'pending',
+      error            TEXT,
+      extracted_at     TIMESTAMPTZ,
+      updated_at       TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+
   // Link column on ventures (business_projects) so a licitación can become a venture.
   // business_projects is created earlier in db.js init(); guard in case of ordering.
   try {
@@ -278,6 +304,47 @@ async function getStats(db) {
   };
 }
 
+// ── Tender detail (extracted) ──
+async function getTenderDetail(db, id) {
+  const r = await db.query(`SELECT * FROM secop_tender_detail WHERE id_proceso = $1`, [id]);
+  return r.rows[0] || null;
+}
+
+async function setTenderDetailStatus(db, id, status, error) {
+  await db.query(
+    `INSERT INTO secop_tender_detail (id_proceso, status, error, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (id_proceso) DO UPDATE SET status = $2, error = $3, updated_at = now()`,
+    [id, status, error || null]
+  );
+}
+
+async function upsertTenderDetail(db, id, d) {
+  await db.query(
+    `INSERT INTO secop_tender_detail
+       (id_proceso, objeto, valor_estimado, plazo_ejecucion, lugar_ejecucion,
+        cronograma, habilitantes, evaluacion, especificaciones, obligaciones,
+        garantias, documentos, detail, source_docs, model, status, error, extracted_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ok',NULL,now(),now())
+     ON CONFLICT (id_proceso) DO UPDATE SET
+       objeto=EXCLUDED.objeto, valor_estimado=EXCLUDED.valor_estimado,
+       plazo_ejecucion=EXCLUDED.plazo_ejecucion, lugar_ejecucion=EXCLUDED.lugar_ejecucion,
+       cronograma=EXCLUDED.cronograma, habilitantes=EXCLUDED.habilitantes,
+       evaluacion=EXCLUDED.evaluacion, especificaciones=EXCLUDED.especificaciones,
+       obligaciones=EXCLUDED.obligaciones, garantias=EXCLUDED.garantias,
+       documentos=EXCLUDED.documentos, detail=EXCLUDED.detail, source_docs=EXCLUDED.source_docs,
+       model=EXCLUDED.model, status='ok', error=NULL, extracted_at=now(), updated_at=now()`,
+    [
+      id, d.objeto || null, d.valor_estimado || null, d.plazo_ejecucion || null, d.lugar_ejecucion || null,
+      JSON.stringify(d.cronograma || []), JSON.stringify(d.requisitos_habilitantes || d.habilitantes || {}),
+      JSON.stringify(d.criterios_evaluacion || d.evaluacion || []), JSON.stringify(d.especificaciones_tecnicas || d.especificaciones || []),
+      JSON.stringify(d.obligaciones || []), JSON.stringify(d.garantias || []),
+      JSON.stringify(d.documentos || []), JSON.stringify(d.detail || d || {}),
+      JSON.stringify(d.source_docs || []), d.model || null,
+    ]
+  );
+}
+
 module.exports = {
   INSERT_COLS,
   ensureSchema,
@@ -291,4 +358,7 @@ module.exports = {
   getLicitacion,
   browseCategories,
   getStats,
+  getTenderDetail,
+  setTenderDetailStatus,
+  upsertTenderDetail,
 };

@@ -1208,3 +1208,22 @@ export async function createVentureFromLicitacion(id: string): Promise<{ ok: boo
     headers: { "Content-Type": "application/json" },
   });
 }
+
+export interface TenderDetail {
+  status?: string;
+  objeto: string | null;
+  valor_estimado: string | null;
+  plazo_ejecucion: string | null;
+  lugar_ejecucion: string | null;
+  cronograma: { hito: string; fecha: string }[];
+  habilitantes: { juridicos?: string[]; financieros?: string[]; tecnicos?: string[]; experiencia?: string[] };
+  evaluacion: { factor: string; puntaje: string }[];
+  especificaciones: string[];
+  obligaciones: string[];
+  garantias: { tipo: string; porcentaje: string; vigencia: string }[];
+  documentos: { name: string; ext: string; size: number; url: string }[];
+  model?: string | null;
+}
+export async function fetchTenderDetail(id: string): Promise<{ status: "ready" | "building" | "error"; detail?: TenderDetail; previous_error?: string | null }> {
+  return apiFetch(`/secop/licitaciones/${encodeURIComponent(id)}/detail`);
+}
