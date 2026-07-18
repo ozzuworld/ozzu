@@ -9,20 +9,24 @@
 const categories = require("./categories");
 const entityStats = require("./entity-stats");
 const UNSPSC_FAMILIES = require("./unspsc-families.json");
+const UNSPSC_CLASSES = require("./unspsc-classes.json");
 const SCOPE = require("./scope.json");
 
-// Relevance = a relevant UNSPSC family AND the objeto does NOT match a scope-exclude
-// keyword (interventoría, obra, hardware supply, physical maintenance…). Keywords are
-// accent-folded substrings; the objeto keeps accents, so we drop the accents in SQL via
-// translate() to match the accent-free fragments. Shared by the list API and the worker.
+// Relevance (the cheap pre-filter, no Claude): the tender's 6-digit UNSPSC CLASS is in the
+// curated in-scope set AND the objeto does NOT match a scope-exclude keyword. We gate at the
+// CLASS (6-digit) level, not the 4-digit family, because a family mixes lanes — e.g. family
+// 8110 holds 811015 (civil engineering) next to 811115 (software engineering). The class is
+// the first 6 digits of unspsc_code (the 8-digit commodity code SECOP tags each process
+// with). The keyword excludes stay as a safety net for the rare off-lane tender that lands
+// inside an in-scope class. Shared by the list API and the worker.
 const EXCLUDE_RX = (SCOPE.exclude_keywords || [])
   .map((k) => String(k).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
   .join("|");
 function relevanceClause(a = "l") {
-  const fam = `${a}.family_code IN (SELECT family_code FROM secop_unspsc_families WHERE relevant)`;
-  if (!EXCLUDE_RX) return `(${fam})`;
+  const cls = `left(${a}.unspsc_code, 6) IN (SELECT code FROM secop_unspsc_classes WHERE relevant)`;
+  if (!EXCLUDE_RX) return `(${cls})`;
   const objeto = `translate(lower(coalesce(${a}.nombre,'') || ' ' || coalesce(${a}.descripcion,'')), 'áéíóúñü', 'aeiounu')`;
-  return `(${fam} AND ${objeto} !~ '${EXCLUDE_RX}')`;
+  return `(${cls} AND ${objeto} !~ '${EXCLUDE_RX}')`;
 }
 
 // Columns written on ingest (search_tsv is GENERATED; first_seen/updated_at handled below).
@@ -168,6 +172,27 @@ async function ensureSchema(db) {
        VALUES ($1,$2,$3,$4)
        ON CONFLICT (family_code) DO UPDATE SET name=EXCLUDED.name, display_category=EXCLUDED.display_category, relevant=EXCLUDED.relevant`,
       [f.code, f.name, f.display, f.relevant === true]
+    );
+  }
+
+  // Authoritative UNSPSC CLASS (6-digit) scope map — the precise pre-filter (dir_1784416887835).
+  // Gates the expensive Claude analysis: only tenders whose 6-digit class is relevant here
+  // reach it. Curated by lane (services / software / cybersecurity / connectivity / network
+  // gear); classes not listed are NOT relevant by default. Mirrors the families table above;
+  // reseeded idempotently on boot, so editing unspsc-classes.json + restarting retunes it.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS secop_unspsc_classes (
+      code     TEXT PRIMARY KEY,
+      label    TEXT,
+      relevant BOOLEAN DEFAULT false
+    )
+  `);
+  for (const c of UNSPSC_CLASSES.classes || []) {
+    await db.query(
+      `INSERT INTO secop_unspsc_classes (code, label, relevant)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (code) DO UPDATE SET label=EXCLUDED.label, relevant=EXCLUDED.relevant`,
+      [c.code, c.label, c.relevant === true]
     );
   }
 

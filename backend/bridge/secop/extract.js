@@ -51,11 +51,12 @@ function parseJSONFromText(t) {
   return JSON.parse(t);
 }
 
-// Bound concurrent Claude sessions (not serial). The ~2-3 min latency is queue-wait,
-// not compute — so N sessions wait concurrently for ~N× throughput, and the wait
-// doesn't consume the plan. Bounded by a semaphore so the no-swap box never OOMs from
-// too many at once. Tune with SECOP_CONCURRENCY.
-const MAX_CONCURRENT = parseInt(process.env.SECOP_CONCURRENCY) || 5;
+// Bound concurrent Claude sessions (not serial). Parallelism helps because the API
+// round-trip has real queue-wait — but the CLI session itself is NOT free: it spawns a
+// runtime and reads PDFs across many agentic turns (real CPU+RAM). On this no-swap 16GB
+// box, 5 concurrent + a deploy build hit load ~117 and hung the bridge, so keep this
+// conservative (default 3). Tune up with SECOP_CONCURRENCY only if the box has headroom.
+const MAX_CONCURRENT = parseInt(process.env.SECOP_CONCURRENCY) || 3;
 let _active = 0;
 const _waiters = [];
 function _acquire() {

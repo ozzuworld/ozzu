@@ -2,9 +2,11 @@
 
 // Background pre-analysis worker (dir_1784411316803). Pre-builds each relevant/open/
 // undecided tender's detail + brief (Claude, Max plan) so offers land in the inbox
-// already analyzed. Runs up to N jobs CONCURRENTLY — Claude's latency is queue-wait,
-// not compute, so parallel waiting is ~N× throughput for free. The extract.js semaphore
-// bounds actual Claude sessions so the no-swap box can't OOM. Kill switch SECOP_WORKER=off.
+// already analyzed. Runs up to N jobs concurrently. NOTE: the `claude` CLI path is NOT
+// free waiting — each session spawns a runtime and reads PDFs across many agentic turns,
+// which is real CPU+RAM. On this no-swap 16GB box, concurrency 5 + a deploy build drove
+// load to ~117 and hung the bridge (2026-07-18), so the default is a conservative 3. The
+// extract.js semaphore bounds actual Claude sessions. Kill switch SECOP_WORKER=off.
 
 const { buildTenderDetail } = require("./detail-pipeline");
 const { generateBrief } = require("./extract");
@@ -12,7 +14,7 @@ const schema = require("./schema");
 
 const ENABLED = process.env.SECOP_WORKER !== "off";
 const TICK_MS = parseInt(process.env.SECOP_WORKER_TICK_MS) || 15000;
-const MAX_JOBS = parseInt(process.env.SECOP_CONCURRENCY) || 5;
+const MAX_JOBS = parseInt(process.env.SECOP_CONCURRENCY) || 3;
 const ERROR_COOLDOWN_MS = parseInt(process.env.SECOP_WORKER_COOLDOWN_MS) || 5 * 60 * 1000;
 
 let ticking = false;
