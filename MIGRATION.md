@@ -141,9 +141,21 @@ curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER
 sudo systemctl enable --now docker
 sudo apt-get install -yq docker-compose-plugin
-docker --version && docker compose version && adb --version | head -1 && gh --version | head -1
+
+# 16G swap — GCP images ship with ZERO swap. Without it a memory spike hard-freezes the
+# box (SSH dies, needs a reboot); the load-117 incident (2026-07-20) was exactly this.
+# swappiness=10 keeps it a safety cushion: prefer RAM, spill only under real pressure.
+if ! sudo swapon --show | grep -q '/swapfile'; then
+  sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+  echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swappiness.conf >/dev/null && sudo sysctl -w vm.swappiness=10
+fi
+
+docker --version && docker compose version && adb --version | head -1 && gh --version | head -1 && free -h | grep -i swap
 REMOTE
 ```
+
+**Swap is not optional.** GCP Ubuntu images have `Swap: 0B`. On a 16 GB box the full Ozzu stack (qdrant, postgres, bridge/node, redis, face-recognition, …) plus a burst of heavy host processes will OOM-freeze instead of degrading — see the Post-cycle-1 hardening lesson below. The `free -h | grep -i swap` at the end of Phase 1 should print `Swap: 15Gi`.
 
 **`android-tools-adb` is critical** — bridge container bind-mounts `/usr/bin/adb`. Without it, docker auto-creates an empty directory at the mount source, then container start fails with "not a directory". Cycle 1 cost: 5 min.
 
@@ -410,11 +422,18 @@ Old project sits idle until free credits expire (Google auto-suspends).
 
 **Soft-fail observations** (didn't break the migration, worth noting):
 - `qdrant` takes 5-30 min to load 113 GB / ~200 segments. No progress logging during shard recovery — looks "stuck" but isn't (look at `docker stats qdrant` Block I/O growth).
-- Bridge first-startup runs `npm install --omit=dev` which adds ~30 sec to first-boot time. Subsequent restarts are fast.
+- Bridge first-startup runs `npm install --omit=dev` (the `backend/docker-compose.yml` bridge `command`) which adds ~30 sec to first-boot time. Subsequent restarts are fast. **This is THE source of `node_modules` — it is git-ignored (not tracked) and excluded from the Phase 2b rsync, so it is rebuilt from the tracked `package-lock.json` on boot.** (Untracked 2026-07-20, dir_1784563762070 — 5,681 tracked dep files were bloating git and timing out `merge_and_deploy`.)
 
 **DON'T:**
 - Don't paste private SSH keys in chat. Use `gcloud compute ssh --command` to inject pubkeys instead. (Cycle 1: King Kazuma pasted `~/.ssh/google_compute_engine` private key into transcript — rotated post-migration.)
 - Don't commit secrets to git-tracked files. Cloudflare token lives in `/root/.ssh/cloudflare_token` (600 perms), never in MIGRATION.md.
+- Don't `git add node_modules` or `artifacts/`. Both are git-ignored (rebuilt on boot / build outputs). Re-tracking them re-introduces the merge timeout below.
+
+### Post-cycle-1 hardening (2026-07-20)
+
+12. **GCP images ship with ZERO swap → hard-freeze under memory pressure.** A memory spike on the no-swap 16 GB box drove load to ~117 and hung the bridge (SSH unreachable, HTTP 000). **Solution baked into Phase 1:** create a 16 GB swapfile + `swappiness=10`. Turns a freeze into a survivable slowdown. Swap is a cushion, not a license to fan out heavy host processes.
+
+13. **Tracked `node_modules` (5,681 files) bloated git and timed out `merge_and_deploy`** (`spawnSync /bin/sh ETIMEDOUT`). Root cause: git operations crawl over the whole dependency tree. **Fix (dir_1784563762070):** `node_modules/` is now git-ignored and untracked (`git rm --cached`, files kept on disk). It was already dead weight — excluded from the Phase 2b rsync and rebuilt on boot by the compose `npm install`. Nothing to do per-cycle; just never re-track it.
 
 ---
 

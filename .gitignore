@@ -78,3 +78,16 @@ tools/gsm-gateway/android/app/build/
 tools/gsm-gateway/android/.gradle/
 tools/gsm-gateway/android/gradle/
 backend/asterisk/conf/certs/
+
+# Node deps — NEVER tracked. Rebuilt on bridge start via `npm install --omit=dev`
+# (backend/docker-compose.yml command) and excluded from the migration rsync.
+# 5,681 tracked files here bloated git and timed out merge_and_deploy (dir_1784563762070).
+node_modules/
+
+# Root .env — holds BRIDGE_TOKEN + other secrets. The backend/**/.env globs above
+# do NOT cover the repo root, so pin it explicitly.
+/.env
+
+# Build outputs + local code index (both excluded from migration rsync too)
+/artifacts/
+.codegraph/
