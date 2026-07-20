@@ -2,12 +2,13 @@
 
 // Build the structured tender detail for one licitación: pull its document list
 // (Archivos dataset, keyed on id_del_portafolio), download the key PDFs (captcha-free),
-// send them to Gemini (extract.js), fold in a cronograma fallback from the Socrata
-// dates, and store in secop_tender_detail. Runs lazily (first open) + refreshable.
+// extract their text (pdftotext) and send it to Claude (extract.js) — OCR/vision fallback
+// for scanned docs — fold in a cronograma fallback from the Socrata dates, and store in
+// secop_tender_detail. Runs lazily (first open) + refreshable.
 
 const https = require("https");
 const schema = require("./schema");
-const { extractTenderDetailFromDocs, generateBrief } = require("./extract");
+const { extractTenderDetailSmart, generateBrief } = require("./extract");
 const { socrataHeaders } = require("./socrata");
 
 const DOCS_DATASET = process.env.SECOP_DOCS_DATASET || "dmgg-8hin";
@@ -137,8 +138,8 @@ async function buildTenderDetail(db, idProceso) {
     }
     if (docs.length === 0) throw new Error("no downloadable PDF documents for this process");
 
-    // 3. Extract with Gemini
-    const { detail, model, docs_used } = await extractTenderDetailFromDocs(docs);
+    // 3. Extract — text-first (pdftotext → single Claude call), OCR/vision fallback for scanned docs (dir_1784562450770)
+    const { detail, model, docs_used } = await extractTenderDetailSmart(docs);
 
     // 4. Fold in fallbacks + the full document list for the UI
     if (!Array.isArray(detail.cronograma) || detail.cronograma.length === 0) {

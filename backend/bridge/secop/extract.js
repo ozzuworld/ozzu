@@ -15,6 +15,9 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 const WORKROOT = process.env.SECOP_EXTRACT_WORKDIR || "/tmp/ozzu-bridge/secop-extract";
 const TIMEOUT_MS = parseInt(process.env.SECOP_EXTRACT_TIMEOUT_MS) || 240000;
 const MAX_DOCS = parseInt(process.env.SECOP_EXTRACT_MAX_DOCS) || 5;
+const PDFTOTEXT_BIN = process.env.PDFTOTEXT_BIN || "pdftotext";
+const MIN_TEXT_CHARS = parseInt(process.env.SECOP_MIN_TEXT_CHARS) || 500;    // per-doc floor: below this the PDF has no usable text layer (scanned) → OCR fallback
+const MAX_TEXT_CHARS = parseInt(process.env.SECOP_MAX_TEXT_CHARS) || 250000; // cap the total text handed to the single Claude call (~60K tokens)
 
 const SCHEMA_HINT = `{
   "objeto": "",
@@ -177,4 +180,50 @@ async function generateBrief(detail, context = {}) {
   return parseJSONFromText(result);
 }
 
-module.exports = { extractTenderDetail, extractTenderDetailFromDocs, generateBrief, SCHEMA_HINT };
+// Deterministic text-layer extraction via pdftotext (poppler) — no LLM, no OCR, milliseconds.
+// Returns "" if the PDF is scanned/image-only (no text layer) or on any error.
+function pdfToText(base64) {
+  return new Promise((resolve) => {
+    let tmp;
+    try {
+      fs.mkdirSync(WORKROOT, { recursive: true });
+      tmp = path.join(WORKROOT, crypto.randomUUID() + ".pdf");
+      fs.writeFileSync(tmp, Buffer.from(base64, "base64"));
+    } catch { return resolve(""); }
+    let out = "", done = false;
+    const finish = (v) => { if (done) return; done = true; try { fs.rmSync(tmp, { force: true }); } catch {} resolve(v); };
+    const proc = spawn(PDFTOTEXT_BIN, ["-q", "-nopgbrk", tmp, "-"]);
+    const timer = setTimeout(() => { proc.kill("SIGKILL"); finish(out); }, 30000);
+    proc.stdout.on("data", (c) => (out += c));
+    proc.on("error", () => { clearTimeout(timer); finish(""); });
+    proc.on("close", () => { clearTimeout(timer); finish(out); });
+  });
+}
+
+// Text-first extraction (dir_1784562450770). Pull each PDF's text layer with pdftotext and
+// do ONE non-agentic Claude call (extractTenderDetail, --allowedTools ""). Replaces the old
+// always-agentic extractTenderDetailFromDocs path (~17 turns + self-OCR per tender, ~1M
+// cache-read tokens/session). Falls back to the OCR/vision path only when NO doc has a usable
+// text layer (scanned pliegos). docs = [{name, base64}], priority-ordered by the caller.
+async function extractTenderDetailSmart(docs) {
+  if (!Array.isArray(docs) || docs.length === 0) throw new Error("no documents to extract");
+  const parts = [];
+  const usedText = [];
+  for (const d of docs) {
+    if (!d.base64) continue;
+    const text = (await pdfToText(d.base64)).trim();
+    if (text.length >= MIN_TEXT_CHARS) {
+      parts.push(`=== ${d.name} ===\n${text}`);
+      usedText.push(d.name);
+    }
+  }
+  const combined = parts.join("\n\n").slice(0, MAX_TEXT_CHARS);
+  if (combined.trim().length >= MIN_TEXT_CHARS) {
+    const { detail } = await extractTenderDetail(combined);
+    return { ok: true, model: "claude", detail, docs_used: usedText };
+  }
+  // No usable text layer on any doc (scanned pliegos) — fall back to OCR/vision (agentic).
+  return extractTenderDetailFromDocs(docs);
+}
+
+module.exports = { extractTenderDetail, extractTenderDetailFromDocs, extractTenderDetailSmart, generateBrief, SCHEMA_HINT };
