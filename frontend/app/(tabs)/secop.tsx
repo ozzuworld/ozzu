@@ -7,6 +7,7 @@ import { TopBar } from "../../components/TopBar";
 import { GroupNav } from "../../components/GroupNav";
 import { OfferCard } from "../../components/secop/OfferCard";
 import { ProposalDocument } from "../../components/secop/ProposalDocument";
+import { WorkerControl } from "../../components/secop/WorkerControl";
 import { colors } from "../../lib/design-tokens";
 import { fetchLicitaciones, decideOffer, type Licitacion } from "../../lib/bridge-api";
 
@@ -67,6 +68,8 @@ export default function OfertasScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.gray[400]} />}
       >
+        <WorkerControl />
+
         {loading ? (
           <View style={{ alignItems: "center", paddingVertical: 60 }}><ActivityIndicator color={ACCENT} /></View>
         ) : items.length === 0 ? (

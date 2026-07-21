@@ -19,6 +19,50 @@ module.exports = function secopRoutes(ctx) {
       return true;
     }
 
+    // GET /secop/worker — pre-analysis worker state + backlog + estimated Max-quota cost.
+    // `pending` is what the worker will actually full-analyze (in-scope only), so `est_tokens`
+    // reflects real work, not the raw open backlog. Drives the app's play/pause card.
+    if (req.method === "GET" && pathname === "/secop/worker") {
+      try {
+        const st = await schema.getWorkerState(db);
+        const [pending, analyzed] = await Promise.all([schema.countPendingFull(db), schema.countAnalyzedOk(db)]);
+        const perTender = parseInt(process.env.SECOP_EST_TOKENS_PER_TENDER) || 210000;
+        sendJSON(res, 200, {
+          enabled: !!st.enabled,
+          hard_off: process.env.SECOP_WORKER === "off",
+          pending, analyzed,
+          concurrency: parseInt(process.env.SECOP_CONCURRENCY) || 3,
+          tick_ms: parseInt(process.env.SECOP_WORKER_TICK_MS) || 15000,
+          est_tokens_per_tender: perTender,
+          est_tokens: pending * perTender,
+          updated_at: st.updated_at || null,
+          updated_by: st.updated_by || null,
+        });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // POST /secop/worker {enabled:bool} — play/pause the worker at runtime (no bridge restart).
+    // The worker checks secop_worker_state each tick; env SECOP_WORKER=off hard-overrides it.
+    if (req.method === "POST" && pathname === "/secop/worker") {
+      try {
+        const body = await parseBody(req);
+        if (typeof body.enabled !== "boolean") { sendJSON(res, 400, { error: "enabled must be boolean" }); return true; }
+        const st = await schema.setWorkerState(db, body.enabled, typeof body.by === "string" ? body.by : "app");
+        log?.info?.(`[secop] worker ${body.enabled ? "STARTED" : "PAUSED"} via app`);
+        const pending = await schema.countPendingFull(db);
+        sendJSON(res, 200, {
+          ok: true,
+          enabled: !!st.enabled,
+          hard_off: process.env.SECOP_WORKER === "off",
+          pending,
+          updated_at: st.updated_at || null,
+          updated_by: st.updated_by || null,
+        });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
     // GET /secop/categories[?all=true] — UNSPSC segments + overlay tags, with counts
     if (req.method === "GET" && pathname === "/secop/categories") {
       try {

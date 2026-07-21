@@ -12,7 +12,11 @@ const { buildTenderDetail } = require("./detail-pipeline");
 const { generateBrief } = require("./extract");
 const schema = require("./schema");
 
-const ENABLED = process.env.SECOP_WORKER !== "off";
+// SECOP_WORKER=off is an emergency HARD kill (no interval armed at all). Normal run/pause is
+// the DB flag secop_worker_state (the app's play/pause button), checked each tick via
+// isEnabled(). Default = paused — the worker spends King Kazuma's Claude Max quota, so it is
+// manually driven, not always-on (dir_1784646309888).
+const HARD_OFF = process.env.SECOP_WORKER === "off";
 const TICK_MS = parseInt(process.env.SECOP_WORKER_TICK_MS) || 15000;
 const MAX_JOBS = parseInt(process.env.SECOP_CONCURRENCY) || 3;
 const ERROR_COOLDOWN_MS = parseInt(process.env.SECOP_WORKER_COOLDOWN_MS) || 5 * 60 * 1000;
@@ -85,10 +89,18 @@ async function processJob(db, job) {
   }
 }
 
+// Runtime gate: env hard-off wins; otherwise the DB flag (app play/pause) decides.
+async function isEnabled(db) {
+  if (HARD_OFF) return false;
+  const st = await schema.getWorkerState(db);
+  return !!st.enabled;
+}
+
 async function tick(db) {
   if (ticking || Date.now() < cooldownUntil) return;
   ticking = true;
   try {
+    if (!(await isEnabled(db))) return; // paused via app (or hard-off) — do nothing this tick
     while (inFlight.size < MAX_JOBS) {
       const job = await pickJob(db);
       if (!job) break; // nothing left to do (or all remaining are in-flight)
@@ -108,9 +120,9 @@ async function tick(db) {
 }
 
 function startWorker(db) {
-  if (!ENABLED) { console.log("[secop-worker] disabled (SECOP_WORKER=off)"); return null; }
-  console.log(`[secop-worker] started (tick ${TICK_MS / 1000}s, concurrency ${MAX_JOBS})`);
+  if (HARD_OFF) { console.log("[secop-worker] hard-disabled (SECOP_WORKER=off) — app play/pause unavailable"); return null; }
+  console.log(`[secop-worker] armed (tick ${TICK_MS / 1000}s, concurrency ${MAX_JOBS}); run/pause via app`);
   return setInterval(() => { tick(db).catch(() => {}); }, TICK_MS);
 }
 
-module.exports = { startWorker, pickFull, pickBriefRegen };
+module.exports = { startWorker, isEnabled, pickFull, pickBriefRegen };

@@ -208,6 +208,22 @@ async function ensureSchema(db) {
     )
   `);
 
+  // Single-row runtime control for the pre-analysis worker (dir_1784646309888). The worker
+  // reads SECOP_WORKER env only once at boot; this DB flag is what the app's play/pause
+  // button flips at runtime (checked every tick), so it survives across restarts. Default
+  // = paused (false) — the worker spends King Kazuma's Claude Max quota, so it must be
+  // manually driven. Env SECOP_WORKER=off is still an emergency HARD kill above this.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS secop_worker_state (
+      id         SMALLINT PRIMARY KEY DEFAULT 1,
+      enabled    BOOLEAN NOT NULL DEFAULT false,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_by TEXT,
+      CONSTRAINT secop_worker_singleton CHECK (id = 1)
+    )
+  `);
+  await db.query(`INSERT INTO secop_worker_state (id, enabled) VALUES (1, false) ON CONFLICT (id) DO NOTHING`);
+
   // Link column on ventures (business_projects) so a licitación can become a venture.
   // business_projects is created earlier in db.js init(); guard in case of ordering.
   try {
@@ -464,6 +480,55 @@ async function setDecision(db, id, decision) {
   );
 }
 
+// Count of tenders the worker will still FULL-analyze — same predicate as worker.js pickFull
+// (in-scope + open + undecided + no ok/recent-building/recent-error detail). This is what the
+// app shows as "pending", so the token estimate reflects real work, not the raw open backlog.
+async function countPendingFull(db) {
+  const r = await db.query(`
+    SELECT count(*)::int AS n
+    FROM secop_licitaciones l
+    WHERE l.is_open
+      AND ${relevanceClause("l")}
+      AND NOT EXISTS (SELECT 1 FROM secop_decisions d
+                      WHERE d.id_proceso = l.id_proceso AND d.decision IN ('rejected','accepted'))
+      AND NOT EXISTS (SELECT 1 FROM secop_tender_detail t
+                      WHERE t.id_proceso = l.id_proceso
+                        AND (t.status = 'ok'
+                          OR (t.status = 'building' AND t.updated_at > now() - interval '30 minutes')
+                          OR (t.status = 'error'    AND t.updated_at > now() - interval '1 hour')))`);
+  return r.rows[0].n;
+}
+
+// Count of in-scope open tenders already analyzed OK — for the "X ya analizadas" context line.
+async function countAnalyzedOk(db) {
+  const r = await db.query(`
+    SELECT count(*)::int AS n
+    FROM secop_tender_detail t
+    JOIN secop_licitaciones l ON l.id_proceso = t.id_proceso
+    WHERE t.status = 'ok' AND l.is_open AND ${relevanceClause("l")}`);
+  return r.rows[0].n;
+}
+
+async function getWorkerState(db) {
+  try {
+    const r = await db.query(`SELECT enabled, updated_at, updated_by FROM secop_worker_state WHERE id = 1`);
+    return r.rows[0] || { enabled: false, updated_at: null, updated_by: null };
+  } catch (e) {
+    return { enabled: false, updated_at: null, updated_by: null }; // table not yet created
+  }
+}
+
+async function setWorkerState(db, enabled, by) {
+  const r = await db.query(
+    `INSERT INTO secop_worker_state (id, enabled, updated_at, updated_by)
+     VALUES (1, $1, now(), $2)
+     ON CONFLICT (id) DO UPDATE SET enabled = $1, updated_at = now(), updated_by = $2
+     RETURNING enabled, updated_at, updated_by`,
+    [!!enabled, by || null]
+  );
+  return r.rows[0];
+}
+
 module.exports = {
   INSERT_COLS,
   ensureSchema,
@@ -471,6 +536,10 @@ module.exports = {
   relevanceClause,
   setBrief,
   setDecision,
+  countPendingFull,
+  countAnalyzedOk,
+  getWorkerState,
+  setWorkerState,
   upsertLicitacion,
   closeExpired,
   startIngestRun,

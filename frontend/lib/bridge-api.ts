@@ -1250,6 +1250,36 @@ export async function decideOffer(id: string, decision: "accepted" | "rejected" 
     body: JSON.stringify({ decision }),
   });
 }
+
+// SECOP pre-analysis worker (dir_1784646309888). It analyzes each in-scope tender with Claude
+// on King Kazuma's Max plan, so it's manually driven from the app. `pending` = tenders still to
+// analyze (in-scope only); `est_tokens` = that count × the measured per-tender cost.
+export interface SecopWorkerState {
+  enabled: boolean;
+  hard_off?: boolean;
+  pending: number;
+  analyzed?: number;
+  concurrency: number;
+  tick_ms: number;
+  est_tokens_per_tender: number;
+  est_tokens: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+}
+
+export async function fetchSecopWorker(): Promise<SecopWorkerState> {
+  return apiFetch(`/secop/worker`);
+}
+
+export async function setSecopWorker(
+  enabled: boolean
+): Promise<{ ok: boolean; enabled: boolean; pending: number; hard_off?: boolean }> {
+  return apiFetch(`/secop/worker`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}
 export async function fetchTenderDetail(id: string): Promise<{ status: "ready" | "building" | "error"; detail?: TenderDetail; previous_error?: string | null }> {
   return apiFetch(`/secop/licitaciones/${encodeURIComponent(id)}/detail`);
 }
