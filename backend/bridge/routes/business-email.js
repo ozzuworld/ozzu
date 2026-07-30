@@ -32,9 +32,19 @@ module.exports = function businessEmailRoutes(ctx) {
       if (key !== "ozzu" && ACCOUNTS.ozzu.user && ACCOUNTS.ozzu.pass) return getTransporter("ozzu");
       return null;
     }
+    // Explicit SSL transport with timeouts. Previously used `service: "gmail"`
+    // with NO timeouts — a stalled SMTP connection made sendMail() hang forever,
+    // which silently killed OZZU alert emails (escalateToHuman swallows send
+    // errors) starting ~2026-07-01. Explicit host/port + timeouts => send either
+    // succeeds fast or fails fast, never hangs.
     _transporters[key] = nodemailer.createTransport({
-      service: "gmail",
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
       auth: { user: acct.user, pass: acct.pass },
+      connectionTimeout: 20000,
+      greetingTimeout: 20000,
+      socketTimeout: 30000,
     });
     _transporters[key]._account = acct;
     return _transporters[key];
