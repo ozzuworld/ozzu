@@ -184,10 +184,10 @@ async function listJobs(db, f = {}) {
   if (!truthy(f.all)) where.push("j.is_open = TRUE");
   if (truthy(f.relevant)) where.push("j.relevant = TRUE");
   if (truthy(f.latam)) where.push("j.latam_reachable = TRUE");
-  // Inbox = relevant + not dismissed + not applied (the triage queue).
+  // Inbox = relevant + untriaged (any save/dismiss/apply clears it, like archiving email).
   if (truthy(f.inbox)) {
     where.push("j.relevant = TRUE");
-    where.push("NOT EXISTS (SELECT 1 FROM jobs_decisions d WHERE d.id = j.id AND d.decision IN ('dismissed','applied'))");
+    where.push("NOT EXISTS (SELECT 1 FROM jobs_decisions d WHERE d.id = j.id AND d.decision IN ('saved','dismissed','applied'))");
   }
   if (f.decision) add("EXISTS (SELECT 1 FROM jobs_decisions d WHERE d.id = j.id AND d.decision = ?)", String(f.decision));
   if (f.source) add("j.source = ?", String(f.source));
@@ -234,7 +234,7 @@ async function getStats(db) {
     db.query(`SELECT count(*)::int AS n FROM jobs WHERE is_open = TRUE`),
     db.query(`SELECT count(*)::int AS n FROM jobs WHERE is_open = TRUE AND relevant = TRUE`),
     db.query(`SELECT count(*)::int AS n FROM jobs j WHERE is_open = TRUE AND relevant = TRUE
-              AND NOT EXISTS (SELECT 1 FROM jobs_decisions d WHERE d.id = j.id AND d.decision IN ('dismissed','applied'))`),
+              AND NOT EXISTS (SELECT 1 FROM jobs_decisions d WHERE d.id = j.id AND d.decision IN ('saved','dismissed','applied'))`),
     db.query(`SELECT source, count(*)::int AS total,
                      count(*) FILTER (WHERE relevant)::int AS relevant
               FROM jobs WHERE is_open = TRUE GROUP BY source ORDER BY relevant DESC`),

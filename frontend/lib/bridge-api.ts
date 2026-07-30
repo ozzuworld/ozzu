@@ -1283,3 +1283,77 @@ export async function setSecopWorker(
 export async function fetchTenderDetail(id: string): Promise<{ status: "ready" | "building" | "error"; detail?: TenderDetail; previous_error?: string | null }> {
   return apiFetch(`/secop/licitaciones/${encodeURIComponent(id)}/detail`);
 }
+
+// ── Jobs inbox — remote software-engineering listings (dir_1785424018953) ──
+export interface Job {
+  id: string;
+  source: string;              // "himalayas" | "remoteok"
+  source_id: string;
+  title: string | null;
+  company: string | null;
+  company_logo: string | null;
+  url: string | null;
+  apply_url: string | null;
+  location: string | null;
+  location_restrictions: string[];
+  timezone_restrictions: (number | string)[];
+  remote: boolean;
+  employment_type: string | null;
+  seniority: string[];
+  tags: string[];
+  salary_min: number | string | null;
+  salary_max: number | string | null;
+  salary_currency: string | null;
+  salary_period: string | null;   // "annual" | "hourly"
+  excerpt: string | null;
+  posted_at: string | null;
+  relevant: boolean;
+  score: number | string;
+  matched_skills: string[];
+  latam_reachable: boolean;
+  decision: "pending" | "saved" | "dismissed" | "applied";
+}
+export interface JobListResult { total: number; limit: number; offset: number; items: Job[]; }
+export interface JobsStats {
+  open_count: number;
+  relevant_count: number;
+  inbox_count: number;
+  by_source: { source: string; total: number; relevant: number }[];
+  saved_count: number;
+  applied_count: number;
+  dismissed_count: number;
+  last_ingest: { status?: string; finished_at?: string | null; relevant?: number } | null;
+}
+export type JobDecision = "saved" | "dismissed" | "applied" | "pending";
+
+export async function fetchJobs(params: Record<string, string | number | boolean | undefined> = {}): Promise<JobListResult> {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+  }
+  return apiFetch(`/jobs?${qs.toString()}`);
+}
+export async function fetchJobsStats(): Promise<JobsStats> {
+  return apiFetch(`/jobs/stats`);
+}
+export async function decideJob(id: string, decision: JobDecision): Promise<{ ok: boolean; decision: string }> {
+  return apiFetch(`/jobs/${encodeURIComponent(id)}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision }),
+  });
+}
+export async function refreshJobs(): Promise<{ ok: boolean; message: string }> {
+  return apiFetch(`/jobs/ingest`, { method: "POST", headers: { "Content-Type": "application/json" } });
+}
+export interface JobsWorkerState { enabled: boolean; hard_off?: boolean; tick_ms: number; updated_at?: string | null; }
+export async function fetchJobsWorker(): Promise<JobsWorkerState> {
+  return apiFetch(`/jobs/worker`);
+}
+export async function setJobsWorker(enabled: boolean): Promise<{ ok: boolean; enabled: boolean }> {
+  return apiFetch(`/jobs/worker`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}
