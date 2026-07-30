@@ -49,6 +49,7 @@ const financeRoutes = require("./routes/finance");
 const octoprintRoutes = require("./routes/octoprint");
 const socRoutes = require("./routes/soc");
 const secopRoutes = require("./routes/secop");
+const jobsRoutes = require("./routes/jobs");
 const watchdog = require("./infra/watchdog");
 const recoveryEngine = require("./infra/recovery-engine");
 const cipherDaemon = require("./cipher-agent/cipher-agent");
@@ -990,6 +991,12 @@ async function initStorage() {
       const _secopWorker = require("./secop/worker").startWorker(db);
       if (_secopWorker) _intervals.push(_secopWorker);
     } catch (err) { log.pg.error("secop worker start:", err.message); }
+
+    // Jobs inbox refresh worker — periodically re-ingests Himalayas + RemoteOK
+    try {
+      const _jobsWorker = require("./jobs/worker").startWorker(db);
+      if (_jobsWorker) _intervals.push(_jobsWorker);
+    } catch (err) { log.pg.error("jobs worker start:", err.message); }
   }
 
   // ── Orphan commit scanner — every 30 minutes ──
@@ -1591,6 +1598,7 @@ function getRouteHandlers() {
       soc: socRoutes(routeCtx),
       ozzuSource: ozzuSourceRoutes(routeCtx),
       secop: secopRoutes(routeCtx),
+      jobs: jobsRoutes(routeCtx),
     };
   }
   return _routeHandlers;
@@ -1730,6 +1738,7 @@ async function handleRequest(req, res) {
   if (await r.octoprint(req, res, pathname, url)) return;
   if (await r.soc(req, res, pathname, url)) return;
   if (await r.secop(req, res, pathname, url)) return;
+  if (await r.jobs(req, res, pathname, url)) return;
   if (await r.ozzuSource(req, res, pathname, url)) return;
 
   // GET /api/training-stats — Face DB training pipeline stats

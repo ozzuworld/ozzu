@@ -1602,6 +1602,14 @@ async function init() {
       console.error("[pg] SECOP schema ensure failed:", e.message);
     }
 
+    // Jobs inbox — self-contained schema module (dir_1785424018953), independent of SECOP.
+    try {
+      await require("./jobs/schema").ensureSchema({ query });
+      console.log("[pg] Jobs inbox schema ensured");
+    } catch (e) {
+      console.error("[pg] Jobs schema ensure failed:", e.message);
+    }
+
     console.log("[pg] Migrations applied (osint tables + schedules/alerts/persons/groups/remediations/incidents + cedula_faces + business + ceo + browser audit + investigations + ekf + identity resolution + owner profile + watchdog + token_usage + device_push_tokens + file_folders + identity_vault + knowledge_graph + agent_audit_log + recon_hosts + infra_state + device_telemetry_v2)");
   } catch (err) {
     console.error("[pg] Connection failed:", err.message);

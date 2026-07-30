@@ -1,0 +1,69 @@
+{
+  "_comment": "Relevance scope for the Jobs inbox (dir_1785424018953). Tunable like secop/overlay.json — edit and the next ingest/rescore re-applies it (POST /jobs/rescore). A job is 'relevant' if its title carries a software-engineering role signal OR it matches >= min_skill_matches of the skill keywords, AND it is not vetoed by exclude_title. Score ranks the inbox.",
+
+  "min_skill_matches": 3,
+
+  "role_signals": [
+    "software engineer", "software developer", "software dev", "swe", "sde",
+    "backend engineer", "backend developer", "back end", "back-end",
+    "frontend engineer", "frontend developer", "front end", "front-end",
+    "full stack", "fullstack", "full-stack",
+    "devops", "sre", "site reliability", "platform engineer", "infrastructure engineer",
+    "mobile engineer", "mobile developer", "ios engineer", "android engineer", "react native",
+    "security engineer", "application security", "appsec", "penetration tester", "pentester", "offensive security",
+    "ai engineer", "ml engineer", "machine learning engineer", "llm engineer",
+    "web developer", "api engineer", "cloud engineer", "systems engineer", "programmer",
+    "engineer - software", "senior engineer", "staff engineer", "founding engineer", "principal engineer"
+  ],
+
+  "skills": [
+    "javascript", "typescript", "node", "nodejs", "node.js", "deno", "bun",
+    "react", "react native", "react-native", "expo", "next.js", "nextjs", "vue", "svelte",
+    "python", "django", "fastapi", "flask", "pandas",
+    "go", "golang", "rust", "elixir",
+    "postgres", "postgresql", "mysql", "sqlite", "redis", "sql", "prisma",
+    "docker", "kubernetes", "k8s", "terraform", "ansible", "helm", "nginx",
+    "aws", "gcp", "google cloud", "azure", "cloudflare", "serverless", "lambda",
+    "ci/cd", "github actions", "gitlab", "linux", "bash", "git",
+    "graphql", "rest api", "grpc", "websocket", "microservices", "api",
+    "react query", "tailwind", "vite", "webpack",
+    "llm", "openai", "anthropic", "claude", "langchain", "rag", "embeddings", "vector database", "qdrant", "pinecone",
+    "machine learning", "deep learning", "pytorch", "tensorflow", "onnx",
+    "cybersecurity", "infosec", "soc", "siem", "nmap", "burp", "metasploit", "reverse engineering", "malware",
+    "networking", "wireguard", "vpn", "tcp/ip", "firewall",
+    "webrtc", "sip", "voip", "asterisk", "ffmpeg",
+    "firmware", "embedded", "esp32", "arduino", "raspberry pi", "iot", "mqtt"
+  ],
+
+  "exclude_title": [
+    "radiologist", "physician", "nurse", "medical", "clinical", "dentist", "pharmacist", "therapist", "psychologist",
+    "sales", "account executive", "account manager", "business development", "sdr", "bdr",
+    "recruiter", "talent acquisition", "hr ", "human resources",
+    "customer support", "customer success", "customer service", "support specialist", "call center",
+    "accountant", "bookkeeper", "auditor", "tax ",
+    "teacher", "tutor", "instructor", "professor",
+    "social media", "copywriter", "content writer", "seo specialist", "community manager",
+    "graphic designer", "video editor", "photographer", "illustrator",
+    "lawyer", "attorney", "paralegal", "legal counsel",
+    "virtual assistant", "data entry", "transcription", "moderator",
+    "warehouse", "driver", "delivery",
+    "intern", "coach", "professeur", "profesor", "practitioner", "influencer", "vice president"
+  ],
+
+  "latam_reachable": {
+    "_comment": "Score boost + optional filter for jobs a Bogota (UTC-5) engineer can actually take. Himalayas exposes locationRestrictions (countries) + timezoneRestrictions (UTC offsets). Worldwide/Americas/Colombia/LatAm or an overlapping timezone (-3..-8) count as reachable.",
+    "timezones": [-3, -4, -5, -6, -7, -8],
+    "countries": ["worldwide", "anywhere", "global", "americas", "latin america", "latam", "south america", "colombia", "united states", "canada", "brazil", "mexico", "argentina"]
+  },
+
+  "min_salary_usd": 0,
+
+  "score_weights": {
+    "per_skill": 1,
+    "role_signal": 4,
+    "salary_present": 2,
+    "latam_reachable": 3,
+    "recent_7d": 2,
+    "senior_plus": 1
+  }
+}
