@@ -1702,8 +1702,11 @@ async function handleRequest(req, res) {
     "/ozzu.json", "/icon.png", "/ozzu-latest.ipa",
     "/anisette-servers.json", "/anisette.json",
     "/iphone-pairing", "/ios-setup",
+    "/api/manifest", // expo-updates OTA manifest
   ]);
-  if (!PUBLIC_ALLOWLIST.has(pathname) && !pathname.startsWith("/mcp-proxy/")) {
+  // Also allow /api/assets (OTA bundle downloads) by prefix
+  const isPublicPath = PUBLIC_ALLOWLIST.has(pathname) || pathname.startsWith("/api/assets");
+  if (!isPublicPath && !pathname.startsWith("/mcp-proxy/")) {
     if (!requireAuth(req, res)) return; // requireAuth sends 401 on reject
   }
 
