@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# cipher.sh — Launch Cipher's interactive CLI (reasonix) — opencode optional
+# cipher.sh — Launch Cipher's interactive CLI (Claude Code) — opencode panel optional
 # Usage:
 #   cipher [--fresh] [--no-launch] [--tui] [extra args...]
 #
 # One mind, one CLI: refreshes CLAUDE.local.md from the bridge (live state +
 # memory index) and appends the most recent conversation tail from a UNIFIED
 # timeline (Claude Code + Reasonix transcripts, newest session wins), then opens
-# reasonix — the word-based interactive agent CLI (exactly like this session).
-# Multi-model: --model deepseek/deepseek-chat or deepseek-v4-pro (default), plus
-# qwen/anthropic/gemini once configured. --tui swaps in opencode's paneled UI.
-# Extra args are passed through to reasonix (one-shot via `opencode run`).
+# Claude Code — the interactive agent CLI. Model + endpoint come from
+# ~/.claude/settings.json (whatever provider it points at — currently Qwen via
+# Alibaba Model Studio). --tui swaps in opencode's paneled UI.
+# Extra args become a one-shot prompt via `claude -p`.
 #
 # Fixes ported from Volts (Apr 12 2026):
 #   - Dual-source history: postgres + JSONL, pick most recent by TIMESTAMP (not size)
@@ -26,7 +26,7 @@ MAX_HISTORY_CHARS=15000
 FRESH_MODE=0
 # ── --no-launch: refresh context + print what would launch, then exit (dry run) ──
 NO_LAUNCH=0
-# ── --tui: the full paneled opencode interface (default is the plain CLI REPL) ──
+# ── --tui: the full paneled opencode interface (default is Claude Code) ──
 TUI_MODE=0
 NEW_ARGS=()
 while [ $# -gt 0 ]; do
@@ -177,13 +177,13 @@ KAIROS_LOCK="/tmp/cipher-session.lock"
 echo "$$" > "$KAIROS_LOCK"
 trap 'rm -f "$KAIROS_LOCK"' EXIT INT TERM
 
-# Launch opencode — Cipher is the mind; this is the hands.
-# opencode loads the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
-# so it wakes up with the same memory and the same timeline every time.
+# Launch the hands — Cipher is the mind. The CLI loads the same workspace
+# files (AGENTS.md, CLAUDE.md, CLAUDE.local.md), so it wakes up with the
+# same memory and the same timeline every time.
 cd "$PROJECT_DIR" || exit 1
 
 if [ $NO_LAUNCH -eq 1 ]; then
-  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: reasonix (interactive CLI) — --tui for the opencode panel"
+  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: claude (Claude Code interactive) — --tui for the opencode panel"
   exit 0
 fi
 
@@ -199,9 +199,12 @@ if [ -f "${PROJECT_DIR}/backend/.env" ]; then
 fi
 
 # ── Launch ──
-# One-shot headless: extra args become the message (opencode run).
+# claude lives in ~/.local/bin — make sure it resolves even from a bare shell.
+export PATH="$HOME/.local/bin:$PATH"
+
+# One-shot headless: extra args become the prompt (claude -p).
 if [ $# -gt 0 ]; then
-  exec opencode run "$@"
+  exec claude -p "$*"
 fi
 
 # Full paneled opencode UI (opt-in).
@@ -209,8 +212,8 @@ if [ $TUI_MODE -eq 1 ]; then
   exec opencode "$@"
 fi
 
-# Default: reasonix — the word-based interactive agent CLI (this is the hands).
-# Multi-model (deepseek today; qwen/anthropic/gemini via providers config),
-# loads the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
+# Default: Claude Code (this is the hands). Model + endpoint come from
+# ~/.claude/settings.json (currently qwen3.8-max via Alibaba Model Studio);
+# it loads the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
 # so it wakes up with the same memory and the same timeline.
-exec /usr/bin/reasonix "$@"
+exec claude
