@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# cipher.sh — Launch Cipher with full memory context on ANY provider runtime
+# cipher.sh — Launch Cipher in opencode, the universal provider-agnostic harness
 # Usage:
-#   cipher [--provider opencode|claude|reasonix] [--fresh] [--no-launch] [extra args...]
+#   cipher [--fresh] [--no-launch] [extra args...]
 #
-# One mind, many hands: refreshes CLAUDE.local.md from the bridge (live state +
+# One mind, one harness: refreshes CLAUDE.local.md from the bridge (live state +
 # memory index) and appends the most recent conversation tail from a UNIFIED
 # timeline (Claude Code + Reasonix transcripts, newest session wins), then
-# launches the chosen runtime. Default provider: opencode (provider-agnostic).
+# launches opencode. The MODEL is chosen inside opencode (/model) — DeepSeek,
+# Qwen, Anthropic, Gemini — not by switching harnesses.
 #
 # Fixes ported from Volts (Apr 12 2026):
-#   - Anti-shortcut env vars (CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING, EFFORT_LEVEL)
 #   - Dual-source history: postgres + JSONL, pick most recent by TIMESTAMP (not size)
 #   - Bridge-down fallback context
 
@@ -22,8 +22,6 @@ MAX_HISTORY_CHARS=15000
 # ── --fresh flag: skip conversation tail entirely ──
 # Use when prior session had API-Error refusals that would poison classifier context.
 FRESH_MODE=0
-# ── --provider opencode|claude|reasonix: which runtime hands to use (Cipher is the mind) ──
-PROVIDER="opencode"
 # ── --no-launch: refresh context + print what would launch, then exit (dry run) ──
 NO_LAUNCH=0
 NEW_ARGS=()
@@ -31,28 +29,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --fresh) FRESH_MODE=1 ;;
     --no-launch) NO_LAUNCH=1 ;;
-    --provider)
-      shift
-      [ $# -eq 0 ] && { echo "cipher: --provider needs a value (opencode|claude|reasonix)"; exit 1; }
-      PROVIDER="$1"
-      ;;
     *) NEW_ARGS+=("$1") ;;
   esac
   shift
 done
-case "$PROVIDER" in
-  opencode) ;;
-  claude) ;;
-  reasonix) ;;
-  *) echo "cipher: unknown provider '${PROVIDER}' (use opencode, claude or reasonix)"; exit 1 ;;
-esac
 set -- "${NEW_ARGS[@]}"
-
-# ── Anti-shortcut fixes (Apr 2026) ──
-# GitHub issues #42796, #40274: Feb 2026 defaults caused adaptive thinking regression.
-# These force max effort and disable the shortcut behavior.
-export CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
-export CLAUDE_CODE_EFFORT_LEVEL=max
 
 # ── Enforce git hooks — pipeline has zero enforcement without this ──
 CURRENT_HOOKS=$(cd "$PROJECT_DIR" && git config core.hooksPath 2>/dev/null || echo "")
@@ -191,38 +172,24 @@ KAIROS_LOCK="/tmp/cipher-session.lock"
 echo "$$" > "$KAIROS_LOCK"
 trap 'rm -f "$KAIROS_LOCK"' EXIT INT TERM
 
-# Launch the provider runtime — Cipher is the mind; this is just the hands.
-# All providers load the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
-# so whichever launches wakes up with the same memory and the same timeline.
+# Launch opencode — Cipher is the mind; this is the hands.
+# opencode loads the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
+# so it wakes up with the same memory and the same timeline every time.
 cd "$PROJECT_DIR" || exit 1
 
 if [ $NO_LAUNCH -eq 1 ]; then
-  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: ${PROVIDER} $*"
+  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: opencode $*"
   exit 0
 fi
 
-if [ "$PROVIDER" = "opencode" ]; then
-  # Providers come from opencode's built-in catalog (models.dev): DeepSeek,
-  # Qwen/DashScope, Anthropic, Google — keys read from standard env vars.
-  # Extract the known key names from gitignored backend/.env (no full source —
-  # keeps unrelated secrets out of the launch environment).
-  if [ -f "${PROJECT_DIR}/backend/.env" ]; then
-    for ENV_LINE in DEEPSEEK_API_KEY DASHSCOPE_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY; do
-      VAL=$(grep -E "^${ENV_LINE}=" "${PROJECT_DIR}/backend/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
-      [ -n "$VAL" ] && export "${ENV_LINE}=${VAL}"
-    done
-  fi
-  exec opencode "$@"
+# Providers come from opencode's built-in catalog (models.dev): DeepSeek,
+# Qwen/DashScope, Anthropic, Google — keys read from standard env vars.
+# Extract the known key names from gitignored backend/.env (no full source —
+# keeps unrelated secrets out of the launch environment).
+if [ -f "${PROJECT_DIR}/backend/.env" ]; then
+  for ENV_LINE in DEEPSEEK_API_KEY DASHSCOPE_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY; do
+    VAL=$(grep -E "^${ENV_LINE}=" "${PROJECT_DIR}/backend/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+    [ -n "$VAL" ] && export "${ENV_LINE}=${VAL}"
+  done
 fi
-
-if [ "$PROVIDER" = "reasonix" ]; then
-  exec /usr/bin/reasonix "$@"
-fi
-
-# Claude Code with system-level mandatory rules
-exec claude --append-system-prompt "MANDATORY (system-level):
-1. NEVER commit to main. Work on cipher/dir_xxx branches.
-2. Every code change needs a directive FIRST.
-3. NEVER merge manually. Use merge-and-deploy.
-4. NEVER state infra facts from memory. Read .claude/rules/ or query live.
-5. Read INVENTORY.md before writing ANY code." "$@"
+exec opencode "$@"
