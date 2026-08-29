@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# cipher.sh — Launch Cipher in opencode, the universal provider-agnostic harness
+# cipher.sh — Launch Cipher's interactive CLI (reasonix) — opencode optional
 # Usage:
-#   cipher [--fresh] [--no-launch] [extra args...]
+#   cipher [--fresh] [--no-launch] [--tui] [extra args...]
 #
-# One mind, one harness: refreshes CLAUDE.local.md from the bridge (live state +
+# One mind, one CLI: refreshes CLAUDE.local.md from the bridge (live state +
 # memory index) and appends the most recent conversation tail from a UNIFIED
-# timeline (Claude Code + Reasonix transcripts, newest session wins), then
-# launches opencode. The MODEL is chosen inside opencode (/model) — DeepSeek,
-# Qwen, Anthropic, Gemini — not by switching harnesses.
+# timeline (Claude Code + Reasonix transcripts, newest session wins), then opens
+# reasonix — the word-based interactive agent CLI (exactly like this session).
+# Multi-model: --model deepseek/deepseek-chat or deepseek-v4-pro (default), plus
+# qwen/anthropic/gemini once configured. --tui swaps in opencode's paneled UI.
+# Extra args are passed through to reasonix (one-shot via `opencode run`).
 #
 # Fixes ported from Volts (Apr 12 2026):
 #   - Dual-source history: postgres + JSONL, pick most recent by TIMESTAMP (not size)
@@ -24,11 +26,14 @@ MAX_HISTORY_CHARS=15000
 FRESH_MODE=0
 # ── --no-launch: refresh context + print what would launch, then exit (dry run) ──
 NO_LAUNCH=0
+# ── --tui: the full paneled opencode interface (default is the plain CLI REPL) ──
+TUI_MODE=0
 NEW_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --fresh) FRESH_MODE=1 ;;
     --no-launch) NO_LAUNCH=1 ;;
+    --tui) TUI_MODE=1 ;;
     *) NEW_ARGS+=("$1") ;;
   esac
   shift
@@ -178,7 +183,7 @@ trap 'rm -f "$KAIROS_LOCK"' EXIT INT TERM
 cd "$PROJECT_DIR" || exit 1
 
 if [ $NO_LAUNCH -eq 1 ]; then
-  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: opencode $*"
+  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: reasonix (interactive CLI) — --tui for the opencode panel"
   exit 0
 fi
 
@@ -192,4 +197,20 @@ if [ -f "${PROJECT_DIR}/backend/.env" ]; then
     [ -n "$VAL" ] && export "${ENV_LINE}=${VAL}"
   done
 fi
-exec opencode "$@"
+
+# ── Launch ──
+# One-shot headless: extra args become the message (opencode run).
+if [ $# -gt 0 ]; then
+  exec opencode run "$@"
+fi
+
+# Full paneled opencode UI (opt-in).
+if [ $TUI_MODE -eq 1 ]; then
+  exec opencode "$@"
+fi
+
+# Default: reasonix — the word-based interactive agent CLI (this is the hands).
+# Multi-model (deepseek today; qwen/anthropic/gemini via providers config),
+# loads the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
+# so it wakes up with the same memory and the same timeline.
+exec /usr/bin/reasonix "$@"
