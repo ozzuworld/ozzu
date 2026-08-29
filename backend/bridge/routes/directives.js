@@ -4,6 +4,17 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 
+// After a state change (work-update / session-handoff), regenerate CLAUDE.local.md
+// so the next provider session — Claude Code OR Reasonix — wakes up with fresh mind state.
+function refreshMindFile() {
+  try {
+    const http = require("http");
+    const r = http.get("http://127.0.0.1:3333/cipher/context", () => {});
+    r.on("error", () => {});
+    r.setTimeout(5000, () => r.destroy());
+  } catch {}
+}
+
 module.exports = function directiveRoutes(ctx) {
   const { sendJSON, parseBody, requireAuth, db, log, metrics,
           getDirectives, saveDirectives, findSimilarDirective,
@@ -742,6 +753,7 @@ module.exports = function directiveRoutes(ctx) {
       directive.updatedAt = Date.now();
       directive.lastActivity = Date.now();
       saveDirectives(directives, directive, null, data.actor || "Cipher");
+      refreshMindFile();
       sendJSON(res, 200, { ok: true, directive });
       return true;
     }
@@ -782,6 +794,7 @@ module.exports = function directiveRoutes(ctx) {
       directive.updatedAt = Date.now();
       directive.lastActivity = Date.now();
       saveDirectives(directives, directive, null, "Cipher");
+      refreshMindFile();
       sendJSON(res, 200, { ok: true, message: "Session handoff saved", directive });
       return true;
     }

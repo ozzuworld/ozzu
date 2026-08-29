@@ -104,8 +104,17 @@ mkdir -p "${WORK_DIR}/env"
 [ -f "${PROJECT_ROOT}/frontend/.env" ] && cp "${PROJECT_ROOT}/frontend/.env" "${WORK_DIR}/env/frontend.env"
 echo "  Env files: $(ls "${WORK_DIR}/env/" | wc -l) files"
 
-# 8. Redis snapshot
-echo "[8/8] Snapshotting Redis..."
+# 8. Cipher memory (canonical mind store — single source of truth for every provider)
+echo "[8/9] Backing up Cipher memory..."
+if [ -d "${PROJECT_ROOT}/private/cipher-memory" ]; then
+  tar -cf "${WORK_DIR}/cipher-memory.tar" -C "${PROJECT_ROOT}/private" cipher-memory 2>/dev/null || true
+  echo "  Cipher memory: $(du -sh "${WORK_DIR}/cipher-memory.tar" 2>/dev/null | cut -f1)"
+else
+  echo "  Cipher memory: (none)"
+fi
+
+# 9. Redis snapshot
+echo "[9/9] Snapshotting Redis..."
 redis-cli -h 127.0.0.1 BGSAVE >/dev/null 2>&1 || true
 sleep 1
 REDIS_CONTAINER=$(docker ps -qf "name=redis" | head -1)
@@ -131,6 +140,7 @@ cat > "${WORK_DIR}/manifest.json" <<MANIFEST
     "uploads": $([ -f "${WORK_DIR}/uploads.tar" ] && echo "true" || echo "false"),
     "artifacts": $([ -f "${WORK_DIR}/artifacts.tar" ] && echo "true" || echo "false"),
     "ha_config": $([ -f "${WORK_DIR}/ha-config.tar" ] && echo "true" || echo "false"),
+    "cipher_memory": $([ -f "${WORK_DIR}/cipher-memory.tar" ] && echo "true" || echo "false"),
     "env_files": true,
     "redis": $([ -f "${WORK_DIR}/redis-dump.rdb" ] && echo "true" || echo "false")
   },
