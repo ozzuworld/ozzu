@@ -16,8 +16,12 @@
 #   - Bridge-down fallback context
 
 BRIDGE_URL="${BRIDGE_URL:-http://localhost:3333}"
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# readlink -f: `cipher` is a symlink (/usr/local/bin/cipher) — resolve to the
+# REAL script, or PROJECT_DIR comes out as /usr/local, the extractor is not
+# found, and Claude Code launches without the mind.
+SCRIPT_PATH="$(readlink -f "$0")"
+PROJECT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 LOCAL_MD="${PROJECT_DIR}/CLAUDE.local.md"
 MAX_HISTORY_CHARS=15000
 
