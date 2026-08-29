@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # cipher.sh — Launch Cipher with full memory context on ANY provider runtime
 # Usage:
-#   cipher [--provider claude|reasonix] [--fresh] [--no-launch] [extra args...]
+#   cipher [--provider opencode|claude|reasonix] [--fresh] [--no-launch] [extra args...]
 #
 # One mind, many hands: refreshes CLAUDE.local.md from the bridge (live state +
 # memory index) and appends the most recent conversation tail from a UNIFIED
 # timeline (Claude Code + Reasonix transcripts, newest session wins), then
-# launches the chosen runtime. Default provider: claude.
+# launches the chosen runtime. Default provider: opencode (provider-agnostic).
 #
 # Fixes ported from Volts (Apr 12 2026):
 #   - Anti-shortcut env vars (CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING, EFFORT_LEVEL)
@@ -22,8 +22,8 @@ MAX_HISTORY_CHARS=15000
 # ── --fresh flag: skip conversation tail entirely ──
 # Use when prior session had API-Error refusals that would poison classifier context.
 FRESH_MODE=0
-# ── --provider claude|reasonix: which runtime hands to use (Cipher is the mind) ──
-PROVIDER="claude"
+# ── --provider opencode|claude|reasonix: which runtime hands to use (Cipher is the mind) ──
+PROVIDER="opencode"
 # ── --no-launch: refresh context + print what would launch, then exit (dry run) ──
 NO_LAUNCH=0
 NEW_ARGS=()
@@ -33,7 +33,7 @@ while [ $# -gt 0 ]; do
     --no-launch) NO_LAUNCH=1 ;;
     --provider)
       shift
-      [ $# -eq 0 ] && { echo "cipher: --provider needs a value (claude|reasonix)"; exit 1; }
+      [ $# -eq 0 ] && { echo "cipher: --provider needs a value (opencode|claude|reasonix)"; exit 1; }
       PROVIDER="$1"
       ;;
     *) NEW_ARGS+=("$1") ;;
@@ -41,9 +41,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 case "$PROVIDER" in
+  opencode) ;;
   claude) ;;
   reasonix) ;;
-  *) echo "cipher: unknown provider '${PROVIDER}' (use claude or reasonix)"; exit 1 ;;
+  *) echo "cipher: unknown provider '${PROVIDER}' (use opencode, claude or reasonix)"; exit 1 ;;
 esac
 set -- "${NEW_ARGS[@]}"
 
@@ -191,13 +192,32 @@ echo "$$" > "$KAIROS_LOCK"
 trap 'rm -f "$KAIROS_LOCK"' EXIT INT TERM
 
 # Launch the provider runtime — Cipher is the mind; this is just the hands.
-# Both providers load the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
+# All providers load the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
 # so whichever launches wakes up with the same memory and the same timeline.
 cd "$PROJECT_DIR" || exit 1
 
 if [ $NO_LAUNCH -eq 1 ]; then
   echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: ${PROVIDER} $*"
   exit 0
+fi
+
+if [ "$PROVIDER" = "opencode" ]; then
+  # Providers come from opencode's built-in catalog (models.dev): OpenRouter,
+  # DeepSeek, Qwen/DashScope, Anthropic — keys read from standard env vars.
+  # Extract the known key names from gitignored backend/.env (no full source —
+  # keeps unrelated secrets out of the launch environment).
+  if [ -f "${PROJECT_DIR}/backend/.env" ]; then
+    for ENV_LINE in OFFENSE_MODEL_KEY DASHSCOPE_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY; do
+      VAL=$(grep -E "^${ENV_LINE}=" "${PROJECT_DIR}/backend/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+      [ -n "$VAL" ] && export "${ENV_LINE}=${VAL}"
+    done
+  fi
+  # OFFENSE_MODEL_KEY is an OpenRouter key (verified: 200 on openrouter.ai,
+  # 401 on api.deepseek.com) — reuse it for the OpenRouter provider.
+  if [ -z "${OPENROUTER_API_KEY:-}" ] && [ -n "$OFFENSE_MODEL_KEY" ]; then
+    export OPENROUTER_API_KEY="$OFFENSE_MODEL_KEY"
+  fi
+  exec opencode "$@"
 fi
 
 if [ "$PROVIDER" = "reasonix" ]; then
