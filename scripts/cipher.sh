@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cipher.sh — Launch Cipher's interactive CLI (Claude Code — the ONLY harness)
 # Usage:
-#   cipher [--fresh] [--no-launch] [extra args...]
+#   cipher [--fresh] [--no-launch] [--continue] [--resume [session-id]] [extra args...]
 #
 # One mind, one CLI: syncs every provider transcript into postgres, refreshes
 # CLAUDE.local.md from the bridge (live state + memory index) and appends the
@@ -39,11 +39,29 @@ MAX_HISTORY_CHARS=15000
 FRESH_MODE=0
 # ── --no-launch: refresh context + print what would launch, then exit (dry run) ──
 NO_LAUNCH=0
+# ── --continue / --resume: get back to a previous conversation ──
+# WITHOUT these, every `cipher` wakes fresh with the memory files + the 15K
+# tail. These pass through to Claude Code's own session restore — the FULL
+# transcript (all turns + tool outputs) of the resumed session.
+#   --continue / -c          most recent session in this directory
+#   --resume / -r            interactive picker over past sessions
+#   --resume <id-or-title>   straight to that session (no picker)
+CONTINUE_MODE=0
+RESUME_MODE=0
+RESUME_ID=""
 NEW_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --fresh) FRESH_MODE=1 ;;
     --no-launch) NO_LAUNCH=1 ;;
+    -c|--continue) CONTINUE_MODE=1 ;;
+    -r|--resume)
+      RESUME_MODE=1
+      # Optional session ID/title as the NEXT arg (anything not starting with -)
+      if [ -n "${2:-}" ] && [[ "${2}" != -* ]]; then
+        RESUME_ID="$2"; shift
+      fi
+      ;;
     *) NEW_ARGS+=("$1") ;;
   esac
   shift
@@ -199,13 +217,29 @@ trap 'rm -f "$KAIROS_LOCK"' EXIT INT TERM
 cd "$PROJECT_DIR" || exit 1
 
 if [ $NO_LAUNCH -eq 1 ]; then
-  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: claude (Claude Code interactive)"
+  LAUNCH_DESC="claude (Claude Code interactive)"
+  [ $CONTINUE_MODE -eq 1 ] && LAUNCH_DESC="claude --continue (resume most recent session)"
+  [ $RESUME_MODE -eq 1 ] && LAUNCH_DESC="claude --resume ${RESUME_ID:-(picker)}"
+  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: $LAUNCH_DESC"
   exit 0
 fi
 
 # ── Launch ──
 # claude lives in ~/.local/bin — make sure it resolves even from a bare shell.
 export PATH="$HOME/.local/bin:$PATH"
+
+# Session restore: pass through to Claude Code INTERACTIVE (never -p — print
+# mode has no picker and demands an explicit session ID, which was the old
+# `--resume requires a valid session ID` error).
+if [ $RESUME_MODE -eq 1 ]; then
+  if [ -n "$RESUME_ID" ]; then
+    exec claude --resume "$RESUME_ID"
+  fi
+  exec claude --resume
+fi
+if [ $CONTINUE_MODE -eq 1 ]; then
+  exec claude --continue
+fi
 
 # One-shot headless: extra args become the prompt (claude -p).
 if [ $# -gt 0 ]; then
