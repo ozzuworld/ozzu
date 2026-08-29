@@ -523,7 +523,7 @@ module.exports = function createCipherRoutes(ctx) {
   if (req.method === "POST" && pathname === "/cipher/session-save") {
     try {
       const body = await parseBody(req);
-      const { sessionId, turns, startedAt, endedAt, noLLM } = body;
+      const { sessionId, contentHash, turns, startedAt, endedAt, noLLM } = body;
 
       if (!Array.isArray(turns) || turns.length < 1) {
         sendJSON(res, 200, { success: false, reason: "skipped — no turns" });
@@ -531,17 +531,32 @@ module.exports = function createCipherRoutes(ctx) {
       }
 
       // ── Idempotency (unified-history sync made this mandatory) ──
-      // Same sessionId twice → duplicate. Also treat (same turn_count, started
-      // within 2 min) as a duplicate — legacy rows predate sessionId metadata.
-      if (sessionId && db.isConnected()) {
+      // Same sessionId twice → duplicate. Same contentHash → duplicate (the
+      // reasonix archive holds multiple snapshots of one session under
+      // different stems — identical turns, different filenames). Also treat
+      // (same turn_count, started within 2 min) as a duplicate — legacy rows
+      // predate sessionId metadata.
+      if ((sessionId || contentHash) && db.isConnected()) {
         try {
-          const dupBySession = await db.query(
-            "SELECT id FROM conversations WHERE persona = 'cipher' AND metadata->>'sessionId' = $1 LIMIT 1",
-            [String(sessionId)]
-          );
-          if (dupBySession.rows.length > 0) {
-            sendJSON(res, 200, { success: true, duplicate: true });
-            return;
+          if (sessionId) {
+            const dupBySession = await db.query(
+              "SELECT id FROM conversations WHERE persona = 'cipher' AND metadata->>'sessionId' = $1 LIMIT 1",
+              [String(sessionId)]
+            );
+            if (dupBySession.rows.length > 0) {
+              sendJSON(res, 200, { success: true, duplicate: true });
+              return;
+            }
+          }
+          if (contentHash) {
+            const dupByHash = await db.query(
+              "SELECT id FROM conversations WHERE persona = 'cipher' AND metadata->>'contentHash' = $1 LIMIT 1",
+              [String(contentHash)]
+            );
+            if (dupByHash.rows.length > 0) {
+              sendJSON(res, 200, { success: true, duplicate: true });
+              return;
+            }
           }
           if (startedAt) {
             const dupByTime = await db.query(
@@ -663,9 +678,12 @@ module.exports = function createCipherRoutes(ctx) {
 
       // Store conversation with individual turns + summary
       if (db.isConnected()) {
+        const convMeta = { source: "session-save" };
+        if (sessionId) convMeta.sessionId = String(sessionId);
+        if (contentHash) convMeta.contentHash = String(contentHash);
         const convId = await db.createConversation(
           "cipher", [],
-          sessionId ? { sessionId: String(sessionId), source: "session-save" } : null
+          (sessionId || contentHash) ? convMeta : null
         );
         if (convId) {
           for (let i = 0; i < turns.length; i++) {
