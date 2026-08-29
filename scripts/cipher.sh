@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-# cipher.sh — Launch Cipher's interactive CLI (Claude Code) — opencode panel optional
+# cipher.sh — Launch Cipher's interactive CLI (Claude Code — the ONLY harness)
 # Usage:
-#   cipher [--fresh] [--no-launch] [--tui] [extra args...]
+#   cipher [--fresh] [--no-launch] [extra args...]
 #
-# One mind, one CLI: refreshes CLAUDE.local.md from the bridge (live state +
-# memory index) and appends the most recent conversation tail from a UNIFIED
-# timeline (Claude Code + Reasonix + archive + opencode transcripts, newest
-# SUBSTANTIVE session wins — throwaway test sessions never shadow real work),
-# then opens Claude Code — the interactive agent CLI. Model + endpoint come
-# from ~/.claude/settings.json (whatever provider it points at — currently
-# Qwen via Alibaba Model Studio). --tui swaps in opencode's paneled UI.
+# One mind, one CLI: syncs every provider transcript into postgres, refreshes
+# CLAUDE.local.md from the bridge (live state + memory index) and appends the
+# most recent conversation tail from a UNIFIED timeline (Claude Code +
+# Reasonix + archive transcripts, newest SUBSTANTIVE session wins — throwaway
+# test sessions never shadow real work), then opens Claude Code. Model +
+# endpoint come from ~/.claude/settings.json (whatever provider it points at —
+# currently Qwen via Alibaba Model Studio).
 # Extra args become a one-shot prompt via `claude -p`.
 #
-# SPLIT-BRAIN RULE (2026-08-29): Cipher is the AI; the harness (claude code /
-# opencode / reasonix) and the model provider are interchangeable hands. All
-# memory lives in provider-agnostic places: workspace files (CLAUDE.md,
+# SPLIT-BRAIN RULE (2026-08-29): Cipher is the AI; the harness and the model
+# provider are interchangeable hands — but as of 2026-08-29 Claude Code is the
+# ONLY harness (opencode removed by King Kazuma's order; reasonix retired).
+# Their OLD transcripts stay in the unified timeline — history is never lost.
+# All memory lives in provider-agnostic places: workspace files (CLAUDE.md,
 # CLAUDE.local.md, private/cipher-memory/), directives, and the unified
 # transcript timeline that scripts/unified-history-sync.py mirrors to postgres.
 #
@@ -37,14 +39,11 @@ MAX_HISTORY_CHARS=15000
 FRESH_MODE=0
 # ── --no-launch: refresh context + print what would launch, then exit (dry run) ──
 NO_LAUNCH=0
-# ── --tui: the full paneled opencode interface (default is Claude Code) ──
-TUI_MODE=0
 NEW_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --fresh) FRESH_MODE=1 ;;
     --no-launch) NO_LAUNCH=1 ;;
-    --tui) TUI_MODE=1 ;;
     *) NEW_ARGS+=("$1") ;;
   esac
   shift
@@ -200,19 +199,8 @@ trap 'rm -f "$KAIROS_LOCK"' EXIT INT TERM
 cd "$PROJECT_DIR" || exit 1
 
 if [ $NO_LAUNCH -eq 1 ]; then
-  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: claude (Claude Code interactive) — --tui for the opencode panel"
+  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: claude (Claude Code interactive)"
   exit 0
-fi
-
-# Providers come from opencode's built-in catalog (models.dev): DeepSeek,
-# Qwen/DashScope, Anthropic, Google — keys read from standard env vars.
-# Extract the known key names from gitignored backend/.env (no full source —
-# keeps unrelated secrets out of the launch environment).
-if [ -f "${PROJECT_DIR}/backend/.env" ]; then
-  for ENV_LINE in DEEPSEEK_API_KEY DASHSCOPE_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY; do
-    VAL=$(grep -E "^${ENV_LINE}=" "${PROJECT_DIR}/backend/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
-    [ -n "$VAL" ] && export "${ENV_LINE}=${VAL}"
-  done
 fi
 
 # ── Launch ──
@@ -224,12 +212,7 @@ if [ $# -gt 0 ]; then
   exec claude -p "$*"
 fi
 
-# Full paneled opencode UI (opt-in).
-if [ $TUI_MODE -eq 1 ]; then
-  exec opencode "$@"
-fi
-
-# Default: Claude Code (this is the hands). Model + endpoint come from
+# Claude Code — the only hands. Model + endpoint come from
 # ~/.claude/settings.json (currently qwen3.8-max via Alibaba Model Studio);
 # it loads the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
 # so it wakes up with the same memory and the same timeline.
