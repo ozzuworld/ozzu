@@ -111,6 +111,6 @@ You tend to produce "AI slop" — generic layouts that show data but have no vis
 ## Reference
 
 Bridge server: `docker compose restart bridge`
-Launch Cipher (unified, any provider): `scripts/cipher.sh [--provider claude|reasonix] [--fresh] [--no-launch]` — refreshes CLAUDE.local.md from the bridge and appends the dual-source timeline (Claude + Reasonix transcripts, newest session wins), then opens the chosen runtime. Same mind, either hands.
+Launch Cipher (unified, any provider): `scripts/cipher.sh [--provider opencode|claude|reasonix] [--fresh] [--no-launch]` — refreshes CLAUDE.local.md from the bridge and appends the dual-source timeline (Claude + Reasonix transcripts, newest session wins), then opens the chosen runtime. Default provider: **opencode** (provider-agnostic — DeepSeek/Qwen/Anthropic/Gemini via opencode.json, keys from backend/.env). Same mind, any hands.
 Deploy the app (iOS-ONLY): `merge-and-deploy` — smartDeploy auto-picks the tier. **JS/TSX change → OTA** (`ota-deploy.sh`, ~30s, no reinstall; King Kazuma force-quits + reopens TWICE to apply — expo-updates downloads on the first launch, applies on the second). **Native change** (`app.json` / `plugins/**` / `modules/**/ios/**` / new native deps) → iOS IPA builds in CI → `artifacts/ozzu-latest.ipa` → sideload via SideStore/AltStore. No Android target for the app. Full tiers + OTA gotchas (Metro stale-cache, expoConfig, two-step apply): `.claude/rules/pipeline.md`.
 Deploy TV (separate Android-TV app, not the ozzu app): `./scripts/ota-deploy-tv.sh` (JS) or CI APK on `tv/` push.

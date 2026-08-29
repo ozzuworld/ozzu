@@ -56,13 +56,13 @@ These do NOT accumulate offense context and are allowed directly:
 These MUST be handled in an isolated subagent, never in the main session:
 
 **Offense source files** (reading, editing, or reviewing diffs on):
-- `backend/bridge/offense-agent.js`
-- `backend/bridge/offense-agent-tools.js`
-- `backend/bridge/offense-engine.js`
-- `backend/bridge/autonomous-executor.js`
-- `backend/bridge/permission-enforcer.js`
-- `backend/bridge/soc-command-classifier.js`
+- `backend/bridge/soc/permission-enforcer.js`
+- `backend/bridge/soc/soc-command-classifier.js`
 - `backend/bridge/routes/soc.js` (exec paths — `POST /soc/execute`, queue run handlers)
+
+> Note (2026-08-29, dir_1787976219239): the L3 autonomous offense loop files
+> (`offense-agent.js`, `offense-agent-tools.js`, `offense-engine.js`,
+> `autonomous-executor.js`, …) were deleted — no longer present.
 
 **Engagement content**:
 - Raw queue commands / payloads (the `command` field of queue items)

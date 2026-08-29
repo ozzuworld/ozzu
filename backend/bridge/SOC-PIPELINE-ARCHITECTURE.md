@@ -1,5 +1,21 @@
 # SOC Platform — Canonical Doc (how it works NOW + where we are + progress log)
 
+> **⚠️ 2026-08-29 (dir_1787976219239): the L3 autonomous offense pipeline was REMOVED.**
+> King Kazuma deleted the offense loop: `offense-agent.js`, `offense-engine.js`,
+> `offense-startup.js`, `offense-sub-agent.js`, `offense-agent-tools.js`,
+> `autonomous-loop.js`, `autonomous-executor.js`, `auto-escalation.js`,
+> `report-via-model.js`, `offense-orchestrator.js`, `offense-final-status.js`,
+> `offense-aggregator.js`, `execution-monitor.js`, `behavioral-scorecard.js` + the
+> autonomous MCP tools (`execute_objective`, `advance_offense`, `start/wait/stop_offense_model`,
+> `start_engagement_run`, `reset_agent_run`, `get_task_graph`, `probe_executor`,
+> `spawn/list/terminate_sub_agent`, `trace_dispatch`, telemetry/scorecard audit tools) and
+> the `POST /soc/engagements/:id/{run,stop,autonomy}` endpoints. SOC is now **manual-only**:
+> engagements, queue, findings, PA taps Run in the app. The offense model key was stale
+> anyway; the valid DeepSeek key now lives in `backend/.env` as `DEEPSEEK_API_KEY`
+> (used by cipher.sh/opencode + the report generator). Sections below describing the
+> L3 loop (§1.1, §1.5, autonomy toggle) are **historical** — the manual workflow is the
+> ground truth.
+
 > **This is THE single living doc for the SOC / offense pipeline.** It supersedes the
 > scattered SOC/offense/finetune docs that used to live under `.claude/` and
 > `backend/bridge/` (consolidated 2026-06-23, dir_1782250182891). If a tripped or

@@ -160,7 +160,8 @@ module.exports = function socRoutes(ctx) {
      ALTER TABLE soc_queue_items ADD COLUMN IF NOT EXISTS timeout_seconds INTEGER NOT NULL DEFAULT 300;`
   ).catch((err) => console.error('[soc] schema migration failed:', err.message));
 
-  // dir_1782336880206: startup sweep — no runAgent loop survives a bridge restart.
+  // Startup sweep (dir_1782336880206): the L3 offense loop was deleted
+  // (dir_1787976219239) — this sweep keeps ghost state from surviving restarts.
   // 1) Mark any 'running' queue items as failed (the process is gone).
   // 2) Reset ALL 'running' agent_status to idle (the loop is gone regardless of
   //    whether it had running queue items at the moment of crash).
@@ -513,122 +514,6 @@ module.exports = function socRoutes(ctx) {
         });
       } catch (error) {
         sendJSON(res, 500, { error: "failed to load step report", details: error.message });
-      }
-      return true;
-    }
-
-    // POST /soc/engagements/:id/run — operator-fired launch of the autonomous DeepSeek run. RULE 3:
-    // the operator executes via the app; this is the trigger the app was missing. Kicks off
-    // offense-agent.runAgent in the BACKGROUND (long-running loop) and returns at once; the Now tab
-    // observes via postgres. Cipher builds the control; the operator is the one who fires it.
-    if (req.method === "POST" && /^\/soc\/engagements\/[^/]+\/run$/.test(pathname)) {
-      if (!requireAuth(req, res)) return true;
-      const eid = decodeURIComponent(pathname.split("/")[3] || "");
-      try {
-        const er = await db.query(`SELECT id, agent_status FROM pentest_engagements WHERE id = $1`, [eid]);
-        if (er.rows.length === 0) { sendJSON(res, 404, { error: "engagement not found" }); return true; }
-        if (er.rows[0].agent_status === "running") { sendJSON(res, 409, { error: "a run is already in progress" }); return true; }
-        let maxIter = 60;
-        let modelOverride = null;
-        try { const b = await parseBody(req); if (b) { if (b.max_iter) maxIter = Math.max(1, Math.min(200, parseInt(b.max_iter, 10) || 60)); if (b.model_override) modelOverride = String(b.model_override); } } catch {}
-        // Fall back to the engagement's stored model preference if not passed in the request
-        if (!modelOverride) {
-          try {
-            const engMeta = await db.query(`SELECT metadata FROM pentest_engagements WHERE id = $1`, [eid]);
-            const meta = engMeta.rows[0]?.metadata;
-            if (meta && typeof meta === "object" && meta.model_override) modelOverride = meta.model_override;
-          } catch {}
-        }
-        // clear any leftover abort flag so the new run isn't halted on its first iteration,
-        // and enable autonomous execution (same as the autonomy toggle — without this the
-        // executor refuses to run queued steps with "engagement opt-out")
-        await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) - 'abort_requested', autonomous_execution_enabled = true, autonomous_paused = false WHERE id = $1`, [eid]).catch(() => {});
-        const agent = require("../soc/offense-agent");
-        // dir_1782339906899: v2 model-driven loop (DeepSeek drives via tool calls).
-        // v1 (runAgent) kept as fallback — set SOC_LOOP_VERSION=v1 in env to revert.
-        const loopVersion = process.env.SOC_LOOP_VERSION || "v2";
-        const runOpts = { max_iter: maxIter };
-        if (modelOverride) runOpts.model_override = modelOverride;
-        if (loopVersion === "v2" && agent.runAgentV2) {
-          agent.runAgentV2(eid, runOpts).catch((e) => console.error("[soc/run] runAgentV2:", e && e.message));
-        } else {
-          agent.runAgent(eid, runOpts).catch((e) => console.error("[soc/run] runAgent:", e && e.message));
-        }
-        sendJSON(res, 202, { ok: true, status: "launching", engagement_id: eid, max_iter: maxIter, loop: loopVersion, model: modelOverride || process.env.OFFENSE_MODEL_NAME || "deepseek-reasoner" });
-      } catch (error) {
-        console.error("[soc/run] Error:", error);
-        sendJSON(res, 500, { error: "launch failed", details: error.message });
-      }
-      return true;
-    }
-
-    // POST /soc/engagements/:id/stop — operator stop. Sets the abort flag the run loop honors at its
-    // next iteration boundary (halts cleanly after the current step finishes).
-    if (req.method === "POST" && /^\/soc\/engagements\/[^/]+\/stop$/.test(pathname)) {
-      if (!requireAuth(req, res)) return true;
-      const eid = decodeURIComponent(pathname.split("/")[3] || "");
-      try {
-        await db.query(`UPDATE pentest_engagements SET agent_run_state = COALESCE(agent_run_state,'{}'::jsonb) || '{"abort_requested":true}'::jsonb WHERE id = $1`, [eid]);
-        sendJSON(res, 200, { ok: true, status: "stopping", engagement_id: eid });
-      } catch (error) {
-        console.error("[soc/stop] Error:", error);
-        sendJSON(res, 500, { error: "stop failed", details: error.message });
-      }
-      return true;
-    }
-
-    // POST /soc/engagements/:id/autonomy {enabled} — the OPERATOR's switch between human-in-the-loop
-    // (model proposes, operator runs each step) and AUTO (queued steps auto-execute through the
-    // membrane: ROE block-list / permission verdict / auto-verify / preflight). Cipher builds this
-    // switch; the operator throws it. On enable, kick any pending steps so the run un-sticks.
-    if (req.method === "POST" && /^\/soc\/engagements\/[^/]+\/autonomy$/.test(pathname)) {
-      if (!requireAuth(req, res)) return true;
-      const eid = decodeURIComponent(pathname.split("/")[3] || "");
-      let enabled = true;
-      try { const b = await parseBody(req); if (b && typeof b.enabled === "boolean") enabled = b.enabled; } catch {}
-      try {
-        const er = await db.query(`SELECT id, agent_status FROM pentest_engagements WHERE id = $1`, [eid]);
-        if (er.rows.length === 0) { sendJSON(res, 404, { error: "engagement not found" }); return true; }
-        await db.query(
-          `UPDATE pentest_engagements SET autonomous_execution_enabled = $2,
-             autonomous_paused = CASE WHEN $2 THEN false ELSE autonomous_paused END
-           WHERE id = $1`,
-          [eid, enabled]);
-        let kicked = 0, launched = false;
-        if (enabled) {
-          try {
-            const autoEx = require("../soc/autonomous-executor");
-            const pend = await db.query(`SELECT id FROM soc_queue_items WHERE engagement_id = $1 AND status = 'pending' ORDER BY seq`, [eid]);
-            for (const row of pend.rows) {
-              try { const r = await autoEx.maybeAutoExecute(row.id); if (r && r.autoExecuted) kicked++; } catch (_) {}
-            }
-          } catch (e) { console.error("[soc/autonomy] kick:", e && e.message); }
-          // Autorun: "Auto on" means run autonomously. If no loop is active, START one — it queues
-          // steps and (auto_exec=true) auto-runs them through the membrane. The operator's toggle is
-          // the trigger (same hand-on-the-switch as Launch).
-          if (er.rows[0].agent_status !== "running") {
-            const agent = require("../soc/offense-agent");
-            const loopV = process.env.SOC_LOOP_VERSION || "v2";
-            let engModel = null;
-            try {
-              const em = await db.query(`SELECT metadata FROM pentest_engagements WHERE id = $1`, [eid]);
-              const m = em.rows[0]?.metadata;
-              if (m && typeof m === "object" && m.model_override) engModel = m.model_override;
-            } catch {}
-            const runOpts = { max_iter: 60 };
-            if (engModel) runOpts.model_override = engModel;
-            if (loopV === "v2" && agent.runAgentV2) {
-              agent.runAgentV2(eid, runOpts).catch((e) => console.error("[soc/autonomy] runAgentV2:", e && e.message));
-            } else {
-              agent.runAgent(eid, runOpts).catch((e) => console.error("[soc/autonomy] runAgent:", e && e.message));
-            }
-            launched = true;
-          }
-        }
-        sendJSON(res, 200, { ok: true, autonomous_execution_enabled: enabled, kicked, launched });
-      } catch (error) {
-        console.error("[soc/autonomy] Error:", error);
-        sendJSON(res, 500, { error: "autonomy toggle failed", details: error.message });
       }
       return true;
     }
@@ -1168,16 +1053,6 @@ module.exports = function socRoutes(ctx) {
         }
 
         sendJSON(res, 200, { inserted, total_pending: inserted.length });
-
-        try {
-          const ae = require("../soc/autonomous-executor");
-          for (const ins of inserted) {
-            ae.maybeAutoExecute(ins.id).catch(e =>
-              console.error(`[soc queue POST] maybeAutoExecute(${ins.id}) error:`, e.message));
-          }
-        } catch (e) {
-          console.error(`[soc queue POST] autonomous-executor import error:`, e.message);
-        }
         return true;
       } catch (error) {
         console.error('[soc queue POST] Error:', error);

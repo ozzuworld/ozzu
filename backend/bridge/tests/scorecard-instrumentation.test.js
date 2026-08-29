@@ -221,132 +221,7 @@ function makeMockDb(overrides = {}) {
 }
 
 (async () => {
-  const { getBehavioralScorecard } = require(path.join(__dirname, "../behavioral-scorecard"));
-
-  await checkAsync("scorecard returns an object on empty data", async () => {
-    const sc = await getBehavioralScorecard(1, makeMockDb());
-    assert.strictEqual(typeof sc, "object");
-    assert.strictEqual(sc.engagement_id, 1);
-  });
-
-  await checkAsync("all required top-level fields present", async () => {
-    const sc = await getBehavioralScorecard(1, makeMockDb());
-    const required = [
-      "engagement_id","concluded","conclude_reason","total_steps",
-      "phase_progression","step_queued_rate","step_queued_breakdown",
-      "loop_breaker_fires","watchdog_timeouts","inference_hung",
-      "permission_denied","claim_verify","findings_by_severity",
-      "false_positive","membrane_breach","orphaned_tasks",
-    ];
-    for (const f of required) assert.ok(f in sc, `missing field: ${f}`);
-  });
-
-  await checkAsync("scorecard JSON contains no IP-shaped strings", async () => {
-    const db = makeMockDb({
-      telemetry: [
-        { outcome: "permission_denied", intent_category: "recon", step_queued: false,
-          outcome_notes: "rule=workspace_jail; suppressed", created_at: new Date() },
-      ],
-    });
-    const sc = await getBehavioralScorecard(1, db);
-    const json = JSON.stringify(sc);
-    assert.ok(!/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(json),
-      "scorecard JSON must not contain IP addresses");
-  });
-
-  await checkAsync("scorecard JSON contains no CVE-shaped strings", async () => {
-    const sc = await getBehavioralScorecard(1, makeMockDb({ findings: [{ severity: "high", kind: "confirmed" }] }));
-    const json = JSON.stringify(sc);
-    assert.ok(!/CVE-\d{4}-\d+/i.test(json), "scorecard JSON must not contain CVE IDs");
-  });
-
-  await checkAsync("scorecard string values contain no offensive tool names", async () => {
-    const db = makeMockDb({
-      telemetry: [
-        { outcome: "lint_reject", intent_category: "non_productive_turn", step_queued: false,
-          outcome_notes: "iter=3; task=5; gate fired", created_at: new Date() },
-      ],
-    });
-    const sc = await getBehavioralScorecard(1, db);
-    const strValues = [];
-    function extractStrings(obj) {
-      if (typeof obj === "string") { strValues.push(obj); return; }
-      if (obj && typeof obj === "object") for (const v of Object.values(obj)) extractStrings(v);
-    }
-    extractStrings(sc);
-    const TOOL_RE = /\b(nmap|curl|ssh|wget|sqlmap|hydra|netcat|burpsuite|metasploit|aircrack)\b/i;
-    for (const s of strValues) {
-      assert.ok(!TOOL_RE.test(s),
-        `scorecard value contains offensive tool name: "${s.slice(0,80)}"`);
-    }
-  });
-
-  await checkAsync("step_queued_breakdown counts each cause correctly", async () => {
-    const db = makeMockDb({
-      telemetry: [
-        { outcome: "infra_hang",  intent_category: "non_productive_turn", step_queued: false, outcome_notes: "", created_at: new Date() },
-        { outcome: "prose_only",  intent_category: "non_productive_turn", step_queued: false, outcome_notes: "", created_at: new Date() },
-        { outcome: "lint_reject", intent_category: "non_productive_turn", step_queued: false, outcome_notes: "", created_at: new Date() },
-        { outcome: "other",       intent_category: "non_productive_turn", step_queued: false, outcome_notes: "", created_at: new Date() },
-      ],
-      queue: [{ status: "done", created_at: new Date() }, { status: "done", created_at: new Date() }],
-    });
-    const sc = await getBehavioralScorecard(1, db);
-    assert.strictEqual(sc.step_queued_breakdown.infra_hang,  1, "infra_hang count");
-    assert.strictEqual(sc.step_queued_breakdown.prose_only,  1, "prose_only count");
-    assert.strictEqual(sc.step_queued_breakdown.lint_reject, 1, "lint_reject count");
-    assert.strictEqual(sc.step_queued_breakdown.other,       1, "other count");
-    assert.ok(sc.step_queued_rate >= 0 && sc.step_queued_rate <= 1,
-      `step_queued_rate out of [0,1]: ${sc.step_queued_rate}`);
-  });
-
-  await checkAsync("claim_verify.gated_a_finding counts correctly", async () => {
-    const db = makeMockDb({
-      telemetry: [
-        { outcome: "verify_gate_fail", intent_category: "pre_insert_gate", step_queued: false, outcome_notes: "", created_at: new Date() },
-        { outcome: "verify_gate_fail", intent_category: "pre_insert_gate", step_queued: false, outcome_notes: "", created_at: new Date() },
-        { outcome: "verify_pass",                  intent_category: "cred_test",        step_queued: false, outcome_notes: "", created_at: new Date() },
-      ],
-    });
-    const sc = await getBehavioralScorecard(1, db);
-    assert.strictEqual(sc.claim_verify.gated_a_finding, 2, "gated_a_finding");
-    assert.strictEqual(sc.claim_verify.passed,          1, "passed");
-  });
-
-  await checkAsync("non-existent engagement throws descriptive error", async () => {
-    const db = { async query() { return { rows: [] }; } };
-    let threw = false;
-    try { await getBehavioralScorecard(99999, db); }
-    catch (e) {
-      threw = true;
-      assert.ok(/not found|required/i.test(e.message), `unexpected error: ${e.message}`);
-    }
-    assert.ok(threw, "should have thrown for missing engagement");
-  });
-
-  // ── 4. Tightening-pass fixes (dir_1782255739233) ──────────────────────────────
-  //
-  // REWRITTEN (dir_1782255739233 hardening pass): these tests now drive the REAL
-  // production functions in claim-verifier.js instead of inline copies, so a
-  // reverted production fix turns them RED. claim-verifier.js is `require`-able on
-  // the host because its /app/db import is lazy and every consumer takes an
-  // injected db (the DI seam). Two seams are used:
-  //   • verifyFinding(id, mockDb, {runProbe}) — captures the SQL the PRODUCTION
-  //     function issues; runProbe injects a deterministic probe response so the
-  //     verdict→UPDATE branch runs without a live target.
-  //   • applyPreInsertGate(finding, {db}) — the SHARED gate both manual routes
-  //     (soc.js submit-results, mcp.js add_finding) call; tested directly.
-  //
-  //   (a) post-insert FAIL must floor severity, not just relabel kind
-  //   (b) manual write-paths pass through the REAL shared gate; clean findings
-  //       unchanged; floor + fail-open emit telemetry (MINOR 1)
-  //   (c) skip→unverified labeling with the AND kind='confirmed' guard
-  //   (d) writer-token and scorecard-reader-token are the same shared constant
-  // ─────────────────────────────────────────────────────────────────────────────
-  console.log("\n[4] Tightening-pass: post-insert severity floor, bypass paths, skip-unverified, shared constant");
-
-  // The REAL production module — loadable on the host post-DI-seam.
-  const claimVerifier = require(path.join(__dirname, "../claim-verifier"));
+  const claimVerifier = require(path.join(__dirname, "../soc/claim-verifier"));
 
   // Capturing db: records every (sql, params) the production code issues and
   // returns whatever rows the verdict path needs. `findingRow` lets each test
@@ -483,7 +358,7 @@ function makeMockDb(overrides = {}) {
         { title: 'Sensitive File Exposure', description: 'Status: 403', severity: 'high', affected_asset: '10.20.30.40' },
         { db, engagementId: 'e1', source: 'submit_results' });
       assert.strictEqual(db.telemetry.length, 1, "floor must emit exactly one telemetry row");
-      const { VERIFY_GATE_FAIL } = require(path.join(__dirname, "../verify-gate-constants"));
+      const { VERIFY_GATE_FAIL } = require(path.join(__dirname, "../soc/verify-gate-constants"));
       assert.ok(db.telemetry[0].params.includes(VERIFY_GATE_FAIL),
         "floor telemetry row must carry the VERIFY_GATE_FAIL token as its outcome");
     });
@@ -546,7 +421,7 @@ function makeMockDb(overrides = {}) {
   // ── (d) Writer-token and reader-token are the same shared constant (FIX 3) ────
   {
     // Require the constants module directly — it has no /app/* or Docker deps.
-    const verifyGateConstants = require(path.join(__dirname, "../verify-gate-constants"));
+    const verifyGateConstants = require(path.join(__dirname, "../soc/verify-gate-constants"));
 
     check("(d) VERIFY_GATE_FAIL constant is exported from verify-gate-constants.js", () => {
       assert.ok(typeof verifyGateConstants.VERIFY_GATE_FAIL === "string",
@@ -560,85 +435,7 @@ function makeMockDb(overrides = {}) {
         `VERIFY_GATE_FAIL '${verifyGateConstants.VERIFY_GATE_FAIL}' exceeds 24-char VARCHAR limit`);
     });
 
-    await checkAsync("(d) scorecard gated_a_finding filter uses same token as the constant", async () => {
-      // Inject a telemetry row whose outcome matches the constant, verify scorecard counts it.
-      const tokenFromConstant = verifyGateConstants.VERIFY_GATE_FAIL;
-      const db = makeMockDb({
-        telemetry: [
-          { outcome: tokenFromConstant, intent_category: "pre_insert_gate", step_queued: false, outcome_notes: "", created_at: new Date() },
-        ],
-      });
-      const sc = await getBehavioralScorecard(1, db);
-      assert.strictEqual(sc.claim_verify.gated_a_finding, 1,
-        "scorecard must count a telemetry row whose outcome == VERIFY_GATE_FAIL constant");
-    });
 
-    // Read the scorecard source to confirm it imports the constant (not a literal).
-    // This is a file-content assertion — it fails if the constant import was removed.
-    check("(d) behavioral-scorecard.js imports verify-gate-constants (not a string literal)", () => {
-      const fs = require("fs");
-      const scorecardSrc = fs.readFileSync(
-        path.join(__dirname, "../behavioral-scorecard.js"), "utf8");
-      assert.ok(/require.*verify-gate-constants/.test(scorecardSrc),
-        "behavioral-scorecard.js must require('./verify-gate-constants')");
-      assert.ok(!/"verify_gate_fail"/.test(scorecardSrc),
-        "behavioral-scorecard.js must not contain the literal string 'verify_gate_fail' — use the constant");
-    });
-
-    check("(d) offense-aggregator.js imports verify-gate-constants (not a string literal)", () => {
-      const fs = require("fs");
-      const aggregatorSrc = fs.readFileSync(
-        path.join(__dirname, "../offense-aggregator.js"), "utf8");
-      assert.ok(/require.*verify-gate-constants/.test(aggregatorSrc),
-        "offense-aggregator.js must require('./verify-gate-constants')");
-      assert.ok(!/'verify_gate_fail'/.test(aggregatorSrc),
-        "offense-aggregator.js must not contain the literal 'verify_gate_fail' — use the constant");
-    });
-
-    // MINOR 2: importing the constant is not enough — assert the producer actually
-    // USES VERIFY_GATE_FAIL as the token WRITTEN into the telemetry INSERT (i.e. it
-    // appears inside the params array of an `INSERT INTO offense_telemetry`), so a
-    // future edit that swaps the written token back to a literal/other var goes red.
-    check("(d/MINOR-2) offense-aggregator.js WRITES VERIFY_GATE_FAIL as the telemetry INSERT token", () => {
-      const fs = require("fs");
-      const aggregatorSrc = fs.readFileSync(
-        path.join(__dirname, "../offense-aggregator.js"), "utf8");
-      // The aggregator has MORE THAN ONE `INSERT INTO offense_telemetry` (the
-      // reflector-recovery row legitimately writes a different token). Scan EVERY
-      // such INSERT's params-array window and require that at least one carries the
-      // VERIFY_GATE_FAIL identifier as a written param — proving the constant is the
-      // token actually persisted by the pre-insert gate, not merely imported.
-      let from = 0, found = false, count = 0;
-      while (true) {
-        const idx = aggregatorSrc.indexOf("INSERT INTO offense_telemetry", from);
-        if (idx < 0) break;
-        count++;
-        const tail = aggregatorSrc.slice(idx);
-        const closeIdx = tail.indexOf("]);");
-        const stmtWindow = closeIdx >= 0 ? tail.slice(0, closeIdx) : tail;
-        if (/\bVERIFY_GATE_FAIL\b/.test(stmtWindow)) found = true;
-        from = idx + 1;
-      }
-      assert.ok(count >= 1, "aggregator must contain an INSERT INTO offense_telemetry");
-      assert.ok(found,
-        "VERIFY_GATE_FAIL must appear as a written param in an offense_telemetry INSERT — " +
-        "the import alone does not prove the constant is the token actually persisted");
-    });
-
-    // Cross-check the value end-to-end at runtime: a telemetry row whose outcome is
-    // the constant's value is counted by the scorecard reader, proving writer-side
-    // value and reader-side filter agree (no drift). (Complements the source check.)
-    await checkAsync("(d/MINOR-2) scorecard counts a row written with the constant's value", async () => {
-      const { VERIFY_GATE_FAIL } = require(path.join(__dirname, "../verify-gate-constants"));
-      const db = makeMockDb({
-        telemetry: [
-          { outcome: VERIFY_GATE_FAIL, intent_category: "pre_insert_gate", step_queued: false, outcome_notes: "", created_at: new Date() },
-        ],
-      });
-      const sc = await getBehavioralScorecard(1, db);
-      assert.strictEqual(sc.claim_verify.gated_a_finding, 1,
-        "the value the producer writes (VERIFY_GATE_FAIL) must be exactly what the reader counts");
-    });
   }
 })().then(() => {
   // ── Summary ──────────────────────────────────────────────────────────────────

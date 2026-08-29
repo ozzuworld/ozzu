@@ -202,20 +202,15 @@ if [ $NO_LAUNCH -eq 1 ]; then
 fi
 
 if [ "$PROVIDER" = "opencode" ]; then
-  # Providers come from opencode's built-in catalog (models.dev): OpenRouter,
-  # DeepSeek, Qwen/DashScope, Anthropic — keys read from standard env vars.
+  # Providers come from opencode's built-in catalog (models.dev): DeepSeek,
+  # Qwen/DashScope, Anthropic, Google — keys read from standard env vars.
   # Extract the known key names from gitignored backend/.env (no full source —
   # keeps unrelated secrets out of the launch environment).
   if [ -f "${PROJECT_DIR}/backend/.env" ]; then
-    for ENV_LINE in OFFENSE_MODEL_KEY DASHSCOPE_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY; do
+    for ENV_LINE in DEEPSEEK_API_KEY DASHSCOPE_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY; do
       VAL=$(grep -E "^${ENV_LINE}=" "${PROJECT_DIR}/backend/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
       [ -n "$VAL" ] && export "${ENV_LINE}=${VAL}"
     done
-  fi
-  # OFFENSE_MODEL_KEY is an OpenRouter key (verified: 200 on openrouter.ai,
-  # 401 on api.deepseek.com) — reuse it for the OpenRouter provider.
-  if [ -z "${OPENROUTER_API_KEY:-}" ] && [ -n "$OFFENSE_MODEL_KEY" ]; then
-    export OPENROUTER_API_KEY="$OFFENSE_MODEL_KEY"
   fi
   exec opencode "$@"
 fi

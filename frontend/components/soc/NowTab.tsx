@@ -93,9 +93,6 @@ interface NowTabProps {
   findings: FindingRowData[];
   onFindingPress: (finding: FindingRowData) => void;
   onStepPress?: (item: any) => void;
-  onLaunch?: () => void;
-  onStop?: () => void;
-  onToggleAuto?: (enabled: boolean) => void;
   onSwitchTab?: (tab: string) => void;
 }
 
@@ -104,8 +101,7 @@ function sevRank(s: string): number {
   return i < 0 ? 99 : i;
 }
 
-export function NowTab({ engagement, executor, queue, findings, onFindingPress, onStepPress, onLaunch, onStop, onToggleAuto, onSwitchTab }: NowTabProps) {
-  const autoEnabled = !!engagement?.autonomous_execution_enabled;
+export function NowTab({ engagement, executor, queue, findings, onFindingPress, onStepPress, onSwitchTab }: NowTabProps) {
   const phase: string = engagement?.engagement_phase || "—";
   const ars = (engagement?.agent_run_state && typeof engagement.agent_run_state === "object") ? engagement.agent_run_state : {};
   const iter = ars.iter ?? ars.iteration ?? ars.current_iter ?? null;
@@ -151,7 +147,7 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
     : runStatus === "halted"   ? "Run halted — no clean conclusion"
     : runStatus === "completed" ? "Run complete"
     : runStatus === "paused"   ? "Paused"
-    : "Idle — not launched yet";
+    : "Idle — run steps from the Queue tab";
 
   // Telemetry warning rows for stall signals (shown only when stalled)
   const recentTelemetry: Array<{ outcome: string; created_at: string }> =
@@ -184,40 +180,10 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
             <Text key={i} style={{ color: colors.warning, fontSize: fontSize.xs, marginTop: i === 0 ? spacing.sm : 2 }}>⚠ Loop halted</Text>
           ) : null
         )}
-        {/* Operator's run control — the trigger the app was missing (RULE 3: operator executes). */}
-        <View style={{ marginTop: spacing.md }}>
-          {live || runStatus === "stalled" ? (
-            <RunBtn label="■  Stop run" tone="stop" onPress={onStop} />
-          ) : (
-            <RunBtn
-              label={runStatus === "paused" ? "▶  Continue run" : (runStatus === "completed" || runStatus === "halted") ? "↻  Run again" : "▶  Launch run"}
-              tone="go"
-              onPress={onLaunch}
-            />
-          )}
-          <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs, marginTop: spacing.xs }}>
-            {live ? "Halts after the current step finishes." : runStatus === "stalled" ? "Loop appears stalled — stop to reset." : `${modelLabel} runs this engagement autonomously — you can stop it anytime.`}
-          </Text>
-        </View>
 
-        {/* Auto-execute switch — operator's call: model proposes & you approve, vs auto-fire (gated). */}
-        <Pressable
-          onPress={() => onToggleAuto?.(!autoEnabled)}
-          style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", marginTop: spacing.md, opacity: pressed ? 0.8 : 1 })}
-        >
-          <View style={{ flex: 1, paddingRight: spacing.sm }}>
-            <Text style={{ color: colors.text.primary, fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>Auto-execute steps</Text>
-            <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs, marginTop: 1 }}>
-              {autoEnabled ? `On — ${modelLabel} runs each step itself (membrane-gated).` : "Off — you run each step from the Queue tab."}
-            </Text>
-          </View>
-          <View style={{ width: 46, height: 28, borderRadius: 14, backgroundColor: autoEnabled ? colors.success : colors.gray[600], padding: 3, justifyContent: "center" }}>
-            <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.gray[50], alignSelf: autoEnabled ? "flex-end" : "flex-start" }} />
-          </View>
-        </Pressable>
+        {/* Status card closes here — run controls removed with the L3 loop (dir_1787976219239). */}
       </View>
 
-      {/* Network relay health */}
       {executor ? (
         <View style={{ backgroundColor: colors.bg.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border.subtle }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
@@ -254,27 +220,6 @@ export function NowTab({ engagement, executor, queue, findings, onFindingPress, 
       />
       {topFindings.map((f) => <FindingRow key={f.id} finding={f} onPress={onFindingPress} />)}
     </ScrollView>
-  );
-}
-
-function RunBtn({ label, onPress, tone }: { label: string; onPress?: () => void; tone: "go" | "stop" }) {
-  const bg = tone === "stop" ? colors.error : colors.accent;
-  const fg = tone === "stop" ? colors.gray[50] : colors.bg.base;
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: bg,
-        borderRadius: radius.md,
-        paddingVertical: spacing.sm + 4,
-        opacity: pressed ? 0.85 : 1,
-      })}
-    >
-      <Text style={{ color: fg, fontSize: fontSize.base, fontWeight: fontWeight.bold, letterSpacing: 0.3 }}>{label}</Text>
-    </Pressable>
   );
 }
 

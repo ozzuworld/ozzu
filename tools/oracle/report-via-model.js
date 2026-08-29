@@ -14,7 +14,7 @@ const MODEL_URL = RAW_URL.endsWith("/chat/completions") ? RAW_URL : `${RAW_URL.r
 // deepseek-reasoner (R1) doesn't support system messages and is slow for report writing.
 // Default to deepseek-chat (V3) which is faster and supports system messages.
 const MODEL_NAME = process.env.REPORT_MODEL || "deepseek-chat";
-const MODEL_KEY = process.env.OFFENSE_MODEL_KEY || "";
+const MODEL_KEY = process.env.OFFENSE_MODEL_KEY || process.env.DEEPSEEK_API_KEY || process.env.OPENROUTER_API_KEY || "";
 
 async function callModel(systemPrompt, userPrompt) {
   const resp = await fetch(MODEL_URL, {

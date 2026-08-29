@@ -1,4 +1,4 @@
-// Fixtures (sample nmap/nc output) live in ./__fixtures__/soc-recon-samples.js — NOT inline.
+// Fixtures (sample nmap/nc output) live in ../__fixtures__/soc-recon-samples.js — NOT inline.
 // Anti-trip (dir_1780531985209): keep scan-shaped text out of files that get casually read.
 // Add new parser cases' samples to that fixtures file, not here.
 // soc-recon-parser.test.js — runnable with `node soc-recon-parser.test.js`.
@@ -12,7 +12,7 @@
 
 const assert = require("assert");
 const { parseNmap, parseNcSweep, parseReconOutput } = require("./soc-recon-parser");
-const { NMAP_SN, NMAP_SV, NC_OPENBSD, NC_GNU, NMAP_OG, NC_8443, NMAP_COMBINED, PING_SWEEP } = require("./__fixtures__/soc-recon-samples");
+const { NMAP_SN, NMAP_SV, NC_OPENBSD, NC_GNU, NMAP_OG, NC_8443, NMAP_COMBINED, PING_SWEEP } = require("../__fixtures__/soc-recon-samples");
 
 let passed = 0;
 function check(name, fn) {

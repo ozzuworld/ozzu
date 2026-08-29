@@ -280,52 +280,6 @@ function EngagementDetailInner() {
     );
   }, []);
 
-  // Operator's run controls — the app's missing trigger (RULE 3). launch fires the autonomous
-  // DeepSeek run via the bridge; stop sets the abort flag the loop honors after the current step.
-  const launchRun = useCallback(() => {
-    const targets = ((engagement as any)?.scope?.target_networks || []).map((t: any) => t.ssid).filter(Boolean).join(", ");
-    const relayName = (engagement as any)?.executor_host || "the bridge";
-    const modelOverride = (engagement as any)?.model_override || "deepseek-reasoner";
-    const modelLabel = modelOverride.startsWith("claude-") ? "Claude Opus" : "DeepSeek";
-    Alert.alert(
-      "Launch run",
-      `${modelLabel} will autonomously run this engagement${targets ? ` against ${targets}` : ""} via ${relayName}, up to 50 steps. You can stop it anytime. Launch?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Launch",
-          onPress: async () => {
-            try {
-              const r = await fetch(`${getBridgeUrl()}/soc/engagements/${id}/run`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ max_iter: 50, model_override: modelOverride }),
-              });
-              if (!r.ok) { const d = await r.json().catch(() => ({})); Alert.alert("Couldn't launch", d.error || `HTTP ${r.status}`); return; }
-              setTimeout(fetchAll, 900);
-            } catch (e: any) { Alert.alert("Couldn't launch", e?.message || "network error"); }
-          },
-        },
-      ],
-    );
-  }, [id, engagement, fetchAll]);
-
-  const stopRun = useCallback(async () => {
-    try { await fetch(`${getBridgeUrl()}/soc/engagements/${id}/stop`, { method: "POST" }); setTimeout(fetchAll, 600); } catch {}
-  }, [id, fetchAll]);
-
-  // Operator's autonomy switch — flip the run between propose-and-approve and auto-execute (gated).
-  const toggleAuto = useCallback(async (enabled: boolean) => {
-    try {
-      await fetch(`${getBridgeUrl()}/soc/engagements/${id}/autonomy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      setTimeout(fetchAll, 700);
-    } catch (e: any) { Alert.alert("Couldn't change mode", e?.message || "network error"); }
-  }, [id, fetchAll]);
-
   const running = useMemo(() => queue.find((q) => q.status === "running"), [queue]);
 
   // ── Loading / not-found gates ──
@@ -439,9 +393,6 @@ function EngagementDetailInner() {
           findings={findings}
           onFindingPress={onFindingPress}
           onStepPress={(item) => setStepDetail(item)}
-          onLaunch={launchRun}
-          onStop={stopRun}
-          onToggleAuto={toggleAuto}
           onSwitchTab={(t) => setTab(t as Tab)}
         />
       ) : null}
