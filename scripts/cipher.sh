@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# cipher.sh — Launch Claude Code as Cipher with full memory context
-# Usage: cipher [any claude args...]
+# cipher.sh — Launch Cipher with full memory context on ANY provider runtime
+# Usage:
+#   cipher [--provider claude|reasonix] [--fresh] [--no-launch] [extra args...]
+#
+# One mind, many hands: refreshes CLAUDE.local.md from the bridge (live state +
+# memory index) and appends the most recent conversation tail from a UNIFIED
+# timeline (Claude Code + Reasonix transcripts, newest session wins), then
+# launches the chosen runtime. Default provider: claude.
 #
 # Fixes ported from Volts (Apr 12 2026):
 #   - Anti-shortcut env vars (CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING, EFFORT_LEVEL)
@@ -16,14 +22,29 @@ MAX_HISTORY_CHARS=15000
 # ── --fresh flag: skip conversation tail entirely ──
 # Use when prior session had API-Error refusals that would poison classifier context.
 FRESH_MODE=0
+# ── --provider claude|reasonix: which runtime hands to use (Cipher is the mind) ──
+PROVIDER="claude"
+# ── --no-launch: refresh context + print what would launch, then exit (dry run) ──
+NO_LAUNCH=0
 NEW_ARGS=()
-for arg in "$@"; do
-  if [ "$arg" = "--fresh" ]; then
-    FRESH_MODE=1
-  else
-    NEW_ARGS+=("$arg")
-  fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fresh) FRESH_MODE=1 ;;
+    --no-launch) NO_LAUNCH=1 ;;
+    --provider)
+      shift
+      [ $# -eq 0 ] && { echo "cipher: --provider needs a value (claude|reasonix)"; exit 1; }
+      PROVIDER="$1"
+      ;;
+    *) NEW_ARGS+=("$1") ;;
+  esac
+  shift
 done
+case "$PROVIDER" in
+  claude) ;;
+  reasonix) ;;
+  *) echo "cipher: unknown provider '${PROVIDER}' (use claude or reasonix)"; exit 1 ;;
+esac
 set -- "${NEW_ARGS[@]}"
 
 # ── Anti-shortcut fixes (Apr 2026) ──
@@ -91,13 +112,13 @@ if [ $BRIDGE_UP -eq 1 ]; then
     # (bigger old sessions always overrode smaller recent ones)
     if [ "$JSONL_TS" -gt "$PG_TS" ] && [ $JSONL_LEN -gt 100 ]; then
       HISTORY="$HISTORY_JSONL"
-      HISTORY_SOURCE="local jsonl (more recent than postgres)"
+      HISTORY_SOURCE="session transcripts — claude+reasonix (more recent than postgres)"
     elif [ $PG_LEN -gt 100 ]; then
       HISTORY="$HISTORY_PG"
       HISTORY_SOURCE="postgres"
     elif [ $JSONL_LEN -gt 100 ]; then
       HISTORY="$HISTORY_JSONL"
-      HISTORY_SOURCE="local jsonl (postgres empty)"
+      HISTORY_SOURCE="session transcripts — claude+reasonix (postgres empty)"
     else
       HISTORY=""
       HISTORY_SOURCE="none"
@@ -120,7 +141,7 @@ EOF
   echo "WARNING: Bridge unreachable at ${BRIDGE_URL} — using JSONL fallback"
   if [ ${#HISTORY_JSONL} -gt 100 ]; then
     HISTORY="$HISTORY_JSONL"
-    HISTORY_SOURCE="local jsonl (bridge-down fallback)"
+    HISTORY_SOURCE="session transcripts (bridge-down fallback)"
   else
     HISTORY=""
     HISTORY_SOURCE="none (no JSONL found either)"
@@ -169,7 +190,21 @@ KAIROS_LOCK="/tmp/cipher-session.lock"
 echo "$$" > "$KAIROS_LOCK"
 trap 'rm -f "$KAIROS_LOCK"' EXIT INT TERM
 
-# Launch Claude Code with system-level mandatory rules
+# Launch the provider runtime — Cipher is the mind; this is just the hands.
+# Both providers load the same workspace files (AGENTS.md, CLAUDE.md, CLAUDE.local.md),
+# so whichever launches wakes up with the same memory and the same timeline.
+cd "$PROJECT_DIR" || exit 1
+
+if [ $NO_LAUNCH -eq 1 ]; then
+  echo "[dry-run] context ready (${FINAL_SIZE:-0} bytes CLAUDE.local.md). Would launch: ${PROVIDER} $*"
+  exit 0
+fi
+
+if [ "$PROVIDER" = "reasonix" ]; then
+  exec /usr/bin/reasonix "$@"
+fi
+
+# Claude Code with system-level mandatory rules
 exec claude --append-system-prompt "MANDATORY (system-level):
 1. NEVER commit to main. Work on cipher/dir_xxx branches.
 2. Every code change needs a directive FIRST.

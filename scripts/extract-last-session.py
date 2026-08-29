@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # extract-last-session.py — extract the tail of the most recent Cipher session
-# from on-disk Claude Code JSONL transcripts. Used by cipher.sh when the bridge
-# is unreachable or as a freshness check against postgres.
+# from on-disk transcripts across ALL providers (Claude Code + Reasonix).
+# This is what keeps Cipher's timeline linear regardless of which runtime was
+# used last — used by cipher.sh to append "Last Conversation" to CLAUDE.local.md.
 #
 # Output format (consumed by cipher.sh awk filter):
 #   [user] <text>
@@ -17,11 +18,29 @@ import glob
 import json
 import os
 import sys
+import time
 
+# Claude Code transcripts live per-project; Reasonix transcripts live under
+# <project>/sessions/. Both feed the same timeline.
 PROJECT_DIRS = [
     os.path.expanduser('~/.claude/projects/-home-gcp-ozzu-scripts/'),
     os.path.expanduser('~/.claude/projects/-home-gcp-ozzu/'),
+    os.path.expanduser('~/.reasonix/projects/-home-gcp-ozzu/sessions/'),
 ]
+
+# A session still being written (live lock sibling or touched in the last N sec)
+# must never be picked — only finished sessions go into the timeline.
+MIN_AGE_SECONDS = 60
+
+
+def is_live(path):
+    if os.path.exists(path + '.lock'):
+        return True
+    if os.path.exists(path + '.lease.lock'):
+        return True
+    if time.time() - os.path.getmtime(path) < MIN_AGE_SECONDS:
+        return True
+    return False
 
 
 def find_latest_jsonl(skip_session_id=None):
@@ -30,9 +49,15 @@ def find_latest_jsonl(skip_session_id=None):
         if not os.path.isdir(d):
             continue
         for f in glob.glob(os.path.join(d, '*.jsonl')):
+            base = os.path.basename(f)
+            # Reasonix writes companion files (events/recovery/ckpt) — main transcript only
+            if '.events.jsonl' in base or '.recovery' in base:
+                continue
             if os.path.getsize(f) < 1024:
                 continue
-            if skip_session_id and skip_session_id in os.path.basename(f):
+            if skip_session_id and skip_session_id in base:
+                continue
+            if is_live(f):
                 continue
             candidates.append((os.path.getmtime(f), f))
     if not candidates:
@@ -76,6 +101,16 @@ def parse_jsonl(path):
                 e = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            # Reasonix format: {"role": "user|assistant", "content": "..."}
+            # (tool/system/reasoning lines have other roles or no text content)
+            if e.get('type') is None and e.get('role') in ('user', 'assistant'):
+                text = extract_text(e.get('content', ''))
+                if is_synthetic(text) or not text.strip():
+                    continue
+                role = 'user' if e['role'] == 'user' else 'cipher'
+                turns.append((role, text.strip()))
+                continue
+            # Claude Code format: {"type": "user|assistant", "message": {"content": ...}}
             t = e.get('type')
             if t not in ('user', 'assistant'):
                 continue
