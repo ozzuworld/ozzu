@@ -462,6 +462,20 @@ module.exports = function createCipherRoutes(ctx) {
     return true;
   }
 
+  // GET /cipher/ingested-sessions — sessionIds already in postgres.
+  // Used by scripts/unified-history-sync.py to skip what's already stored.
+  if (req.method === "GET" && pathname === "/cipher/ingested-sessions") {
+    try {
+      const result = await db.query(
+        "SELECT metadata->>'sessionId' AS sid FROM conversations WHERE persona = 'cipher' AND metadata->>'sessionId' IS NOT NULL"
+      );
+      sendJSON(res, 200, { sessionIds: result.rows.map(r => r.sid).filter(Boolean) });
+    } catch (err) {
+      sendJSON(res, 500, { error: err.message });
+    }
+    return true;
+  }
+
   // GET /cipher/search?q=keyword — search actual conversation content
   if (req.method === "GET" && pathname === "/cipher/search") {
     try {
@@ -509,16 +523,47 @@ module.exports = function createCipherRoutes(ctx) {
   if (req.method === "POST" && pathname === "/cipher/session-save") {
     try {
       const body = await parseBody(req);
-      const { sessionId, turns } = body;
+      const { sessionId, turns, startedAt, endedAt, noLLM } = body;
 
       if (!Array.isArray(turns) || turns.length < 1) {
         sendJSON(res, 200, { success: false, reason: "skipped — no turns" });
         return;
       }
 
-      // Summarize via Gemini Flash — cap transcript to avoid timeout
+      // ── Idempotency (unified-history sync made this mandatory) ──
+      // Same sessionId twice → duplicate. Also treat (same turn_count, started
+      // within 2 min) as a duplicate — legacy rows predate sessionId metadata.
+      if (sessionId && db.isConnected()) {
+        try {
+          const dupBySession = await db.query(
+            "SELECT id FROM conversations WHERE persona = 'cipher' AND metadata->>'sessionId' = $1 LIMIT 1",
+            [String(sessionId)]
+          );
+          if (dupBySession.rows.length > 0) {
+            sendJSON(res, 200, { success: true, duplicate: true });
+            return;
+          }
+          if (startedAt) {
+            const dupByTime = await db.query(
+              `SELECT id FROM conversations WHERE persona = 'cipher' AND turn_count = $1
+               AND ABS(EXTRACT(EPOCH FROM (started_at - to_timestamp($2 / 1000.0)))) < 120 LIMIT 1`,
+              [turns.length, startedAt]
+            );
+            if (dupByTime.rows.length > 0) {
+              sendJSON(res, 200, { success: true, duplicate: true });
+              return;
+            }
+          }
+        } catch (err) {
+          log.memory.warn?.("session-save dedup check failed:", err.message);
+        }
+      }
+
+      // Summarize via Gemini Flash — cap transcript to avoid timeout.
+      // noLLM=true (bulk backfill from unified-history-sync) skips both Gemini
+      // calls and uses the deterministic fallback summary — no quota burn.
       let summary = null;
-      if (GEMINI_API_KEY) {
+      if (GEMINI_API_KEY && !noLLM) {
         const fullTranscript = turns
           .map(t => `${t.role === "user" ? "King Kazuma" : "Cipher"}: ${t.content}`)
           .join("\n");
@@ -567,7 +612,7 @@ module.exports = function createCipherRoutes(ctx) {
       // Extract structured facts via Gemini Flash (runs in parallel with DB save)
       let extractedFacts = [];
       let extractedTopics = [];
-      if (GEMINI_API_KEY) {
+      if (GEMINI_API_KEY && !noLLM) {
         const factTranscript = turns
           .map(t => `${t.role === "user" ? "King Kazuma" : "Cipher"}: ${t.content}`)
           .join("\n");
@@ -618,7 +663,10 @@ module.exports = function createCipherRoutes(ctx) {
 
       // Store conversation with individual turns + summary
       if (db.isConnected()) {
-        const convId = await db.createConversation("cipher");
+        const convId = await db.createConversation(
+          "cipher", [],
+          sessionId ? { sessionId: String(sessionId), source: "session-save" } : null
+        );
         if (convId) {
           for (let i = 0; i < turns.length; i++) {
             const t = turns[i];
@@ -628,7 +676,10 @@ module.exports = function createCipherRoutes(ctx) {
               { source: "cli", sessionId }
             ).catch(() => {});
           }
-          await db.endConversation(convId, summary, turns.length, extractedTopics).catch(() => {});
+          await db.endConversation(
+            convId, summary, turns.length, extractedTopics,
+            (startedAt && endedAt) ? { startedAt, endedAt } : null
+          ).catch(() => {});
 
           // Store extracted facts as memories
           for (const f of extractedFacts) {

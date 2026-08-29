@@ -1702,22 +1702,36 @@ async function searchMemories(persona, searchText, limit = 10) {
 
 // ── Conversations ──
 
-async function createConversation(persona, devices = []) {
+async function createConversation(persona, devices = [], metadata = null) {
   if (!_pgConnected) return null;
   const res = await query(
-    `INSERT INTO conversations (persona, devices) VALUES ($1, $2) RETURNING id`,
-    [persona, devices]
+    `INSERT INTO conversations (persona, devices, metadata)
+     VALUES ($1, $2, COALESCE($3::jsonb, '{}'::jsonb)) RETURNING id`,
+    [persona, devices, metadata ? JSON.stringify(metadata) : null]
   );
   return res.rows[0]?.id;
 }
 
-async function endConversation(conversationId, summary, turnCount, topics = []) {
+// times (optional): { startedAt: epochMs, endedAt: epochMs } — lets the
+// unified-history sync backfill historical sessions with their REAL times
+// instead of "now" (which broke the "Last session" ordering).
+async function endConversation(conversationId, summary, turnCount, topics = [], times = null) {
   if (!_pgConnected) return;
-  await query(
-    `UPDATE conversations SET ended_at = NOW(), summary = $2, turn_count = $3, topics = $4
-     WHERE id = $1`,
-    [conversationId, summary, turnCount, topics]
-  );
+  if (times && times.startedAt && times.endedAt) {
+    await query(
+      `UPDATE conversations
+       SET started_at = to_timestamp($2 / 1000.0), ended_at = to_timestamp($3 / 1000.0),
+           summary = $4, turn_count = $5, topics = $6
+       WHERE id = $1`,
+      [conversationId, times.startedAt, times.endedAt, summary, turnCount, topics]
+    );
+  } else {
+    await query(
+      `UPDATE conversations SET ended_at = NOW(), summary = $2, turn_count = $3, topics = $4
+       WHERE id = $1`,
+      [conversationId, summary, turnCount, topics]
+    );
+  }
 }
 
 async function addConversationTurn(conversationId, role, content, turnIndex, toolCalls = null, contentType = 'text', metadata = null) {

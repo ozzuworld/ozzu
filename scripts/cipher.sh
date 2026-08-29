@@ -5,11 +5,18 @@
 #
 # One mind, one CLI: refreshes CLAUDE.local.md from the bridge (live state +
 # memory index) and appends the most recent conversation tail from a UNIFIED
-# timeline (Claude Code + Reasonix transcripts, newest session wins), then opens
-# Claude Code — the interactive agent CLI. Model + endpoint come from
-# ~/.claude/settings.json (whatever provider it points at — currently Qwen via
-# Alibaba Model Studio). --tui swaps in opencode's paneled UI.
+# timeline (Claude Code + Reasonix + archive + opencode transcripts, newest
+# SUBSTANTIVE session wins — throwaway test sessions never shadow real work),
+# then opens Claude Code — the interactive agent CLI. Model + endpoint come
+# from ~/.claude/settings.json (whatever provider it points at — currently
+# Qwen via Alibaba Model Studio). --tui swaps in opencode's paneled UI.
 # Extra args become a one-shot prompt via `claude -p`.
+#
+# SPLIT-BRAIN RULE (2026-08-29): Cipher is the AI; the harness (claude code /
+# opencode / reasonix) and the model provider are interchangeable hands. All
+# memory lives in provider-agnostic places: workspace files (CLAUDE.md,
+# CLAUDE.local.md, private/cipher-memory/), directives, and the unified
+# transcript timeline that scripts/unified-history-sync.py mirrors to postgres.
 #
 # Fixes ported from Volts (Apr 12 2026):
 #   - Dual-source history: postgres + JSONL, pick most recent by TIMESTAMP (not size)
@@ -60,6 +67,12 @@ fi
 # This maximizes prompt cache hits — only the tail changes session to session.
 
 # Pull Cipher context from bridge (dynamic state: directives, services, action queue)
+# BEFORE that: sync every provider transcript into postgres (idempotent, deduped
+# by the bridge). This is what keeps the "Last session" header and /cipher/search
+# honest no matter which harness ran last — JSONL/SQLite on disk is the source
+# of truth, postgres is the queryable copy. Must run BEFORE the context pull.
+timeout 240 python3 "${SCRIPT_DIR}/unified-history-sync.py" --quiet 2>/dev/null || true
+
 CONTEXT=$(curl -sf "${BRIDGE_URL}/cipher/context" 2>/dev/null)
 BRIDGE_UP=0
 [ -n "$CONTEXT" ] && BRIDGE_UP=1
