@@ -68,12 +68,12 @@ Default slicer profile (Ender V3 SE): PETG 230/80°C, 0.4mm nozzle, 0.2mm layer,
 
 | Need | Command |
 |---|---|
-| Print an STL | `curl -sX POST http://localhost:3333/octoprint/print -H "Content-Type: application/json" -H "Authorization: Bearer $BRIDGE_TOKEN" -d '{"stl_path":"/path/to/foo.stl"}'` |
+| Print an STL | `curl -sX POST http://localhost:3333/octoprint/print -H "Content-Type: application/json" -H "Authorization: Bearer $BRIDGE_API_KEY" -d '{"stl_path":"/path/to/foo.stl"}'` |
 | Slice only (test if STL is printable, no print) | same as above with `"dry_run": true` |
-| Live status | `curl -sH "Authorization: Bearer $BRIDGE_TOKEN" http://localhost:3333/octoprint/status` |
+| Live status | `curl -sH "Authorization: Bearer $BRIDGE_API_KEY" http://localhost:3333/octoprint/status` |
 | Cancel print | `POST /octoprint/cancel` |
 
-`BRIDGE_TOKEN` lives in `/home/gcp/ozzu/.env` as `BRIDGE_TOKEN=...`.
+`BRIDGE_API_KEY` lives in `/home/gcp/ozzu/backend/.env` as `BRIDGE_API_KEY=...` (read by `server.js`). NOTE: it is currently EMPTY = bridge auth disabled (dir_1783018878145) — the Bearer header is accepted but unchecked until a key is set. There is no `BRIDGE_TOKEN` variable anywhere; this doc said `BRIDGE_TOKEN` for years (fixed 2026-09-17, dir_1789633186984).
 
 ## When the pipeline breaks
 

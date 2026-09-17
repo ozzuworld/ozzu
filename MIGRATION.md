@@ -40,8 +40,10 @@ Roughly **15 min of King Kazuma's hands-on time, ~60 min of Cipher background wo
 | Cycle | Date | Source project | Target project | Wall-clock | Downtime | Manual steps | New failures discovered |
 |---|---|---|---|---|---|---|---|
 | 1 | 2026-04-24 | project-14e4bf6c | project-80de6b4a | ~3h | ~50 min* | ~25 | 9 (see below) |
+| 2 | 2026-06-26→28 | project-80de6b4a (`700980343543`) | project-2f3f9831 (`378635557503`), us-central1-b | — | — | — | 5 (OAuth scopes read-only, compute SA had no IAM role, WG conf missing Address line, +2 — `private/cipher-memory/project_gcp_cycle2_migration.md`) |
+| 3 | 2026-09-15→17 | GCP VM (project-2f3f9831) | **bridge-01 metal** — ex-dev-01 ThinkPad, WiFi-permanent, WG 10.9.0.5 (reuses dev-01 identity) | ~2d prep | **~90s** (cutover 07:50:38 UTC) | ~15 | First OFF-GCP target — GCP demoted to thin TLS relay + WG hub (nginx → 10.9.0.5:3333, socat :3333 for mesh agents). qdrant face DB intentionally NOT migrated (KK order — empty volume on metal). Gotchas: container_name ≠ compose service key (`ozzu-postgres`/`ozzu-redis`/`ozzu-asterisk`); excluding `artifacts/` 404s the public IPA; metal `/tmp` is tmpfs → runtime data moved to `/home/gcp/ozzu-tmp` + `/etc/tmpfiles.d` symlinks; fleet telemetry must hairpin via relay socat (bind 0.0.0.0) or point at 10.9.0.5; watchdog nginx probe had to move to the relay (10.9.0.1:80). Playbook + logs: `private/vm-migration-dev01/` |
 
-*Downtime was inflated by qdrant slow-load + firewall-rules-not-created-at-create-time. Cycle 2 should hit the ~5-10 min target.
+*Downtime was inflated by qdrant slow-load + firewall-rules-not-created-at-create-time. Cycle 2 should hit the ~5-10 min target. (Cycle 3 beat it: ~90s — the target was metal, not a VM rebuild, and the DB/qdrant never needed reloading.)
 
 Per-cycle details in `migrations/<date>/metrics.json`.
 

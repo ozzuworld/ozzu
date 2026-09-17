@@ -10,8 +10,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv libimage-exiftool-perl \
     openssh-client prusa-slicer ffmpeg \
     nmap net-tools iproute2 iputils-ping dnsutils netcat-openbsd \
-    whatweb nikto gobuster proxychains4 && \
+    whatweb gobuster proxychains4 \
+    libnet-ssleay-perl libio-socket-ssl-perl libxml-writer-perl libnet-dns-perl && \
     rm -rf /var/lib/apt/lists/*
+# nikto: DROPPED from Debian bookworm apt ("Unable to locate package nikto" — broke every
+# image rebuild after the base left bullseye; the live image survived only because it was
+# never rebuilt). Installed from the upstream git clone instead. The perl modules above are
+# its runtime deps: XML::Writer was the loud one ("Required module not found" at -Version),
+# Net::SSLeay/IO::Socket::SSL for https targets, Net::DNS for name resolution.
+RUN git clone --depth 1 https://github.com/sullo/nikto /opt/nikto && \
+    ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto
 # SOC offense toolkit (nmap/net-tools/iproute2/iputils/dnsutils/netcat/whatweb) — the bridge is the
 # toolkit host (2026-06-23): SOC execution runs LOCAL here, routing the lab /24 via wg0 → tablet
 # relay → EDIFICIO. dev-01 is OUT of the offense pipeline (host-networked → wg0 already routes it).
@@ -31,9 +39,12 @@ RUN curl -sL https://github.com/projectdiscovery/nuclei/releases/download/v3.9.0
     git clone --depth 1 https://github.com/swisskyrepo/PayloadsAllTheThings.git /opt/payloads
 
 # Python OSINT tools in isolated venv (light — heavy tools live in osint-tools container)
+# Symlinks into /usr/local/bin: without them maigret/holehe/h8mail are invisible to PATH —
+# every SOC shell step doing `command -v maigret` failed even on fresh builds (dir_1789633186984).
 RUN python3 -m venv /opt/osint-venv --system-site-packages && \
     /opt/osint-venv/bin/pip install --no-cache-dir \
-    maigret holehe h8mail
+    maigret holehe h8mail && \
+    for b in maigret holehe h8mail; do ln -sf /opt/osint-venv/bin/$b /usr/local/bin/$b; done
 
 # PhoneInfoga Go binary (single static file, zero deps)
 RUN ARCH=$(dpkg --print-architecture) && \

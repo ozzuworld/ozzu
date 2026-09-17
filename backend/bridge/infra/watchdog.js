@@ -161,18 +161,32 @@ async function checkRedis() {
 
 async function checkNginx() {
   const start = Date.now();
-  try {
-    // Nginx returns 444 (drops connection) without a valid Host header
-    // Use the FQDN host header to get a real response
-    const res = await fetchWithTimeout("http://127.0.0.1:80", {
-      timeout: 5000,
-      headers: { Host: "home.ozzu.world" },
-    });
-    // 301/302 redirects to HTTPS are healthy, 444 means config issue
-    return { ok: res.status < 500, latencyMs: Date.now() - start, details: { statusCode: res.status } };
-  } catch (err) {
-    return { ok: false, latencyMs: Date.now() - start, details: { error: err.message } };
+  // Post-migration (2026-09-17, dir_1789633186984): the nginx TLS relay lives on the GCP
+  // VM (wg0 10.9.0.1), NOT on bridge-01 metal — probing only 127.0.0.1:80 here produced a
+  // permanent false "nginx down" + pointless recovery-engine churn. Probe every candidate
+  // in order; first answer <500 wins (301→https = healthy; 444/refused on ALL = down).
+  // Override the list with NGINX_HEALTH_URLS when the relay moves (GCP-kill project).
+  const targets = (process.env.NGINX_HEALTH_URLS || "http://127.0.0.1:80,http://10.9.0.1:80")
+    .split(",").map((t) => t.trim()).filter(Boolean);
+  let lastErr = null;
+  for (const url of targets) {
+    try {
+      // Nginx returns 444 (drops connection) without a valid Host header
+      // Use the FQDN host header to get a real response
+      const res = await fetchWithTimeout(url, {
+        timeout: 5000,
+        headers: { Host: "home.ozzu.world" },
+      });
+      // 301/302 redirects to HTTPS are healthy, 444 means config issue
+      if (res.status < 500) {
+        return { ok: true, latencyMs: Date.now() - start, details: { statusCode: res.status, url } };
+      }
+      lastErr = new Error(`status ${res.status} from ${url}`);
+    } catch (err) {
+      lastErr = err;
+    }
   }
+  return { ok: false, latencyMs: Date.now() - start, details: { error: lastErr?.message || "all targets failed", tried: targets } };
 }
 
 async function checkWireguard() {

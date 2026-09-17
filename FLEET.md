@@ -23,9 +23,9 @@
 
 | device_id | Hardware | OS | Role | Transport | Supervision | Notes |
 |---|---|---|---|---|---|---|
-| `gcp-bridge-host` | GCP VM | Linux | bridge | curl → localhost | systemd `ozzu-telemetry.service` | the bridge itself |
-| `ozzu-sbc` | Rock Pi 4B | Linux | sbc/gateway | curl → 10.9.0.1 (WG) | systemd | the real SBC/VoIP gateway |
-| `dev-01` | GCP VM | Linux | dev | curl → 10.9.0.1 (WG) | systemd | **flaky** — drops off WG; OUT of offense/print pipelines |
+| `gcp-bridge-host` | GCP VM (thin relay) | Linux | relay | curl → localhost:3333 | systemd `ozzu-telemetry.service` | post-2026-09-17 the VM only terminates TLS (nginx → 10.9.0.5:3333), hosts the WG hub, and forwards :3333 (socat) for mesh agents — the bridge itself lives on bridge-01 |
+| `ozzu-sbc` | Rock Pi 4B | Linux | sbc/gateway | curl → 10.9.0.1 (WG, socat-forwarded to bridge-01) | systemd | the real SBC/VoIP gateway |
+| `dev-01` | **bridge-01** ThinkPad (metal, WiFi-permanent) | Linux | bridge + SOC executor | curl → 127.0.0.1:3333 (LOCAL override) | systemd | **IS bridge-01** — the ex-dev-01 ThinkPad (hostname `bridge-01`, 10.9.0.5) now runs the whole stack. device_id stays `dev-01` for code compat (db.js `executor_host` default, soc.js SSH/exec-agent dispatch, watchdog peer ping). `ssh dev-01` from the bridge container lands on it (hadmin). |
 | `cat-s41` | CAT S41 | Android 8 (toybox, kernel 4.4) | phone | **static curl** → 10.9.0.1 (WG) | **Magisk service.d supervisor** | no RTC; WG via app VpnService; see gotchas |
 | `tablet-p610` | Samsung Tab S6 Lite | Android (LineageOS) | pentest-bridge | static curl → 10.9.0.1 (WG) | Magisk service.d supervisor | L3 pentest bridge; root `wireguard-go` daemon |
 
