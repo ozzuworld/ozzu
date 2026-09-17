@@ -19,8 +19,13 @@ const PROJECT_DIR = "/home/gcp/ozzu";
 // ── COORDINATOR pattern — model routing (from Claude Code leak) ──
 // Haiku for investigation/status tasks ($0.25/MTok)
 // Sonnet for complex fixes and decisions ($3/MTok) — 12x cost reduction on grunt work
+// ⚠️ These IDs are Anthropic-specific and only reach the CLI when the operator
+// declares an Anthropic endpoint — see lib/provider-model.js (provider-agnostic
+// --model gate; added 2026-09-17 after "Model not exist" 400s from the Qwen
+// endpoint silently killed every daemon auto-fix).
 const MODEL_HAIKU = "claude-haiku-4-5-20251001";
 const MODEL_SONNET = "claude-sonnet-4-6";
+const { modelArgs } = require("../lib/provider-model");
 
 function selectModel(eventKey) {
   // Critical fixes need full reasoning → Sonnet
@@ -163,9 +168,10 @@ function spawnClaude(action) {
   let stderr = "";
 
   const model = action.model || selectModel(action.eventKey);
-  log(`Spawning Claude for: ${action.reason} (run: ${runId}, model: ${model})`);
+  const mArgs = modelArgs(model);
+  log(`Spawning Claude for: ${action.reason} (run: ${runId}, model: ${mArgs.length ? mArgs[1] : "provider-default"})`);
 
-  const proc = spawn("claude", ["-p", fullPrompt, "--model", model, "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep"], {
+  const proc = spawn("claude", ["-p", fullPrompt, ...mArgs, "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep"], {
     cwd: PROJECT_DIR,
     env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cipher-daemon" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -473,8 +479,10 @@ async function runAutoDream() {
     const { execSync } = require("child_process");
     let output = "";
     try {
+      // provider-agnostic: --model only when pinned (see modelArgs note at top)
+      const mFlag = modelArgs(MODEL_HAIKU).map((a) => JSON.stringify(a)).join(" ");
       output = execSync(
-        `claude -p ${JSON.stringify(prompt)} --model claude-haiku-4-5-20251001 --output-format text`,
+        `claude -p ${JSON.stringify(prompt)} ${mFlag ? mFlag + " " : ""}--output-format text`,
         { cwd: "/home/gcp/ozzu", encoding: "utf8", timeout: 60000, env: { ...process.env } }
       );
     } catch (err) {

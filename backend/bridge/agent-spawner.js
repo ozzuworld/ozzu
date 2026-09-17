@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const metrics = require("./metrics-tracker");
 const { getDevice } = require("./lib/devices");
+const { modelArgs } = require("./lib/provider-model");
 
 const BRIDGE = "http://localhost:3333";
 const WORKDIR = "/home/gcp/ozzu";
@@ -757,10 +758,13 @@ function spawnAgent(directive, type, customPrompt) {
     ? wrapWorkerPrompt(directive, type, customPrompt)
     : (type === "planning" ? buildPlanningPrompt(directive) : buildImplementationPrompt(directive));
 
-  // All directive agents use Opus for strongest reasoning
-  const model = "opus";
+  // All directive agents PREFER Opus for strongest reasoning — provider-gated
+  // (lib/provider-model): --model is omitted unless the active endpoint is
+  // declared Anthropic or pinned via CIPHER_CLAUDE_MODEL
+  const mArgs = modelArgs("opus");
+  const model = mArgs.length ? mArgs[1] : "provider-default";
   const args = [
-    "--model", model,
+    ...mArgs,
     "--allowedTools", "Bash Read Write Edit Glob Grep WebFetch WebSearch",
     "-p", prompt,
   ];

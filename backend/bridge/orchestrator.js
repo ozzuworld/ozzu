@@ -6,6 +6,7 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { modelArgs } = require("./lib/provider-model");
 
 const LOG_DIR = "/tmp/ozzu-bridge";
 const SESSION_FILE = path.join(LOG_DIR, "orchestrator-session.json");
@@ -221,7 +222,7 @@ async function createSession() {
 
   const args = [
     "--session-id", id,
-    "--model", "opus",
+    ...modelArgs("opus"),
     "--output-format", "json",
     "--allowedTools", "Read Grep Glob WebSearch WebFetch",
     "--system-prompt", SYSTEM_PROMPT,
@@ -297,7 +298,7 @@ async function rotateSession() {
 
   const args = [
     "--session-id", id,
-    "--model", "opus",
+    ...modelArgs("opus"),
     "--output-format", "json",
     "--allowedTools", "Read Grep Glob WebSearch WebFetch",
     "--system-prompt", SYSTEM_PROMPT,
