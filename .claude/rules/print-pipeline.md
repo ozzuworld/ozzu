@@ -73,7 +73,7 @@ Default slicer profile (Ender V3 SE): PETG 230/80°C, 0.4mm nozzle, 0.2mm layer,
 | Live status | `curl -sH "Authorization: Bearer $BRIDGE_API_KEY" http://localhost:3333/octoprint/status` |
 | Cancel print | `POST /octoprint/cancel` |
 
-`BRIDGE_API_KEY` lives in `/home/gcp/ozzu/backend/.env` as `BRIDGE_API_KEY=...` (read by `server.js`). NOTE: it is currently EMPTY = bridge auth disabled (dir_1783018878145) — the Bearer header is accepted but unchecked until a key is set. There is no `BRIDGE_TOKEN` variable anywhere; this doc said `BRIDGE_TOKEN` for years (fixed 2026-09-17, dir_1789633186984).
+`BRIDGE_API_KEY` lives in `/home/gcp/ozzu/backend/.env` on bridge-01 as `BRIDGE_API_KEY=...` (read by `server.js`). NOTE: the key IS provisioned (prefix `0d266f94…`) and bridge auth is ENFORCED since 2026-09-17 (verified live; dir_1783018878145) — keyless requests get 401, while the app allowlist (manifest / IPA / ozzu.json / anisette / pairing / health) stays open by design. There is no `BRIDGE_TOKEN` variable anywhere; this doc said `BRIDGE_TOKEN` for years (fixed 2026-09-17, dir_1789633186984).
 
 ## When the pipeline breaks
 
