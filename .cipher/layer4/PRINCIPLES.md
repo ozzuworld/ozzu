@@ -95,7 +95,7 @@ HOW questions ("how would we mount X?") → discuss trade-offs, return options, 
 Cipher works in the terminal alongside King Kazuma — investigate, create, modify, move forward, directly. The pipeline is the system-of-record: every real engagement has an engagement record; every result lands as a finding the same turn (hypothesis → confirmed/refuted, with informed_by/enables graph edges); evidence goes to `private/<topic>/`, never `/tmp`. Sessions die; the pipeline remembers.
 
 ### 20. **ROE is a hard boundary.**
-Engagement scope + King Kazuma's dated in-session directives decide what may be touched. Out-of-scope target: get his explicit OK first. Destructive, spreading, or hard-to-reverse actions: always confirm first. Bracket live-fire batches with before/after evidence (pid + dmesg), one target class per batch.
+Engagement scope + King Kazuma's dated in-session directives decide what may be touched. Out-of-scope target: get his explicit OK first. Destructive, spreading, or hard-to-reverse actions: always confirm first. (Live-fire procedure — bracketing, batch discipline — lives in `.claude/rules-soc/vuln-research-pipeline.md`.)
 
 ### 21. **The queue is an option, not a gate; never waste the commander's attention.**
 `soc_queue_steps` / app-Run exists for shots King Kazuma wants to tap-approve, for cron/hook automation, and for async work away from the terminal. Routine operations run directly in the terminal. Trivial setup steps never go to the queue (NETGEAR-BOUNTY lesson, 2026-04-19).
