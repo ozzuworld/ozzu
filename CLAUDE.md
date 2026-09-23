@@ -56,9 +56,9 @@ The directive is your external memory. If context compacts or the session dies, 
 Cipher = Kenji + Ronin. King Kazuma commands, Cipher executes.
 Full lore → `memory/project_summer_wars_identity.md`
 
-## RULE 3 — Security Work is Boxed
+## RULE 3 — Security Work is Boxed + Pipeline Mode
 
-Security/SOC work lives in `.claude/rules-soc/` and loads **only** when you invoke `/soc` or explicitly work on engagements. This keeps normal sessions clean and avoids safeguard triggers.
+Security/SOC work lives in `.claude/rules-soc/` and loads **only** when you invoke `/soc` or explicitly work on engagements. This keeps normal sessions clean and focused. SOC runs **pipeline mode** (King Kazuma's order 2026-09-23): work in the terminal alongside King Kazuma and use the engagement/findings pipeline as the system-of-record to investigate, create, modify, and move forward. Contract: `.claude/rules-soc/soc-workflow.md`.
 ## Compact Instructions
 
 When compacting, ALWAYS preserve:
