@@ -43,7 +43,7 @@
 - **Series terminadas >14d (no favoritas)** — shows: watched ∧ newest episode viewed >14d ∧ not favorited (incl. parents)
 - Rule sources: `maintainerr-rules/*.yaml` (import via `POST /api/rules/yaml/decode` `{yaml, mediaType:"movie"|"show"}` — YAML `mediaType: MOVIES/SHOWS`, field ids like `Jellyfin.isWatched` come from `GET /api/rules/constants`).
 
-**Jellyfin libraries**: `Movies` (`/media/movies`) + `TV Shows` (`/media/tv`, id `767bffe4f11c93ef34b805451a696a4e`). The original "Shows" library was created without `collectionType` — see runbook #12.
+**Jellyfin libraries**: `Movies` (`/media/movies`) + `TV Shows` (`/media/tv`, id `767bffe4f11c93ef34b805451a696a4e`). The original "Shows" library was created without `collectionType` — see runbook #13.
 
 ## Runbook (from hard-won memory — `private/cipher-memory/reference_media_stack_dev01.md`)
 
@@ -63,7 +63,8 @@
 9. **EZTV (`eztvx.to`) is Cloudflare-protected** → indexer MUST carry the `flaresolverr` tag in Prowlarr; direct fails. First FS-tested indexer add is slow (~140s cold browser) — don't retry-loop it into a 429.
 10. **Frozen upstream slugs** — jellyseerr→`seerr-team/seerr`, maintainerr→`maintainerr/maintainerr` (details above). If a request-stack app "doesn't work with Jellyfin 12", check the image slug/age FIRST (`docker images --format '{{.CreatedAt}}'`): the old images are 13 months stale.
 11. **Docker hairpin NAT is blocked on bridge-01**: containers CANNOT reach `192.168.1.9:<port>` (timeout) — always use compose service names (`jellyfin:8096`, `radarr:7878`, …) for inter-container config. Host→container via localhost works fine.
-12. **Jellyfin library `collectionType` trap**: a library created without `collectionType` shows `CollectionType: null` in `/Library/MediaFolders` FOREVER — recreating with the SAME name reuses the internal item (same ItemId) and doesn't fix it (`/Library/VirtualFolders` may even display the right type while MediaFolders says null). Downstream apps (Maintainerr) filter by MediaFolders → library invisible. Fix: delete + recreate under a NEW name (that's why it's "TV Shows", not "Shows"). Then re-enable in Seerr — the library id changed.
+12. **`/srv/downloads/{tv,movies}` must pre-exist** — qbit categories save there; Sonarr/Radarr health throws `RemotePathMappingCheck` ERROR if missing (deploy.sh creates them). The health entry is CACHED — after fixing, `docker restart sonarr radarr` clears it (qbit downloads are unaffected). Sonarr queue briefly shows 0 after an arr restart, then repopulates from qbit sync — don't panic.
+13. **Jellyfin library `collectionType` trap**: a library created without `collectionType` shows `CollectionType: null` in `/Library/MediaFolders` FOREVER — recreating with the SAME name reuses the internal item (same ItemId) and doesn't fix it (`/Library/VirtualFolders` may even display the right type while MediaFolders says null). Downstream apps (Maintainerr) filter by MediaFolders → library invisible. Fix: delete + recreate under a NEW name (that's why it's "TV Shows", not "Shows"). Then re-enable in Seerr — the library id changed.
 
 ## Remote access
 

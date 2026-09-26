@@ -14,7 +14,9 @@ DEPLOY_DIR=/srv/media-stack
 [[ "$(hostname)" == "bridge-01" ]] || echo "WARN: not on bridge-01 ($(hostname)) — continuing anyway"
 
 echo "=== 1. Directory layout ==="
-mkdir -p "$DEPLOY_DIR/config" "$DEPLOY_DIR/cache/stremio" /srv/downloads /srv/media/movies /srv/media/tv
+# /srv/downloads/{tv,movies} MUST pre-exist: qbit categories point at them and
+# Sonarr/Radarr's RemotePathMappingCheck health-errors if they're missing (2026-09-26).
+mkdir -p "$DEPLOY_DIR/config" "$DEPLOY_DIR/cache/stremio" /srv/downloads /srv/downloads/tv /srv/downloads/movies /srv/media/movies /srv/media/tv
 chown -R 1000:1000 "$DEPLOY_DIR" /srv/downloads /srv/media
 chmod 755 /srv/media /srv/downloads
 
