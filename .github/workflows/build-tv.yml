@@ -10,6 +10,8 @@ on:
 jobs:
   build-tv:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # publish the APK as a Release asset (see final step)
     defaults:
       run:
         working-directory: tv
@@ -85,10 +87,15 @@ jobs:
           }
           EOF
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ozzu-tv
-          path: |
-            tv/android/app/build/outputs/apk/release/app-release.apk
-            /tmp/latest.json
-          retention-days: 30
+      # GitHub Actions artifact storage is a small shared quota that fills up with
+      # accumulated IPAs/APKs. Publish the APK + metadata as assets on the rolling
+      # `tv-latest` Release instead (separate, large quota). smartDeploy pulls them
+      # via `gh release download tv-latest`. (dir_1781645332787)
+      - name: Publish APK + metadata to the tv-latest Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          gh release create tv-latest --prerelease --title "Ozzu TV latest" \
+            --notes "Automated Ozzu TV build (rolling)" 2>/dev/null || true
+          gh release upload tv-latest "$APK" /tmp/latest.json --clobber
