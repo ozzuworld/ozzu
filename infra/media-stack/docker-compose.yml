@@ -1,0 +1,192 @@
+# Ozzu self-hosted media broker — bridge-01 (i5-1135G7 / Iris Xe / Ubuntu 26.04 / Docker cgroup v2)
+# Architecture: private/media-stack/RESEARCH-internal-netflix-2026-09-26.md §9
+#   "bridge-01 is the household debrid" — torrent→HTTP streaming + rotation library.
+#   LAN delivery to KTC TV (192.168.1.5). Zero media bytes leave the house except P2P swarm.
+# Lives on bridge-01 at /srv/media-stack. Inter-service comms on the `media` network.
+# Revived + adapted from infra/jellyfin-dev01 (git 8b5ca990/e0da7817, purged e186d756).
+#
+# Host facts verified 2026-09-26: render gid=991, video gid=44, uid 1000=hadmin,
+# /dev/dri/renderD128 present (QuickSync), 14.8G RAM shared with the whole Ozzu core
+# stack → mem_limit caps below are REQUIRED, don't remove them.
+
+networks:
+  media:
+
+services:
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+      JELLYFIN_PublishedServerUrl: http://192.168.1.9:8096
+    volumes:
+      - ./config/jellyfin:/config
+      - /srv/media:/media
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "44"   # video
+      - "991"  # render (verified getent group render on bridge-01, 2026-09-26)
+    ports:
+      - "8096:8096"
+      - "8920:8920"
+      - "7359:7359/udp"
+    mem_limit: 1200m
+    restart: unless-stopped
+
+  # Broker stream engine: magnet → sequential HTTP with Range seek (piece deadlines).
+  # This is what makes marker-resume work without storing anything: clients play a
+  # plain HTTP URL; no torrent engine on any device. Cache capped, lives on local disk.
+  stremio-server:
+    image: stremio/server:latest
+    container_name: stremio-server
+    networks: [media]
+    environment:
+      TZ: America/Bogota
+      APP_PATH: /app/cache   # persist settings+cache on the mapped volume, NOT container overlay
+    volumes:
+      - ./cache/stremio:/app/cache
+    ports:
+      - "11470:11470"
+    mem_limit: 512m
+    restart: unless-stopped
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    networks: [media]
+    environment:
+      LOG_LEVEL: info
+      TZ: America/Bogota
+    volumes:
+      - ./config/jellyseerr:/app/config
+    ports:
+      - "5055:5055"
+    mem_limit: 300m
+    restart: unless-stopped
+    depends_on: [jellyfin]
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+    volumes:
+      - ./config/prowlarr:/config
+    ports:
+      - "9696:9696"
+    mem_limit: 300m
+    restart: unless-stopped
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    networks: [media]
+    environment:
+      LOG_LEVEL: info
+      TZ: America/Bogota
+    ports:
+      - "8191:8191"
+    mem_limit: 400m
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+    volumes:
+      - ./config/sonarr:/config
+      - /srv/downloads:/downloads
+      - /srv/media/tv:/tv
+    mem_limit: 400m
+    ports:
+      - "8989:8989"
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+    volumes:
+      - ./config/radarr:/config
+      - /srv/downloads:/downloads
+      - /srv/media/movies:/movies
+    mem_limit: 400m
+    ports:
+      - "7878:7878"
+    restart: unless-stopped
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+    volumes:
+      - ./config/bazarr:/config
+      - /srv/media/movies:/movies
+      - /srv/media/tv:/tv
+    mem_limit: 300m
+    ports:
+      - "6767:6767"
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    networks: [media]
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Bogota
+      WEBUI_PORT: 8080
+    volumes:
+      - ./config/qbittorrent:/config
+      - /srv/downloads:/downloads
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    mem_limit: 512m
+    restart: unless-stopped
+
+  maintainerr:
+    image: ghcr.io/jorenn92/maintainerr:latest
+    container_name: maintainerr
+    networks: [media]
+    environment:
+      TZ: America/Bogota
+      BASE_PATH: /
+    volumes:
+      - ./config/maintainerr:/opt/data
+    ports:
+      - "6246:6246"
+    mem_limit: 200m
+    restart: unless-stopped
+
+  # One-shot tool, not a daemon: docker compose run --rm recyclarr sync
+  # Config: ./config/recyclarr/recyclarr.yml (TRaSH quality profiles → Sonarr/Radarr)
+  recyclarr:
+    image: ghcr.io/recyclarr/recyclarr:latest
+    container_name: recyclarr
+    networks: [media]
+    volumes:
+      - ./config/recyclarr:/config
+    profiles: [tools]
+    mem_limit: 128m
