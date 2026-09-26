@@ -55,7 +55,12 @@ services:
     restart: unless-stopped
 
   jellyseerr:
-    image: fallenbagel/jellyseerr:latest
+    # ⚠️ The project RENAMED: fallenbagel/jellyseerr → seerr-team/seerr (v3.x).
+    # BOTH old images (Docker Hub fallenbagel/jellyseerr:latest AND ghcr.io/
+    # fallenbagel/jellyseerr:latest) are FROZEN at v2.7.3 (2025-08-14), which
+    # sends X-Emby-Authorization → Jellyfin 12 rejects with 400. v3.x sends
+    # Authorization and works. Container name stays 'jellyseerr' (port 5055).
+    image: ghcr.io/seerr-team/seerr:latest
     container_name: jellyseerr
     networks: [media]
     environment:
@@ -167,7 +172,13 @@ services:
     restart: unless-stopped
 
   maintainerr:
-    image: ghcr.io/jorenn92/maintainerr:latest
+    # ⚠️ Slug RENAMED like jellyseerr→seerr: ghcr.io/jorenn92/maintainerr is the
+    # LEGACY frozen slug (stuck at v2.19.0, 2025-08 — has NO Jellyfin support at all).
+    # Official image is ghcr.io/maintainerr/maintainerr (v3.x); Jellyfin support
+    # landed ~v2.27/v3.x via the official @jellyfin/sdk (Authorization: MediaBrowser
+    # scheme → works with Jellyfin 12). Data dir /opt/data runs as UID 1000 →
+    # chown 1000:1000 ./config/maintainerr on the host.
+    image: ghcr.io/maintainerr/maintainerr:latest
     container_name: maintainerr
     networks: [media]
     environment:

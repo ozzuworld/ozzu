@@ -1,0 +1,20 @@
+mediaType: MOVIES
+rules:
+  - "0":
+      - firstValue: Jellyfin.isWatched
+        action: EQUALS
+        customValue:
+          type: boolean
+          value: "true"
+      - operator: AND
+        firstValue: Jellyfin.lastViewedAt
+        action: BEFORE
+        customValue:
+          type: custom_days
+          value: "30"
+      - operator: AND
+        firstValue: Jellyfin.favoritedBy
+        action: NOT_CONTAINS
+        customValue:
+          type: text
+          value: "hadmin"
