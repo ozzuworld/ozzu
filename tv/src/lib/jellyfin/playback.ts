@@ -5,19 +5,27 @@
 // transcode fallback (PlaybackInfo + HLS) is deferred to Phase 3.
 
 import { getPlaystateApi } from "@jellyfin/sdk/lib/utils/api";
-import { getApi, getBaseUrl, getAccessToken, getDeviceId } from "./client";
+import { getApi, getBaseUrl, getDeviceId, authHeaders } from "./client";
 import { qs } from "./images";
 import { secondsToTicks } from "../format";
 
-/** Direct-play URL for expo-video. */
+/** Direct-play URL for expo-video (auth travels in HEADERS, not the query —
+ * Jellyfin 12 returns 401 for `api_key=` query auth; verified 2026-09-26). */
 export function directStreamUrl(itemId: string, mediaSourceId?: string): string {
   const query = qs({
     static: true,
     mediaSourceId,
     deviceId: getDeviceId(),
-    api_key: getAccessToken(),
   });
   return `${getBaseUrl()}/Videos/${itemId}/stream?${query}`;
+}
+
+/** expo-video VideoSource with JF12 header auth. */
+export function streamSource(
+  itemId: string,
+  mediaSourceId?: string
+): { uri: string; headers: Record<string, string> } {
+  return { uri: directStreamUrl(itemId, mediaSourceId), headers: authHeaders() };
 }
 
 export async function reportStart(itemId: string, positionSeconds: number): Promise<void> {

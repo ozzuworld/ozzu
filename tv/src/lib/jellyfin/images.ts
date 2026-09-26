@@ -2,7 +2,7 @@
 // can't be tested here) — these query params are the stable Jellyfin contract.
 // Images route through the same bridge proxy as everything else.
 
-import { getBaseUrl, getAccessToken } from "./client";
+import { getBaseUrl } from "./client";
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
 
 export function qs(params: Record<string, string | number | boolean | undefined>): string {
@@ -18,8 +18,10 @@ function imageUrl(
   tag: string | undefined,
   fillWidth: number
 ): string {
-  const token = getAccessToken();
-  const query = qs({ tag, fillWidth, quality: 90, api_key: token });
+  // NO api_key param: Jellyfin 12 rejects query-param auth with 401. Consumers
+  // must attach authHeaders() on the <Image source> (RN Image sends headers on
+  // Android + iOS). (JF12 retrofit, 2026-09-26)
+  const query = qs({ tag, fillWidth, quality: 90 });
   return `${getBaseUrl()}/Items/${itemId}/Images/${type}?${query}`;
 }
 

@@ -5,6 +5,7 @@ import { LoginScreen } from "../screens/LoginScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { DetailScreen } from "../screens/DetailScreen";
 import { PlayerScreen } from "../screens/PlayerScreen";
+import { SearchScreen } from "../screens/SearchScreen";
 import { colors } from "../lib/theme";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -27,6 +28,7 @@ export function RootNavigator({
       <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="Detail" component={DetailScreen} />
       <Stack.Screen name="Player" component={PlayerScreen} />
+      <Stack.Screen name="Search" component={SearchScreen} />
     </Stack.Navigator>
   );
 }

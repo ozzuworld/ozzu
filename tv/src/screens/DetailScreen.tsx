@@ -3,7 +3,7 @@ import { Image, ImageBackground, StyleSheet, Text, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
 import { getItemDetail } from "../lib/jellyfin/items";
-import { getUserId } from "../lib/jellyfin/client";
+import { getUserId, authHeaders } from "../lib/jellyfin/client";
 import { backdropUrl, logoUrl } from "../lib/jellyfin/images";
 import { formatRuntime, ticksToSeconds, yearOf } from "../lib/format";
 import { colors, spacing, fontSize, fontWeight, screenPad, withAlpha } from "../lib/theme";
@@ -49,7 +49,7 @@ export function DetailScreen() {
   const body = (
     <View style={styles.content}>
       {logo ? (
-        <Image source={{ uri: logo }} style={styles.logo} resizeMode="contain" />
+        <Image source={{ uri: logo, headers: authHeaders() }} style={styles.logo} resizeMode="contain" />
       ) : (
         <Text style={styles.title} numberOfLines={2}>
           {item.Name}
@@ -80,7 +80,7 @@ export function DetailScreen() {
     return <View style={[styles.root, { backgroundColor: colors.bg.base }]}>{body}</View>;
   }
   return (
-    <ImageBackground source={{ uri: backdrop }} style={styles.root}>
+    <ImageBackground source={{ uri: backdrop, headers: authHeaders() }} style={styles.root}>
       <View style={styles.scrimLeft} />
       <View style={styles.scrimBottom} />
       {body}

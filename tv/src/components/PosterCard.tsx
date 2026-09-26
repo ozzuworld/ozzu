@@ -12,6 +12,7 @@ import {
   withAlpha,
 } from "../lib/theme";
 import { posterUrl } from "../lib/jellyfin/images";
+import { authHeaders } from "../lib/jellyfin/client";
 import { watchedFraction, yearOf } from "../lib/format";
 import { ProgressBar } from "./ProgressBar";
 
@@ -66,7 +67,7 @@ export function PosterCard({
       <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
         <View style={styles.posterWrap}>
           {uri ? (
-            <Image source={{ uri }} style={styles.poster} resizeMode="cover" />
+            <Image source={{ uri, headers: authHeaders() }} style={styles.poster} resizeMode="cover" />
           ) : (
             <View style={[styles.poster, styles.placeholder]}>
               <Text style={styles.placeholderText} numberOfLines={4}>

@@ -17,6 +17,9 @@ jobs:
         working-directory: tv
     env:
       EXPO_PUBLIC_BRIDGE_URL: ${{ secrets.EXPO_PUBLIC_BRIDGE_URL }}
+      # Bearer key for /media/* broker routes (same secret the iOS build uses).
+      # Metro inlines EXPO_PUBLIC_* at bundle time. (dir_1790443814736 P2)
+      EXPO_PUBLIC_BRIDGE_API_KEY: ${{ secrets.EXPO_PUBLIC_BRIDGE_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
