@@ -12,11 +12,22 @@ UPDATES_DIR="/tmp/ozzu-bridge/updates/$RUNTIME_VERSION"
 
 echo "=== TV OTA Deploy ==="
 
+# Inline the bridge key for EXPO_PUBLIC_* (Metro bakes env at export time; value
+# never printed). Same key the iOS CI injects from repo secrets — locally sourced
+# from backend/.env so broker-lane calls authenticate on the public path.
+if [ -z "${EXPO_PUBLIC_BRIDGE_API_KEY:-}" ] && [ -f "$WORKDIR/backend/.env" ]; then
+  EXPO_PUBLIC_BRIDGE_API_KEY="$(grep -E '^BRIDGE_API_KEY=' "$WORKDIR/backend/.env" | head -1 | cut -d= -f2-)"
+  export EXPO_PUBLIC_BRIDGE_API_KEY
+  [ -n "$EXPO_PUBLIC_BRIDGE_API_KEY" ] && echo "(bridge key inlined from backend/.env)"
+fi
+
 # Export JS bundle (Android only — TV is always Android)
+# --clear: Metro's transformer cache doesn't reliably invalidate after branch
+# switches — the app-side OTA script learned this the hard way (2026-06-22).
 echo "[1/3] Exporting JS bundle (Android)..."
 cd "$TV_DIR"
 rm -rf /tmp/ota-tv-export
-npx expo export --platform android --output-dir /tmp/ota-tv-export 2>&1 | tail -5
+npx expo export --platform android --clear --output-dir /tmp/ota-tv-export 2>&1 | tail -5
 
 # Verify export produced a valid bundle
 METADATA="/tmp/ota-tv-export/metadata.json"

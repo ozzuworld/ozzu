@@ -91,3 +91,7 @@ node_modules/
 # Build outputs + local code index (both excluded from migration rsync too)
 /artifacts/
 .codegraph/
+
+# Expo generated artifacts — CI prebuilds android/ fresh (`expo prebuild --clean`); never commit
+.expo/
+tv/android/
