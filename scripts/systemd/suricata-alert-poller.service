@@ -1,0 +1,7 @@
+[Unit]
+Description=Pull Suricata EVE alerts from ozzu-edge (sensor grid)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/gcp/ozzu/scripts/suricata-alert-poller.sh

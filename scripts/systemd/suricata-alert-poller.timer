@@ -1,0 +1,11 @@
+[Unit]
+Description=Run suricata-alert-poller every 60s
+
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=60
+AccuracySec=5s
+Unit=suricata-alert-poller.service
+
+[Install]
+WantedBy=timers.target

@@ -11,6 +11,12 @@
 #   - Home Assistant config (/home/gcp/ozzu/backend/config/)
 #   - Environment files (.env, .env.local)
 #   - Redis AOF snapshot
+#   - private/ docs tier (legal/STATE/evidence; heavy dirs excluded) [2026-09-25]
+#   - System configs (/etc/wireguard, data/adguardhome) [2026-09-25]
+#   - Qdrant storage (face DB) [2026-09-25]
+#   - Media-stack configs (/srv/media-stack/config: Jellyfin db/state, *arr, qbit) [2026-09-27]
+# ⚠️ Passphrase = BRIDGE_API_KEY (backend/.env). On rotation, archive the OLD key value
+#    beside the backups or they become undecryptable (offsite copy: OC ~/offsite-ozzu/RESTORE-KEY).
 
 set -euo pipefail
 
@@ -114,7 +120,7 @@ else
 fi
 
 # 9. Redis snapshot
-echo "[9/9] Snapshotting Redis..."
+echo "[9/13] Snapshotting Redis..."
 redis-cli -h 127.0.0.1 BGSAVE >/dev/null 2>&1 || true
 sleep 1
 REDIS_CONTAINER=$(docker ps -qf "name=redis" | head -1)
@@ -124,6 +130,61 @@ if [ -n "$REDIS_CONTAINER" ]; then
   echo "  Redis: $(du -sh "${WORK_DIR}/redis-dump.rdb" 2>/dev/null | cut -f1 || echo 'n/a')"
 else
   echo "  Redis: (container not found)"
+fi
+
+# 10. Private docs tier (2026-09-25, CIS-11 fix: legal/STATE/evidence were single-copy on one disk)
+# Heavy exclusions: cucm/expressway-evidence (23G, rebuildable corpora/rootfs), drone/backups (3.2G legacy images)
+# 2026-09-27: + cucm/native-fuzz (5.8G regenerable fuzz corpora — ballooned the enc gen 1.5G→2.3G
+# and pushed the OC offsite disk to 100%; same class as expressway-evidence).
+echo "[10/13] Backing up private/ docs tier..."
+if [ -d "${PROJECT_ROOT}/private" ]; then
+  tar -cf "${WORK_DIR}/private-docs.tar" -C "${PROJECT_ROOT}" \
+    --exclude='private/cucm/expressway-evidence' \
+    --exclude='private/cucm/native-fuzz' \
+    --exclude='private/drone/backups' \
+    --exclude='*.vmdk' --exclude='*.iso' --exclude='*.vdi' \
+    private 2>/dev/null || true
+  echo "  Private docs: $(du -sh "${WORK_DIR}/private-docs.tar" 2>/dev/null | cut -f1 || echo 'n/a')"
+else
+  echo "  Private docs: (none)"
+fi
+
+# 11. System config tier (WG keys + AdGuard conf)
+echo "[11/13] Backing up system configs..."
+tar -cf "${WORK_DIR}/system-config.tar" \
+  -C / etc/wireguard \
+  -C "${PROJECT_ROOT}/data" adguardhome 2>/dev/null || true
+echo "  System config: $(du -sh "${WORK_DIR}/system-config.tar" 2>/dev/null | cut -f1 || echo 'n/a')"
+
+# 12. Qdrant storage (face DB embeddings)
+echo "[12/13] Snapshotting qdrant storage..."
+QDRANT_CONTAINER=$(docker ps -qf "name=qdrant" | head -1)
+if [ -n "$QDRANT_CONTAINER" ]; then
+  { docker cp "${QDRANT_CONTAINER}:/qdrant/storage" "${WORK_DIR}/qdrant-storage" 2>/dev/null \
+    && tar -cf "${WORK_DIR}/qdrant-storage.tar" -C "${WORK_DIR}" qdrant-storage 2>/dev/null \
+    && rm -rf "${WORK_DIR}/qdrant-storage"; } || true
+  echo "  Qdrant: $(du -sh "${WORK_DIR}/qdrant-storage.tar" 2>/dev/null | cut -f1 || echo 'n/a')"
+else
+  echo "  Qdrant: (container not found)"
+fi
+
+# 13. Media-stack configs (SKYLINE-SOC-2026-075 audit 2026-09-27: Jellyfin db + watched
+# state, *arr configs/API keys, qbit torrent state — ~82M raw, was single-copy on /srv).
+# Excluded: regenerable caches/metadata/logs/transcodes and the media files themselves
+# (rotation library is re-downloadable; ozzu-media-watchdog caps its growth).
+echo "[13/13] Backing up media-stack configs..."
+if [ -d /srv/media-stack/config ]; then
+  tar -cf "${WORK_DIR}/media-stack-config.tar" -C /srv/media-stack \
+    --exclude='config/jellyfin/cache' \
+    --exclude='config/jellyfin/log' \
+    --exclude='config/jellyfin/data/metadata' \
+    --exclude='config/jellyfin/data/transcodes' \
+    --exclude='config/jellyfin/data/plugins' \
+    --exclude='config/*/logs' --exclude='config/*/Logs' \
+    config 2>/dev/null || true
+  echo "  Media-stack config: $(du -sh "${WORK_DIR}/media-stack-config.tar" 2>/dev/null | cut -f1 || echo 'n/a')"
+else
+  echo "  Media-stack config: (dir not found)"
 fi
 
 # Create manifest
@@ -142,7 +203,11 @@ cat > "${WORK_DIR}/manifest.json" <<MANIFEST
     "ha_config": $([ -f "${WORK_DIR}/ha-config.tar" ] && echo "true" || echo "false"),
     "cipher_memory": $([ -f "${WORK_DIR}/cipher-memory.tar" ] && echo "true" || echo "false"),
     "env_files": true,
-    "redis": $([ -f "${WORK_DIR}/redis-dump.rdb" ] && echo "true" || echo "false")
+    "redis": $([ -f "${WORK_DIR}/redis-dump.rdb" ] && echo "true" || echo "false"),
+    "private_docs": $([ -f "${WORK_DIR}/private-docs.tar" ] && echo "true" || echo "false"),
+    "system_config": $([ -f "${WORK_DIR}/system-config.tar" ] && echo "true" || echo "false"),
+    "qdrant": $([ -f "${WORK_DIR}/qdrant-storage.tar" ] && echo "true" || echo "false"),
+    "media_stack_config": $([ -f "${WORK_DIR}/media-stack-config.tar" ] && echo "true" || echo "false")
   },
   "sizes": {
     "database": "$(du -sh "${WORK_DIR}/database.dump" 2>/dev/null | cut -f1 || echo '0')",
