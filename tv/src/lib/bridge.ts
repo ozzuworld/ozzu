@@ -24,7 +24,8 @@ function headers(extra?: Record<string, string>): Record<string, string> {
   return h;
 }
 
-async function call<T>(path: string, init?: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<T> {
+/** Authenticated bridge JSON call. Exported for sibling lane clients (seerr.ts). */
+export async function call<T>(path: string, init?: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

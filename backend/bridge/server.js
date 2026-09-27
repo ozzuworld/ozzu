@@ -51,6 +51,7 @@ const socRoutes = require("./routes/soc");
 const secopRoutes = require("./routes/secop");
 const jobsRoutes = require("./routes/jobs");
 const mediaRoutes = require("./routes/media");
+const discoverRoutes = require("./routes/discover");
 const watchdog = require("./infra/watchdog");
 const recoveryEngine = require("./infra/recovery-engine");
 const cipherDaemon = require("./cipher-agent/cipher-agent");
@@ -1628,6 +1629,7 @@ function getRouteHandlers() {
       ozzuSource: ozzuSourceRoutes(routeCtx),
       secop: secopRoutes(routeCtx),
       jobs: jobsRoutes(routeCtx),
+      discover: discoverRoutes(routeCtx),
       media: mediaRoutes(routeCtx),
     };
   }
@@ -1779,6 +1781,8 @@ async function handleRequest(req, res) {
   if (await r.soc(req, res, pathname, url)) return;
   if (await r.secop(req, res, pathname, url)) return;
   if (await r.jobs(req, res, pathname, url)) return;
+  // discover BEFORE media: media.js catch-alls every /media* path (Seerr lane)
+  if (await r.discover(req, res, pathname, url)) return;
   if (await r.media(req, res, pathname, url)) return;
   if (await r.ozzuSource(req, res, pathname, url)) return;
 
