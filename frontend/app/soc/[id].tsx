@@ -1,13 +1,16 @@
-// SOC engagement detail screen — thin orchestrator over 4 tab components.
-// dir_1780764341980: replaced the single-screen dump with Now / Queue / Findings / Detail.
-// State lives here; tabs are presentational. Live updates via useBridgeStream
-// (socQueueChanged, socStepDone, socFindingAdded, socExecOutput) — no polling.
+// Engagement record — SOC v3 report plane (dir_1790538151856).
+// READ-ONLY rebuild of the old acting screen: the app no longer runs queue
+// steps, cancels, skips or streams executor output. This is the record view
+// of one engagement: findings, queue history, recon hosts, execution log,
+// plus links to any kill chains this engagement feeds. Acting happens in the
+// terminal with King Kazuma; this screen reflects it.
 
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -15,7 +18,7 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { usePhoneLayout } from "../../lib/usePhoneLayout";
-import { getBridgeUrl } from "../../lib/bridge-api";
+import { apiFetch } from "../../lib/bridge-api";
 import { useBridgeStream } from "../../lib/useBridgeStream";
 import {
   colors,
@@ -25,44 +28,62 @@ import {
   fontWeight as fw,
   withAlpha,
 } from "../../lib/design-tokens";
+import { ProgressBar } from "../../components/business/ProgressBar";
 import { PhasePill } from "../../components/soc/PhasePill";
-import { NowTab, type ExecutorLite } from "../../components/soc/NowTab";
-import { ReportTab } from "../../components/soc/ReportTab";
-import { QueueTab } from "../../components/soc/QueueTab";
-import { FindingsTab } from "../../components/soc/FindingsTab";
-import { ObservationsTab } from "../../components/soc/ObservationsTab";
-import { DetailTab, type EngagementMeta, type ReconHostRow, type AuditLogRow, type TaskGraphNode } from "../../components/soc/DetailTab";
-import { LiveExecModal } from "../../components/soc/LiveExecModal";
-import { StepDetailModal, type StepDetail } from "../../components/soc/StepDetailModal";
+import { FindingRow, type FindingRowData } from "../../components/soc/FindingRow";
+import { FindingDetailModal } from "../../components/soc/FindingDetailModal";
+import { QueueRow, type QueueItemRow } from "../../components/soc/QueueRow";
 import { SocErrorBoundary } from "../../components/soc/SocErrorBoundary";
+import { severityColor } from "../../components/soc/phaseColors";
+import { fmtDate } from "../../components/soc/chainConstants";
 import { safe } from "../../components/soc/safe";
-import type { QueueItemRow } from "../../components/soc/QueueRow";
-import type { FindingRowData } from "../../components/soc/FindingRow";
-import type { RunningItem } from "../../components/soc/LiveExecBanner";
 
-type Tab = "now" | "queue" | "findings" | "observe" | "report" | "detail";
+type Tab = "findings" | "queue" | "recon" | "log";
 
 const TABS: Array<{ key: Tab; label: string }> = [
-  { key: "now", label: "Now" },
-  { key: "queue", label: "Queue" },
   { key: "findings", label: "Findings" },
-  { key: "observe", label: "Observe" },
-  { key: "report", label: "Report" },
-  { key: "detail", label: "Detail" },
+  { key: "queue", label: "Queue" },
+  { key: "recon", label: "Recon" },
+  { key: "log", label: "Log" },
 ];
 
 const FALLBACK_POLL_MS = 60_000;
 
-interface QueueItem extends QueueItemRow {
-  engagement_id: string;
-  command?: string;
-  expected_artifact?: string | null;
-  session_id?: string | null;
-  output?: string | null;
-  created_at?: string;
+interface EngagementMeta {
+  id: string;
+  client_name: string;
+  engagement_type: string;
+  status: string;
+  scope?: any;
+  roe?: any;
+  start_date?: string | null;
+  end_date?: string | null;
+  engagement_phase?: string | null;
+  created_at?: string | null;
 }
 
-export default function EngagementDetailScreen() {
+interface ReconHostRow {
+  ip: string;
+  hostname?: string | null;
+  mac?: string | null;
+  vendor?: string | null;
+  status?: string | null;
+  ports?: any;
+  discovered_at?: string | null;
+}
+
+interface AuditLogRow {
+  session_id: string;
+  agent_name: string;
+  task: string;
+  status: string;
+  started_at: string;
+  completed_at?: string | null;
+}
+
+interface ChainLink { slug: string; name: string; status: string; }
+
+export default function EngagementRecordScreen() {
   const router = useRouter();
   const [resetKey, setResetKey] = useState(0);
   return (
@@ -71,218 +92,94 @@ export default function EngagementDetailScreen() {
       onReset={() => setResetKey((k) => k + 1)}
       onBack={() => router.back()}
     >
-      <EngagementDetailInner />
+      <EngagementRecordInner />
     </SocErrorBoundary>
   );
 }
 
-function EngagementDetailInner() {
+function EngagementRecordInner() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { insets } = usePhoneLayout();
 
   const [engagement, setEngagement] = useState<EngagementMeta | null>(null);
-  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [queue, setQueue] = useState<QueueItemRow[]>([]);
   const [findings, setFindings] = useState<FindingRowData[]>([]);
   const [reconHosts, setReconHosts] = useState<ReconHostRow[]>([]);
   const [auditLog, setAuditLog] = useState<AuditLogRow[]>([]);
-  const [taskGraph, setTaskGraph] = useState<TaskGraphNode[]>([]);
+  const [chainLinks, setChainLinks] = useState<ChainLink[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>("now");
-  const [busyId, setBusyId] = useState<number | null>(null);
-  const [execItem, setExecItem] = useState<RunningItem | null>(null);
-  const [stepDetail, setStepDetail] = useState<StepDetail | null>(null);
-  const [executor, setExecutor] = useState<ExecutorLite>(null);
-  const [pendingObs, setPendingObs] = useState(0);
+  const [tab, setTab] = useState<Tab>("findings");
+  const [detailFinding, setDetailFinding] = useState<number | null>(null);
 
-  const mountedRef = useRef(true);
-
-  // ── Fetchers ──
+  // ── Fetchers (read-only) ──
 
   const fetchQueue = useCallback(async () => {
     try {
-      const r = await fetch(`${getBridgeUrl()}/soc/engagements/${id}/queue`);
-      const d = await r.json();
-      if (!mountedRef.current) return;
+      const d = await apiFetch(`/soc/engagements/${id}/queue`);
       setQueue(d.queue || []);
     } catch {}
   }, [id]);
 
   const fetchFindings = useCallback(async () => {
     try {
-      const r = await fetch(`${getBridgeUrl()}/soc/engagements/${id}/findings`);
-      const d = await r.json();
-      if (!mountedRef.current) return;
+      const d = await apiFetch(`/soc/engagements/${id}/findings`);
       setFindings(d.findings || []);
     } catch {}
   }, [id]);
 
   const fetchRecon = useCallback(async () => {
     try {
-      const r = await fetch(`${getBridgeUrl()}/soc/${id}/recon`);
-      if (!r.ok) return;
-      const d = await r.json();
-      if (!mountedRef.current) return;
+      const d = await apiFetch(`/soc/${id}/recon`);
       setReconHosts(d.hosts || []);
     } catch {}
   }, [id]);
 
   const fetchAuditLog = useCallback(async () => {
     try {
-      const r = await fetch(`${getBridgeUrl()}/soc/audit-log/${id}`);
-      const d = await r.json();
-      if (!mountedRef.current) return;
+      const d = await apiFetch(`/soc/audit-log/${id}`);
       setAuditLog(d.executions || []);
     } catch {}
   }, [id]);
 
-  const fetchTaskGraph = useCallback(async () => {
+  const fetchChainLinks = useCallback(async () => {
     try {
-      const r = await fetch(`${getBridgeUrl()}/soc/engagements/${id}/task-graph`);
-      if (!r.ok) return;
-      const d = await r.json();
-      if (!mountedRef.current) return;
-      setTaskGraph(d.tasks || []);
+      const d = await apiFetch("/soc/chains");
+      const linked = (d.chains || [])
+        .filter((c: any) => Array.isArray(c.engagement_ids) && c.engagement_ids.includes(id))
+        .map((c: any) => ({ slug: c.slug, name: c.name, status: c.status }));
+      setChainLinks(linked);
     } catch {}
   }, [id]);
 
   const fetchAll = useCallback(async () => {
     try {
-      const engRes = await fetch(`${getBridgeUrl()}/soc/engagements/${id}`);
-      const engData = await engRes.json();
-      if (!mountedRef.current) return;
-      setEngagement(engData.engagement);
-      // Executor health for the observer view — match the engagement's executor against live device_state.
-      const execHost = engData.engagement?.executor_host;
-      if (execHost) {
-        try {
-          const er = await fetch(`${getBridgeUrl()}/soc/executors`);
-          const ed = await er.json();
-          const match = (ed.executors || []).find((x: any) => x.device_id === execHost) || null;
-          if (mountedRef.current) setExecutor(match);
-        } catch {}
-      }
-      await Promise.all([fetchQueue(), fetchFindings(), fetchRecon(), fetchAuditLog(), fetchTaskGraph()]);
-      try {
-        const obsRes = await fetch(`${getBridgeUrl()}/soc/engagements/${id}/observations`);
-        if (obsRes.ok) {
-          const obsData = await obsRes.json();
-          if (mountedRef.current) setPendingObs((obsData.observations || []).filter((o: any) => o.status === "pending").length);
-        }
-      } catch {}
+      const engData = await apiFetch(`/soc/engagements/${id}`);
+      setEngagement(engData.engagement || null);
+      await Promise.all([fetchQueue(), fetchFindings(), fetchRecon(), fetchAuditLog(), fetchChainLinks()]);
     } catch {
       Alert.alert("Error", "Failed to load engagement");
     } finally {
-      if (mountedRef.current) setLoading(false);
+      setLoading(false);
     }
-  }, [id, fetchQueue, fetchFindings, fetchRecon, fetchAuditLog, fetchTaskGraph]);
+  }, [id, fetchQueue, fetchFindings, fetchRecon, fetchAuditLog, fetchChainLinks]);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    fetchAll();
-    return () => { mountedRef.current = false; };
-  }, [fetchAll]);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // ── Live push subscriptions ──
-
+  // Record-refresh pushes only — no exec output stream (the app doesn't act).
   const forEngagement = useCallback((msg: any) => msg && msg.engagement_id === id, [id]);
+  useBridgeStream("socQueueChanged", () => { fetchQueue(); }, {
+    filter: forEngagement, fallbackPollMs: FALLBACK_POLL_MS, onFallback: fetchQueue,
+  });
+  useBridgeStream("socStepDone", () => { fetchQueue(); fetchAuditLog(); }, { filter: forEngagement });
+  useBridgeStream("socFindingAdded", () => { fetchFindings(); }, { filter: forEngagement });
 
-  useBridgeStream(
-    "socQueueChanged",
-    () => { fetchQueue(); fetchTaskGraph(); },
-    { filter: forEngagement, fallbackPollMs: FALLBACK_POLL_MS, onFallback: () => { fetchQueue(); fetchTaskGraph(); } },
-  );
-  useBridgeStream(
-    "socStepDone",
-    () => { fetchQueue(); fetchTaskGraph(); fetchAuditLog(); },
-    { filter: forEngagement },
-  );
-  useBridgeStream(
-    "socFindingAdded",
-    () => { fetchFindings(); },
-    { filter: forEngagement },
-  );
-
-  // ── Actions ──
-
-  const runQueueItem = useCallback(async (item: QueueItemRow) => {
-    if (busyId != null) return;
-    setBusyId(item.id);
-    try {
-      const r = await fetch(`${getBridgeUrl()}/soc/queue/${item.id}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: "running" } : q)));
-    } catch (e: any) {
-      Alert.alert("Run failed", e.message || "Could not start step");
-    } finally {
-      setBusyId(null);
-    }
-  }, [busyId]);
-
-  const cancelQueueItem = useCallback((item: QueueItemRow) => {
-    Alert.alert(
-      "Cancel running step?",
-      `Kill "${item.title}"? Partial output will be saved.`,
-      [
-        { text: "Keep running", style: "cancel" },
-        {
-          text: "Cancel",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const r = await fetch(`${getBridgeUrl()}/soc/queue/${item.id}/cancel`, { method: "POST" });
-              if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            } catch (e: any) {
-              Alert.alert("Cancel failed", e.message || "Could not cancel step");
-            }
-          },
-        },
-      ],
-    );
-  }, []);
-
-  const skipQueueItem = useCallback((item: QueueItemRow) => {
-    Alert.alert("Skip step?", `Mark "${item.title}" as skipped?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Skip",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await fetch(`${getBridgeUrl()}/soc/queue/${item.id}/skip`, { method: "POST" });
-          } catch (e: any) {
-            Alert.alert("Skip failed", e.message || "Could not skip step");
-          }
-        },
-      },
-    ]);
-  }, []);
-
-  const onOutputUpdate = useCallback((itemId: number, output: string) => {
-    setQueue((prev) => prev.map((q) => (q.id === itemId ? { ...q, output } : q)));
-    setExecItem((prev) => (prev && prev.id === itemId ? { ...prev, output } : prev));
-  }, []);
-
-  const onFindingPress = useCallback((f: FindingRowData) => {
-    const desc = (f as any).description as string | undefined;
-    const rem = (f as any).remediation as string | undefined;
-    Alert.alert(
-      f.title,
-      [
-        f.affected_asset ? `Asset: ${f.affected_asset}` : null,
-        f.cvss_score != null ? `CVSS: ${f.cvss_score}` : null,
-        desc ? `\n${desc}` : null,
-        rem ? `\nFix: ${rem}` : null,
-      ].filter(Boolean).join("\n"),
-    );
-  }, []);
-
-  const running = useMemo(() => queue.find((q) => q.status === "running"), [queue]);
-
-  // ── Loading / not-found gates ──
+  const queueDone = useMemo(() => queue.filter((q) => q.status === "done").length, [queue]);
+  const sevCounts = useMemo(() => {
+    const c: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    for (const f of findings) c[f.severity] = (c[f.severity] || 0) + 1;
+    return c;
+  }, [findings]);
 
   if (loading) {
     return (
@@ -307,73 +204,104 @@ function EngagementDetailInner() {
       <StatusBar style="light" />
 
       {/* Header */}
-      <View
-        style={{
-          paddingHorizontal: spacing.md,
-          paddingTop: spacing.sm,
-          paddingBottom: spacing.md,
-          backgroundColor: colors.bg.elevated,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border.subtle,
-        }}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={16} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, marginBottom: spacing.xs, paddingVertical: spacing.xs, alignSelf: "flex-start" })}>
+      <View style={{
+        paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md,
+        backgroundColor: colors.bg.elevated,
+        borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
+      }}>
+        <Pressable onPress={() => router.back()} hitSlop={16} style={({ pressed }) => ({
+          opacity: pressed ? 0.6 : 1, marginBottom: spacing.xs, paddingVertical: spacing.xs, alignSelf: "flex-start",
+        })}>
           <Text style={{ color: colors.accent, fontSize: fs.lg, fontWeight: fw.medium }}>← Back</Text>
         </Pressable>
-        <Text
-          style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.bold }}
-          numberOfLines={1}
-        >
-          {safe(engagement.id, "—")}
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacing.xs, gap: spacing.sm }}>
-          <Text style={{ color: colors.text.secondary, fontSize: fs.md, flex: 1 }} numberOfLines={1}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+          <Text style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.bold, flex: 1 }} numberOfLines={1}>
             {safe(engagement.client_name, "—")}
-            {engagement.engagement_type ? ` · ${engagement.engagement_type}` : ""}
           </Text>
           <PhasePill phase={engagement.engagement_phase} size="sm" />
         </View>
+        <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, fontFamily: "monospace", marginTop: 2 }} numberOfLines={1}>
+          {safe(engagement.id, "—")}{engagement.engagement_type ? ` · ${engagement.engagement_type}` : ""}
+          {engagement.start_date ? ` · ${fmtDate(engagement.start_date)} →` : ""}
+        </Text>
+
+        {/* Severity strip + queue progress */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm }}>
+          {(["critical", "high", "medium", "low", "info"] as const).map((sv) => (
+            sevCounts[sv] > 0 ? (
+              <View key={sv} style={{
+                flexDirection: "row", alignItems: "center", gap: 4,
+                backgroundColor: withAlpha(severityColor(sv), 0.12),
+                borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2,
+              }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: severityColor(sv) }} />
+                <Text style={{ color: severityColor(sv), fontSize: fs.xs, fontWeight: fw.bold, fontFamily: "monospace" }}>
+                  {sevCounts[sv]}
+                </Text>
+              </View>
+            ) : null
+          ))}
+          <View style={{ flex: 1 }} />
+          {queue.length > 0 ? (
+            <Text style={{ color: colors.text.tertiary, fontSize: fs.xs, fontFamily: "monospace" }}>
+              queue {queueDone}/{queue.length}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* Chain links */}
+        {chainLinks.length > 0 ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.sm }}>
+            {chainLinks.map((c) => (
+              <Pressable
+                key={c.slug}
+                onPress={() => router.push(`/soc/chain/${c.slug}`)}
+                style={({ pressed }) => ({
+                  flexDirection: "row", alignItems: "center", gap: 4,
+                  backgroundColor: withAlpha(colors.brand.purple, 0.12),
+                  borderRadius: radius.full, paddingHorizontal: spacing.sm + 2, paddingVertical: 4,
+                  borderWidth: 1, borderColor: withAlpha(colors.brand.purple, 0.3),
+                  opacity: pressed ? 0.8 : 1,
+                })}
+              >
+                <Text style={{ fontSize: 10 }}>⛓️</Text>
+                <Text style={{ color: colors.brand.purple, fontSize: fs.xs, fontWeight: fw.semibold }}>
+                  {safe(c.name, c.slug)}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </View>
 
       {/* Tab nav */}
-      <View
-        style={{
-          flexDirection: "row",
-          backgroundColor: colors.bg.elevated,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border.subtle,
-        }}
-      >
+      <View style={{
+        flexDirection: "row", backgroundColor: colors.bg.elevated,
+        borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
+      }}>
         {TABS.map((t) => {
           const active = tab === t.key;
-          const badge = countForTab(t.key, queue, findings, pendingObs);
+          const badge = t.key === "findings" ? findings.length
+            : t.key === "queue" ? queue.length
+            : t.key === "recon" ? reconHosts.length
+            : auditLog.length;
           return (
             <Pressable
               key={t.key}
               onPress={() => setTab(t.key)}
-              style={({ pressed }) => [
-                styles.tab,
-                active && styles.tabActive,
-                pressed && { opacity: 0.8 },
-              ]}
+              style={({ pressed }) => [styles.tab, active && styles.tabActive, pressed && { opacity: 0.8 }]}
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    color: active ? colors.accent : colors.text.tertiary,
-                    fontSize: fs.md,
-                    fontWeight: active ? fw.bold : fw.medium,
-                  }}
-                >
+                <Text numberOfLines={1} style={{
+                  color: active ? colors.accent : colors.text.tertiary,
+                  fontSize: fs.md, fontWeight: active ? fw.bold : fw.medium,
+                }}>
                   {t.label}
                 </Text>
-                {badge != null && badge > 0 ? (
+                {badge > 0 ? (
                   <Text style={{
                     color: active ? colors.accent : colors.text.disabled,
-                    fontSize: fs.xs,
-                    fontFamily: "monospace",
-                    fontWeight: fw.semibold,
+                    fontSize: fs.xs, fontFamily: "monospace", fontWeight: fw.semibold,
                   }}>
                     {badge}
                   </Text>
@@ -384,65 +312,138 @@ function EngagementDetailInner() {
         })}
       </View>
 
-      {/* Active tab body */}
-      {tab === "now" ? (
-        <NowTab
-          engagement={engagement}
-          executor={executor}
-          queue={queue}
-          findings={findings}
-          onFindingPress={onFindingPress}
-          onStepPress={(item) => setStepDetail(item)}
-          onSwitchTab={(t) => setTab(t as Tab)}
-        />
-      ) : null}
-      {tab === "queue" ? (
-        <QueueTab
-          queue={queue}
-          busyId={busyId}
-          onRun={runQueueItem}
-          onCancel={cancelQueueItem}
-          onSkip={skipQueueItem}
-          onItemPress={(item) => setStepDetail(item as any)}
-        />
-      ) : null}
-      {tab === "findings" ? (
-        <FindingsTab findings={findings} onFindingPress={onFindingPress} />
-      ) : null}
-      {tab === "observe" ? <ObservationsTab engagementId={id!} /> : null}
-      {tab === "report" ? <ReportTab engagementId={id!} /> : null}
-      {tab === "detail" ? (
-        <DetailTab
-          engagement={engagement}
-          reconHosts={reconHosts}
-          auditLog={auditLog}
-          taskGraph={taskGraph}
-        />
-      ) : null}
+      {/* Tab bodies */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.sm }}
+      >
+        {tab === "findings" ? (
+          findings.length === 0 ? (
+            <EmptyTab emoji="🔎" text="No findings recorded on this engagement" />
+          ) : (
+            findings.map((f) => <FindingRow key={f.id} finding={f} onPress={(x) => setDetailFinding(x.id)} />)
+          )
+        ) : null}
 
-      {/* Step detail modal */}
-      <StepDetailModal
-        visible={stepDetail != null}
-        step={stepDetail}
-        onClose={() => setStepDetail(null)}
-      />
+        {tab === "queue" ? (
+          queue.length === 0 ? (
+            <EmptyTab emoji="📋" text="No queue steps recorded" />
+          ) : (
+            <>
+              <View style={{ marginBottom: spacing.xs }}>
+                <ProgressBar done={queueDone} total={queue.length} color={colors.accent} height={4} />
+              </View>
+              {queue.map((q) => <QueueRow key={q.id} item={q} />)}
+            </>
+          )
+        ) : null}
 
-      {/* Full exec modal */}
-      <LiveExecModal
-        visible={execItem != null}
-        item={execItem}
-        onClose={() => setExecItem(null)}
-        onCancel={running ? () => { cancelQueueItem(running); setExecItem(null); } : undefined}
-      />
+        {tab === "recon" ? (
+          reconHosts.length === 0 ? (
+            <EmptyTab emoji="📡" text="No recon hosts recorded" />
+          ) : (
+            reconHosts.map((h, i) => {
+              const ports = Array.isArray(h.ports) ? h.ports : [];
+              return (
+                <View key={`${h.ip}-${i}`} style={{
+                  backgroundColor: colors.gray[800], borderRadius: radius.md,
+                  borderLeftWidth: 3,
+                  borderLeftColor: h.status === "up" ? colors.success : colors.text.disabled,
+                  borderWidth: 1, borderColor: "rgba(255,255,255,0.04)",
+                  padding: spacing.md, gap: spacing.xs,
+                }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                    <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.semibold, fontFamily: "monospace" }}>
+                      {safe(h.ip)}
+                    </Text>
+                    {h.hostname ? (
+                      <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, flex: 1 }} numberOfLines={1}>
+                        {safe(h.hostname)}
+                      </Text>
+                    ) : <View style={{ flex: 1 }} />}
+                    <View style={{
+                      width: 7, height: 7, borderRadius: 4,
+                      backgroundColor: h.status === "up" ? colors.success : colors.text.disabled,
+                    }} />
+                  </View>
+                  {h.vendor || h.mac ? (
+                    <Text style={{ color: colors.text.disabled, fontSize: fs.xs, fontFamily: "monospace" }} numberOfLines={1}>
+                      {[safe(h.mac), safe(h.vendor)].filter(Boolean).join(" · ")}
+                    </Text>
+                  ) : null}
+                  {ports.length > 0 ? (
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: 2 }}>
+                      {ports.slice(0, 12).map((p: any, pi: number) => {
+                        const port = typeof p === "object" ? p?.port : p;
+                        const svc = typeof p === "object" ? p?.service || p?.version : null;
+                        return (
+                          <View key={pi} style={{
+                            backgroundColor: withAlpha(colors.info, 0.10), borderRadius: radius.xs,
+                            paddingHorizontal: spacing.xs + 2, paddingVertical: 2,
+                          }}>
+                            <Text style={{ color: colors.brand.blue, fontSize: 9, fontFamily: "monospace" }}>
+                              {safe(port)}{svc ? ` ${safe(svc)}` : ""}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                      {ports.length > 12 ? (
+                        <Text style={{ color: colors.text.disabled, fontSize: 9, fontFamily: "monospace" }}>
+                          +{ports.length - 12}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })
+          )
+        ) : null}
+
+        {tab === "log" ? (
+          auditLog.length === 0 ? (
+            <EmptyTab emoji="🧾" text="No execution log entries" />
+          ) : (
+            auditLog.map((row, i) => {
+              const done = row.status === "done" || row.status === "completed";
+              const failed = row.status === "failed";
+              const stColor = failed ? colors.error : done ? colors.success : colors.warning;
+              return (
+                <View key={`${row.session_id}-${i}`} style={{
+                  backgroundColor: colors.gray[800], borderRadius: radius.md,
+                  borderLeftWidth: 3, borderLeftColor: stColor,
+                  borderWidth: 1, borderColor: "rgba(255,255,255,0.04)",
+                  padding: spacing.md, gap: 2,
+                }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                    <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium, flex: 1 }} numberOfLines={1}>
+                      {safe(row.task)}
+                    </Text>
+                    <Text style={{ color: stColor, fontSize: fs.xs, fontWeight: fw.semibold }}>{safe(row.status)}</Text>
+                  </View>
+                  <Text style={{ color: colors.text.disabled, fontSize: fs.xs, fontFamily: "monospace" }} numberOfLines={1}>
+                    {safe(row.agent_name)} · {row.started_at ? new Date(row.started_at).toLocaleString() : "—"}
+                    {row.completed_at ? ` → ${new Date(row.completed_at).toLocaleTimeString()}` : ""}
+                  </Text>
+                </View>
+              );
+            })
+          )
+        ) : null}
+      </ScrollView>
+
+      <FindingDetailModal findingId={detailFinding} onClose={() => setDetailFinding(null)} />
     </View>
   );
 }
 
-function countForTab(key: Tab, queue: QueueItem[], findings: FindingRowData[], pendingObs?: number): number | null {
-  if (key === "queue") return queue.length;
-  if (key === "findings") return findings.length;
-  if (key === "observe") return pendingObs || null;
-  return null;
+function EmptyTab({ emoji, text }: { emoji: string; text: string }) {
+  return (
+    <View style={{ alignItems: "center", paddingVertical: spacing.xxxl }}>
+      <Text style={{ fontSize: 36, marginBottom: spacing.sm }}>{emoji}</Text>
+      <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>{text}</Text>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({

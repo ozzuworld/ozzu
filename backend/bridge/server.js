@@ -1010,6 +1010,24 @@ async function initStorage() {
     scanOrphanCommits().catch(err => log.directive.error("orphan commit scanner (startup):", err.message));
   }, 2 * 60 * 1000);
 
+  // ── SOC v3 record-plane indexer — every 10 minutes (dir_1790538151856) ──
+  // Idempotent disk→DB sync: seeds chains, syncs CHAIN.md manifests, indexes
+  // artifacts + rNNN evidence runs, applies curated finding links, archive sweep.
+  // First pass 90s after boot (lets the DB pool settle); errors are logged, never fatal.
+  try {
+    const { runIndex: socRunIndex } = require("./soc/soc-indexer");
+    setTimeout(() => {
+      socRunIndex(db)
+        .then(r => console.log("[soc-index] startup pass:", JSON.stringify(r)))
+        .catch(err => console.error("[soc-index] startup pass failed:", err.message));
+    }, 90 * 1000);
+    _intervals.push(setInterval(() => {
+      socRunIndex(db).catch(err => console.error("[soc-index] pass failed:", err.message));
+    }, 10 * 60 * 1000));
+  } catch (err) {
+    console.error("[soc-index] module load failed:", err.message);
+  }
+
   // ── Background build status updater — every 60 seconds ──
   _intervals.push(setInterval(async () => {
     try {

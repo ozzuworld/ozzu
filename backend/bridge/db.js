@@ -1144,6 +1144,84 @@ async function init() {
     // the new graph prompt is smoke-tested. Flip true on engagements that opt in.
     await pool.query(`ALTER TABLE pentest_engagements ADD COLUMN IF NOT EXISTS graph_mode_enabled BOOLEAN DEFAULT false`);
 
+    // ── SOC v3 Record plane (dir_1790538151856) — kill-chain-first reporting ──
+    // Design contract: private/soc-redesign/PROPOSAL-v1.md. The app is a REPORTING
+    // surface over these tables; the disk (CHAIN.md manifests, drop dirs, evidence
+    // runs) is synced in by soc/soc-indexer.js (idempotent, file-first). Chains are
+    // the first-class object: components (findings), artifacts (drop package files),
+    // runs (rNNN evidence), and vendor-coordination events all hang off them.
+    await pool.query(`CREATE TABLE IF NOT EXISTS soc_kill_chains (
+      id              VARCHAR(40) PRIMARY KEY,
+      slug            VARCHAR(80) NOT NULL UNIQUE,
+      name            VARCHAR(120) NOT NULL,
+      drop_number     INTEGER,
+      status          VARCHAR(30) NOT NULL DEFAULT 'researching',
+      cvss_composed   NUMERIC(3,1),
+      cvss_standalone NUMERIC(3,1),
+      engagement_ids  JSONB DEFAULT '[]',
+      components      JSONB DEFAULT '[]',
+      dir_path        TEXT,
+      published_repo  TEXT,
+      published_at    TIMESTAMPTZ,
+      summary         TEXT,
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS soc_artifacts (
+      id            SERIAL PRIMARY KEY,
+      chain_id      VARCHAR(40) REFERENCES soc_kill_chains(id) ON DELETE CASCADE,
+      finding_id    INTEGER REFERENCES pentest_findings(id) ON DELETE SET NULL,
+      engagement_id VARCHAR(50) REFERENCES pentest_engagements(id) ON DELETE SET NULL,
+      kind          VARCHAR(30) NOT NULL,
+      path          TEXT NOT NULL,
+      sha256        VARCHAR(64),
+      sanitized     BOOLEAN DEFAULT false,
+      push_state    VARCHAR(20) DEFAULT 'local',
+      repo          VARCHAR(120),
+      created_at    TIMESTAMPTZ DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(chain_id, path)
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS soc_runs (
+      id            SERIAL PRIMARY KEY,
+      run_key       VARCHAR(40) NOT NULL UNIQUE,
+      target        VARCHAR(120),
+      engagement_id VARCHAR(50) REFERENCES pentest_engagements(id) ON DELETE SET NULL,
+      chain_id      VARCHAR(40) REFERENCES soc_kill_chains(id) ON DELETE SET NULL,
+      run_date      DATE,
+      purpose       TEXT,
+      verdict       VARCHAR(20),
+      summary       TEXT,
+      files         JSONB DEFAULT '[]',
+      indexed_from  TEXT,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS soc_coordination_events (
+      id          SERIAL PRIMARY KEY,
+      channel     VARCHAR(20) NOT NULL,
+      event_date  DATE NOT NULL,
+      direction   VARCHAR(10) NOT NULL DEFAULT 'sent',
+      subject     TEXT,
+      ref         VARCHAR(120) NOT NULL DEFAULT '',
+      status      VARCHAR(20) DEFAULT 'pending',
+      chain_id    VARCHAR(40) REFERENCES soc_kill_chains(id) ON DELETE SET NULL,
+      finding_ids JSONB DEFAULT '[]',
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(channel, event_date, ref)
+    )`);
+    // Finding lifecycle axis (truth axis = existing kind column). lifecycle values:
+    // discovered|filed|packaged|submitted|vendor-acked|cve-assigned|fix-shipped|
+    // published|held|duplicate|withdrawn
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS chain_id VARCHAR(40) REFERENCES soc_kill_chains(id) ON DELETE SET NULL`);
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS lifecycle VARCHAR(30)`);
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS skyline_id VARCHAR(40)`);
+    await pool.query(`ALTER TABLE pentest_findings ADD COLUMN IF NOT EXISTS cve_id VARCHAR(40)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_findings_chain ON pentest_findings(chain_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_findings_lifecycle ON pentest_findings(lifecycle)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_chains_status ON soc_kill_chains(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_runs_chain ON soc_runs(chain_id, run_date)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_artifacts_chain ON soc_artifacts(chain_id, kind)`);
+
     // ── Phase-gated autonomous execution (dir_1780784224487) ──
     // autonomous_execution_enabled: when true, queueStep auto-spawns SSH execution
     //   for recon/enumeration phase steps via the existing /soc/queue/:id/run path.

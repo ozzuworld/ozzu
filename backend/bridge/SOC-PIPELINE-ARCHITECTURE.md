@@ -87,10 +87,36 @@ terminal-direct work is the default mode.
   and `invoke_joko`; PRINCIPLES §VI revised. Re-assess classifier guards only if
   SOC work ever routes back through Claude/Opus.
 
+## SOC v3 — record/report plane (2026-09-27, dir_1790538151856)
+
+Three planes: **WORK** stays on disk (canonical evidence folders) → **RECORD**
+lives in bridge postgres → **REPORT** is the app (read-only). The app is no
+longer an acting tool; acting happens terminal-direct in pipeline mode.
+
+- Tables: `soc_kill_chains`, `soc_artifacts` (sha256 + `sanitized` leak-guard),
+  `soc_runs`, `soc_coordination_events`; `pentest_findings` gains
+  `chain_id`/`lifecycle`/`skyline_id`/`cve_id` (dual axis: `kind` = truth,
+  `lifecycle` = disclosure state).
+- File-first two-way sync: `CHAIN.md` frontmatter per chain dir is authoritative
+  for status/components; `soc/soc-indexer.js` syncs disk→DB (90s after boot +
+  every 10 min + `POST /soc/reindex`); MCP chain writes rewrite `CHAIN.md`.
+- Read API: `/soc/overview`, `/soc/chains[/:slug]`, `/soc/findings[/:id]`,
+  `/soc/runs`, `/soc/coordination`, `/soc/artifacts/:id/content` (sanitized
+  only — manifests 403 by design).
+- MCP tools: `add_kill_chain`, `update_kill_chain`, `attach_artifact`,
+  `log_run`, `log_coordination`.
+- App screens: chain-first SOC home, chain detail (pipeline strip + advisory
+  viewer), findings board (lifecycle filters), read-only engagement record.
+  Acting UI (Run/Skip/Cancel/new/Calls/relay) removed.
+- Design contract: `private/soc-redesign/PROPOSAL-v1.md` (private).
+
 ## Progress log
 
 <!-- Newest first. The merge_and_deploy PostToolUse hook (soc-progress-log.sh) appends a
      timestamped line here on each SOC-related merge. Manual entries welcome too. -->
+
+- 2026-09-27 — SOC v3 record/report plane: kill-chain tables + indexer + read API + 5 MCP tools + chain-first app rebuild; acting UI removed; Android APK CI restored (dir_1790538151856).
+- 2026-09-23 — SOC audit: strip refusal-era machine, adopt pipeline mode — dir_1790188614863
 
 - 2026-09-23 — Pipeline-mode audit: stripped refusal-era rules/hooks/memories, removed invoke_joko, rewrote canonical doc slim (dir_1790188614863).
 - 2026-06-23 — Consolidated ~11 sprawled SOC/offense/finetune docs into this single canonical doc; deleted the stale duplicates; wired the auto-update hook (dir_1782250182891).

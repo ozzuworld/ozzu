@@ -1,0 +1,137 @@
+name: Build Android APK
+
+# Android target restored 2026-09-27 by King Kazuma's order (dir_1790538151856):
+# "i will be using ozzu app on android for the time been". The app remains
+# iOS-primary; this workflow produces a sideloadable rolling APK.
+#
+# JS-only changes do NOT need this workflow — ota-deploy.sh already exports the
+# iOS + Android JS bundles and the bridge manifest serves both, so an installed
+# APK picks up JS over-the-air exactly like the iPhone (runtimeVersion 1.0.0
+# must match). This build is for NATIVE changes (app.json / plugins / modules /
+# new native deps) or a first install.
+
+on:
+  workflow_dispatch: # Manual trigger (GitHub UI or: gh workflow run build-android.yml)
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/app.json'
+      - 'frontend/plugins/**'
+      - 'frontend/modules/**'
+
+permissions:
+  contents: write   # publish the APK to the android-latest Release (artifact quota fills)
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      EXPO_PUBLIC_HA_URL: ${{ secrets.EXPO_PUBLIC_HA_URL }}
+      EXPO_PUBLIC_HA_TOKEN: ${{ secrets.EXPO_PUBLIC_HA_TOKEN }}
+      EXPO_PUBLIC_GEMINI_API_KEY: ${{ secrets.EXPO_PUBLIC_GEMINI_API_KEY }}
+      EXPO_PUBLIC_BRIDGE_URL: ${{ secrets.EXPO_PUBLIC_BRIDGE_URL }}
+      EXPO_PUBLIC_BRIDGE_PUBLIC_URL: ${{ secrets.EXPO_PUBLIC_BRIDGE_PUBLIC_URL }}
+      EXPO_PUBLIC_BRIDGE_API_KEY: ${{ secrets.EXPO_PUBLIC_BRIDGE_API_KEY }}
+      EXPO_PUBLIC_BRIDGE_PIN: ${{ secrets.EXPO_PUBLIC_BRIDGE_PIN }}
+      EXPO_PUBLIC_META_APP_ID: ${{ secrets.EXPO_PUBLIC_META_APP_ID }}
+      EXPO_PUBLIC_META_CLIENT_TOKEN: ${{ secrets.EXPO_PUBLIC_META_CLIENT_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write .env from secrets
+        run: |
+          echo "EXPO_PUBLIC_HA_URL=${EXPO_PUBLIC_HA_URL}" > .env
+          echo "EXPO_PUBLIC_HA_TOKEN=${EXPO_PUBLIC_HA_TOKEN}" >> .env
+          echo "EXPO_PUBLIC_GEMINI_API_KEY=${EXPO_PUBLIC_GEMINI_API_KEY}" >> .env
+          echo "EXPO_PUBLIC_BRIDGE_URL=${EXPO_PUBLIC_BRIDGE_URL}" >> .env
+          echo "EXPO_PUBLIC_BRIDGE_PUBLIC_URL=${EXPO_PUBLIC_BRIDGE_PUBLIC_URL}" >> .env
+          echo "EXPO_PUBLIC_BRIDGE_API_KEY=${EXPO_PUBLIC_BRIDGE_API_KEY}" >> .env
+          echo "EXPO_PUBLIC_BRIDGE_PIN=${EXPO_PUBLIC_BRIDGE_PIN}" >> .env
+
+      - name: Bump android.versionCode from GITHUB_RUN_NUMBER
+        run: |
+          # Monotonic versionCode so Android treats each build as an upgrade.
+          # version (1.0.0) stays semantic and MUST match the OTA runtimeVersion gate.
+          jq --argjson vc "$GITHUB_RUN_NUMBER" '.expo.android.versionCode = $vc' app.json > app.json.new
+          mv app.json.new app.json
+          echo "versionCode set to $(jq -r '.expo.android.versionCode' app.json)"
+
+      - name: Decode release keystore (optional)
+        if: env.OZZU_ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          OZZU_ANDROID_KEYSTORE_BASE64: ${{ secrets.OZZU_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$OZZU_ANDROID_KEYSTORE_BASE64" | base64 -d > /tmp/ozzu-android.keystore
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build release APK
+        env:
+          OZZU_ANDROID_KEYSTORE_FILE: ${{ secrets.OZZU_ANDROID_KEYSTORE_BASE64 && '/tmp/ozzu-android.keystore' || '' }}
+          OZZU_ANDROID_KEY_ALIAS: ${{ secrets.OZZU_ANDROID_KEY_ALIAS }}
+          OZZU_ANDROID_KEY_PASSWORD: ${{ secrets.OZZU_ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android
+          # No keystore secret configured → the Expo template signs release with the
+          # debug key: still a sideloadable, OTA-capable APK (interim-use target).
+          ./gradlew assembleRelease \
+            -x lint -x test \
+            -x checkDebugDuplicateClasses \
+            -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86_64
+
+      - name: Stage APK + metadata
+        run: |
+          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          cp "$APK" ozzu.apk
+          SHA256=$(sha256sum ozzu.apk | cut -d' ' -f1)
+          SIZE=$(stat -c%s ozzu.apk)
+          cat > android-latest.json <<EOF
+          {
+            "version": "$(jq -r .expo.version app.json)",
+            "versionCode": $GITHUB_RUN_NUMBER,
+            "runtimeVersion": "$(jq -r '.expo.runtimeVersion // "1.0.0"' app.json)",
+            "sha256": "$SHA256",
+            "size": $SIZE,
+            "runId": "$GITHUB_RUN_ID",
+            "sha": "$GITHUB_SHA",
+            "builtAt": "$(date -u +%FT%TZ)"
+          }
+          EOF
+          cat android-latest.json
+
+      - name: Publish APK + metadata to the android-latest Release
+        # Release assets have a separate quota from artifact storage (same pattern
+        # as build-ios.yml / build-tv.yml). Rolling release, clobber-upload.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view android-latest >/dev/null 2>&1 || \
+            gh release create android-latest --title "Android latest APK" \
+              --notes "Rolling latest Android build (auto-updated by build-android.yml)" --prerelease
+          gh release upload android-latest \
+            ozzu.apk android-latest.json --clobber

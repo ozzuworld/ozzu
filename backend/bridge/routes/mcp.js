@@ -698,6 +698,102 @@ module.exports = function mcpRoutes(ctx) {
         required: ["engagement_id"],
       },
     },
+    {
+      name: "add_kill_chain",
+      description: "Register a SOC v3 kill chain (Word;Word named attack chain = drop unit). Creates/updates the soc_kill_chains row AND materializes the CHAIN.md manifest in dir_path (file-first contract). Chains are the app's first-class object: components, artifacts, runs and coordination events hang off them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "kebab-case id, e.g. 'false-relay'" },
+          name: { type: "string", description: "display name, e.g. 'False;Relay'" },
+          drop_number: { type: "number", description: "publication sequence number (1, 2, 3, ...)" },
+          status: { type: "string", enum: ["researching", "proven", "packaged", "submitted", "vendor-acked", "cve-assigned", "fix-shipped", "published"], description: "chain lifecycle status (default 'researching')" },
+          cvss_composed: { type: "number", description: "CVSS when composed with other published chains" },
+          cvss_standalone: { type: "number", description: "CVSS standalone" },
+          engagement_ids: { type: "array", description: "engagements this chain's work ran under" },
+          components: { type: "array", description: "[{skyline_id, name, cwe, severity, cvss, cve, role}] component vulns" },
+          dir_path: { type: "string", description: "chain folder relative to repo root, e.g. 'private/cucm/False-Relay'" },
+          published_repo: { type: "string", description: "public repo URL once pushed" },
+          published_at: { type: "string", description: "YYYY-MM-DD publication date" },
+          summary: { type: "string", description: "one-paragraph chain summary" },
+        },
+        required: ["slug", "name"],
+      },
+    },
+    {
+      name: "update_kill_chain",
+      description: "Update a kill chain's status/CVSS/publication fields, or upsert one component by skyline_id. Re-syncs the CHAIN.md manifest on disk after the DB write (two-way file-first contract).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "chain slug, e.g. 'false-relay'" },
+          status: { type: "string", enum: ["researching", "proven", "packaged", "submitted", "vendor-acked", "cve-assigned", "fix-shipped", "published"] },
+          cvss_composed: { type: "number" },
+          cvss_standalone: { type: "number" },
+          published_repo: { type: "string" },
+          published_at: { type: "string", description: "YYYY-MM-DD" },
+          summary: { type: "string" },
+          dir_path: { type: "string" },
+          upsert_component: { type: "object", description: "{skyline_id (required), name, cwe, severity, cvss, cve, role} — replaces the component with the same skyline_id, else appends" },
+        },
+        required: ["slug"],
+      },
+    },
+    {
+      name: "attach_artifact",
+      description: "Register a file as a SOC v3 artifact (advisory/poc/banner/report/...) linked to a chain, finding, or engagement. Computes sha256 when the bridge can read the file. sanitized=true marks it servable through the in-app content viewer (GET /soc/artifacts/:id/content); unsanitized artifacts are refused by the API (leak-guard).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          chain_slug: { type: "string", description: "chain to attach to (preferred)" },
+          finding_id: { type: "number", description: "finding to attach to (alternative)" },
+          engagement_id: { type: "string", description: "engagement to attach to (alternative)" },
+          kind: { type: "string", enum: ["advisory", "readme", "poc", "mitigations", "banner", "vuln-page", "email-draft", "report", "tool", "manifest", "coordination-log", "evidence", "other"] },
+          path: { type: "string", description: "absolute path on the bridge host" },
+          sanitized: { type: "boolean", description: "true ONLY if leak-scanned (no lab IPs/domains/creds/handles) — gates the in-app viewer" },
+          push_state: { type: "string", enum: ["local", "staged", "pushed"], description: "publication state (default local)" },
+          repo: { type: "string", description: "repo the artifact belongs to / was pushed to" },
+        },
+        required: ["kind", "path"],
+      },
+    },
+    {
+      name: "log_run",
+      description: "Record/enrich an evidence run (rNNN) in the SOC v3 ledger: target, date, purpose, verdict (pass/fail/partial), summary, chain/engagement links. The disk indexer auto-inserts rNNN*.md files it finds; this tool enriches them and logs runs the indexer can't see. Upsert by run_key.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          run_key: { type: "string", description: "e.g. 'r401'" },
+          target: { type: "string", description: "e.g. 'expressway-x15', 'cucm-15'" },
+          engagement_id: { type: "string" },
+          chain_slug: { type: "string" },
+          run_date: { type: "string", description: "YYYY-MM-DD (default today)" },
+          purpose: { type: "string", description: "one-line what this run tested" },
+          verdict: { type: "string", enum: ["pass", "fail", "partial"] },
+          summary: { type: "string", description: "result summary (no secrets — hash-only discipline)" },
+          files: { type: "array", description: "evidence file paths" },
+        },
+        required: ["run_key"],
+      },
+    },
+    {
+      name: "log_coordination",
+      description: "Record a vendor-coordination event (PSIRT/ZDI/SSD/MITRE/GitHub): submission, response, silence. Upsert by (channel, event_date, ref). Powers the chain Coordination tab and the campaign 'weeks silent' counter.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          channel: { type: "string", enum: ["psirt", "zdi", "ssd", "mitre", "github", "other"] },
+          event_date: { type: "string", description: "YYYY-MM-DD" },
+          direction: { type: "string", enum: ["sent", "received", "draft"] },
+          subject: { type: "string" },
+          ref: { type: "string", description: "stable dedup key, e.g. 'psirt-2026-08-04'" },
+          status: { type: "string", enum: ["pending", "acked", "silent", "rejected", "held"] },
+          chain_slug: { type: "string" },
+          finding_ids: { type: "array", description: "related pentest_findings ids" },
+        },
+        required: ["channel", "event_date"],
+      },
+    },
   ];
 
   // ── Tool handlers ──
@@ -2245,6 +2341,181 @@ module.exports = function mcpRoutes(ctx) {
           channels,
         });
         return { content: [{ type: "text", text: `✓ Created person: ${p.name} (${p.id})\nChannels: ${p.channels.map(c => `${c.type}:${c.address}`).join(", ") || "none"}` }] };
+      }
+
+      // ── SOC v3 record-plane tools (dir_1790538151856) ──
+      case "add_kill_chain": {
+        if (!args.slug || !args.name) {
+          return { content: [{ type: "text", text: "add_kill_chain: slug and name are required" }], isError: true };
+        }
+        const slug = String(args.slug).toLowerCase().replace(/[^a-z0-9-]/g, "-");
+        await db.query(
+          `INSERT INTO soc_kill_chains
+             (id, slug, name, drop_number, status, cvss_composed, cvss_standalone,
+              engagement_ids, components, dir_path, published_repo, published_at, summary)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           ON CONFLICT (slug) DO UPDATE SET
+             name            = EXCLUDED.name,
+             drop_number     = COALESCE(EXCLUDED.drop_number, soc_kill_chains.drop_number),
+             status          = EXCLUDED.status,
+             cvss_composed   = COALESCE(EXCLUDED.cvss_composed, soc_kill_chains.cvss_composed),
+             cvss_standalone = COALESCE(EXCLUDED.cvss_standalone, soc_kill_chains.cvss_standalone),
+             engagement_ids  = CASE WHEN EXCLUDED.engagement_ids::text = '[]' THEN soc_kill_chains.engagement_ids ELSE EXCLUDED.engagement_ids END,
+             components      = CASE WHEN EXCLUDED.components::text = '[]' THEN soc_kill_chains.components ELSE EXCLUDED.components END,
+             dir_path        = COALESCE(EXCLUDED.dir_path, soc_kill_chains.dir_path),
+             published_repo  = COALESCE(EXCLUDED.published_repo, soc_kill_chains.published_repo),
+             published_at    = COALESCE(EXCLUDED.published_at, soc_kill_chains.published_at),
+             summary         = COALESCE(EXCLUDED.summary, soc_kill_chains.summary),
+             updated_at      = now()`,
+          [`chain_${slug}`, slug, args.name, args.drop_number ?? null, args.status || "researching",
+           args.cvss_composed ?? null, args.cvss_standalone ?? null,
+           JSON.stringify(args.engagement_ids || []), JSON.stringify(args.components || []),
+           args.dir_path || null, args.published_repo || null, args.published_at || null,
+           args.summary || null]);
+        let manifestWritten = false;
+        try { manifestWritten = await require("../soc/soc-indexer").writeManifest(db, slug); } catch (_) {}
+        return { content: [{ type: "text", text: `✅ Kill chain upserted: ${args.name} (${slug}) — status '${args.status || "researching"}'${manifestWritten ? `, CHAIN.md manifest synced to ${args.dir_path || "dir_path"}` : (args.dir_path ? " (CHAIN.md write skipped — check dir_path)" : "")}. Visible in app: SOC home → chain card (GET /soc/chains).` }] };
+      }
+
+      case "update_kill_chain": {
+        if (!args.slug) {
+          return { content: [{ type: "text", text: "update_kill_chain: slug is required" }], isError: true };
+        }
+        const r = await db.query(`SELECT * FROM soc_kill_chains WHERE slug = $1`, [args.slug]);
+        if (!r.rows.length) {
+          return { content: [{ type: "text", text: `update_kill_chain: no chain with slug '${args.slug}'` }], isError: true };
+        }
+        const row = r.rows[0];
+        let components = typeof row.components === "string" ? JSON.parse(row.components || "[]") : (row.components || []);
+        if (args.upsert_component && args.upsert_component.skyline_id) {
+          const idx = components.findIndex(c => c && c.skyline_id === args.upsert_component.skyline_id);
+          if (idx >= 0) components[idx] = { ...components[idx], ...args.upsert_component };
+          else components.push(args.upsert_component);
+        }
+        await db.query(
+          `UPDATE soc_kill_chains SET
+             status          = COALESCE($2, status),
+             cvss_composed   = COALESCE($3, cvss_composed),
+             cvss_standalone = COALESCE($4, cvss_standalone),
+             published_repo  = COALESCE($5, published_repo),
+             published_at    = COALESCE($6, published_at),
+             summary         = COALESCE($7, summary),
+             dir_path        = COALESCE($8, dir_path),
+             components      = $9,
+             updated_at      = now()
+           WHERE slug = $1`,
+          [args.slug, args.status || null, args.cvss_composed ?? null, args.cvss_standalone ?? null,
+           args.published_repo || null, args.published_at || null, args.summary || null,
+           args.dir_path || null, JSON.stringify(components)]);
+        let manifestWritten = false;
+        try { manifestWritten = await require("../soc/soc-indexer").writeManifest(db, args.slug); } catch (_) {}
+        const changes = [];
+        if (args.status) changes.push(`status → ${args.status}`);
+        if (args.upsert_component) changes.push(`component ${args.upsert_component.skyline_id} upserted`);
+        if (args.published_repo) changes.push(`repo → ${args.published_repo}`);
+        return { content: [{ type: "text", text: `✅ Chain '${args.slug}' updated${changes.length ? ` (${changes.join("; ")})` : ""}${manifestWritten ? " — CHAIN.md re-synced" : ""}` }] };
+      }
+
+      case "attach_artifact": {
+        if (!args.path || !args.kind) {
+          return { content: [{ type: "text", text: "attach_artifact: path and kind are required" }], isError: true };
+        }
+        let chainId = null;
+        if (args.chain_slug) {
+          const cr = await db.query(`SELECT id FROM soc_kill_chains WHERE slug = $1`, [args.chain_slug]);
+          if (!cr.rows.length) {
+            return { content: [{ type: "text", text: `attach_artifact: no chain with slug '${args.chain_slug}'` }], isError: true };
+          }
+          chainId = cr.rows[0].id;
+        }
+        let sha = null;
+        try {
+          sha = require("crypto").createHash("sha256")
+            .update(require("fs").readFileSync(args.path)).digest("hex");
+        } catch (_) { /* file not readable from the bridge — register without hash */ }
+        const sanitized = !!args.sanitized;
+        const pushState = args.push_state || "local";
+        if (chainId) {
+          await db.query(
+            `INSERT INTO soc_artifacts (chain_id, finding_id, engagement_id, kind, path, sha256, sanitized, push_state, repo)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             ON CONFLICT (chain_id, path) DO UPDATE SET
+               kind = EXCLUDED.kind, sha256 = EXCLUDED.sha256, sanitized = EXCLUDED.sanitized,
+               push_state = EXCLUDED.push_state, repo = COALESCE(EXCLUDED.repo, soc_artifacts.repo),
+               updated_at = now()`,
+            [chainId, args.finding_id ?? null, args.engagement_id || null, args.kind, args.path,
+             sha, sanitized, pushState, args.repo || null]);
+        } else {
+          const ex = await db.query(
+            `SELECT id FROM soc_artifacts
+             WHERE path = $1 AND chain_id IS NULL AND finding_id IS NOT DISTINCT FROM $2`,
+            [args.path, args.finding_id ?? null]);
+          if (ex.rows.length) {
+            await db.query(
+              `UPDATE soc_artifacts SET kind=$2, sha256=$3, sanitized=$4, push_state=$5,
+                       repo=COALESCE($6, repo), updated_at=now() WHERE id=$1`,
+              [ex.rows[0].id, args.kind, sha, sanitized, pushState, args.repo || null]);
+          } else {
+            await db.query(
+              `INSERT INTO soc_artifacts (chain_id, finding_id, engagement_id, kind, path, sha256, sanitized, push_state, repo)
+               VALUES (NULL,$1,$2,$3,$4,$5,$6,$7,$8)`,
+              [args.finding_id ?? null, args.engagement_id || null, args.kind, args.path,
+               sha, sanitized, pushState, args.repo || null]);
+          }
+        }
+        return { content: [{ type: "text", text: `✅ Artifact attached: [${args.kind}] ${args.path}${sha ? ` (sha256 ${sha.slice(0, 8)}…)` : " (⚠ bridge could not read the file — no hash)"} — sanitized=${sanitized}${sanitized ? "" : " → NOT served by the in-app content viewer (by design)"} — push_state=${pushState}` }] };
+      }
+
+      case "log_run": {
+        if (!args.run_key) {
+          return { content: [{ type: "text", text: "log_run: run_key is required (e.g. 'r401')" }], isError: true };
+        }
+        let chainId = null;
+        if (args.chain_slug) {
+          const cr = await db.query(`SELECT id FROM soc_kill_chains WHERE slug = $1`, [args.chain_slug]);
+          chainId = cr.rows.length ? cr.rows[0].id : null;
+        }
+        await db.query(
+          `INSERT INTO soc_runs (run_key, target, engagement_id, chain_id, run_date, purpose, verdict, summary, files)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           ON CONFLICT (run_key) DO UPDATE SET
+             target        = COALESCE(EXCLUDED.target, soc_runs.target),
+             engagement_id = COALESCE(EXCLUDED.engagement_id, soc_runs.engagement_id),
+             chain_id      = COALESCE(EXCLUDED.chain_id, soc_runs.chain_id),
+             run_date      = COALESCE(EXCLUDED.run_date, soc_runs.run_date),
+             purpose       = COALESCE(EXCLUDED.purpose, soc_runs.purpose),
+             verdict       = COALESCE(EXCLUDED.verdict, soc_runs.verdict),
+             summary       = COALESCE(EXCLUDED.summary, soc_runs.summary),
+             files         = CASE WHEN EXCLUDED.files::text = '[]' THEN soc_runs.files ELSE EXCLUDED.files END`,
+          [String(args.run_key).toLowerCase(), args.target || null, args.engagement_id || null,
+           chainId, args.run_date || new Date().toISOString().slice(0, 10),
+           args.purpose || null, args.verdict || null, args.summary || null,
+           JSON.stringify(args.files || [])]);
+        return { content: [{ type: "text", text: `✅ Run '${args.run_key}' logged${args.verdict ? ` — verdict ${args.verdict}` : ""}${args.chain_slug ? ` (chain ${args.chain_slug})` : ""}` }] };
+      }
+
+      case "log_coordination": {
+        if (!args.channel || !args.event_date) {
+          return { content: [{ type: "text", text: "log_coordination: channel and event_date are required" }], isError: true };
+        }
+        let chainId = null;
+        if (args.chain_slug) {
+          const cr = await db.query(`SELECT id FROM soc_kill_chains WHERE slug = $1`, [args.chain_slug]);
+          chainId = cr.rows.length ? cr.rows[0].id : null;
+        }
+        const ref = args.ref || String(args.subject || args.channel).slice(0, 60);
+        await db.query(
+          `INSERT INTO soc_coordination_events (channel, event_date, direction, subject, ref, status, chain_id, finding_ids)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (channel, event_date, ref) DO UPDATE SET
+             direction   = EXCLUDED.direction,
+             subject     = COALESCE(EXCLUDED.subject, soc_coordination_events.subject),
+             status      = EXCLUDED.status,
+             chain_id    = COALESCE(EXCLUDED.chain_id, soc_coordination_events.chain_id),
+             finding_ids = CASE WHEN EXCLUDED.finding_ids::text = '[]' THEN soc_coordination_events.finding_ids ELSE EXCLUDED.finding_ids END`,
+          [args.channel, args.event_date, args.direction || "sent", args.subject || null,
+           ref, args.status || "pending", chainId, JSON.stringify(args.finding_ids || [])]);
+        return { content: [{ type: "text", text: `✅ Coordination event logged: ${args.channel} ${args.event_date} (${args.direction || "sent"}) — status '${args.status || "pending"}'` }] };
       }
 
       default:

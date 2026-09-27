@@ -1,0 +1,300 @@
+{
+  "version": 1,
+  "comment": "SOC v3 record-plane seed (dir_1790538151856). Applied idempotently by soc-indexer.js: chains INSERT ON CONFLICT DO NOTHING (live DB rows win), then per-chain CHAIN.md manifest (if present) is file-first authoritative. All facts verified against disclosure-repo README/TIMELINE + pentest_findings + GitHub API on 2026-09-27. Component cvss null where no per-component score was ever published (legacy drops).",
+  "chains": [
+    {
+      "slug": "silent-call",
+      "name": "Silent;Call",
+      "drop_number": 1,
+      "status": "published",
+      "cvss_composed": 10.0,
+      "cvss_standalone": null,
+      "engagement_ids": [],
+      "dir_path": "private/cucm/Silent-Call",
+      "published_repo": "https://github.com/0xReadingSteiner/Silent-Call",
+      "published_at": "2026-08-04",
+      "summary": "CUCM 15.x pre-authentication remote root \u2014 3 HTTP requests, zero credentials. Spoofhack (unrestricted X-Forwarded-For trust) \u2192 Keyhack (hardcoded Tomcat Manager credentials) \u2192 Roothack (unrestricted sudo to root).",
+      "components": [
+        {
+          "skyline_id": "SKYLINE-2026-001",
+          "name": "Spoofhack",
+          "cwe": "CWE-644",
+          "severity": null,
+          "cvss": null,
+          "cve": null,
+          "role": "entry \u2014 X-Forwarded-For header trust without restriction"
+        },
+        {
+          "skyline_id": "SKYLINE-2026-002",
+          "name": "Keyhack",
+          "cwe": "CWE-798",
+          "severity": null,
+          "cvss": null,
+          "cve": null,
+          "role": "foothold \u2014 hardcoded Tomcat Manager credentials"
+        },
+        {
+          "skyline_id": "SKYLINE-2026-003",
+          "name": "Roothack",
+          "cwe": "CWE-269",
+          "severity": null,
+          "cvss": null,
+          "cve": null,
+          "role": "escalation \u2014 multiple unrestricted sudo paths to root"
+        }
+      ]
+    },
+    {
+      "slug": "blind-wire",
+      "name": "Blind;Wire",
+      "drop_number": 2,
+      "status": "published",
+      "cvss_composed": 8.1,
+      "cvss_standalone": 8.1,
+      "engagement_ids": [],
+      "dir_path": "private/cucm/Blind-Wire",
+      "published_repo": "https://github.com/0xReadingSteiner/Blind-Wire",
+      "published_at": "2026-08-10",
+      "summary": "Cisco Expressway X14.3.7 pre-authentication SIP request smuggling \u2014 ttclib_strToUInt Content-Length 2^32\u21920 integer wrap turns the edge proxy into a policy-blind tunnel. Confirmed live 2026-08-09/10; PSIRT + MITRE notified 2026-08-10.",
+      "components": [
+        {
+          "skyline_id": "SKYLINE-2026-056",
+          "name": "Zerohack",
+          "cwe": "CWE-190",
+          "severity": "high",
+          "cvss": 8.1,
+          "cve": null,
+          "role": "Content-Length integer overflow (2^32 \u2192 0) in SIP parser"
+        }
+      ]
+    },
+    {
+      "slug": "dead-dial",
+      "name": "Dead;Dial",
+      "drop_number": 3,
+      "status": "published",
+      "cvss_composed": 10.0,
+      "cvss_standalone": null,
+      "engagement_ids": [],
+      "dir_path": "private/cucm/Dead-Dial",
+      "published_repo": "https://github.com/0xReadingSteiner/Dead-Dial",
+      "published_at": "2026-08-10",
+      "summary": "CUCM WebDialer pre-auth RCE via 2006-era Apache Axis AdminService arbitrary class deployment + JNDI injection. Independent path \u2014 survives Tomcat Manager credential rotation ( Silent;Call fix). Live-confirmed 2026-08-01.",
+      "components": [
+        {
+          "skyline_id": "SKYLINE-2026-001",
+          "name": "Spoofhack",
+          "cwe": "CWE-644",
+          "severity": null,
+          "cvss": null,
+          "cve": null,
+          "role": "entry \u2014 X-Forwarded-For trust (shared with Silent;Call)"
+        },
+        {
+          "skyline_id": "SKYLINE-2026-057a",
+          "name": "Deployhack",
+          "cwe": "CWE-306",
+          "severity": null,
+          "cvss": null,
+          "cve": null,
+          "role": "Axis AdminService arbitrary class deployment (unauthenticated)"
+        },
+        {
+          "skyline_id": "SKYLINE-2026-057b",
+          "name": "Lookaphack",
+          "cwe": "CWE-502",
+          "severity": null,
+          "cvss": null,
+          "cve": null,
+          "role": "JNDI injection via deployed SOAP service \u2192 RCE"
+        }
+      ]
+    },
+    {
+      "slug": "false-relay",
+      "name": "False;Relay",
+      "drop_number": 4,
+      "status": "packaged",
+      "cvss_composed": 9.1,
+      "cvss_standalone": 8.5,
+      "engagement_ids": [
+        "SKYLINE-SOC-2026-346",
+        "SKYLINE-SOC-2026-094"
+      ],
+      "dir_path": "private/cucm/False-Relay",
+      "published_repo": null,
+      "published_at": null,
+      "summary": "MRA corridor chain (Expressway X15.5.1 + CUCM 15.0.1): presence-only edge gate (Blankhack) + zero-auth relay-credential seeding (Seedhack) + descriptor corridor + cluster-key identity forgery (Badgehack) = internet-origin pre-auth CUCM data (200 live UDS XML) and forged-Bearer SSO-session acceptance. Proven live end-to-end on both a seeded path and a pure-real-credential path (2026-09-27). Zero fail2ban ticks on the success path. Push held on lab-owner approval.",
+      "components": [
+        {
+          "skyline_id": "SKYLINE-2026-004",
+          "name": "Badgehack",
+          "cwe": "CWE-287/CWE-321",
+          "severity": "high",
+          "cvss": 8.1,
+          "cve": null,
+          "role": "CUCM Bearer tokens validated by pure cluster-key crypto \u2014 no DB, no revocation, no throttle; forged sub \u2192 SSO session"
+        },
+        {
+          "skyline_id": "SKYLINE-2026-005",
+          "name": "Blankhack",
+          "cwe": "CWE-287",
+          "severity": "medium",
+          "cvss": 6.5,
+          "cve": null,
+          "role": "Expressway-E presence-only X-Auth gate (ts_auth check-exist) \u2014 internet-facing box validates nothing"
+        },
+        {
+          "skyline_id": "SKYLINE-2026-006",
+          "name": "Seedhack",
+          "cwe": "CWE-306",
+          "severity": "high",
+          "cvss": 7.8,
+          "cve": null,
+          "role": "Expressway-C CDB loopback :4370 zero-auth \u2192 plant relay-credential row \u2192 attacker-chosen cookie validates"
+        },
+        {
+          "skyline_id": "SKYLINE-2026-007",
+          "name": "Splithack",
+          "cwe": "CWE-444",
+          "severity": "medium",
+          "cvss": 5.3,
+          "cve": "upstream class: CVE-2026-24033/CVE-2026-57834",
+          "role": "chunk-extension request smuggling on shipped ATS rebuild (upstream fix e44213f8ec absent) \u2014 WAF/parser differential"
+        },
+        {
+          "skyline_id": "SKYLINE-2026-008",
+          "name": "Wraphack",
+          "cwe": "CWE-190",
+          "severity": "high",
+          "cvss": 7.5,
+          "cve": "upstream class: ATS Content-Length int64 wrap (fix a9ec41a35)",
+          "role": "CL=2^64 wraps to 0 \u2014 desync oracle + backend-leg smuggled-request delivery proven"
+        },
+        {
+          "skyline_id": "SKYLINE-2026-009",
+          "name": "Namehack",
+          "cwe": "CWE-116",
+          "severity": "low",
+          "cvss": 3.7,
+          "cve": "upstream class: CVE-2026-58155",
+          "role": "uint16 header-name truncation \u2014 64KB alias traverses E\u2192C\u2192backend as short name; TrackingID correlation spoofing (strip defenses hold)"
+        }
+      ]
+    }
+  ],
+  "coordination": [
+    {
+      "channel": "zdi",
+      "event_date": "2026-08-04",
+      "direction": "sent",
+      "subject": "17 CUCM vulnerability submissions (multiple prior dates) \u2014 all unprocessed as of 2026-08-04",
+      "ref": "zdi-17-pending",
+      "status": "pending"
+    },
+    {
+      "channel": "psirt",
+      "event_date": "2026-08-04",
+      "direction": "sent",
+      "subject": "CUCM pre-auth remote root chain (Silent;Call) \u2014 full technical details offered on request",
+      "ref": "psirt-2026-08-04",
+      "status": "silent",
+      "chain_slug": "silent-call"
+    },
+    {
+      "channel": "mitre",
+      "event_date": "2026-08-04",
+      "direction": "sent",
+      "subject": "CNA-of-last-resort CVE request (CUCM root chain)",
+      "ref": "mitre-2026-08-04",
+      "status": "pending",
+      "chain_slug": "silent-call"
+    },
+    {
+      "channel": "psirt",
+      "event_date": "2026-08-10",
+      "direction": "sent",
+      "subject": "Expressway SIP request smuggling (Blind;Wire / SKYLINE-2026-056)",
+      "ref": "psirt-2026-08-10",
+      "status": "silent",
+      "chain_slug": "blind-wire"
+    },
+    {
+      "channel": "mitre",
+      "event_date": "2026-08-10",
+      "direction": "sent",
+      "subject": "CNA-of-last-resort CVE request (SKYLINE-2026-056)",
+      "ref": "mitre-2026-08-10",
+      "status": "pending",
+      "chain_slug": "blind-wire"
+    },
+    {
+      "channel": "psirt",
+      "event_date": "2026-09-27",
+      "direction": "draft",
+      "subject": "False;Relay submission (004/005/006 + shipped-CVE confirmations 007/008/009) \u2014 DRAFT written, send held on lab-owner live approval",
+      "ref": "psirt-false-relay-draft",
+      "status": "held",
+      "chain_slug": "false-relay"
+    }
+  ],
+  "finding_links": [
+    {
+      "finding_id": 1040,
+      "chain_slug": "false-relay",
+      "lifecycle": "packaged"
+    },
+    {
+      "finding_id": 1041,
+      "chain_slug": "false-relay",
+      "lifecycle": "filed"
+    },
+    {
+      "finding_id": 1035,
+      "chain_slug": "false-relay",
+      "skyline_id": "SKYLINE-2026-004",
+      "lifecycle": "packaged"
+    },
+    {
+      "finding_id": 1037,
+      "chain_slug": "false-relay",
+      "skyline_id": "SKYLINE-2026-004",
+      "lifecycle": "filed"
+    },
+    {
+      "finding_id": 1036,
+      "chain_slug": "false-relay",
+      "skyline_id": "SKYLINE-2026-004",
+      "lifecycle": "filed"
+    },
+    {
+      "finding_id": 995,
+      "chain_slug": "false-relay",
+      "lifecycle": "filed"
+    },
+    {
+      "finding_id": 991,
+      "chain_slug": "false-relay",
+      "skyline_id": "SKYLINE-2026-006",
+      "lifecycle": "filed"
+    },
+    {
+      "finding_id": 990,
+      "chain_slug": "false-relay",
+      "skyline_id": "SKYLINE-2026-005",
+      "lifecycle": "filed"
+    }
+  ],
+  "archive_sweep": {
+    "status": "scoping",
+    "older_than_days": 30,
+    "require_no_findings": true,
+    "require_no_queue": true
+  },
+  "run_links": [
+    {
+      "run_key": "r401",
+      "chain_slug": "false-relay"
+    }
+  ]
+}

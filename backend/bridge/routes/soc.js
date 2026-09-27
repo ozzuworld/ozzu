@@ -203,6 +203,225 @@ module.exports = function socRoutes(ctx) {
 
   return async function handleSocRoutes(req, res, pathname, url) {
 
+    // ═══════════════ SOC v3 — RECORD & REPORT PLANE (dir_1790538151856) ═══════════════
+    // Read-only reporting API for the rebuilt chain-first app. All ACTING stays in the
+    // terminal/queue machinery further down — per KK's order 2026-09-27 the app is a
+    // reporting tool. Sole exception: POST /soc/reindex (re-syncs DB ← disk; no
+    // external side effects). Content viewer serves SANITIZED artifacts only.
+    const pathLib = require("path");
+
+    // GET /soc/overview — app home payload: chains + aggregate counts + activity
+    if (req.method === "GET" && pathname === "/soc/overview") {
+      try {
+        const [chains, byLifecycle, bySeverity, engStatus, recentRuns, recentFindings, coord] = await Promise.all([
+          db.query(`SELECT slug, name, drop_number, status, cvss_composed, cvss_standalone,
+                           published_at, jsonb_array_length(components) AS component_count
+                    FROM soc_kill_chains ORDER BY drop_number ASC NULLS LAST, created_at DESC`),
+          db.query(`SELECT COALESCE(lifecycle, '(unset)') AS lifecycle, count(*)::int AS n
+                    FROM pentest_findings GROUP BY lifecycle ORDER BY n DESC`),
+          db.query(`SELECT severity, count(*)::int AS n FROM pentest_findings
+                    WHERE chain_id IS NOT NULL GROUP BY severity`),
+          db.query(`SELECT status, count(*)::int AS n FROM pentest_engagements
+                    GROUP BY status ORDER BY n DESC`),
+          db.query(`SELECT run_key, target, run_date, verdict, purpose FROM soc_runs
+                    ORDER BY run_date DESC NULLS LAST, id DESC LIMIT 10`),
+          db.query(`SELECT f.id, f.severity, f.title, f.lifecycle, f.discovered_at, c.slug AS chain_slug
+                    FROM pentest_findings f LEFT JOIN soc_kill_chains c ON c.id = f.chain_id
+                    ORDER BY f.id DESC LIMIT 10`),
+          db.query(`SELECT channel, event_date, direction, subject, status, ref
+                    FROM soc_coordination_events ORDER BY event_date DESC, id DESC LIMIT 10`),
+        ]);
+        sendJSON(res, 200, {
+          chains: chains.rows,
+          findings_by_lifecycle: byLifecycle.rows,
+          chain_findings_by_severity: bySeverity.rows,
+          engagements_by_status: engStatus.rows,
+          recent_runs: recentRuns.rows,
+          recent_findings: recentFindings.rows,
+          recent_coordination: coord.rows,
+        });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // GET /soc/chains — all chains with counts
+    if (req.method === "GET" && pathname === "/soc/chains") {
+      try {
+        const r = await db.query(`
+          SELECT c.slug, c.name, c.drop_number, c.status, c.cvss_composed, c.cvss_standalone,
+                 c.published_repo, c.published_at, c.summary, c.engagement_ids, c.components,
+                 jsonb_array_length(c.components) AS component_count,
+                 (SELECT count(*)::int FROM soc_artifacts a WHERE a.chain_id = c.id) AS artifact_count,
+                 (SELECT count(*)::int FROM pentest_findings f WHERE f.chain_id = c.id) AS finding_count,
+                 (SELECT a.id FROM soc_artifacts a WHERE a.chain_id = c.id AND a.kind = 'banner' AND a.sanitized ORDER BY a.id LIMIT 1) AS banner_artifact_id
+          FROM soc_kill_chains c
+          ORDER BY c.drop_number ASC NULLS LAST, c.created_at DESC`);
+        sendJSON(res, 200, { chains: r.rows });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // GET /soc/chains/:slug — full chain payload (components, artifacts, runs, findings, coordination)
+    const v3ChainMatch = pathname.match(/^\/soc\/chains\/([a-z0-9][a-z0-9-]*)$/);
+    if (req.method === "GET" && v3ChainMatch) {
+      try {
+        const chainRes = await db.query(`SELECT * FROM soc_kill_chains WHERE slug = $1`, [v3ChainMatch[1]]);
+        if (!chainRes.rows.length) { sendJSON(res, 404, { error: `no kill chain '${v3ChainMatch[1]}'` }); return true; }
+        const c = chainRes.rows[0];
+        const [arts, runs, findings, coord] = await Promise.all([
+          db.query(`SELECT id, kind, path, sha256, sanitized, push_state, repo, updated_at
+                    FROM soc_artifacts WHERE chain_id = $1 ORDER BY kind, id`, [c.id]),
+          db.query(`SELECT id, run_key, target, run_date, verdict, purpose, summary, engagement_id
+                    FROM soc_runs WHERE chain_id = $1
+                    ORDER BY run_date DESC NULLS LAST, id DESC LIMIT 200`, [c.id]),
+          db.query(`SELECT id, severity, title, lifecycle, skyline_id, cve_id, cvss_score,
+                           cvss_vector, status, kind, engagement_id, discovered_at
+                    FROM pentest_findings WHERE chain_id = $1 ORDER BY id DESC`, [c.id]),
+          db.query(`SELECT id, channel, event_date, direction, subject, ref, status
+                    FROM soc_coordination_events WHERE chain_id = $1 ORDER BY event_date DESC, id DESC`, [c.id]),
+        ]);
+        // Runs are chain-attributed only (linkage via seed run_links / MCP log_run);
+        // unattributed indexed runs stay in the global /soc/runs log.
+        const chainRuns = runs.rows;
+        sendJSON(res, 200, {
+          chain: {
+            ...c,
+            components: typeof c.components === "string" ? JSON.parse(c.components || "[]") : c.components,
+            engagement_ids: typeof c.engagement_ids === "string" ? JSON.parse(c.engagement_ids || "[]") : c.engagement_ids,
+          },
+          artifacts: arts.rows.map(a => ({ ...a, path: undefined, filename: pathLib.basename(a.path || "") , sha8: (a.sha256 || "").slice(0, 8) })),
+          runs: chainRuns,
+          findings: findings.rows,
+          coordination: coord.rows,
+        });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // GET /soc/findings — v3 board: filters lifecycle/severity/chain/engagement_id/q + paging
+    if (req.method === "GET" && pathname === "/soc/findings") {
+      try {
+        const where = []; const params = [];
+        const push = (v) => { params.push(v); return `$${params.length}`; };
+        const q = url.searchParams;
+        if (q.get("lifecycle")) where.push(`f.lifecycle = ${push(q.get("lifecycle"))}`);
+        if (q.get("severity")) where.push(`f.severity = ${push(q.get("severity"))}`);
+        if (q.get("chain")) where.push(`f.chain_id = (SELECT id FROM soc_kill_chains WHERE slug = ${push(q.get("chain"))})`);
+        if (q.get("engagement_id")) where.push(`f.engagement_id = ${push(q.get("engagement_id"))}`);
+        if (q.get("kind")) where.push(`f.kind = ${push(q.get("kind"))}`);
+        if (q.get("q")) { const s = `%${q.get("q")}%`; where.push(`(f.title ILIKE ${push(s)} OR f.description ILIKE ${push(s)})`); }
+        const limit = Math.min(Math.max(parseInt(q.get("limit") || "100", 10) || 100, 1), 500);
+        const offset = Math.max(parseInt(q.get("offset") || "0", 10) || 0, 0);
+        const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
+        const [rows, total] = await Promise.all([
+          db.query(`SELECT f.id, f.engagement_id, f.severity, f.title, f.lifecycle, f.skyline_id,
+                           f.cve_id, f.cvss_score, f.kind, f.status, f.discovered_at,
+                           c.slug AS chain_slug, c.name AS chain_name
+                    FROM pentest_findings f LEFT JOIN soc_kill_chains c ON c.id = f.chain_id
+                    ${w} ORDER BY f.id DESC LIMIT ${limit} OFFSET ${offset}`, params),
+          db.query(`SELECT count(*)::int AS n FROM pentest_findings f ${w}`, params),
+        ]);
+        sendJSON(res, 200, { findings: rows.rows, total: total.rows[0].n, limit, offset });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // GET /soc/findings/:id — finding detail (full row + chain + linked artifacts)
+    const v3FindingMatch = pathname.match(/^\/soc\/findings\/(\d+)$/);
+    if (req.method === "GET" && v3FindingMatch) {
+      try {
+        const r = await db.query(`SELECT f.*, c.slug AS chain_slug, c.name AS chain_name
+                                  FROM pentest_findings f LEFT JOIN soc_kill_chains c ON c.id = f.chain_id
+                                  WHERE f.id = $1`, [v3FindingMatch[1]]);
+        if (!r.rows.length) { sendJSON(res, 404, { error: "finding not found" }); return true; }
+        const arts = await db.query(`SELECT id, kind, sha256, sanitized, push_state, updated_at,
+                                            path FROM soc_artifacts WHERE finding_id = $1`, [r.rows[0].id]);
+        sendJSON(res, 200, {
+          finding: r.rows[0],
+          artifacts: arts.rows.map(a => ({ ...a, path: undefined, filename: pathLib.basename(a.path || ""), sha8: (a.sha256 || "").slice(0, 8) })),
+        });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // GET /soc/runs — evidence-run ledger (filters: chain/target/engagement_id, paging)
+    if (req.method === "GET" && pathname === "/soc/runs") {
+      try {
+        const where = []; const params = [];
+        const push = (v) => { params.push(v); return `$${params.length}`; };
+        const q = url.searchParams;
+        if (q.get("chain")) where.push(`r.chain_id = (SELECT id FROM soc_kill_chains WHERE slug = ${push(q.get("chain"))})`);
+        if (q.get("target")) where.push(`r.target = ${push(q.get("target"))}`);
+        if (q.get("engagement_id")) where.push(`r.engagement_id = ${push(q.get("engagement_id"))}`);
+        if (q.get("verdict")) where.push(`r.verdict = ${push(q.get("verdict"))}`);
+        const limit = Math.min(Math.max(parseInt(q.get("limit") || "100", 10) || 100, 1), 500);
+        const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
+        const rows = await db.query(`SELECT r.id, r.run_key, r.target, r.run_date, r.verdict, r.purpose,
+                                            r.summary, r.engagement_id, c.slug AS chain_slug
+                                     FROM soc_runs r LEFT JOIN soc_kill_chains c ON c.id = r.chain_id
+                                     ${w} ORDER BY r.run_date DESC NULLS LAST, r.id DESC LIMIT ${limit}`, params);
+        sendJSON(res, 200, { runs: rows.rows, count: rows.rows.length });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // GET /soc/coordination — vendor-coordination log (optional ?chain=)
+    if (req.method === "GET" && pathname === "/soc/coordination") {
+      try {
+        const chain = url.searchParams.get("chain");
+        const params = [];
+        let w = "";
+        if (chain) { w = `WHERE e.chain_id = (SELECT id FROM soc_kill_chains WHERE slug = $1)`; params.push(chain); }
+        const rows = await db.query(`SELECT e.id, e.channel, e.event_date, e.direction, e.subject,
+                                            e.ref, e.status, c.slug AS chain_slug
+                                     FROM soc_coordination_events e LEFT JOIN soc_kill_chains c ON c.id = e.chain_id
+                                     ${w} ORDER BY e.event_date DESC, e.id DESC LIMIT 200`, params);
+        sendJSON(res, 200, { coordination: rows.rows });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // GET /soc/artifacts/:id/content — in-app viewer. SANITIZED artifacts only
+    // (leak-guard at the API layer: unsanitized rows are refused by design).
+    const v3ArtMatch = pathname.match(/^\/soc\/artifacts\/(\d+)\/content$/);
+    if (req.method === "GET" && v3ArtMatch) {
+      try {
+        const a = await db.query(`SELECT * FROM soc_artifacts WHERE id = $1`, [v3ArtMatch[1]]);
+        if (!a.rows.length) { sendJSON(res, 404, { error: "artifact not found" }); return true; }
+        const art = a.rows[0];
+        if (!art.sanitized) { sendJSON(res, 403, { error: "artifact is not sanitized — content is not served through the reporting API" }); return true; }
+        const fsMod = require("fs");
+        if (!art.path || !fsMod.existsSync(art.path)) { sendJSON(res, 404, { error: "artifact file missing on disk" }); return true; }
+        const ext = pathLib.extname(art.path).toLowerCase();
+        if (ext === ".png" || ext === ".jpg" || ext === ".jpeg") {
+          const buf = fsMod.readFileSync(art.path);
+          res.writeHead(200, { "Content-Type": ext === ".png" ? "image/png" : "image/jpeg", "Content-Length": buf.length, "Cache-Control": "private, max-age=300" });
+          res.end(buf);
+          return true;
+        }
+        if ([".md", ".txt", ".sh"].includes(ext)) {
+          const stat = fsMod.statSync(art.path);
+          if (stat.size > 400000) { sendJSON(res, 413, { error: "artifact too large for in-app viewer (400KB cap)" }); return true; }
+          const txt = fsMod.readFileSync(art.path, "utf8");
+          res.writeHead(200, { "Content-Type": ext === ".md" ? "text/markdown; charset=utf-8" : "text/plain; charset=utf-8" });
+          res.end(txt);
+          return true;
+        }
+        sendJSON(res, 415, { error: `unsupported artifact type '${ext}'` });
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
+    // POST /soc/reindex — re-sync DB ← disk (idempotent; safe to spam)
+    if (req.method === "POST" && pathname === "/soc/reindex") {
+      try {
+        const { runIndex } = require("../soc/soc-indexer");
+        const result = await runIndex(db);
+        sendJSON(res, 200, result);
+      } catch (err) { sendJSON(res, 500, { error: err.message }); }
+      return true;
+    }
+
     // GET /soc/engagements - List all engagements
     // dir_1780764341980 — added medium/low/info finding counts + queue totals so
     // the list card can render severity buckets and a real progress bar without
