@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 // ha-context, status-bar). Route params arrive via the preview URL query
 // (?slug=false-relay, ?id=SKYLINE-SOC-2026-001).
 import HomeScreen from "../app/(tabs)/home";
+import WorkScreen from "../app/(tabs)/business";
 import SocHomeScreen from "../app/(tabs)/soc";
 import SocChainScreen from "../app/soc/chain/[slug]";
 import SocFindingsScreen from "../app/soc/findings";
@@ -17,6 +18,7 @@ const screen = params.get("screen") || "home";
 
 const SCREENS = {
   home: HomeScreen,
+  work: WorkScreen,
   "soc-home": SocHomeScreen,
   "soc-chain": SocChainScreen,
   "soc-findings": SocFindingsScreen,
