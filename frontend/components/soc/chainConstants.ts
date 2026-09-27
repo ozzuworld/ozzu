@@ -43,6 +43,22 @@ export const CHAIN_STATUS_COLOR: Record<string, string> = {
   published: colors.accent,
 };
 
+// Card emoji slot (same role project.emoji plays on the ventures screen).
+export const CHAIN_STATUS_EMOJI: Record<string, string> = {
+  researching: "🔍",
+  proven: "🧪",
+  packaged: "📦",
+  submitted: "📨",
+  "vendor-acked": "🤝",
+  "cve-assigned": "🆔",
+  "fix-shipped": "🔧",
+  published: "🌐",
+};
+
+export function chainStatusEmoji(status?: string | null): string {
+  return CHAIN_STATUS_EMOJI[status || ""] || "🔐";
+}
+
 export function chainStatusColor(status?: string | null): string {
   return CHAIN_STATUS_COLOR[status || ""] || colors.gray[300];
 }

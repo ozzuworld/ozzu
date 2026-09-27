@@ -1,36 +1,28 @@
-// SOC home — kill-chain campaign console (dir_1790544238642, rebuilt from zero).
-// The app is a REPORTING tool organized by kill chains. This screen shows:
-//   1. the lead chain as a hero panel (banner, disclosure stage track, counts)
-//   2. every kill chain as a dense row (status rail, DROP, CVSS)
-//   3. the findings pulse — every finding by lifecycle status, tappable
-//   4. the activity record (findings / evidence runs / vendor coordination)
-// Nothing else lives here. Engagements are NOT part of the app's navigation:
-// they are an ops record reachable only from inside a chain.
+// SOC screen — same UI as the Ventures/WORK screen (business.tsx), filled with
+// SOC info (KK order 2026-09-27, dir_1790544238642). Structure copied 1:1:
+// TopBar + GroupNav + sub-tab pills + overview card + card list. Three sub-tabs:
+//   CHAINS    — overview card (disclosure %) + one card per kill chain
+//   FINDINGS  — severity filter pills + one card per finding → detail modal
+//   ACTIVITY  — section cards (findings / evidence runs / vendor coordination)
+// Read-only report plane: the app observes, the terminal acts.
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  RefreshControl,
-  Pressable,
-} from "react-native";
+import { View, Text, ScrollView, Pressable, RefreshControl } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { GroupNav } from "../../components/GroupNav";
 import { TopBar } from "../../components/TopBar";
+import { ProgressBar } from "../../components/business/ProgressBar";
+import { FindingDetailModal } from "../../components/soc/FindingDetailModal";
 import { apiFetch } from "../../lib/bridge-api";
 import { useBridgeStream } from "../../lib/useBridgeStream";
+import { colors } from "../../lib/design-tokens";
+import { severityColor, severityIcon } from "../../components/soc/phaseColors";
 import {
-  colors,
-  spacing,
-  radius,
-  fontSize as fs,
-  fontWeight as fw,
-} from "../../lib/design-tokens";
-import { severityColor } from "../../components/soc/phaseColors";
-import {
+  CHAIN_STATUS_ORDER,
   chainStatusColor,
   chainStatusLabel,
+  chainStatusEmoji,
   lifecycleColor,
   lifecycleLabel,
   cvssColor,
@@ -38,24 +30,34 @@ import {
   fmtDate,
   dropLabel,
   channelColor,
+  DIRECTION_ICON,
 } from "../../components/soc/chainConstants";
 import { safe } from "../../components/soc/safe";
-import {
-  MONO,
-  MicroLabel,
-  Mono,
-  Chip,
-  SectionHead,
-  StageTrack,
-  PulseBar,
-  type PulseSegment,
-  RowGroup,
-  PressRow,
-  StatCell,
-  EmptyState,
-} from "../../components/soc/consoleKit";
 
-// ── Types (mirrors GET /soc/chains + GET /soc/overview) ──
+const ACCENT = colors.accent;
+// Same hairline the ventures cards use (ProjectCard/business.tsx).
+const HAIRLINE = "rgba(255,255,255,0.04)";
+
+const SUB_TABS = [
+  { key: "chains", label: "CHAINS" },
+  { key: "findings", label: "FINDINGS" },
+  { key: "activity", label: "ACTIVITY" },
+] as const;
+
+type SubTab = typeof SUB_TABS[number]["key"];
+
+const SEV_FILTERS = [
+  { key: "", label: "ALL" },
+  { key: "critical", label: "CRIT" },
+  { key: "high", label: "HIGH" },
+  { key: "medium", label: "MED" },
+  { key: "low", label: "LOW" },
+  { key: "info", label: "INFO" },
+] as const;
+
+const PAGE = 100;
+
+// ── Types (mirror GET /soc/chains, /soc/overview, /soc/findings) ──
 
 interface ChainSummary {
   slug: string;
@@ -63,15 +65,25 @@ interface ChainSummary {
   drop_number: number | null;
   status: string;
   cvss_composed: string | number | null;
-  cvss_standalone: string | number | null;
   published_repo: string | null;
-  published_at: string | null;
   summary: string | null;
-  engagement_ids: string[] | string | null;
   component_count: number;
   artifact_count: number;
   finding_count: number;
-  banner_artifact_id: number | null;
+}
+
+interface BoardFinding {
+  id: number;
+  severity: string;
+  title: string;
+  lifecycle: string | null;
+  skyline_id: string | null;
+  cve_id: string | null;
+  cvss_score: string | number | null;
+  affected_asset?: string | null;
+  discovered_at: string | null;
+  chain_slug: string | null;
+  chain_name: string | null;
 }
 
 interface Overview {
@@ -90,24 +102,29 @@ interface Overview {
   findings_by_lifecycle: Array<{ lifecycle: string; n: number }>;
 }
 
-type FeedItem = {
-  key: string;
-  tag: string;
-  tagColor: string;
-  title: string;
-  date: string;
-  onPress?: () => void;
-};
-
-const UNSET = "(unset)";
+function stageIndex(status: string): number {
+  return CHAIN_STATUS_ORDER.indexOf(status as (typeof CHAIN_STATUS_ORDER)[number]);
+}
 
 export default function SOCScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ tab?: string; severity?: string }>();
 
+  const initialTab: SubTab =
+    params.tab === "findings" || params.tab === "activity" ? params.tab : "chains";
+
+  const [activeTab, setActiveTab] = useState<SubTab>(initialTab);
   const [chains, setChains] = useState<ChainSummary[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Findings tab state
+  const [findings, setFindings] = useState<BoardFinding[]>([]);
+  const [findingsTotal, setFindingsTotal] = useState(0);
+  const [sevFilter, setSevFilter] = useState<string>(params.severity || "");
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [detailFinding, setDetailFinding] = useState<number | null>(null);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -117,246 +134,444 @@ export default function SOCScreen() {
       ]);
       setChains(chainsRes.chains || []);
       setOverview(overviewRes || null);
-    } catch (error) {
-      console.error("Error fetching SOC overview:", error);
-    } finally {
-      setLoading(false);
-    }
+    } catch {}
+    finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  const fetchFindings = useCallback(async (offset: number, append: boolean) => {
+    try {
+      const q = new URLSearchParams({ limit: String(PAGE), offset: String(offset) });
+      if (sevFilter) q.set("severity", sevFilter);
+      const d = await apiFetch(`/soc/findings?${q.toString()}`);
+      setFindings((prev) => (append ? [...prev, ...(d.findings || [])] : d.findings || []));
+      setFindingsTotal(d.total || 0);
+    } catch {}
+  }, [sevFilter]);
 
-  // Record-plane pushes: a new finding / queue change anywhere in the campaign
-  // refreshes the record. No exec streams — the app doesn't act.
-  useBridgeStream("socFindingAdded", () => { fetchAll(); });
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { fetchFindings(0, false); }, [fetchFindings]);
+
+  useBridgeStream("socFindingAdded", () => { fetchAll(); fetchFindings(0, false); });
   useBridgeStream("socQueueChanged", () => { fetchAll(); });
 
-  const onRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchAll();
+    await Promise.all([fetchAll(), fetchFindings(0, false)]);
     setRefreshing(false);
-  }, [fetchAll]);
+  }, [fetchAll, fetchFindings]);
 
-  // Findings pulse: every finding, by lifecycle status, tappable → board.
-  const pulse = useMemo<PulseSegment[]>(() => {
-    const rows = overview?.findings_by_lifecycle || [];
-    return rows
-      .filter((r) => r.n > 0)
-      .map((r) => {
-        const unset = !r.lifecycle || r.lifecycle === UNSET;
-        return {
-          key: unset ? "unset" : r.lifecycle,
-          label: unset ? "unfiled" : lifecycleLabel(r.lifecycle),
-          n: r.n,
-          color: unset ? colors.gray[500] : lifecycleColor(r.lifecycle),
-        };
-      });
-  }, [overview]);
-  const tracked = useMemo(
-    () => pulse.filter((p) => p.key !== "unset").reduce((s, p) => s + p.n, 0),
-    [pulse],
-  );
-
-  const feed = useMemo<FeedItem[]>(() => {
-    const items: Array<FeedItem & { sort: string }> = [];
-    for (const f of overview?.recent_findings || []) {
-      items.push({
-        key: `f${f.id}`,
-        tag: "FINDING",
-        tagColor: severityColor(f.severity),
-        title: safe(f.title),
-        date: fmtDate(f.discovered_at),
-        sort: f.discovered_at || "",
-        onPress: () => router.push("/soc/findings"),
-      });
+  // ── Overview numbers (same role as the ventures PROJECTS overview card) ──
+  const stats = useMemo(() => {
+    const totalFindings = (overview?.findings_by_lifecycle || []).reduce((s, r) => s + r.n, 0);
+    let stageSum = 0;
+    let critHigh = 0;
+    let published = 0;
+    for (const c of chains) {
+      const idx = stageIndex(c.status);
+      stageSum += idx >= 0 ? idx + 1 : 0;
+      if (c.status === "published") published += 1;
     }
-    for (const r of overview?.recent_runs || []) {
-      items.push({
-        key: `r${r.run_key}`,
-        tag: "RUN",
-        tagColor: colors.accent,
-        title: safe(r.purpose, r.run_key),
-        date: fmtDate(r.run_date),
-        sort: r.run_date || "",
-        onPress: r.chain_slug ? () => router.push(`/soc/chain/${r.chain_slug}`) : undefined,
-      });
+    // crit/high come from the board's first page when unfiltered
+    if (!sevFilter) {
+      for (const f of findings) {
+        if (f.severity === "critical" || f.severity === "high") critHigh += 1;
+      }
     }
-    for (const c of overview?.recent_coordination || []) {
-      items.push({
-        key: `c${c.channel}-${c.event_date}`,
-        tag: (c.channel || "msg").toUpperCase().slice(0, 8),
-        tagColor: channelColor(c.channel),
-        title: safe(c.subject, c.channel),
-        date: fmtDate(c.event_date),
-        sort: c.event_date || "",
-      });
-    }
-    items.sort((a, b) => (b.sort || "").localeCompare(a.sort || ""));
-    return items.slice(0, 12).map(({ sort, ...rest }) => rest);
-  }, [overview, router]);
-
-  const hero = chains[0] || null;
+    const denom = chains.length * CHAIN_STATUS_ORDER.length;
+    const pct = denom > 0 ? Math.round((stageSum / denom) * 100) : 0;
+    return { totalFindings, critHigh, published, pct, stageSum, denom };
+  }, [chains, overview, findings, sevFilter]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
-      <StatusBar style="light" />
-
+    <View style={{ flex: 1, backgroundColor: colors.gray[850] }}>
       <TopBar
-        title={
-          <Text style={{
-            color: colors.gray[50], fontSize: fs.xl, fontWeight: fw.bold,
-            fontFamily: MONO, letterSpacing: 6,
-          }}>
-            SOC
-          </Text>
-        }
-        background={colors.bg.elevated}
-        borderBottom
-        right={
-          <Chip label="findings" color={colors.brand.purple} onPress={() => router.push("/soc/findings")} />
-        }
+        background={colors.gray[850]}
+        title={<Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 14, fontWeight: "bold", letterSpacing: 3 }}>SOC</Text>}
       />
 
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: spacing.md, paddingBottom: spacing.xxxl }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text.disabled} />
-        }
-      >
-        {/* Campaign stamp row */}
-        <View style={{
-          flexDirection: "row", alignItems: "center",
-          marginTop: spacing.md, marginBottom: spacing.md,
-        }}>
-          <MicroLabel color={colors.text.secondary}>campaign record</MicroLabel>
-          <View style={{ flex: 1 }} />
-          <Mono color={colors.text.disabled}>{fmtDate(new Date().toISOString())}</Mono>
-        </View>
+      <GroupNav group="work" />
 
-        {loading ? (
-          <EmptyState text="loading campaign record" />
-        ) : chains.length === 0 ? (
-          <EmptyState text="no kill chains recorded" sub="chains appear once Cipher records them" />
-        ) : (
-          <>
-            {/* ── Lead chain hero ── */}
-            {hero ? (
+      {/* Sub-tab navigation — same pills as WORK */}
+      <View style={{ paddingHorizontal: 16, paddingBottom: 8, backgroundColor: colors.gray[850] }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            {SUB_TABS.map((tab) => (
               <Pressable
-                onPress={() => router.push(`/soc/chain/${hero.slug}`)}
-                style={({ pressed }) => ({
-                  opacity: pressed ? 0.94 : 1,
-                  borderWidth: 1, borderColor: colors.border.default,
-                  borderRadius: radius.lg, overflow: "hidden",
-                  backgroundColor: colors.gray[850],
-                })}
+                key={tab.key}
+                onPress={() => setActiveTab(tab.key)}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 7,
+                  borderRadius: 6,
+                  backgroundColor: activeTab === tab.key ? ACCENT + "22" : "transparent",
+                  borderWidth: 1,
+                  borderColor: activeTab === tab.key ? ACCENT + "44" : "transparent",
+                }}
               >
-                <View style={{ padding: spacing.md, gap: spacing.md }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                    {dropLabel(hero.drop_number) ? (
-                      <Chip label={dropLabel(hero.drop_number)!} color={colors.accent} filled />
-                    ) : null}
-                    <Chip label={chainStatusLabel(hero.status)} color={chainStatusColor(hero.status)} dot />
-                    <View style={{ flex: 1 }} />
-                    {hero.published_repo ? <Chip label="public" color={colors.success} /> : null}
-                  </View>
-                  <Text style={{ color: colors.gray[50], fontSize: 22, fontWeight: fw.bold }} numberOfLines={1}>
-                    {safe(hero.name, hero.slug)}
-                  </Text>
-                  <StageTrack status={hero.status} />
-                  {hero.summary ? (
-                    <Text style={{ color: colors.text.secondary, fontSize: fs.sm, lineHeight: 18 }} numberOfLines={2}>
-                      {safe(hero.summary)}
-                    </Text>
-                  ) : null}
-                  <View style={{ flexDirection: "row", alignItems: "flex-end", gap: spacing.xl }}>
-                    {fmtCvss(hero.cvss_composed) ? (
-                      <StatCell
-                        value={fmtCvss(hero.cvss_composed)!}
-                        label="cvss"
-                        color={cvssColor(hero.cvss_composed)}
-                        size={26}
-                      />
-                    ) : null}
-                    <StatCell value={hero.component_count} label="comps" />
-                    <StatCell value={hero.finding_count} label="findings" />
-                    <StatCell value={hero.artifact_count} label="artifacts" />
-                  </View>
-                </View>
+                <Text
+                  style={{
+                    color: activeTab === tab.key ? ACCENT : colors.gray[400],
+                    fontFamily: "monospace",
+                    fontSize: 10,
+                    fontWeight: "bold",
+                    letterSpacing: 1,
+                  }}
+                >
+                  {tab.label}
+                </Text>
               </Pressable>
-            ) : null}
+            ))}
+          </View>
+        </ScrollView>
+      </View>
 
-            {/* ── All chains, dense ── */}
-            <SectionHead label="kill chains" right={String(chains.length)} />
-            <RowGroup>
-              {chains.map((c, i) => {
-                const cv = fmtCvss(c.cvss_composed);
-                return (
-                  <PressRow
-                    key={c.slug}
-                    rail={chainStatusColor(c.status)}
-                    last={i === chains.length - 1}
-                    onPress={() => router.push(`/soc/chain/${c.slug}`)}
-                  >
-                    <View style={{ flex: 1, paddingLeft: spacing.xs }}>
-                      <Text style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.semibold }} numberOfLines={1}>
-                        {safe(c.name, c.slug)}
-                      </Text>
-                      <Mono color={colors.text.tertiary} style={{ marginTop: 2 }}>
-                        {dropLabel(c.drop_number) || "----"} · {chainStatusLabel(c.status)} · {c.component_count} cmp · {c.finding_count} fnd
-                      </Mono>
-                    </View>
-                    {cv ? (
-                      <Mono color={cvssColor(c.cvss_composed)} size={fs.lg} weight="bold">{cv}</Mono>
-                    ) : null}
-                    <Mono color={colors.text.disabled} size={fs.lg}>›</Mono>
-                  </PressRow>
-                );
-              })}
-            </RowGroup>
-
-            {/* ── Findings pulse ── */}
-            <SectionHead label="findings by status" right={`${tracked} tracked`} rightColor={colors.info} />
-            <PulseBar segments={pulse.filter((p) => p.key !== "unset")} />
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xl, rowGap: spacing.md }}>
-              {pulse.map((p) => (
-                <StatCell
-                  key={p.key}
-                  value={p.n}
-                  label={p.label}
-                  color={p.color}
-                  size={fs.xxl}
-                  onPress={() => router.push(p.key === "unset" ? "/soc/findings" : `/soc/findings?lifecycle=${p.key}`)}
-                />
-              ))}
+      {/* ── CHAINS ── */}
+      {activeTab === "chains" && (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.gray[400]} />}
+        >
+          {/* Overview card — same as ventures */}
+          <View
+            style={{
+              backgroundColor: colors.gray[800],
+              borderRadius: 14,
+              padding: 18,
+              marginBottom: 20,
+              borderWidth: 1,
+              borderColor: HAIRLINE,
+            }}
+          >
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12 }}>
+              <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, letterSpacing: 2 }}>DISCLOSURE PROGRESS</Text>
+              <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 28, fontWeight: "bold", lineHeight: 32 }}>{stats.pct}%</Text>
             </View>
+            <ProgressBar done={stats.stageSum} total={stats.denom} color={ACCENT} height={8} glow />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 14, paddingHorizontal: 4 }}>
+              <View style={{ alignItems: "center" }}>
+                <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{chains.length}</Text>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>CHAINS</Text>
+              </View>
+              <View style={{ alignItems: "center" }}>
+                <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{stats.totalFindings}</Text>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>FINDINGS</Text>
+              </View>
+              <View style={{ alignItems: "center" }}>
+                <Text style={{ color: colors.error, fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{stats.critHigh}</Text>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>CRIT+HIGH</Text>
+              </View>
+              <View style={{ alignItems: "center" }}>
+                <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 20, fontWeight: "bold" }}>{stats.published}</Text>
+                <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 2 }}>PUBLIC</Text>
+              </View>
+            </View>
+          </View>
 
-            {/* ── Activity record ── */}
-            <SectionHead label="activity" right={String(feed.length)} />
-            {feed.length === 0 ? (
-              <EmptyState text="no activity recorded" />
-            ) : (
-              <RowGroup>
-                {feed.map((item, i) => (
-                  <PressRow key={item.key} last={i === feed.length - 1} onPress={item.onPress}>
-                    <View style={{ width: 66 }}>
-                      <Chip label={item.tag} color={item.tagColor} />
+          {/* Chain cards — ProjectCard shape */}
+          {loading && chains.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: 40 }}>
+              <Text style={{ color: colors.gray[400], fontFamily: "monospace" }}>Loading chains...</Text>
+            </View>
+          ) : chains.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: 60 }}>
+              <Text style={{ fontSize: 48, marginBottom: 16 }}>🔐</Text>
+              <Text style={{ color: colors.gray[300], fontSize: 15, marginBottom: 4 }}>No kill chains yet</Text>
+              <Text style={{ color: colors.gray[400], fontSize: 12, textAlign: "center", paddingHorizontal: 40 }}>
+                Chains appear here once Cipher records them
+              </Text>
+            </View>
+          ) : (
+            chains.map((c) => {
+              const idx = stageIndex(c.status);
+              const stage = idx >= 0 ? idx + 1 : 0;
+              const statusColor = chainStatusColor(c.status);
+              const cv = fmtCvss(c.cvss_composed);
+              const drop = dropLabel(c.drop_number);
+              return (
+                <Pressable
+                  key={c.slug}
+                  onPress={() => router.push(`/soc/chain/${c.slug}`)}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.92 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] })}
+                >
+                  <View
+                    style={{
+                      backgroundColor: colors.gray[800],
+                      borderRadius: 12,
+                      borderLeftWidth: 3,
+                      borderLeftColor: statusColor,
+                      marginBottom: 12,
+                      padding: 16,
+                      borderWidth: 1,
+                      borderColor: HAIRLINE,
+                    }}
+                  >
+                    {/* Header row */}
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+                        <Text style={{ fontSize: 22 }}>{chainStatusEmoji(c.status)}</Text>
+                        <Text style={{ color: colors.gray[50], fontSize: 15, fontWeight: "600", flex: 1 }} numberOfLines={1}>
+                          {safe(c.name, c.slug)}
+                        </Text>
+                      </View>
+                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusColor }} />
                     </View>
-                    <Text
-                      style={{ flex: 1, color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium, lineHeight: 18 }}
-                      numberOfLines={2}
-                    >
-                      {item.title}
-                    </Text>
-                    <Mono color={colors.text.disabled} style={{ flexShrink: 0 }}>{item.date}</Mono>
-                  </PressRow>
-                ))}
-              </RowGroup>
-            )}
-          </>
-        )}
 
-      </ScrollView>
+                    {/* Summary — same slot as the venture description */}
+                    {c.summary ? (
+                      <Text style={{ color: colors.gray[300], fontSize: 12, lineHeight: 17, marginBottom: 10 }} numberOfLines={2}>
+                        {safe(c.summary)}
+                      </Text>
+                    ) : null}
+
+                    {/* Disclosure progress — same slot as task progress */}
+                    <ProgressBar done={stage} total={CHAIN_STATUS_ORDER.length} color={statusColor} height={5} />
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
+                      <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>
+                        {stage}/{CHAIN_STATUS_ORDER.length} · {chainStatusLabel(c.status)}{drop ? ` · ${drop}` : ""}
+                      </Text>
+                      {cv ? (
+                        <Text style={{ color: cvssColor(c.cvss_composed), fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
+                          CVSS {cv}
+                        </Text>
+                      ) : (
+                        <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
+                          {c.finding_count} fnd
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                </Pressable>
+              );
+            })
+          )}
+        </ScrollView>
+      )}
+
+      {/* ── FINDINGS ── */}
+      {activeTab === "findings" && (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.gray[400]} />}
+        >
+          {/* Severity filter — same pills as the dashboard period selector */}
+          <View style={{ flexDirection: "row", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+            {SEV_FILTERS.map((s) => (
+              <Pressable
+                key={s.key || "all"}
+                onPress={() => setSevFilter(s.key)}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 6,
+                  borderRadius: 6,
+                  backgroundColor: sevFilter === s.key ? ACCENT + "22" : colors.gray[800],
+                  borderWidth: 1,
+                  borderColor: sevFilter === s.key ? ACCENT + "44" : "rgba(255,255,255,0.06)",
+                }}
+              >
+                <Text style={{ color: sevFilter === s.key ? ACCENT : colors.gray[300], fontFamily: "monospace", fontSize: 10, fontWeight: "bold", textTransform: "uppercase" }}>
+                  {s.label}
+                </Text>
+              </Pressable>
+            ))}
+            <View style={{ flexBasis: "100%", height: 0 }} />
+            <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>
+              {findings.length}/{findingsTotal} findings
+            </Text>
+          </View>
+
+          {findings.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: 60 }}>
+              <Text style={{ fontSize: 48, marginBottom: 16 }}>🛡️</Text>
+              <Text style={{ color: colors.gray[300], fontSize: 15, marginBottom: 4 }}>No findings match</Text>
+              <Text style={{ color: colors.gray[400], fontSize: 12, textAlign: "center", paddingHorizontal: 40 }}>
+                Clear the severity filter to widen the board
+              </Text>
+            </View>
+          ) : (
+            findings.map((f) => {
+              const sevC = severityColor(f.severity);
+              const lcC = lifecycleColor(f.lifecycle);
+              const cv = fmtCvss(f.cvss_score);
+              return (
+                <Pressable
+                  key={f.id}
+                  onPress={() => setDetailFinding(f.id)}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.92 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] })}
+                >
+                  <View
+                    style={{
+                      backgroundColor: colors.gray[800],
+                      borderRadius: 12,
+                      borderLeftWidth: 3,
+                      borderLeftColor: sevC,
+                      marginBottom: 12,
+                      padding: 16,
+                      borderWidth: 1,
+                      borderColor: HAIRLINE,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+                        <Text style={{ fontSize: 22 }}>{severityIcon(f.severity)}</Text>
+                        <Text style={{ color: colors.gray[50], fontSize: 15, fontWeight: "600", flex: 1 }} numberOfLines={2}>
+                          {safe(f.title)}
+                        </Text>
+                      </View>
+                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: lcC, marginLeft: 8 }} />
+                    </View>
+
+                    <Text style={{ color: colors.gray[300], fontSize: 12, lineHeight: 17, marginBottom: 10 }} numberOfLines={2}>
+                      {[f.chain_name, f.skyline_id || f.cve_id, f.affected_asset].filter(Boolean).map((s) => safe(String(s))).join(" · ") || safe(f.severity)}
+                    </Text>
+
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 2 }}>
+                      <Text style={{ color: lcC, fontFamily: "monospace", fontSize: 10 }}>
+                        {lifecycleLabel(f.lifecycle).toUpperCase()}{f.discovered_at ? ` · ${fmtDate(f.discovered_at)}` : ""}
+                      </Text>
+                      {cv ? (
+                        <Text style={{ color: cvssColor(f.cvss_score), fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>
+                          CVSS {cv}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                </Pressable>
+              );
+            })
+          )}
+
+          {findings.length < findingsTotal ? (
+            <Pressable
+              onPress={async () => { setLoadingMore(true); await fetchFindings(findings.length, true); setLoadingMore(false); }}
+              disabled={loadingMore}
+              style={{
+                alignItems: "center",
+                backgroundColor: ACCENT + "18",
+                paddingHorizontal: 20,
+                paddingVertical: 10,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: ACCENT + "44",
+                opacity: loadingMore ? 0.6 : 1,
+              }}
+            >
+              <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 12, fontWeight: "bold" }}>
+                {loadingMore ? "LOADING..." : `+ LOAD ${findingsTotal - findings.length} MORE`}
+              </Text>
+            </Pressable>
+          ) : null}
+        </ScrollView>
+      )}
+
+      {/* ── ACTIVITY ── */}
+      {activeTab === "activity" && (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.gray[400]} />}
+        >
+          {loading && !overview ? (
+            <View style={{ alignItems: "center", paddingVertical: 40 }}>
+              <Text style={{ color: colors.gray[400], fontFamily: "monospace" }}>Loading activity...</Text>
+            </View>
+          ) : (
+            <>
+              <ActivityCard
+                label={`FINDINGS (${(overview?.recent_findings || []).length})`}
+                empty="No findings recorded yet"
+                rows={(overview?.recent_findings || []).map((f) => ({
+                  key: `f${f.id}`,
+                  title: safe(f.title),
+                  sub: [f.chain_slug, fmtDate(f.discovered_at)].filter(Boolean).join(" · "),
+                  right: safe(f.severity).toUpperCase(),
+                  rightColor: severityColor(f.severity),
+                  onPress: () => setDetailFinding(f.id),
+                }))}
+              />
+              <ActivityCard
+                label={`EVIDENCE RUNS (${(overview?.recent_runs || []).length})`}
+                empty="No evidence runs recorded yet"
+                rows={(overview?.recent_runs || []).map((r) => ({
+                  key: `r${r.run_key}`,
+                  title: safe(r.purpose, r.run_key),
+                  sub: `${safe(r.target)}${r.run_date ? ` · ${fmtDate(r.run_date)}` : ""}`,
+                  right: r.verdict ? safe(r.verdict).toUpperCase() : fmtDate(r.run_date),
+                  rightColor: r.verdict === "fail" ? colors.error : r.verdict ? colors.success : colors.gray[300],
+                  onPress: r.chain_slug ? () => router.push(`/soc/chain/${r.chain_slug}`) : undefined,
+                }))}
+              />
+              <ActivityCard
+                label={`VENDOR COORDINATION (${(overview?.recent_coordination || []).length})`}
+                empty="No vendor coordination logged yet"
+                rows={(overview?.recent_coordination || []).map((c, i) => ({
+                  key: `c${c.channel}-${c.event_date}-${i}`,
+                  title: safe(c.subject, c.channel),
+                  sub: `${DIRECTION_ICON[c.direction] || "·"} ${safe(c.channel)} · ${fmtDate(c.event_date)}`,
+                  right: safe(c.status).toUpperCase(),
+                  rightColor: channelColor(c.channel),
+                }))}
+              />
+            </>
+          )}
+        </ScrollView>
+      )}
+
+      <FindingDetailModal findingId={detailFinding} onClose={() => setDetailFinding(null)} />
+      <StatusBar style="light" />
+    </View>
+  );
+}
+
+// ── Activity section card — DashboardView's TOP-BUYERS card shape ──
+
+interface ActivityRow {
+  key: string;
+  title: string;
+  sub: string;
+  right: string;
+  rightColor: string;
+  onPress?: () => void;
+}
+
+function ActivityCard({ label, rows, empty }: { label: string; rows: ActivityRow[]; empty: string }) {
+  return (
+    <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: HAIRLINE }}>
+      <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, letterSpacing: 2, marginBottom: 10 }}>{label}</Text>
+      {rows.length === 0 ? (
+        <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11, paddingVertical: 8 }}>{empty}</Text>
+      ) : (
+        rows.map((r, i) => {
+          const inner = (
+            <>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={{ color: colors.gray[50], fontFamily: "monospace", fontSize: 12 }} numberOfLines={2}>{r.title}</Text>
+                {r.sub ? <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10, marginTop: 2 }} numberOfLines={1}>{r.sub}</Text> : null}
+              </View>
+              <Text style={{ color: r.rightColor, fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>{r.right}</Text>
+            </>
+          );
+          const rowStyle = {
+            flexDirection: "row" as const,
+            justifyContent: "space-between" as const,
+            alignItems: "center" as const,
+            paddingVertical: 6,
+            borderBottomWidth: i < rows.length - 1 ? 1 : 0,
+            borderBottomColor: HAIRLINE,
+          };
+          return r.onPress ? (
+            <Pressable key={r.key} onPress={r.onPress} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }, rowStyle]}>
+              {inner}
+            </Pressable>
+          ) : (
+            <View key={r.key} style={rowStyle}>{inner}</View>
+          );
+        })
+      )}
     </View>
   );
 }
