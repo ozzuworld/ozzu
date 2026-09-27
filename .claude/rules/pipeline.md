@@ -5,7 +5,7 @@ paths:
 
 # Deploy Pipeline
 
-**The Ozzu app is iOS-ONLY (dir_1782138428827)** — the iPhone is the only app device; there is no Android build/APK/mirror for the app. But iOS-only does **NOT** mean "always rebuild": the app ships JS changes **over-the-air (OTA)** and only does a full native CI build when native code changes. The **TV app** (`tv/`) is a separate Android-TV target with its own OTA — don't conflate them.
+**The Ozzu app is iOS-PRIMARY (dir_1782138428827) with an interim Android target** (KK order 2026-09-27, dir_1790538151856 — he is running the app on Android for the time being; `build-android.yml` → sideloadable APK). Neither target means "always rebuild": the app ships JS changes **over-the-air (OTA)** and only does a full native CI build when native code changes. The **TV app** (`tv/`) is a separate Android-TV target with its own OTA — don't conflate them.
 
 ## The Ozzu app — two tiers (OTA architecture, 2026-06-22)
 
@@ -29,6 +29,14 @@ paths:
 
 ### STAGING (recovery)
 `stage_ios` MCP tool — rebuild the iOS IPA on demand if a native `merge-and-deploy` build failed/cancelled.
+
+### Android lane (interim, 2026-09-27 — dir_1790538151856)
+| Change | Path | Notes |
+|---|---|---|
+| **JS / TSX only** | **Same OTA** — `ota-deploy.sh` already exports the iOS **+ Android** bundle; the manifest serves both | An installed APK auto-updates on launch (two-step apply, same as iPhone). runtimeVersion 1.0.0 gate applies. |
+| **Native** (`app.json`, `plugins/**`, `modules/**`, new native deps) | `build-android.yml` — auto on push-main native paths, or manual: `gh workflow run build-android.yml` | expo prebuild + `gradlew assembleRelease` (~15–25 min) → `ozzu.apk` + `android-latest.json` → rolling **`android-latest`** GitHub Release → cache to `artifacts/ozzu-latest.apk` → sideload. Debug-key-signed unless `OZZU_ANDROID_KEYSTORE_BASE64` secret is set — still sideloadable + OTA-capable. |
+
+smartDeploy does NOT (yet) auto-trigger the Android build on native changes — run the workflow manually after a native `merge-and-deploy`. No Redroid mirror/screenshot loop exists for the app (decommissioned); UI is verified in code against `ProjectCard.tsx` + tokens.
 
 ## The TV app (`tv/`) — Android TV, SEPARATE from the app
 
