@@ -135,6 +135,9 @@ export default function ChainDetailScreen() {
   const [collapsed, setCollapsed] = useState<Set<string>>(
     () => new Set(["artifacts", "coord", "advisory"]),
   );
+  // FINDINGS view toggle — the sheet's PHASES/STATUS mini-toggle:
+  // group the work by lifecycle phase or by severity.
+  const [groupBy, setGroupBy] = useState<"lifecycle" | "severity">("lifecycle");
 
   const toggle = (key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -189,24 +192,30 @@ export default function ChainDetailScreen() {
     return () => { mounted = false; };
   }, [advisoryArtifact]);
 
-  // Findings grouped by lifecycle — the sheet's phase-group pattern.
+  // Findings grouped like the sheet's task phase-groups — by lifecycle
+  // phase or by severity, per the FINDINGS view toggle.
   const findingGroups = useMemo(() => {
+    const keyOf = (f: ChainFinding) =>
+      groupBy === "severity" ? (f.severity || "info") : (f.lifecycle || "unfiled");
     const groups = new Map<string, ChainFinding[]>();
     for (const f of findings) {
-      const key = f.lifecycle || "unfiled";
+      const key = keyOf(f);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(f);
     }
+    const order = groupBy === "severity"
+      ? ["critical", "high", "medium", "low", "info"]
+      : [...LIFECYCLE_ORDER, "held", "duplicate", "withdrawn", "unfiled"];
     const ordered: Array<[string, ChainFinding[]]> = [];
-    for (const lc of [...LIFECYCLE_ORDER, "held", "duplicate", "withdrawn", "unfiled"]) {
-      const rows = groups.get(lc);
-      if (rows && rows.length > 0) ordered.push([lc, rows]);
+    for (const k of order) {
+      const rows = groups.get(k);
+      if (rows && rows.length > 0) ordered.push([k, rows]);
     }
     for (const [k, v] of groups) {
       if (!ordered.some(([ok]) => ok === k)) ordered.push([k, v]);
     }
     return ordered;
-  }, [findings]);
+  }, [findings, groupBy]);
 
   if (loading) {
     return (
@@ -306,92 +315,8 @@ export default function ChainDetailScreen() {
           </SectionCard>
         ) : null}
 
-        {/* ── The work: findings grouped by lifecycle, collapsible like phases ── */}
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11, letterSpacing: 1 }}>
-            FINDINGS ({findings.length})
-          </Text>
-        </View>
-        {findings.length === 0 ? (
-          <View style={{ alignItems: "center", paddingVertical: 32 }}>
-            <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 12 }}>No findings linked yet</Text>
-          </View>
-        ) : (
-          findingGroups.map(([lc, rows]) => {
-            const isCollapsed = collapsed.has(`f:${lc}`);
-            return (
-              <View key={lc} style={{ marginBottom: 12 }}>
-                <Pressable
-                  onPress={() => toggle(`f:${lc}`)}
-                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6, paddingHorizontal: 4 }}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text style={{ color: colors.gray[400], fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</Text>
-                    <Text style={{ color: lifecycleColor(lc === "unfiled" ? null : lc), fontFamily: "monospace", fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>
-                      {lifecycleLabel(lc === "unfiled" ? null : lc).toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>{rows.length}</Text>
-                </Pressable>
-                {!isCollapsed ? (
-                  <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
-                    {rows.map((f, i) => {
-                      const cv = fmtCvss(f.cvss_score);
-                      return (
-                        <Row
-                          key={f.id}
-                          title={`${severityIcon(f.severity)} ${safe(f.title)}`}
-                          sub={[f.skyline_id || f.cve_id, f.discovered_at ? fmtDate(f.discovered_at) : null].filter(Boolean).join(" · ") || undefined}
-                          right={cv || safe(f.severity).toUpperCase()}
-                          rightColor={cv ? cvssColor(f.cvss_score) : severityColor(f.severity)}
-                          last={i === rows.length - 1}
-                          onPress={() => setDetailFinding(f.id)}
-                        />
-                      );
-                    })}
-                  </View>
-                ) : null}
-              </View>
-            );
-          })
-        )}
-
-        {/* Components */}
-        {chain.components.length > 0 ? (
-          <SectionCard label={`COMPONENTS (${chain.components.length})`}>
-            {chain.components.map((comp, i) => {
-              const cv = fmtCvss(comp.cvss);
-              return (
-                <Row
-                  key={comp.skyline_id || comp.name || String(i)}
-                  title={`${severityIcon(comp.severity)} ${safe(comp.name, "component")}`}
-                  sub={[comp.skyline_id, comp.role, comp.cwe, comp.cve].filter(Boolean).map((s) => safe(String(s))).join(" · ") || undefined}
-                  right={cv || safe(comp.severity || "").toUpperCase()}
-                  rightColor={cv ? cvssColor(comp.cvss) : severityColor(comp.severity)}
-                  last={i === chain.components.length - 1}
-                />
-              );
-            })}
-          </SectionCard>
-        ) : null}
-
-        {/* Evidence runs */}
-        {runs.length > 0 ? (
-          <SectionCard label={`EVIDENCE RUNS (${runs.length})`}>
-            {runs.map((r, i) => (
-              <Row
-                key={r.id}
-                title={safe(r.run_key)}
-                sub={[r.purpose, r.target, r.run_date ? fmtDate(r.run_date) : null].filter(Boolean).map((s) => safe(String(s))).join(" · ")}
-                right={r.verdict ? safe(r.verdict).toUpperCase() : ""}
-                rightColor={r.verdict === "fail" ? colors.error : colors.success}
-                last={i === runs.length - 1}
-              />
-            ))}
-          </SectionCard>
-        ) : null}
-
-        {/* Document-type content — collapsed disclosure rows, like EXPENSES */}
+        {/* Document-type content — collapsed disclosure rows in the sheet's
+            EXPENSES slot: present but closed, above the work, never the face. */}
         <DisclosureSection
           label={`ARTIFACTS (${artifacts.length})`}
           collapsed={collapsed.has("artifacts")}
@@ -456,6 +381,182 @@ export default function ChainDetailScreen() {
             <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11, paddingVertical: 8 }}>No advisory packaged yet</Text>
           )}
         </DisclosureSection>
+
+        {/* STATUS — the sheet's segment row, read-only: the 8-stage pipeline
+            with the current stage filled, like the sheet fills ACTIVE. */}
+        <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, letterSpacing: 2, marginBottom: 8 }}>STATUS</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
+          {CHAIN_STATUS_ORDER.map((s, i) => {
+            const active = i === idx;
+            const past = i < idx;
+            const col = chainStatusColor(s);
+            return (
+              <View
+                key={s}
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 6,
+                  backgroundColor: active ? col + "22" : "transparent",
+                  borderWidth: 1,
+                  borderColor: active ? col + "66" : past ? col + "33" : HAIRLINE,
+                }}
+              >
+                <Text style={{
+                  color: active ? col : past ? col : colors.gray[400],
+                  opacity: past ? 0.6 : 1,
+                  fontFamily: "monospace",
+                  fontSize: 9,
+                  fontWeight: "bold",
+                  letterSpacing: 1,
+                }}>
+                  {chainStatusLabel(s).toUpperCase()}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* ── The work: findings grouped in collapsible phase-groups ── */}
+        {/* FINDINGS header + view toggle — the sheet's TASKS (n) + PHASES/STATUS */}
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11, letterSpacing: 1 }}>
+            FINDINGS ({findings.length})
+          </Text>
+          <View style={{ flexDirection: "row", gap: 4 }}>
+            {(["lifecycle", "severity"] as const).map((g) => (
+              <Pressable
+                key={g}
+                onPress={() => setGroupBy(g)}
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 4,
+                  backgroundColor: groupBy === g ? colors.gray[700] : "transparent",
+                }}
+              >
+                <Text style={{
+                  color: groupBy === g ? colors.gray[100] : colors.gray[400],
+                  fontFamily: "monospace",
+                  fontSize: 8,
+                  fontWeight: "bold",
+                  letterSpacing: 1,
+                }}>
+                  {g.toUpperCase()}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+        {findings.length === 0 ? (
+          <View style={{ alignItems: "center", paddingVertical: 32 }}>
+            <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 12 }}>No findings linked yet</Text>
+          </View>
+        ) : (
+          findingGroups.map(([lc, rows]) => {
+            const isCollapsed = collapsed.has(`f:${lc}`);
+            return (
+              <View key={lc} style={{ marginBottom: 12 }}>
+                <Pressable
+                  onPress={() => toggle(`f:${lc}`)}
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6, paddingHorizontal: 4 }}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={{ color: colors.gray[400], fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</Text>
+                    <Text style={{ color: groupBy === "severity" ? severityColor(lc) : lifecycleColor(lc === "unfiled" ? null : lc), fontFamily: "monospace", fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>
+                      {(groupBy === "severity" ? lc : lifecycleLabel(lc === "unfiled" ? null : lc)).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>{rows.length}</Text>
+                </Pressable>
+                {!isCollapsed ? (
+                  <View style={{ gap: 8 }}>
+                    {rows.map((f) => {
+                      const cv = fmtCvss(f.cvss_score);
+                      const sub = [f.skyline_id || f.cve_id, f.discovered_at ? fmtDate(f.discovered_at) : null]
+                        .filter(Boolean).join(" · ");
+                      return (
+                        <Pressable
+                          key={f.id}
+                          onPress={() => setDetailFinding(f.id)}
+                          style={({ pressed }) => ({
+                            opacity: pressed ? 0.92 : 1,
+                            transform: [{ scale: pressed ? 0.99 : 1 }],
+                            backgroundColor: colors.gray[800],
+                            borderRadius: 10,
+                            padding: 12,
+                            borderWidth: 1,
+                            borderColor: HAIRLINE,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 10,
+                          })}
+                        >
+                          <View style={{
+                            width: 24, height: 24, borderRadius: 12,
+                            borderWidth: 1.5, borderColor: severityColor(f.severity),
+                            alignItems: "center", justifyContent: "center",
+                          }}>
+                            <Text style={{ fontSize: 11 }}>{severityIcon(f.severity)}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: colors.gray[50], fontSize: 13, lineHeight: 18 }} numberOfLines={2}>
+                              {safe(f.title)}
+                            </Text>
+                            {sub ? (
+                              <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 3 }} numberOfLines={1}>
+                                {sub}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <Text style={{ color: cv ? cvssColor(f.cvss_score) : severityColor(f.severity), fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
+                            {cv || safe(f.severity).toUpperCase()}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })
+        )}
+
+        {/* Components */}
+        {chain.components.length > 0 ? (
+          <SectionCard label={`COMPONENTS (${chain.components.length})`}>
+            {chain.components.map((comp, i) => {
+              const cv = fmtCvss(comp.cvss);
+              return (
+                <Row
+                  key={comp.skyline_id || comp.name || String(i)}
+                  title={`${severityIcon(comp.severity)} ${safe(comp.name, "component")}`}
+                  sub={[comp.skyline_id, comp.role, comp.cwe, comp.cve].filter(Boolean).map((s) => safe(String(s))).join(" · ") || undefined}
+                  right={cv || safe(comp.severity || "").toUpperCase()}
+                  rightColor={cv ? cvssColor(comp.cvss) : severityColor(comp.severity)}
+                  last={i === chain.components.length - 1}
+                />
+              );
+            })}
+          </SectionCard>
+        ) : null}
+
+        {/* Evidence runs */}
+        {runs.length > 0 ? (
+          <SectionCard label={`EVIDENCE RUNS (${runs.length})`}>
+            {runs.map((r, i) => (
+              <Row
+                key={r.id}
+                title={safe(r.run_key)}
+                sub={[r.purpose, r.target, r.run_date ? fmtDate(r.run_date) : null].filter(Boolean).map((s) => safe(String(s))).join(" · ")}
+                right={r.verdict ? safe(r.verdict).toUpperCase() : ""}
+                rightColor={r.verdict === "fail" ? colors.error : colors.success}
+                last={i === runs.length - 1}
+              />
+            ))}
+          </SectionCard>
+        ) : null}
+
       </ScrollView>
 
       <ArtifactViewerModal artifact={viewArtifact} onClose={() => setViewArtifact(null)} />
