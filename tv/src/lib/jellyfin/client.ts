@@ -1,17 +1,18 @@
 // Jellyfin SDK client singleton for the Ozzu TV app.
 //
-// The TV reaches Jellyfin through the bridge reverse-proxy (nginx ^~ /bridge/
-// jellyfin/ -> dev-01:8096 over WG). Base URL is overridable in Settings.
+// The TV reaches Jellyfin on bridge-01 three ways (see resolveServerUrl): LAN
+// direct at home, WG mesh (10.9.0.5:8096), or the public nginx door
+// (home.ozzu.world/bridge/jellyfin -> AWS edge -> WG -> :8096) from anywhere.
 // A stable deviceId is required so Jellyfin keys sessions/resume consistently.
 
 import { Jellyfin } from "@jellyfin/sdk";
 import type { Api } from "@jellyfin/sdk";
 
 // LAN-direct by default: Jellyfin lives on bridge-01 (192.168.1.9:8096) and media
-// bytes must NOT hairpin through the GCP edge (data-sovereignty + bandwidth).
-// Override in Settings for remote:
+// bytes must NOT hairpin through the cloud edge when at home (data-sovereignty +
+// bandwidth). resolveServerUrl() below picks the best path per network:
 //   WG mesh:            http://10.9.0.5:8096
-//   nginx public proxy: https://home.ozzu.world/bridge/jellyfin
+//   nginx public proxy: https://home.ozzu.world/bridge/jellyfin (AWS edge)
 export const DEFAULT_BASE_URL = "http://192.168.1.9:8096";
 const CLIENT_INFO = { name: "Ozzu TV", version: "1.0.0" };
 
@@ -83,7 +84,7 @@ export function authHeaders(): Record<string, string> {
 export const SERVER_CANDIDATES = [
   "http://192.168.1.9:8096", // home LAN (bridge-01)
   "http://10.9.0.5:8096", // WG mesh
-  "https://home.ozzu.world/bridge/jellyfin", // public nginx proxy (edge pending)
+  "https://home.ozzu.world/bridge/jellyfin", // public door via AWS edge (LIVE since 2026-09-27)
 ];
 
 let _reachable = false;
