@@ -69,6 +69,25 @@ Expandable health card for services.
 | `ProgressBar` | `components/business/ProgressBar.tsx` | Horizontal progress fill |
 | `CostField` | `components/business/CostField.tsx` | COP currency input |
 
+## SOC Components (v3 report plane — read-only; acting UI removed 2026-09-27)
+
+| Component | File | Use For |
+|-----------|------|---------|
+| `chainConstants` | `components/soc/chainConstants.ts` | Kill-chain status pipeline + finding lifecycle + CVSS banding + artifact/channel tokens — import these, never re-hex |
+| `FindingDetailModal` | `components/soc/FindingDetailModal.tsx` | Full finding record viewer (fetches `/soc/findings/:id`; markdown description/remediation, chain-link nav) |
+| `EngagementCard` | `components/soc/EngagementCard.tsx` | Engagement list card (home screen active-engagements section) |
+| `FindingRow` | `components/soc/FindingRow.tsx` | Finding list row (severity border, CVSS pill, CVE refs) |
+| `QueueRow` | `components/soc/QueueRow.tsx` | Queue step row — callbacks optional; WITHOUT them it is purely presentational (read-only record) |
+| `PhasePill` | `components/soc/PhasePill.tsx` | Engagement phase pill |
+| `SocErrorBoundary` | `components/soc/SocErrorBoundary.tsx` | Error boundary wrapper for SOC screens |
+
+SOC screens: `(tabs)/soc.tsx` (chain-first home), `soc/chain/[slug].tsx` (chain
+detail: pipeline strip + advisory viewer), `soc/findings.tsx` (board with
+lifecycle/severity/chain filters), `soc/[id].tsx` (read-only engagement record).
+Data: `/soc/overview`, `/soc/chains[/:slug]`, `/soc/findings[/:id]`,
+`/soc/artifacts/:id/content` (sanitized only). Architecture:
+`backend/bridge/SOC-PIPELINE-ARCHITECTURE.md` § SOC v3.
+
 ## Ops Components
 
 | Component | File | Use For |
