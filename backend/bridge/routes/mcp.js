@@ -215,7 +215,7 @@ module.exports = function mcpRoutes(ctx) {
     },
     {
       name: "get_infra_state",
-      description: "Get live infrastructure state. TOPOLOGY: GCP VM (bridge, postgres, redis, qdrant, nginx, face-recognition, browser) + WireGuard mesh (10.9.0.0/24) connecting kazuma-pc, orangepi5, ozzu-tab (pentest relay), Rock Pi (WG bridge 10.9.0.21). Sections: network (VPN, routes), devices (reachability/services/resources), gcp (Docker, disk, memory). Cached 60s, use refresh=true for fresh probe.",
+      description: "Get live infrastructure state. TOPOLOGY (current since 2026-09-25): bridge-01 metal (10.9.0.5 — bridge, postgres, redis, qdrant, nginx, face-recognition, media stack) + AWS edge VM 'ozzu-edge' (32.195.174.19 — public TLS door for home.ozzu.world, WireGuard HUB 10.9.0.1, certbot, Suricata IDS, fail2ban) + WireGuard mesh (10.9.0.0/24) connecting kazuma-pc, orangepi5, ozzu-tab (pentest relay), Rock Pi (WG bridge 10.9.0.21). GCP VM = DECOMMISSIONED husk (KK order 2026-09-17) — no live role. Sections: network (VPN, routes), devices (reachability/services/resources), gcp (legacy section NAME — reports the bridge host's Docker/disk/memory). Cached 60s, use refresh=true for fresh probe.",
       inputSchema: {
         type: "object",
         properties: {

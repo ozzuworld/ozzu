@@ -108,7 +108,11 @@ async function probeServer(url: string, timeoutMs = 2500): Promise<boolean> {
 export async function resolveServerUrl(first?: string | null): Promise<string | null> {
   const seen = new Set<string>();
   const urls: string[] = [];
-  for (const u of [first, ...SERVER_CANDIDATES]) {
+  // Order matters: LAN → WG → persisted override → public edge. Home devices
+  // always get the direct LAN path (zero cloud hairpin, zero egress cost);
+  // remote devices fall through to the public door (live since 2026-09-27).
+  const [lan, wg, pub] = SERVER_CANDIDATES;
+  for (const u of [lan, wg, first, pub]) {
     if (!u) continue;
     const norm = u.replace(/\/+$/, "");
     if (!seen.has(norm)) {
