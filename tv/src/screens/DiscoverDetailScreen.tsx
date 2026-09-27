@@ -296,9 +296,14 @@ export function DiscoverDetailScreen() {
               onPress={reqPending || requested ? undefined : doRequest}
             />
           ) : (
-            <FocusableButton label="Back" icon="←" hasTVPreferredFocus onPress={() => nav.goBack()} />
+            <FocusableButton
+              label="Back"
+              icon="←"
+              // series-in-library hands first focus to the season picker below
+              hasTVPreferredFocus={!(mediaType === "tv" && jellyfinId)}
+              onPress={() => nav.goBack()}
+            />
           )}
-          {mediaType === "movie" && jellyfinId && !available ? null : null}
           {!!reqNote && <Text style={styles.reqNote}>{reqNote}</Text>}
         </View>
 
@@ -314,7 +319,7 @@ export function DiscoverDetailScreen() {
                     <FocusableButton
                       key={s.Id}
                       label={s.IndexNumber ? `Season ${s.IndexNumber}` : s.Name || `Season ${i + 1}`}
-                      hasTVPreferredFocus={!available && i === 0}
+                      hasTVPreferredFocus={i === 0}
                       onPress={() => setActiveSeason(s.Id)}
                       style={active ? styles.seasonActive : undefined}
                     />

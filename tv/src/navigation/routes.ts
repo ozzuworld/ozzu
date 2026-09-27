@@ -15,6 +15,8 @@ export type RootStackParamList = {
   Login: undefined;
   Home: undefined;
   Detail: { itemId: string };
+  /** Seerr-lane detail (TMDB catalog) — dir_1790443814736 discovery phase. */
+  DiscoverDetail: { tmdbId: number; mediaType: "movie" | "tv" };
   Player: { itemId: string; startSeconds?: number } | { broker: BrokerPlayParams };
   Search: undefined;
   Settings: undefined;

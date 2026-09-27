@@ -10,9 +10,17 @@ import {
 } from "../lib/jellyfin/home";
 import { getUserId } from "../lib/jellyfin/client";
 import { brokerStreamLan, markersContinue, type Marker } from "../lib/bridge";
+import {
+  discoverTrending,
+  submitRequest,
+  isAvailable,
+  type DiscoverItem,
+} from "../lib/seerr";
 import { colors, spacing, fontSize, fontWeight, screenPad } from "../lib/theme";
 import { MediaRail } from "../components/MediaRail";
 import { MarkerRail } from "../components/MarkerRail";
+import { DiscoverRail } from "../components/DiscoverRail";
+import { HeroBillboard } from "../components/HeroBillboard";
 import { FocusableButton } from "../components/FocusableButton";
 import { ErrorView, Spinner } from "../components/States";
 
@@ -22,10 +30,12 @@ interface Rail {
   items: BaseItemDto[];
 }
 
-// Home = two lanes (dir_1790443814736 P2):
-//   Ozzu broker rail  — postgres markers, independent of Jellyfin (works even
-//                       if the library server is down; streams from stremio-server)
-//   Jellyfin rails    — rotation library (Continue Watching / Recently Added / libs)
+// Home = three lanes (dir_1790443814736 discovery phase):
+//   Seerr lane    — hero billboard + Trending Now (TMDB catalog; Seerr provides
+//                   everything, Jellyfin plays: available items carry jellyfinId)
+//   Ozzu broker   — postgres markers, independent of Jellyfin (stremio streams)
+//   Jellyfin lane — rotation library (Continue Watching / Recently Added / libs)
+// Every lane loads via allSettled — one dead lane never blanks the screen.
 
 async function loadJellyfinRails(userId: string): Promise<Rail[]> {
   const [resume, libraries] = await Promise.all([
@@ -52,7 +62,10 @@ export function HomeScreen() {
   const nav = useNavigation<any>();
   const [rails, setRails] = useState<Rail[] | null>(null);
   const [markers, setMarkers] = useState<Marker[]>([]);
+  const [trending, setTrending] = useState<DiscoverItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [heroReqPending, setHeroReqPending] = useState(false);
+  const [heroRequested, setHeroRequested] = useState<Record<number, boolean>>({});
   const scrollRef = useRef<ScrollView>(null);
   const yPos = useRef<Record<string, number>>({});
 
@@ -60,16 +73,18 @@ export function HomeScreen() {
     setError(null);
     setRails(null);
     const userId = getUserId();
-    // The broker lane never depends on Jellyfin being up (and vice versa).
-    const [jf, mk] = await Promise.allSettled([
+    // The three lanes never depend on each other (Seerr/bridge/Jellyfin).
+    const [jf, mk, tr] = await Promise.allSettled([
       loadJellyfinRails(userId),
       markersContinue().then((r) => r.markers),
+      discoverTrending().then((r) => r.results),
     ]);
     setMarkers(mk.status === "fulfilled" ? mk.value : []);
+    setTrending(tr.status === "fulfilled" ? tr.value : []);
     if (jf.status === "fulfilled") {
       setRails(jf.value);
-    } else if (mk.status !== "fulfilled") {
-      setError("Couldn't reach your Jellyfin server or the Ozzu bridge.");
+    } else if (mk.status !== "fulfilled" && tr.status !== "fulfilled") {
+      setError("Couldn't reach your Jellyfin server, the Ozzu bridge, or Seerr.");
     } else {
       setRails([]);
     }
@@ -88,6 +103,9 @@ export function HomeScreen() {
     if (item.Id) nav.navigate("Detail", { itemId: item.Id });
   };
 
+  const openDiscover = (item: DiscoverItem) =>
+    nav.navigate("DiscoverDetail", { tmdbId: item.tmdbId, mediaType: item.mediaType });
+
   const openMarker = (m: Marker) => {
     const dur = m.duration_seconds || 0;
     const nearEnd = dur > 0 && m.position_seconds / dur > 0.98;
@@ -105,9 +123,39 @@ export function HomeScreen() {
     });
   };
 
+  // Hero = first trending item WITH a backdrop (billboards need 16:9 art).
+  const heroItem = trending.find((t) => t.backdropPath) ?? trending[0] ?? null;
+  const heroPlayableId =
+    heroItem && isAvailable(heroItem.availability) ? heroItem.availability?.jellyfinId ?? null : null;
+
+  const playHero = () => {
+    if (!heroItem || !heroPlayableId) return;
+    if (heroItem.mediaType === "movie") {
+      nav.navigate("Player", { itemId: heroPlayableId });
+    } else {
+      // Series: detail screen owns the season/episode picker.
+      openDiscover(heroItem);
+    }
+  };
+
+  const requestHero = async () => {
+    if (!heroItem || heroReqPending) return;
+    setHeroReqPending(true);
+    try {
+      const r = await submitRequest(heroItem.tmdbId, heroItem.mediaType, "all");
+      if (r.created || r.reason === "duplicate") {
+        setHeroRequested((prev) => ({ ...prev, [heroItem.tmdbId]: true }));
+      }
+    } catch {
+      // note stays silent on home — detail screen surfaces request errors
+    } finally {
+      setHeroReqPending(false);
+    }
+  };
+
   if (error) return <ErrorView message={error} onRetry={load} />;
   if (!rails) return <Spinner label="Loading your library…" />;
-  if (!rails.length && !markers.length)
+  if (!rails.length && !markers.length && !trending.length)
     return <ErrorView message="No media found — try Discover, or add libraries in Jellyfin." onRetry={load} />;
 
   return (
@@ -115,9 +163,27 @@ export function HomeScreen() {
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={heroItem ? styles.scrollBleed : styles.scroll}
       >
-        <View style={styles.header}>
+        {heroItem ? (
+          <View
+            onLayout={(e) => {
+              yPos.current["hero"] = e.nativeEvent.layout.y;
+            }}
+          >
+            <HeroBillboard
+              item={heroItem}
+              onPlay={heroPlayableId ? playHero : undefined}
+              onRequest={!heroPlayableId ? requestHero : undefined}
+              onMoreInfo={() => openDiscover(heroItem)}
+              requestPending={heroReqPending}
+              requested={!!heroRequested[heroItem.tmdbId]}
+              focusFirst
+            />
+          </View>
+        ) : null}
+
+        <View style={heroItem ? styles.headerOverlay : styles.header}>
           <Text style={styles.brand}>
             OZZU<Text style={styles.brandAccent}> TV</Text>
           </Text>
@@ -133,9 +199,23 @@ export function HomeScreen() {
             <MarkerRail
               title="Continue Watching — Ozzu"
               markers={markers}
-              firstItemFocus
               onSelect={openMarker}
               onRowFocus={() => onRowFocus("broker")}
+            />
+          </View>
+        ) : null}
+
+        {trending.length ? (
+          <View
+            onLayout={(e) => {
+              yPos.current["trending"] = e.nativeEvent.layout.y;
+            }}
+          >
+            <DiscoverRail
+              title="Trending Now"
+              items={trending}
+              onSelect={openDiscover}
+              onRowFocus={() => onRowFocus("trending")}
             />
           </View>
         ) : null}
@@ -150,7 +230,7 @@ export function HomeScreen() {
             <MediaRail
               title={r.title}
               items={r.items}
-              firstItemFocus={i === 0 && !markers.length}
+              firstItemFocus={i === 0 && !markers.length && !heroItem && !trending.length}
               onSelect={openDetail}
               onRowFocus={() => onRowFocus(r.key)}
             />
@@ -164,9 +244,23 @@ export function HomeScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg.base },
   scroll: { paddingTop: spacing.lg, paddingBottom: spacing.xxxl },
+  // hero bleeds to the top edge (Netflix-style full-bleed billboard)
+  scrollBleed: { paddingBottom: spacing.xxxl },
   header: {
     paddingHorizontal: screenPad,
     marginBottom: spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    paddingHorizontal: screenPad,
+    paddingTop: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
