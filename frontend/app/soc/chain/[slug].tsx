@@ -27,7 +27,6 @@ import {
   radius,
   fontSize as fs,
   fontWeight as fw,
-  withAlpha,
 } from "../../../lib/design-tokens";
 import { MarkdownContent } from "../../../components/ContentPanel";
 import { FindingDetailModal } from "../../../components/soc/FindingDetailModal";
@@ -59,7 +58,6 @@ import {
   SegTabs,
   EmptyState,
   ConsoleHeader,
-  BannerGradient,
 } from "../../../components/soc/consoleKit";
 
 // ── Types (mirror GET /soc/chains/:slug) ──
@@ -213,7 +211,6 @@ export default function ChainDetailScreen() {
     );
   }
 
-  const banner = artifacts.find((a) => a.kind === "banner" && a.sanitized) || null;
   const statusColor = chainStatusColor(chain.status);
   const composed = fmtCvss(chain.cvss_composed);
   const standalone = fmtCvss(chain.cvss_standalone);
@@ -231,25 +228,12 @@ export default function ChainDetailScreen() {
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
         {/* ── Identity: banner + name + stage track ── */}
-        {banner ? (
-          <View style={{ height: 190 }}>
-            <Image
-              source={{ uri: `${getBridgeUrl()}/soc/artifacts/${banner.id}/content`, headers: getAuthHeaders() }}
-              style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-              resizeMode="cover"
-            />
-            <BannerGradient height={190}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                {drop ? <Chip label={drop} color={colors.accent} filled /> : null}
-                <View style={{ flex: 1 }} />
-                {chain.published_repo ? <Chip label="public" color={colors.success} /> : null}
-              </View>
-            </BannerGradient>
+        <View style={{ padding: spacing.md, gap: spacing.md, paddingTop: spacing.lg }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+            {drop ? <Chip label={drop} color={colors.accent} filled /> : null}
+            <View style={{ flex: 1 }} />
+            {chain.published_repo ? <Chip label="public" color={colors.success} /> : null}
           </View>
-        ) : null}
-
-        <View style={{ padding: spacing.md, gap: spacing.md, paddingTop: banner ? spacing.md : spacing.lg }}>
-          {!banner && drop ? <Chip label={drop} color={colors.accent} filled /> : null}
           <Text style={{ color: colors.gray[50], fontSize: 24, fontWeight: fw.bold }} numberOfLines={2}>
             {safe(chain.name, chain.slug)}
           </Text>

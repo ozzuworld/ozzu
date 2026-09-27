@@ -285,28 +285,13 @@ export function ConsoleHeader({ onBack, label, title, right }: {
   );
 }
 
-// ── Empty state — mono, no emoji ──
+// ── Empty state — micro label, no emoji, no dev-comment prefix ──
 
 export function EmptyState({ text, sub }: { text: string; sub?: string }) {
   return (
     <View style={{ alignItems: "center", paddingVertical: spacing.xxxl, gap: spacing.xs }}>
-      <Mono color={colors.text.disabled} size={fs.md} weight="bold">// {text}</Mono>
+      <MicroLabel color={colors.text.disabled} size={fs.sm}>{text}</MicroLabel>
       {sub ? <Mono color={colors.text.disabled} size={fs.xs}>{sub}</Mono> : null}
-    </View>
-  );
-}
-
-// ── Banner with layered alpha gradient (no LinearGradient native dep) ──
-
-export function BannerGradient({ children, height }: { children?: React.ReactNode; height: number }) {
-  return (
-    <View style={{ height }}>
-      <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "70%", backgroundColor: withAlpha(colors.bg.base, 0.30) }} />
-      <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "45%", backgroundColor: withAlpha(colors.bg.base, 0.55) }} />
-      <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "26%", backgroundColor: withAlpha(colors.bg.base, 0.82) }} />
-      <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: spacing.md, gap: spacing.sm }}>
-        {children}
-      </View>
     </View>
   );
 }

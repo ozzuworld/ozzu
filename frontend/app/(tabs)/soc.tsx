@@ -14,15 +14,11 @@ import {
   ScrollView,
   RefreshControl,
   Pressable,
-  Image,
-  Linking,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
-import { usePhoneLayout } from "../../lib/usePhoneLayout";
-import { GroupNav } from "../../components/GroupNav";
 import { TopBar } from "../../components/TopBar";
-import { apiFetch, getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
+import { apiFetch } from "../../lib/bridge-api";
 import { useBridgeStream } from "../../lib/useBridgeStream";
 import {
   colors,
@@ -30,7 +26,6 @@ import {
   radius,
   fontSize as fs,
   fontWeight as fw,
-  withAlpha,
 } from "../../lib/design-tokens";
 import { severityColor } from "../../components/soc/phaseColors";
 import {
@@ -58,7 +53,6 @@ import {
   PressRow,
   StatCell,
   EmptyState,
-  BannerGradient,
 } from "../../components/soc/consoleKit";
 
 // ── Types (mirrors GET /soc/chains + GET /soc/overview) ──
@@ -109,7 +103,6 @@ const UNSET = "(unset)";
 
 export default function SOCScreen() {
   const router = useRouter();
-  const { insets } = usePhoneLayout();
 
   const [chains, setChains] = useState<ChainSummary[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -205,7 +198,7 @@ export default function SOCScreen() {
   const hero = chains[0] || null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
       <StatusBar style="light" />
 
       <TopBar
@@ -223,7 +216,6 @@ export default function SOCScreen() {
           <Chip label="findings" color={colors.brand.purple} onPress={() => router.push("/soc/findings")} />
         }
       />
-      <GroupNav group="work" />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -259,46 +251,16 @@ export default function SOCScreen() {
                   backgroundColor: colors.gray[850],
                 })}
               >
-                {hero.banner_artifact_id ? (
-                  <View style={{ height: 168 }}>
-                    <Image
-                      source={{
-                        uri: `${getBridgeUrl()}/soc/artifacts/${hero.banner_artifact_id}/content`,
-                        headers: getAuthHeaders(),
-                      }}
-                      style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-                      resizeMode="cover"
-                    />
-                    <BannerGradient height={168}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                        {dropLabel(hero.drop_number) ? (
-                          <Chip label={dropLabel(hero.drop_number)!} color={colors.accent} filled />
-                        ) : null}
-                        <Chip label={chainStatusLabel(hero.status)} color={chainStatusColor(hero.status)} dot />
-                        <View style={{ flex: 1 }} />
-                        {hero.published_repo ? (
-                          <Chip label="public" color={colors.success} />
-                        ) : null}
-                      </View>
-                    </BannerGradient>
-                  </View>
-                ) : (
-                  <View style={{ padding: spacing.lg, gap: spacing.sm, backgroundColor: colors.gray[850] }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                      {dropLabel(hero.drop_number) ? (
-                        <Chip label={dropLabel(hero.drop_number)!} color={colors.accent} filled />
-                      ) : null}
-                      <Chip label={chainStatusLabel(hero.status)} color={chainStatusColor(hero.status)} dot />
-                    </View>
-                    <Text style={{ color: colors.gray[50], fontSize: 22, fontWeight: fw.bold }} numberOfLines={1}>
-                      {safe(hero.name, hero.slug)}
-                    </Text>
-                  </View>
-                )}
-
-                {/* Hero body: name + stage track + counts */}
                 <View style={{ padding: spacing.md, gap: spacing.md }}>
-                  <Text style={{ color: colors.gray[50], fontSize: 20, fontWeight: fw.bold }} numberOfLines={1}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                    {dropLabel(hero.drop_number) ? (
+                      <Chip label={dropLabel(hero.drop_number)!} color={colors.accent} filled />
+                    ) : null}
+                    <Chip label={chainStatusLabel(hero.status)} color={chainStatusColor(hero.status)} dot />
+                    <View style={{ flex: 1 }} />
+                    {hero.published_repo ? <Chip label="public" color={colors.success} /> : null}
+                  </View>
+                  <Text style={{ color: colors.gray[50], fontSize: 22, fontWeight: fw.bold }} numberOfLines={1}>
                     {safe(hero.name, hero.slug)}
                   </Text>
                   <StageTrack status={hero.status} />
@@ -319,8 +281,6 @@ export default function SOCScreen() {
                     <StatCell value={hero.component_count} label="comps" />
                     <StatCell value={hero.finding_count} label="findings" />
                     <StatCell value={hero.artifact_count} label="artifacts" />
-                    <View style={{ flex: 1 }} />
-                    <Mono color={colors.text.disabled} style={{ paddingBottom: 2 }}>open ›</Mono>
                   </View>
                 </View>
               </Pressable>
@@ -357,7 +317,7 @@ export default function SOCScreen() {
 
             {/* ── Findings pulse ── */}
             <SectionHead label="findings by status" right={`${tracked} tracked`} rightColor={colors.info} />
-            <PulseBar segments={pulse} />
+            <PulseBar segments={pulse.filter((p) => p.key !== "unset")} />
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xl, rowGap: spacing.md }}>
               {pulse.map((p) => (
                 <StatCell
@@ -383,12 +343,12 @@ export default function SOCScreen() {
                       <Chip label={item.tag} color={item.tagColor} />
                     </View>
                     <Text
-                      style={{ flex: 1, color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium }}
-                      numberOfLines={1}
+                      style={{ flex: 1, color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium, lineHeight: 18 }}
+                      numberOfLines={2}
                     >
                       {item.title}
                     </Text>
-                    <Mono color={colors.text.disabled}>{item.date}</Mono>
+                    <Mono color={colors.text.disabled} style={{ flexShrink: 0 }}>{item.date}</Mono>
                   </PressRow>
                 ))}
               </RowGroup>
@@ -396,9 +356,6 @@ export default function SOCScreen() {
           </>
         )}
 
-        <View style={{ alignItems: "center", paddingTop: spacing.xxl }}>
-          <Mono color={colors.gray[600]} size={9}>// record plane — acting happens in the terminal</Mono>
-        </View>
       </ScrollView>
     </View>
   );
