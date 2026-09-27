@@ -1,17 +1,14 @@
-// Engagement record — SOC v3 report plane (dir_1790538151856).
-// READ-ONLY rebuild of the old acting screen: the app no longer runs queue
-// steps, cancels, skips or streams executor output. This is the record view
-// of one engagement: findings, queue history, recon hosts, execution log,
-// plus links to any kill chains this engagement feeds. Acting happens in the
-// terminal with King Kazuma; this screen reflects it.
+// Engagement ops record — SOC report console (dir_1790544238642, rebuilt).
+// NOT app navigation: this screen is reachable ONLY from a kill chain's
+// "ops record" row. It is the raw engagement ledger — findings, queue
+// history, recon hosts, execution log — in console language. Read-only;
+// acting happens in the terminal with King Kazuma.
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
@@ -23,29 +20,35 @@ import { useBridgeStream } from "../../lib/useBridgeStream";
 import {
   colors,
   spacing,
-  radius,
   fontSize as fs,
   fontWeight as fw,
-  withAlpha,
 } from "../../lib/design-tokens";
-import { ProgressBar } from "../../components/business/ProgressBar";
-import { PhasePill } from "../../components/soc/PhasePill";
-import { FindingRow, type FindingRowData } from "../../components/soc/FindingRow";
 import { FindingDetailModal } from "../../components/soc/FindingDetailModal";
-import { QueueRow, type QueueItemRow } from "../../components/soc/QueueRow";
 import { SocErrorBoundary } from "../../components/soc/SocErrorBoundary";
 import { severityColor } from "../../components/soc/phaseColors";
-import { fmtDate } from "../../components/soc/chainConstants";
+import {
+  lifecycleColor,
+  lifecycleLabel,
+  chainStatusColor,
+  fmtDate,
+  fmtCvss,
+  cvssColor,
+} from "../../components/soc/chainConstants";
 import { safe } from "../../components/soc/safe";
+import {
+  MONO,
+  MicroLabel,
+  Mono,
+  Chip,
+  SectionHead,
+  RowGroup,
+  PressRow,
+  SegTabs,
+  EmptyState,
+  ConsoleHeader,
+} from "../../components/soc/consoleKit";
 
 type Tab = "findings" | "queue" | "recon" | "log";
-
-const TABS: Array<{ key: Tab; label: string }> = [
-  { key: "findings", label: "Findings" },
-  { key: "queue", label: "Queue" },
-  { key: "recon", label: "Recon" },
-  { key: "log", label: "Log" },
-];
 
 const FALLBACK_POLL_MS = 60_000;
 
@@ -60,6 +63,26 @@ interface EngagementMeta {
   end_date?: string | null;
   engagement_phase?: string | null;
   created_at?: string | null;
+}
+
+interface QueueItemRow {
+  id: number;
+  seq: number;
+  title: string;
+  description?: string | null;
+  status: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+}
+
+interface FindingRowData {
+  id: number;
+  severity: string;
+  title: string;
+  lifecycle?: string | null;
+  affected_asset?: string | null;
+  cvss_score?: number | string | null;
+  discovered_at?: string | null;
 }
 
 interface ReconHostRow {
@@ -82,6 +105,14 @@ interface AuditLogRow {
 }
 
 interface ChainLink { slug: string; name: string; status: string; }
+
+const QUEUE_COLOR: Record<string, string> = {
+  running: colors.success,
+  done: colors.accent,
+  failed: colors.error,
+  skipped: colors.text.tertiary,
+  pending: colors.warning,
+};
 
 export default function EngagementRecordScreen() {
   const router = useRouter();
@@ -189,273 +220,207 @@ function EngagementRecordInner() {
     );
   }
 
-  if (!engagement) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
-        <Text style={{ color: colors.text.disabled, textAlign: "center", marginTop: spacing.xl }}>
-          Engagement not found
-        </Text>
-      </View>
-    );
-  }
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
       <StatusBar style="light" />
 
-      {/* Header */}
-      <View style={{
-        paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md,
-        backgroundColor: colors.bg.elevated,
-        borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
-      }}>
-        <Pressable onPress={() => router.back()} hitSlop={16} style={({ pressed }) => ({
-          opacity: pressed ? 0.6 : 1, marginBottom: spacing.xs, paddingVertical: spacing.xs, alignSelf: "flex-start",
-        })}>
-          <Text style={{ color: colors.accent, fontSize: fs.lg, fontWeight: fw.medium }}>← Back</Text>
-        </Pressable>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-          <Text style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.bold, flex: 1 }} numberOfLines={1}>
-            {safe(engagement.client_name, "—")}
-          </Text>
-          <PhasePill phase={engagement.engagement_phase} size="sm" />
-        </View>
-        <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, fontFamily: "monospace", marginTop: 2 }} numberOfLines={1}>
-          {safe(engagement.id, "—")}{engagement.engagement_type ? ` · ${engagement.engagement_type}` : ""}
-          {engagement.start_date ? ` · ${fmtDate(engagement.start_date)} →` : ""}
-        </Text>
+      <ConsoleHeader
+        onBack={() => router.back()}
+        label="engagement · ops record"
+        right={<Chip label={safe(engagement?.status, "--")} color={colors.brand.blue} dot />}
+        title={safe(engagement?.client_name, engagement?.id, id)}
+      />
 
-        {/* Severity strip + queue progress */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm }}>
-          {(["critical", "high", "medium", "low", "info"] as const).map((sv) => (
-            sevCounts[sv] > 0 ? (
-              <View key={sv} style={{
-                flexDirection: "row", alignItems: "center", gap: 4,
-                backgroundColor: withAlpha(severityColor(sv), 0.12),
-                borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2,
-              }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: severityColor(sv) }} />
-                <Text style={{ color: severityColor(sv), fontSize: fs.xs, fontWeight: fw.bold, fontFamily: "monospace" }}>
-                  {sevCounts[sv]}
-                </Text>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
+        {/* Identity strip */}
+        <View style={{ padding: spacing.md, gap: spacing.sm }}>
+          <Mono color={colors.text.secondary} size={fs.sm} weight="semibold" numberOfLines={1}>
+            {safe(id)}
+          </Mono>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, alignItems: "center" }}>
+            <Chip label={safe(engagement?.engagement_type, "engagement")} color={colors.text.secondary} />
+            {engagement?.engagement_phase ? (
+              <Chip label={safe(engagement.engagement_phase)} color={colors.brand.purple} />
+            ) : null}
+            {engagement?.start_date ? (
+              <Mono color={colors.text.disabled}>{fmtDate(engagement.start_date)} → {engagement.end_date ? fmtDate(engagement.end_date) : "…"}</Mono>
+            ) : null}
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.lg, rowGap: spacing.sm }}>
+            {Object.entries(sevCounts).filter(([, n]) => n > 0).map(([sev, n]) => (
+              <View key={sev} style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
+                <Mono color={severityColor(sev)} size={fs.lg} weight="bold">{n}</Mono>
+                <MicroLabel color={severityColor(sev)} size={9}>{sev}</MicroLabel>
               </View>
-            ) : null
-          ))}
-          <View style={{ flex: 1 }} />
-          {queue.length > 0 ? (
-            <Text style={{ color: colors.text.tertiary, fontSize: fs.xs, fontFamily: "monospace" }}>
-              queue {queueDone}/{queue.length}
-            </Text>
+            ))}
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
+              <Mono color={colors.text.secondary} size={fs.lg} weight="bold">{queueDone}/{queue.length}</Mono>
+              <MicroLabel color={colors.text.disabled} size={9}>queue done</MicroLabel>
+            </View>
+          </View>
+
+          {/* Chains this engagement feeds — the way back up */}
+          {chainLinks.length > 0 ? (
+            <>
+              <SectionHead label="feeds chains" />
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
+                {chainLinks.map((c) => (
+                  <Chip
+                    key={c.slug}
+                    label={c.name.length > 22 ? `${c.name.slice(0, 21)}…` : c.name}
+                    color={chainStatusColor(c.status)}
+                    onPress={() => router.push(`/soc/chain/${c.slug}`)}
+                  />
+                ))}
+              </View>
+            </>
           ) : null}
         </View>
 
-        {/* Chain links */}
-        {chainLinks.length > 0 ? (
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.sm }}>
-            {chainLinks.map((c) => (
-              <Pressable
-                key={c.slug}
-                onPress={() => router.push(`/soc/chain/${c.slug}`)}
-                style={({ pressed }) => ({
-                  flexDirection: "row", alignItems: "center", gap: 4,
-                  backgroundColor: withAlpha(colors.brand.purple, 0.12),
-                  borderRadius: radius.full, paddingHorizontal: spacing.sm + 2, paddingVertical: 4,
-                  borderWidth: 1, borderColor: withAlpha(colors.brand.purple, 0.3),
-                  opacity: pressed ? 0.8 : 1,
-                })}
-              >
-                <Text style={{ fontSize: 10 }}>⛓️</Text>
-                <Text style={{ color: colors.brand.purple, fontSize: fs.xs, fontWeight: fw.semibold }}>
-                  {safe(c.name, c.slug)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-      </View>
+        <SegTabs<Tab>
+          tabs={[
+            { key: "findings", label: "fnd", count: findings.length },
+            { key: "queue", label: "queue", count: queue.length },
+            { key: "recon", label: "recon", count: reconHosts.length },
+            { key: "log", label: "log", count: auditLog.length },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
 
-      {/* Tab nav */}
-      <View style={{
-        flexDirection: "row", backgroundColor: colors.bg.elevated,
-        borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
-      }}>
-        {TABS.map((t) => {
-          const active = tab === t.key;
-          const badge = t.key === "findings" ? findings.length
-            : t.key === "queue" ? queue.length
-            : t.key === "recon" ? reconHosts.length
-            : auditLog.length;
-          return (
-            <Pressable
-              key={t.key}
-              onPress={() => setTab(t.key)}
-              style={({ pressed }) => [styles.tab, active && styles.tabActive, pressed && { opacity: 0.8 }]}
-            >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text numberOfLines={1} style={{
-                  color: active ? colors.accent : colors.text.tertiary,
-                  fontSize: fs.md, fontWeight: active ? fw.bold : fw.medium,
-                }}>
-                  {t.label}
-                </Text>
-                {badge > 0 ? (
-                  <Text style={{
-                    color: active ? colors.accent : colors.text.disabled,
-                    fontSize: fs.xs, fontFamily: "monospace", fontWeight: fw.semibold,
-                  }}>
-                    {badge}
-                  </Text>
-                ) : null}
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {/* Tab bodies */}
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.sm }}
-      >
-        {tab === "findings" ? (
-          findings.length === 0 ? (
-            <EmptyTab emoji="🔎" text="No findings recorded on this engagement" />
-          ) : (
-            findings.map((f) => <FindingRow key={f.id} finding={f} onPress={(x) => setDetailFinding(x.id)} />)
-          )
-        ) : null}
-
-        {tab === "queue" ? (
-          queue.length === 0 ? (
-            <EmptyTab emoji="📋" text="No queue steps recorded" />
-          ) : (
-            <>
-              <View style={{ marginBottom: spacing.xs }}>
-                <ProgressBar done={queueDone} total={queue.length} color={colors.accent} height={4} />
-              </View>
-              {queue.map((q) => <QueueRow key={q.id} item={q} />)}
-            </>
-          )
-        ) : null}
-
-        {tab === "recon" ? (
-          reconHosts.length === 0 ? (
-            <EmptyTab emoji="📡" text="No recon hosts recorded" />
-          ) : (
-            reconHosts.map((h, i) => {
-              const ports = Array.isArray(h.ports) ? h.ports : [];
-              return (
-                <View key={`${h.ip}-${i}`} style={{
-                  backgroundColor: colors.gray[800], borderRadius: radius.md,
-                  borderLeftWidth: 3,
-                  borderLeftColor: h.status === "up" ? colors.success : colors.text.disabled,
-                  borderWidth: 1, borderColor: "rgba(255,255,255,0.04)",
-                  padding: spacing.md, gap: spacing.xs,
-                }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                    <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.semibold, fontFamily: "monospace" }}>
-                      {safe(h.ip)}
-                    </Text>
-                    {h.hostname ? (
-                      <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, flex: 1 }} numberOfLines={1}>
-                        {safe(h.hostname)}
+        <View style={{ padding: spacing.md }}>
+          {tab === "findings" ? (
+            findings.length === 0 ? (
+              <EmptyState text="no findings recorded" />
+            ) : (
+              <RowGroup>
+                {findings.map((f, i) => (
+                  <PressRow
+                    key={f.id}
+                    rail={severityColor(f.severity)}
+                    last={i === findings.length - 1}
+                    onPress={() => setDetailFinding(f.id)}
+                  >
+                    <View style={{ flex: 1, paddingLeft: spacing.xs }}>
+                      <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.semibold, lineHeight: 18 }} numberOfLines={2}>
+                        {safe(f.title)}
                       </Text>
-                    ) : <View style={{ flex: 1 }} />}
-                    <View style={{
-                      width: 7, height: 7, borderRadius: 4,
-                      backgroundColor: h.status === "up" ? colors.success : colors.text.disabled,
-                    }} />
-                  </View>
-                  {h.vendor || h.mac ? (
-                    <Text style={{ color: colors.text.disabled, fontSize: fs.xs, fontFamily: "monospace" }} numberOfLines={1}>
-                      {[safe(h.mac), safe(h.vendor)].filter(Boolean).join(" · ")}
-                    </Text>
-                  ) : null}
-                  {ports.length > 0 ? (
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: 2 }}>
-                      {ports.slice(0, 12).map((p: any, pi: number) => {
-                        const port = typeof p === "object" ? p?.port : p;
-                        const svc = typeof p === "object" ? p?.service || p?.version : null;
-                        return (
-                          <View key={pi} style={{
-                            backgroundColor: withAlpha(colors.info, 0.10), borderRadius: radius.xs,
-                            paddingHorizontal: spacing.xs + 2, paddingVertical: 2,
-                          }}>
-                            <Text style={{ color: colors.brand.blue, fontSize: 9, fontFamily: "monospace" }}>
-                              {safe(port)}{svc ? ` ${safe(svc)}` : ""}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                      {ports.length > 12 ? (
-                        <Text style={{ color: colors.text.disabled, fontSize: 9, fontFamily: "monospace" }}>
-                          +{ports.length - 12}
+                      <Mono color={colors.text.disabled} style={{ marginTop: 3 }}>
+                        {[
+                          safe(f.severity).toUpperCase(),
+                          f.affected_asset,
+                          f.discovered_at ? fmtDate(f.discovered_at) : null,
+                        ].filter(Boolean).join(" · ")}
+                      </Mono>
+                    </View>
+                    <View style={{ alignItems: "flex-end", gap: 4 }}>
+                      {fmtCvss(f.cvss_score) ? (
+                        <Mono color={cvssColor(f.cvss_score)} size={fs.lg} weight="bold">{fmtCvss(f.cvss_score)}</Mono>
+                      ) : null}
+                      <MicroLabel color={lifecycleColor(f.lifecycle ?? null)} size={9}>
+                        {lifecycleLabel(f.lifecycle ?? null)}
+                      </MicroLabel>
+                    </View>
+                  </PressRow>
+                ))}
+              </RowGroup>
+            )
+          ) : null}
+
+          {tab === "queue" ? (
+            queue.length === 0 ? (
+              <EmptyState text="queue empty" />
+            ) : (
+              <RowGroup>
+                {queue.map((q, i) => (
+                  <PressRow key={q.id} rail={QUEUE_COLOR[q.status] || colors.text.disabled} last={i === queue.length - 1}>
+                    <Mono color={colors.text.disabled} size={fs.sm} weight="bold">
+                      {String(q.seq).padStart(2, "0")}
+                    </Mono>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium }} numberOfLines={1}>
+                        {safe(q.title)}
+                      </Text>
+                      {q.description ? (
+                        <Text style={{ color: colors.text.tertiary, fontSize: fs.xs, marginTop: 2 }} numberOfLines={1}>
+                          {safe(q.description)}
                         </Text>
                       ) : null}
                     </View>
-                  ) : null}
-                </View>
-              );
-            })
-          )
-        ) : null}
+                    <Chip label={safe(q.status)} color={QUEUE_COLOR[q.status] || colors.text.disabled} />
+                  </PressRow>
+                ))}
+              </RowGroup>
+            )
+          ) : null}
 
-        {tab === "log" ? (
-          auditLog.length === 0 ? (
-            <EmptyTab emoji="🧾" text="No execution log entries" />
-          ) : (
-            auditLog.map((row, i) => {
-              const done = row.status === "done" || row.status === "completed";
-              const failed = row.status === "failed";
-              const stColor = failed ? colors.error : done ? colors.success : colors.warning;
-              return (
-                <View key={`${row.session_id}-${i}`} style={{
-                  backgroundColor: colors.gray[800], borderRadius: radius.md,
-                  borderLeftWidth: 3, borderLeftColor: stColor,
-                  borderWidth: 1, borderColor: "rgba(255,255,255,0.04)",
-                  padding: spacing.md, gap: 2,
-                }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                    <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium, flex: 1 }} numberOfLines={1}>
-                      {safe(row.task)}
-                    </Text>
-                    <Text style={{ color: stColor, fontSize: fs.xs, fontWeight: fw.semibold }}>{safe(row.status)}</Text>
-                  </View>
-                  <Text style={{ color: colors.text.disabled, fontSize: fs.xs, fontFamily: "monospace" }} numberOfLines={1}>
-                    {safe(row.agent_name)} · {row.started_at ? new Date(row.started_at).toLocaleString() : "—"}
-                    {row.completed_at ? ` → ${new Date(row.completed_at).toLocaleTimeString()}` : ""}
-                  </Text>
-                </View>
-              );
-            })
-          )
-        ) : null}
+          {tab === "recon" ? (
+            reconHosts.length === 0 ? (
+              <EmptyState text="no recon hosts" />
+            ) : (
+              <RowGroup>
+                {reconHosts.map((h, i) => {
+                  const ports: string[] = Array.isArray(h.ports)
+                    ? h.ports.map((p: any) => (typeof p === "number" ? String(p) : p?.port ?? "")).filter(Boolean)
+                    : [];
+                  return (
+                    <PressRow key={`${h.ip}-${i}`} last={i === reconHosts.length - 1}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.sm }}>
+                          <Mono color={colors.text.primary} size={fs.md} weight="bold">{safe(h.ip)}</Mono>
+                          {h.hostname ? (
+                            <Text style={{ color: colors.text.tertiary, fontSize: fs.sm }} numberOfLines={1}>{safe(h.hostname)}</Text>
+                          ) : null}
+                        </View>
+                        <Mono color={colors.text.disabled} style={{ marginTop: 2 }}>
+                          {[h.mac, h.vendor].filter(Boolean).join(" · ") || "—"}
+                        </Mono>
+                      </View>
+                      <View style={{ alignItems: "flex-end", gap: 3 }}>
+                        {ports.length > 0 ? (
+                          <Mono color={colors.info} size={9} numberOfLines={1}>{ports.join(",")}</Mono>
+                        ) : null}
+                        <MicroLabel color={h.status === "up" ? colors.success : colors.text.disabled} size={9}>
+                          {safe(h.status, "--")}
+                        </MicroLabel>
+                      </View>
+                    </PressRow>
+                  );
+                })}
+              </RowGroup>
+            )
+          ) : null}
+
+          {tab === "log" ? (
+            auditLog.length === 0 ? (
+              <EmptyState text="no execution log" />
+            ) : (
+              <RowGroup>
+                {auditLog.map((row, i) => (
+                  <PressRow
+                    key={`${row.session_id}-${i}`}
+                    rail={row.status === "success" ? colors.success : row.status === "failed" ? colors.error : colors.text.disabled}
+                    last={i === auditLog.length - 1}
+                  >
+                    <View style={{ flex: 1, paddingLeft: spacing.xs }}>
+                      <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium, lineHeight: 18 }} numberOfLines={2}>
+                        {safe(row.task)}
+                      </Text>
+                      <Mono color={colors.text.disabled} style={{ marginTop: 3 }}>
+                        {safe(row.agent_name)} · {fmtDate(row.started_at)}
+                        {row.completed_at ? ` → ${fmtDate(row.completed_at)}` : ""}
+                      </Mono>
+                    </View>
+                    <Chip label={safe(row.status)} color={row.status === "success" ? colors.success : row.status === "failed" ? colors.error : colors.text.disabled} />
+                  </PressRow>
+                ))}
+              </RowGroup>
+            )
+          ) : null}
+        </View>
       </ScrollView>
 
       <FindingDetailModal findingId={detailFinding} onClose={() => setDetailFinding(null)} />
     </View>
   );
 }
-
-function EmptyTab({ emoji, text }: { emoji: string; text: string }) {
-  return (
-    <View style={{ alignItems: "center", paddingVertical: spacing.xxxl }}>
-      <Text style={{ fontSize: 36, marginBottom: spacing.sm }}>{emoji}</Text>
-      <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>{text}</Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  tab: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: spacing.sm + 4,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-  },
-  tabActive: {
-    borderBottomColor: colors.accent,
-  },
-});

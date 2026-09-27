@@ -1,8 +1,8 @@
-// Findings board — SOC v3 report plane (dir_1790538151856).
-// Every recorded finding with its disclosure lifecycle status, filterable by
-// lifecycle / severity / kill chain. Tap a row for the full record
-// (FindingDetailModal). Read-only: statuses move via Cipher's MCP tools, the
-// board reflects them.
+// Findings board — SOC report console (dir_1790544238642, rebuilt from zero).
+// EVERY recorded finding, each with its disclosure lifecycle status shown
+// automatically (the rail + label come from the record, nothing hand-set).
+// Filterable by lifecycle / severity / kill chain; deep-linkable via route
+// params (?lifecycle=filed). Tap a row for the full record. Read-only.
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import {
@@ -14,20 +14,18 @@ import {
   View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiFetch } from "../../lib/bridge-api";
 import { useBridgeStream } from "../../lib/useBridgeStream";
 import {
   colors,
   spacing,
-  radius,
   fontSize as fs,
   fontWeight as fw,
   withAlpha,
 } from "../../lib/design-tokens";
 import { FindingDetailModal } from "../../components/soc/FindingDetailModal";
-import { severityColor } from "../../components/soc/phaseColors";
 import {
   LIFECYCLE_ORDER,
   LIFECYCLE_EXTRA,
@@ -38,6 +36,15 @@ import {
   fmtDate,
 } from "../../components/soc/chainConstants";
 import { safe } from "../../components/soc/safe";
+import {
+  MONO,
+  Mono,
+  RowGroup,
+  PressRow,
+  ConsoleHeader,
+  EmptyState,
+  microStyle,
+} from "../../components/soc/consoleKit";
 
 interface BoardFinding {
   id: number;
@@ -58,11 +65,19 @@ interface BoardFinding {
 interface ChainOption { slug: string; name: string; }
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
+const SEV_COLOR: Record<string, string> = {
+  critical: colors.error,
+  high: colors.brand.orange,
+  medium: colors.brand.amberDeep,
+  low: colors.info,
+  info: colors.text.secondary,
+};
 const PAGE = 100;
 
 export default function FindingsBoardScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ lifecycle?: string; severity?: string; chain?: string }>();
 
   const [findings, setFindings] = useState<BoardFinding[]>([]);
   const [total, setTotal] = useState(0);
@@ -70,9 +85,9 @@ export default function FindingsBoardScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [lifecycle, setLifecycle] = useState<string | null>(null);
-  const [severity, setSeverity] = useState<string | null>(null);
-  const [chain, setChain] = useState<string | null>(null);
+  const [lifecycle, setLifecycle] = useState<string | null>(params.lifecycle || null);
+  const [severity, setSeverity] = useState<string | null>(params.severity || null);
+  const [chain, setChain] = useState<string | null>(params.chain || null);
   const [detailId, setDetailId] = useState<number | null>(null);
 
   const buildQuery = useCallback((offset: number) => {
@@ -120,225 +135,153 @@ export default function FindingsBoardScreen() {
   }, [fetchPage, findings.length]);
 
   const hasMore = findings.length < total;
-
-  const lifecyclePills = useMemo(
-    () => [...LIFECYCLE_ORDER, ...LIFECYCLE_EXTRA],
-    [],
-  );
+  const lifecyclePills = useMemo(() => [...LIFECYCLE_ORDER, ...LIFECYCLE_EXTRA], []);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
       <StatusBar style="light" />
 
-      {/* Header */}
-      <View style={{
-        paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md,
-        backgroundColor: colors.bg.elevated,
-        borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
-      }}>
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <Pressable onPress={() => router.back()} hitSlop={16} style={({ pressed }) => ({
-            opacity: pressed ? 0.6 : 1, paddingVertical: spacing.xs, paddingRight: spacing.md,
-          })}>
-            <Text style={{ color: colors.accent, fontSize: fs.lg, fontWeight: fw.medium }}>← Back</Text>
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.text.primary, fontSize: fs.xl, fontWeight: fw.bold }}>Findings</Text>
-          </View>
-          {!loading ? (
-            <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, fontFamily: "monospace" }}>
+      <ConsoleHeader
+        onBack={() => router.back()}
+        label="findings"
+        right={
+          !loading ? (
+            <Mono color={colors.text.disabled} size={fs.sm} weight="semibold">
               {findings.length}/{total}
-            </Text>
-          ) : null}
-        </View>
+            </Mono>
+          ) : null
+        }
+      />
+
+      {/* ── Filters: sharp mono chips, two rails ── */}
+      <View style={{
+        borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
+        backgroundColor: colors.bg.elevated,
+        paddingVertical: spacing.sm, gap: spacing.sm,
+      }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: spacing.md, gap: spacing.sm }}>
+          <FilterChip label="all" color={colors.text.secondary} active={!lifecycle} onPress={() => setLifecycle(null)} />
+          {lifecyclePills.map((lc) => (
+            <FilterChip
+              key={lc}
+              label={lifecycleLabel(lc)}
+              color={lifecycleColor(lc)}
+              active={lifecycle === lc}
+              onPress={() => setLifecycle(lifecycle === lc ? null : lc)}
+            />
+          ))}
+        </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: spacing.md, gap: spacing.sm }}>
+          {SEVERITIES.map((sv) => (
+            <FilterChip
+              key={sv}
+              label={sv}
+              color={SEV_COLOR[sv]}
+              active={severity === sv}
+              onPress={() => setSeverity(severity === sv ? null : sv)}
+            />
+          ))}
+          <View style={{ width: 1, height: 18, backgroundColor: colors.border.default, marginHorizontal: spacing.xs }} />
+          {chains.map((c) => (
+            <FilterChip
+              key={c.slug}
+              label={c.name.length > 16 ? `${c.name.slice(0, 15)}…` : c.name}
+              color={colors.brand.purple}
+              active={chain === c.slug}
+              onPress={() => setChain(chain === c.slug ? null : c.slug)}
+            />
+          ))}
+        </ScrollView>
       </View>
 
-      {/* Filter row 1 — lifecycle */}
       <ScrollView
-        horizontal showsHorizontalScrollIndicator={false}
-        style={{ backgroundColor: colors.bg.elevated, flexGrow: 0 }}
-        contentContainerStyle={{ gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: spacing.xxxl }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text.disabled} />
+        }
       >
-        <FilterPill label="all" selected={lifecycle == null} color={colors.accent} onPress={() => setLifecycle(null)} />
-        {lifecyclePills.map((lc) => (
-          <FilterPill
-            key={lc}
-            label={lifecycleLabel(lc)}
-            selected={lifecycle === lc}
-            color={lifecycleColor(lc)}
-            onPress={() => setLifecycle(lifecycle === lc ? null : lc)}
-          />
-        ))}
-      </ScrollView>
-
-      {/* Filter row 2 — severity + chain */}
-      <ScrollView
-        horizontal showsHorizontalScrollIndicator={false}
-        style={{ backgroundColor: colors.bg.elevated, flexGrow: 0, borderBottomWidth: 1, borderBottomColor: colors.border.subtle }}
-        contentContainerStyle={{ gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}
-      >
-        {SEVERITIES.map((sv) => (
-          <FilterPill
-            key={sv}
-            label={sv}
-            selected={severity === sv}
-            color={severityColor(sv)}
-            onPress={() => setSeverity(severity === sv ? null : sv)}
-          />
-        ))}
-        {chains.length > 0 ? (
-          <View style={{ width: 1, backgroundColor: colors.border.default, marginHorizontal: spacing.xs }} />
-        ) : null}
-        {chains.map((c) => (
-          <FilterPill
-            key={c.slug}
-            label={`⛓ ${c.name}`}
-            selected={chain === c.slug}
-            color={colors.brand.purple}
-            onPress={() => setChain(chain === c.slug ? null : c.slug)}
-          />
-        ))}
-      </ScrollView>
-
-      {/* Board */}
-      {loading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator color={colors.accent} />
-        </View>
-      ) : (
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.sm }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text.disabled} />}
-        >
-          {findings.length === 0 ? (
-            <View style={{ alignItems: "center", paddingVertical: spacing.xxxl }}>
-              <Text style={{ fontSize: 40, marginBottom: spacing.sm }}>🔎</Text>
-              <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>No findings match these filters</Text>
-            </View>
-          ) : (
-            findings.map((f) => <BoardRow key={f.id} finding={f} onPress={() => setDetailId(f.id)} />)
-          )}
-          {hasMore ? (
-            <Pressable
-              onPress={onLoadMore}
-              disabled={loadingMore}
-              style={({ pressed }) => ({
-                alignItems: "center", paddingVertical: spacing.md,
-                borderRadius: radius.md, marginTop: spacing.xs,
-                backgroundColor: pressed ? withAlpha(colors.text.secondary, 0.10) : withAlpha(colors.text.secondary, 0.06),
-                opacity: loadingMore ? 0.5 : 1,
+        {loading ? (
+          <View style={{ paddingVertical: spacing.xxxl, alignItems: "center" }}>
+            <ActivityIndicator color={colors.accent} />
+          </View>
+        ) : findings.length === 0 ? (
+          <EmptyState text="no findings match" sub="clear a filter to widen the board" />
+        ) : (
+          <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.md }}>
+            <RowGroup>
+              {findings.map((f, i) => {
+                const lcColor = lifecycleColor(f.lifecycle);
+                const cv = fmtCvss(f.cvss_score);
+                return (
+                  <PressRow
+                    key={f.id}
+                    rail={lcColor}
+                    last={i === findings.length - 1 && !hasMore}
+                    onPress={() => setDetailId(f.id)}
+                  >
+                    <View style={{ flex: 1, paddingLeft: spacing.xs }}>
+                      <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.semibold, lineHeight: 18 }} numberOfLines={2}>
+                        {safe(f.title)}
+                      </Text>
+                      <Mono color={colors.text.disabled} style={{ marginTop: 3 }}>
+                        {[
+                          f.skyline_id || f.cve_id,
+                          f.chain_slug,
+                          f.severity.toUpperCase(),
+                          f.discovered_at ? fmtDate(f.discovered_at) : null,
+                        ].filter(Boolean).join(" · ")}
+                      </Mono>
+                    </View>
+                    <View style={{ alignItems: "flex-end", gap: 4 }}>
+                      {cv ? <Mono color={cvssColor(f.cvss_score)} size={fs.lg} weight="bold">{cv}</Mono> : null}
+                      <Text style={microStyle(lcColor, 9)}>{lifecycleLabel(f.lifecycle)}</Text>
+                    </View>
+                  </PressRow>
+                );
               })}
-            >
-              <Text style={{ color: colors.text.secondary, fontSize: fs.md, fontWeight: fw.medium }}>
-                {loadingMore ? "Loading…" : `Load more (${total - findings.length} remaining)`}
-              </Text>
-            </Pressable>
-          ) : null}
-        </ScrollView>
-      )}
+              {hasMore ? (
+                <Pressable
+                  onPress={onLoadMore}
+                  disabled={loadingMore}
+                  style={({ pressed }) => ({
+                    alignItems: "center", paddingVertical: spacing.md,
+                    opacity: pressed || loadingMore ? 0.6 : 1,
+                  })}
+                >
+                  <Mono color={colors.accent} size={fs.sm} weight="bold">
+                    {loadingMore ? "loading…" : `load more · ${total - findings.length} remaining`}
+                  </Mono>
+                </Pressable>
+              ) : null}
+            </RowGroup>
+          </View>
+        )}
+      </ScrollView>
 
       <FindingDetailModal findingId={detailId} onClose={() => setDetailId(null)} />
     </View>
   );
 }
 
-// ── Row ──
+// ── Filter chip: sharp, uppercase mono, alpha fill when active ──
 
-function BoardRow({ finding, onPress }: { finding: BoardFinding; onPress: () => void }) {
-  const sevColor = severityColor(finding.severity);
-  const lcColor = lifecycleColor(finding.lifecycle);
-  const cv = fmtCvss(finding.cvss_score);
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        backgroundColor: colors.gray[800],
-        borderRadius: radius.md,
-        borderLeftWidth: 3,
-        borderLeftColor: sevColor,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.04)",
-        padding: spacing.md,
-        opacity: pressed ? 0.92 : 1,
-      })}
-    >
-      {/* Title row */}
-      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing.sm }}>
-        <Text style={{ flex: 1, color: colors.text.primary, fontSize: fs.base, fontWeight: fw.medium, lineHeight: 18 }} numberOfLines={2}>
-          {safe(finding.title)}
-        </Text>
-        {cv ? (
-          <View style={{
-            backgroundColor: withAlpha(cvssColor(finding.cvss_score), 0.13),
-            borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2,
-          }}>
-            <Text style={{ color: cvssColor(finding.cvss_score), fontSize: fs.sm, fontWeight: fw.bold, fontFamily: "monospace" }}>
-              {cv}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-
-      {/* Status chips */}
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.sm }}>
-        <Chip label={lifecycleLabel(finding.lifecycle)} color={lcColor} dot />
-        <Chip label={safe(finding.severity)} color={sevColor} />
-        {finding.skyline_id ? <Chip label={safe(finding.skyline_id)} color={colors.accent} mono />
-          : finding.cve_id ? <Chip label={safe(finding.cve_id)} color={colors.brand.orange} mono /> : null}
-        {finding.chain_slug ? <Chip label={`⛓ ${safe(finding.chain_name, finding.chain_slug)}`} color={colors.brand.purple} /> : null}
-      </View>
-
-      {/* Meta line */}
-      <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacing.sm, gap: spacing.sm }}>
-        <Text style={{ color: colors.text.disabled, fontSize: fs.xs, fontFamily: "monospace", flex: 1 }} numberOfLines={1}>
-          {safe(finding.engagement_id, "—")}{finding.kind ? ` · ${safe(finding.kind)}` : ""}
-        </Text>
-        <Text style={{ color: colors.text.disabled, fontSize: fs.xs, fontFamily: "monospace" }}>
-          {fmtDate(finding.discovered_at)}
-        </Text>
-      </View>
-    </Pressable>
-  );
-}
-
-function Chip({ label, color, mono, dot }: { label: string; color: string; mono?: boolean; dot?: boolean }) {
-  return (
-    <View style={{
-      flexDirection: "row", alignItems: "center", gap: 4,
-      backgroundColor: withAlpha(color, 0.11), borderRadius: radius.sm,
-      paddingHorizontal: spacing.sm, paddingVertical: 2,
-    }}>
-      {dot ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: color }} /> : null}
-      <Text style={{ color, fontSize: fs.xs, fontWeight: fw.semibold, fontFamily: mono ? "monospace" : undefined }}>
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-function FilterPill({ label, selected, color, onPress }: {
-  label: string; selected: boolean; color: string; onPress: () => void;
+function FilterChip({ label, color, active, onPress }: {
+  label: string; color: string; active: boolean; onPress: () => void;
 }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        {
-          paddingHorizontal: spacing.md, paddingVertical: 5,
-          borderRadius: radius.full,
-          backgroundColor: selected ? withAlpha(color, 0.20) : withAlpha(colors.text.secondary, 0.07),
-          borderWidth: 1,
-          borderColor: selected ? withAlpha(color, 0.55) : "transparent",
-          opacity: pressed ? 0.8 : 1,
-        },
-      ]}
-    >
+    <Pressable onPress={onPress} style={({ pressed }) => ({
+      paddingHorizontal: spacing.sm + 2, paddingVertical: 4,
+      borderRadius: 3,
+      backgroundColor: active ? withAlpha(color, 0.16) : "transparent",
+      borderWidth: 1,
+      borderColor: active ? withAlpha(color, 0.5) : colors.border.default,
+      opacity: pressed ? 0.7 : 1,
+    })}>
       <Text style={{
-        color: selected ? color : colors.text.secondary,
-        fontSize: fs.sm,
-        fontWeight: selected ? fw.semibold : fw.medium,
+        color: active ? color : colors.text.tertiary,
+        fontSize: 9, fontWeight: fw.bold, letterSpacing: 1,
+        textTransform: "uppercase", fontFamily: MONO,
       }}>
         {label}
       </Text>

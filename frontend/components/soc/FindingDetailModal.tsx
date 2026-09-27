@@ -1,16 +1,16 @@
-// FindingDetailModal — read-only finding record viewer (SOC v3 report plane).
-// Fetches GET /soc/findings/:id on open and renders the full record:
-// dual-axis status (kind = truth, lifecycle = disclosure), CVSS, chain link,
-// description/remediation as markdown, reproduction steps, refs, linked
-// artifacts. No actions — the app observes, the terminal acts. dir_1790538151856.
+// FindingDetailModal — read-only finding record viewer, console language
+// (dir_1790544238642). Fetches GET /soc/findings/:id on open and renders the
+// full record: dual-axis status (kind = truth, lifecycle = disclosure),
+// CVSS, chain link, description/remediation as markdown, reproduction steps,
+// refs, linked artifacts. No actions — the app observes, the terminal acts.
 
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Modal, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { getBridgeUrl, getAuthHeaders } from "../../lib/bridge-api";
 import {
-  colors, fontSize, fontWeight, radius, spacing, withAlpha,
+  colors, fontSize as fs, fontWeight as fw, spacing, withAlpha,
 } from "../../lib/design-tokens";
 import { MarkdownContent } from "../ContentPanel";
 import { severityColor } from "./phaseColors";
@@ -18,6 +18,9 @@ import {
   lifecycleColor, lifecycleLabel, fmtCvss, fmtDate, artifactIcon,
 } from "./chainConstants";
 import { safe } from "./safe";
+import {
+  MONO, MicroLabel, Mono, Chip, SectionHead, RowGroup, PressRow, ConsoleHeader,
+} from "./consoleKit";
 
 interface LinkedArtifact {
   id: number;
@@ -90,159 +93,163 @@ export function FindingDetailModal({ findingId, onClose }: Props) {
   return (
     <Modal visible animationType="slide" onRequestClose={onClose} transparent={false}>
       <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
-        {/* Header */}
-        <View style={{
-          flexDirection: "row", alignItems: "center",
-          paddingHorizontal: spacing.md, paddingVertical: spacing.md + 2,
-          backgroundColor: colors.bg.elevated,
-          borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
-        }}>
-          <Pressable onPress={onClose} hitSlop={16} style={({ pressed }) => ({
-            opacity: pressed ? 0.6 : 1,
-            paddingVertical: spacing.sm, paddingRight: spacing.md,
-          })}>
-            <Text style={{ color: colors.accent, fontSize: fontSize.lg, fontWeight: fontWeight.semibold }}>← Back</Text>
-          </Pressable>
-          <View style={{ flex: 1 }} />
-          <Text style={{ color: colors.text.tertiary, fontFamily: "monospace", fontSize: fontSize.sm }}>
-            #{findingId}
-          </Text>
-        </View>
+        <ConsoleHeader
+          onBack={onClose}
+          label="finding record"
+          right={<Mono color={colors.text.disabled} size={fs.sm} weight="semibold">#{findingId}</Mono>}
+        />
 
         {loading || !finding ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <ActivityIndicator color={colors.accent} />
           </View>
         ) : (
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.md }}>
-            {/* Severity + title */}
-            <View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm, flexWrap: "wrap" }}>
-                <Pill color={sevColor} label={safe(finding.severity, "unknown").toUpperCase()} />
-                <Pill color={lifecycleColor(finding.lifecycle)} label={lifecycleLabel(finding.lifecycle)} />
-                {finding.kind ? <Pill color={colors.gray[300]} label={safe(finding.kind)} /> : null}
-              </View>
-              <Text style={{ color: colors.text.primary, fontSize: fontSize.xl, fontWeight: fontWeight.bold, lineHeight: 24 }}>
-                {safe(finding.title)}
-              </Text>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxxl }}>
+            {/* Status chips + title */}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.md }}>
+              <Chip label={safe(finding.severity, "unknown")} color={sevColor} filled dot />
+              <Chip label={lifecycleLabel(finding.lifecycle)} color={lifecycleColor(finding.lifecycle)} />
+              {finding.kind ? <Chip label={safe(finding.kind)} color={colors.gray[400]} /> : null}
             </View>
+            <Text style={{ color: colors.gray[50], fontSize: fs.xl, fontWeight: fw.bold, lineHeight: 26 }}>
+              {safe(finding.title)}
+            </Text>
 
-            {/* Identity meta */}
-            <View style={{
-              flexDirection: "row", flexWrap: "wrap", gap: spacing.md,
-              backgroundColor: colors.bg.elevated, borderRadius: radius.md, padding: spacing.md,
-            }}>
-              {fmtCvss(finding.cvss_score) ? <MetaChip label="CVSS" value={fmtCvss(finding.cvss_score)!} valueColor={sevColor} /> : null}
-              {finding.skyline_id ? <MetaChip label="Skyline" value={safe(finding.skyline_id)} /> : null}
-              {finding.cve_id ? <MetaChip label="CVE" value={safe(finding.cve_id)} /> : null}
-              {finding.engagement_id ? <MetaChip label="Engagement" value={safe(finding.engagement_id)} /> : null}
-              {finding.discovered_at ? <MetaChip label="Discovered" value={fmtDate(finding.discovered_at)} /> : null}
-              {finding.discovered_by ? <MetaChip label="By" value={safe(finding.discovered_by)} /> : null}
+            {/* Identity meta — dense label/value rows */}
+            <View style={{ marginTop: spacing.lg }}>
+              <RowGroup>
+                {fmtCvss(finding.cvss_score) ? (
+                  <MetaRow label="cvss" value={fmtCvss(finding.cvss_score)!} valueColor={sevColor} big />
+                ) : null}
+                {finding.skyline_id ? <MetaRow label="skyline" value={safe(finding.skyline_id)} /> : null}
+                {finding.cve_id ? <MetaRow label="cve" value={safe(finding.cve_id)} valueColor={colors.brand.orange} /> : null}
+                {finding.engagement_id ? <MetaRow label="engagement" value={safe(finding.engagement_id)} /> : null}
+                {finding.discovered_at ? <MetaRow label="discovered" value={fmtDate(finding.discovered_at)} /> : null}
+                {finding.discovered_by ? <MetaRow label="by" value={safe(finding.discovered_by)} last={!finding.cvss_vector} /> : null}
+                {finding.cvss_vector ? (
+                  <View style={{ padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.border.subtle }}>
+                    <Text selectable style={{ color: colors.text.disabled, fontFamily: MONO, fontSize: 9, lineHeight: 14 }}>
+                      {safe(finding.cvss_vector)}
+                    </Text>
+                  </View>
+                ) : null}
+              </RowGroup>
             </View>
-
-            {finding.cvss_vector ? (
-              <Text selectable style={{ color: colors.text.tertiary, fontFamily: "monospace", fontSize: fontSize.xs }}>
-                {safe(finding.cvss_vector)}
-              </Text>
-            ) : null}
 
             {/* Chain link */}
             {finding.chain_slug ? (
-              <Pressable
-                onPress={() => { onClose(); router.push(`/soc/chain/${finding.chain_slug}`); }}
-                style={({ pressed }) => ({
-                  flexDirection: "row", alignItems: "center", gap: spacing.sm,
-                  backgroundColor: withAlpha(colors.brand.purple, 0.10),
-                  borderRadius: radius.md, padding: spacing.md,
-                  borderWidth: 1, borderColor: withAlpha(colors.brand.purple, 0.25),
-                  opacity: pressed ? 0.85 : 1,
-                })}
-              >
-                <Text style={{ fontSize: 16 }}>⛓️</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.text.primary, fontSize: fontSize.md, fontWeight: fontWeight.semibold }}>
-                    {safe(finding.chain_name, finding.chain_slug)}
-                  </Text>
-                  <Text style={{ color: colors.text.tertiary, fontSize: fontSize.xs }}>Part of this kill chain — tap to open</Text>
-                </View>
-                <Text style={{ color: colors.text.disabled, fontSize: fontSize.md }}>›</Text>
-              </Pressable>
+              <>
+                <SectionHead label="kill chain" />
+                <RowGroup>
+                  <PressRow onPress={() => { onClose(); router.push(`/soc/chain/${finding.chain_slug}`); }} last>
+                    <MicroLabel color={colors.brand.purple} size={9}>chain</MicroLabel>
+                    <Text style={{ flex: 1, color: colors.text.primary, fontSize: fs.md, fontWeight: fw.semibold }} numberOfLines={1}>
+                      {safe(finding.chain_name, finding.chain_slug)}
+                    </Text>
+                    <Mono color={colors.text.disabled} size={fs.lg}>›</Mono>
+                  </PressRow>
+                </RowGroup>
+              </>
             ) : null}
 
             {finding.affected_asset ? (
-              <Section title="Affected asset">
-                <Text selectable style={{ color: colors.text.secondary, fontFamily: "monospace", fontSize: fontSize.sm }}>
+              <>
+                <SectionHead label="affected asset" />
+                <Mono color={colors.text.secondary} size={fs.sm} style={{ lineHeight: 20 }}>
                   {safe(finding.affected_asset)}
-                </Text>
-              </Section>
+                </Mono>
+              </>
             ) : null}
 
             {finding.description ? (
-              <Section title="Description">
+              <>
+                <SectionHead label="description" />
                 <MarkdownContent content={safe(finding.description)} />
-              </Section>
+              </>
             ) : null}
 
             {renderRepro(finding.reproduction) ? (
-              <Section title="Reproduction">
+              <>
+                <SectionHead label="reproduction" />
                 {renderRepro(finding.reproduction)}
-              </Section>
+              </>
             ) : null}
 
             {finding.remediation ? (
-              <Section title="Remediation">
+              <>
+                <SectionHead label="remediation" />
                 <MarkdownContent content={safe(finding.remediation)} />
-              </Section>
+              </>
             ) : null}
 
             {Array.isArray(finding.mitre_attack) && finding.mitre_attack.length > 0 ? (
-              <Section title="MITRE ATT&CK">
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs }}>
+              <>
+                <SectionHead label="mitre att&ck" />
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
                   {finding.mitre_attack.map((t) => (
-                    <View key={t} style={{
-                      backgroundColor: withAlpha(colors.brand.blue, 0.12), borderRadius: radius.sm,
-                      paddingHorizontal: spacing.sm, paddingVertical: 3,
-                    }}>
-                      <Text style={{ color: colors.brand.blue, fontFamily: "monospace", fontSize: fontSize.xs }}>{safe(t)}</Text>
-                    </View>
+                    <Chip key={t} label={safe(t)} color={colors.brand.blue} />
                   ))}
                 </View>
-              </Section>
+              </>
             ) : null}
 
             {Array.isArray(finding.refs) && finding.refs.length > 0 ? (
-              <Section title="References">
+              <>
+                <SectionHead label="references" />
                 <View style={{ gap: spacing.xs }}>
                   {finding.refs.map((r, i) => (
-                    <Text key={i} selectable style={{ color: colors.text.secondary, fontFamily: "monospace", fontSize: fontSize.xs, lineHeight: 16 }}>
+                    <Mono key={i} color={colors.text.secondary} size={fs.xs} style={{ lineHeight: 16 }}>
                       {safe(r)}
-                    </Text>
+                    </Mono>
                   ))}
                 </View>
-              </Section>
+              </>
             ) : null}
 
             {artifacts.length > 0 ? (
-              <Section title="Linked artifacts">
-                <View style={{ gap: spacing.sm }}>
-                  {artifacts.map((a) => (
-                    <View key={a.id} style={{
-                      flexDirection: "row", alignItems: "center", gap: spacing.sm,
-                      backgroundColor: colors.bg.elevated, borderRadius: radius.md, padding: spacing.md,
-                    }}>
-                      <Text style={{ fontSize: 14 }}>{artifactIcon(a.kind)}</Text>
-                      <Text style={{ flex: 1, color: colors.text.primary, fontSize: fontSize.md }} numberOfLines={1}>{safe(a.filename)}</Text>
-                      <Text style={{ color: colors.text.disabled, fontFamily: "monospace", fontSize: fontSize.xs }}>{safe(a.sha8)}</Text>
-                      {!a.sanitized ? <Text style={{ fontSize: fontSize.xs }}>🔒</Text> : null}
-                    </View>
+              <>
+                <SectionHead label="linked artifacts" right={String(artifacts.length)} />
+                <RowGroup>
+                  {artifacts.map((a, i) => (
+                    <PressRow key={a.id} last={i === artifacts.length - 1}>
+                      <Mono color={colors.text.secondary} size={fs.lg}>{artifactIcon(a.kind)}</Mono>
+                      <Mono color={colors.text.primary} size={fs.md} weight="semibold" numberOfLines={1} style={{ flex: 1 }}>
+                        {safe(a.filename)}
+                      </Mono>
+                      <Mono color={colors.text.disabled}>{safe(a.sha8)}</Mono>
+                      {!a.sanitized ? <Chip label="internal" color={colors.gray[500]} /> : null}
+                    </PressRow>
                   ))}
-                </View>
-              </Section>
+                </RowGroup>
+              </>
             ) : null}
           </ScrollView>
         )}
       </View>
     </Modal>
+  );
+}
+
+function MetaRow({ label, value, valueColor, big, last }: {
+  label: string; value: string; valueColor?: string; big?: boolean; last?: boolean;
+}) {
+  return (
+    <View style={{
+      flexDirection: "row", alignItems: "center", gap: spacing.md,
+      paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+      borderBottomWidth: last ? 0 : 1, borderBottomColor: colors.border.subtle,
+    }}>
+      <MicroLabel color={colors.text.disabled} size={9} style={{ width: 84 }}>{label}</MicroLabel>
+      <Text style={{
+        flex: 1,
+        color: valueColor || colors.text.primary,
+        fontSize: big ? fs.lg : fs.sm,
+        fontWeight: big ? fw.bold : fw.medium,
+        fontFamily: MONO,
+      }} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -259,8 +266,8 @@ function renderRepro(repro: any): React.ReactNode | null {
         <View style={{ gap: spacing.sm }}>
           {steps.map((s: any, i: number) => (
             <View key={i} style={{ flexDirection: "row", gap: spacing.sm }}>
-              <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: fontSize.sm, fontWeight: fontWeight.bold }}>{i + 1}.</Text>
-              <Text selectable style={{ flex: 1, color: colors.text.secondary, fontSize: fontSize.sm, lineHeight: 20 }}>{safe(s)}</Text>
+              <Mono color={colors.accent} size={fs.sm} weight="bold">{i + 1}.</Mono>
+              <Text selectable style={{ flex: 1, color: colors.text.secondary, fontSize: fs.sm, lineHeight: 20 }}>{safe(s)}</Text>
             </View>
           ))}
         </View>
@@ -269,48 +276,14 @@ function renderRepro(repro: any): React.ReactNode | null {
     if (Object.keys(repro).length === 0) return null;
     return (
       <View style={{
-        backgroundColor: colors.bg.elevated, borderRadius: radius.md,
+        backgroundColor: withAlpha(colors.gray[850], 0.6), borderRadius: 4,
         padding: spacing.md, borderWidth: 1, borderColor: colors.border.subtle,
       }}>
-        <Text selectable style={{ color: colors.text.secondary, fontFamily: "monospace", fontSize: fontSize.xs, lineHeight: 16 }}>
+        <Text selectable style={{ color: colors.text.secondary, fontFamily: MONO, fontSize: fs.xs, lineHeight: 16 }}>
           {JSON.stringify(repro, null, 2)}
         </Text>
       </View>
     );
   }
   return null;
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={{ gap: spacing.sm }}>
-      <Text style={{
-        color: colors.text.tertiary, fontSize: fontSize.xs,
-        fontWeight: fontWeight.semibold, textTransform: "uppercase", letterSpacing: 0.5,
-      }}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-function MetaChip({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
-  return (
-    <View style={{ gap: 2, minWidth: 70 }}>
-      <Text style={{ color: colors.text.disabled, fontSize: fontSize.xs }}>{label}</Text>
-      <Text style={{ color: valueColor || colors.text.primary, fontSize: fontSize.sm, fontWeight: fontWeight.medium }}>{value}</Text>
-    </View>
-  );
-}
-
-function Pill({ color, label }: { color: string; label: string }) {
-  return (
-    <View style={{
-      flexDirection: "row", alignItems: "center",
-      backgroundColor: withAlpha(color, 0.14), borderRadius: radius.sm,
-      paddingHorizontal: spacing.sm, paddingVertical: 3,
-    }}>
-      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color, marginRight: spacing.xs }} />
-      <Text style={{ color, fontSize: fontSize.xs, fontWeight: fontWeight.semibold }}>{label}</Text>
-    </View>
-  );
 }

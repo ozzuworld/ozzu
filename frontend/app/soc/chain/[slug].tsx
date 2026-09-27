@@ -1,10 +1,9 @@
-// Kill-chain detail — SOC v3 report plane (dir_1790538151856).
-// One chain = one disclosure unit. This screen renders the full record:
-// banner + identity header, the disclosure pipeline strip (researching →
-// published with the current stage lit), component finding-cards, and five
-// segments: Advisory (rendered markdown), Runs (evidence log), Findings
-// (DB-linked records), Artifacts (sanitized viewer w/ leak-guard), Coord
-// (vendor messages). Read-only — acting happens in the terminal.
+// Kill-chain container — SOC report console (dir_1790544238642, rebuilt from zero).
+// One chain = one disclosure unit = the container for ALL of its work:
+// identity + disclosure stage track, components, advisory, evidence runs,
+// findings, artifacts (sanitized viewer, leak-guarded) and vendor
+// coordination. The engagement ids here are the ONLY door into the ops
+// record — engagements are not app-level navigation.
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import {
@@ -14,7 +13,6 @@ import {
   Modal,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
@@ -32,13 +30,13 @@ import {
   withAlpha,
 } from "../../../lib/design-tokens";
 import { MarkdownContent } from "../../../components/ContentPanel";
-import { FindingRow, type FindingRowData } from "../../../components/soc/FindingRow";
 import { FindingDetailModal } from "../../../components/soc/FindingDetailModal";
 import { severityColor } from "../../../components/soc/phaseColors";
 import {
-  CHAIN_STATUS_ORDER,
   chainStatusColor,
   chainStatusLabel,
+  lifecycleColor,
+  lifecycleLabel,
   cvssColor,
   fmtCvss,
   fmtDate,
@@ -48,6 +46,21 @@ import {
   DIRECTION_ICON,
 } from "../../../components/soc/chainConstants";
 import { safe } from "../../../components/soc/safe";
+import {
+  MONO,
+  MicroLabel,
+  Mono,
+  Chip,
+  SectionHead,
+  StageTrack,
+  RowGroup,
+  PressRow,
+  StatCell,
+  SegTabs,
+  EmptyState,
+  ConsoleHeader,
+  BannerGradient,
+} from "../../../components/soc/consoleKit";
 
 // ── Types (mirror GET /soc/chains/:slug) ──
 
@@ -108,15 +121,18 @@ interface CoordRow {
   status: string;
 }
 
-type Segment = "advisory" | "runs" | "findings" | "artifacts" | "coord";
+interface ChainFinding {
+  id: number;
+  severity: string;
+  title: string;
+  lifecycle: string | null;
+  skyline_id: string | null;
+  cve_id: string | null;
+  cvss_score: string | number | null;
+  discovered_at: string | null;
+}
 
-const SEGMENTS: Array<{ key: Segment; label: string }> = [
-  { key: "advisory", label: "Advisory" },
-  { key: "runs", label: "Runs" },
-  { key: "findings", label: "Findings" },
-  { key: "artifacts", label: "Artifacts" },
-  { key: "coord", label: "Coord" },
-];
+type Segment = "advisory" | "runs" | "findings" | "artifacts" | "coord";
 
 export default function ChainDetailScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
@@ -126,7 +142,7 @@ export default function ChainDetailScreen() {
   const [chain, setChain] = useState<ChainDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactRow[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
-  const [findings, setFindings] = useState<FindingRowData[]>([]);
+  const [findings, setFindings] = useState<ChainFinding[]>([]);
   const [coordination, setCoordination] = useState<CoordRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -191,10 +207,8 @@ export default function ChainDetailScreen() {
   if (notFound || !chain) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
-        <HeaderBack onBack={() => router.back()} />
-        <Text style={{ color: colors.text.disabled, textAlign: "center", marginTop: spacing.xl }}>
-          Kill chain not found
-        </Text>
+        <ConsoleHeader onBack={() => router.back()} label="kill chain" />
+        <EmptyState text="chain not found" />
       </View>
     );
   }
@@ -209,314 +223,277 @@ export default function ChainDetailScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
       <StatusBar style="light" />
 
-      {/* Header */}
-      <View style={{
-        paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md,
-        backgroundColor: colors.bg.elevated,
-        borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
-      }}>
-        <HeaderBack onBack={() => router.back()} />
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-          {drop ? (
-            <View style={{
-              backgroundColor: withAlpha(colors.accent, 0.15), borderRadius: radius.xs,
-              paddingHorizontal: spacing.sm, paddingVertical: 2,
-            }}>
-              <Text style={{ color: colors.accentLight, fontSize: fs.xs, fontWeight: fw.bold, letterSpacing: 0.8 }}>{drop}</Text>
-            </View>
-          ) : null}
-          <Text style={{ color: colors.text.primary, fontSize: fs.xl, fontWeight: fw.bold, flex: 1 }} numberOfLines={1}>
-            {safe(chain.name, chain.slug)}
-          </Text>
-          <View style={{
-            flexDirection: "row", alignItems: "center",
-            backgroundColor: withAlpha(statusColor, 0.14), borderRadius: radius.sm,
-            paddingHorizontal: spacing.sm, paddingVertical: 3,
-          }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusColor, marginRight: spacing.xs }} />
-            <Text style={{ color: statusColor, fontSize: fs.xs, fontWeight: fw.semibold }}>
-              {chainStatusLabel(chain.status)}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Segment nav */}
-      <View style={{
-        flexDirection: "row", backgroundColor: colors.bg.elevated,
-        borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
-      }}>
-        {SEGMENTS.map((s) => {
-          const active = segment === s.key;
-          const count = s.key === "runs" ? runs.length
-            : s.key === "findings" ? findings.length
-            : s.key === "artifacts" ? artifacts.length
-            : s.key === "coord" ? coordination.length
-            : null;
-          return (
-            <Pressable
-              key={s.key}
-              onPress={() => setSegment(s.key)}
-              style={({ pressed }) => [styles.tab, active && styles.tabActive, pressed && { opacity: 0.8 }]}
-            >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text numberOfLines={1} style={{
-                  color: active ? colors.accent : colors.text.tertiary,
-                  fontSize: fs.md, fontWeight: active ? fw.bold : fw.medium,
-                }}>
-                  {s.label}
-                </Text>
-                {count != null && count > 0 ? (
-                  <Text style={{
-                    color: active ? colors.accent : colors.text.disabled,
-                    fontSize: fs.xs, fontFamily: "monospace", fontWeight: fw.semibold,
-                  }}>
-                    {count}
-                  </Text>
-                ) : null}
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
+      <ConsoleHeader
+        onBack={() => router.back()}
+        label="kill chain"
+        right={<Chip label={chainStatusLabel(chain.status)} color={statusColor} dot />}
+      />
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
-        {/* Identity block: banner + summary + CVSS + pipeline */}
+        {/* ── Identity: banner + name + stage track ── */}
         {banner ? (
-          <Image
-            source={{ uri: `${getBridgeUrl()}/soc/artifacts/${banner.id}/content`, headers: getAuthHeaders() }}
-            style={{ width: "100%", height: 170 }}
-            resizeMode="cover"
-          />
+          <View style={{ height: 190 }}>
+            <Image
+              source={{ uri: `${getBridgeUrl()}/soc/artifacts/${banner.id}/content`, headers: getAuthHeaders() }}
+              style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+              resizeMode="cover"
+            />
+            <BannerGradient height={190}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                {drop ? <Chip label={drop} color={colors.accent} filled /> : null}
+                <View style={{ flex: 1 }} />
+                {chain.published_repo ? <Chip label="public" color={colors.success} /> : null}
+              </View>
+            </BannerGradient>
+          </View>
         ) : null}
 
-        <View style={{ padding: spacing.lg, gap: spacing.md }}>
+        <View style={{ padding: spacing.md, gap: spacing.md, paddingTop: banner ? spacing.md : spacing.lg }}>
+          {!banner && drop ? <Chip label={drop} color={colors.accent} filled /> : null}
+          <Text style={{ color: colors.gray[50], fontSize: 24, fontWeight: fw.bold }} numberOfLines={2}>
+            {safe(chain.name, chain.slug)}
+          </Text>
+          <StageTrack status={chain.status} />
+
           {chain.summary ? (
             <Text style={{ color: colors.text.secondary, fontSize: fs.base, lineHeight: 20 }}>
               {safe(chain.summary)}
             </Text>
           ) : null}
 
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, alignItems: "center" }}>
+          {/* Counts strip */}
+          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: spacing.xl, rowGap: spacing.md, flexWrap: "wrap" }}>
             {composed ? (
-              <View style={{
-                flexDirection: "row", alignItems: "baseline", gap: 4,
-                backgroundColor: withAlpha(cvssColor(chain.cvss_composed), 0.13),
-                borderRadius: radius.sm, paddingHorizontal: spacing.sm + 2, paddingVertical: 5,
-              }}>
-                <Text style={{ color: colors.text.tertiary, fontSize: fs.xs, fontWeight: fw.semibold }}>CVSS</Text>
-                <Text style={{ color: cvssColor(chain.cvss_composed), fontSize: fs.lg, fontWeight: fw.bold, fontFamily: "monospace" }}>
-                  {composed}
-                </Text>
-              </View>
+              <StatCell value={composed} label="cvss" color={cvssColor(chain.cvss_composed)} size={26} />
             ) : null}
             {standalone ? (
-              <View style={{
-                flexDirection: "row", alignItems: "baseline", gap: 4,
-                backgroundColor: withAlpha(cvssColor(chain.cvss_standalone), 0.08),
-                borderRadius: radius.sm, paddingHorizontal: spacing.sm + 2, paddingVertical: 5,
-              }}>
-                <Text style={{ color: colors.text.tertiary, fontSize: fs.xs, fontWeight: fw.semibold }}>SOLO</Text>
-                <Text style={{ color: cvssColor(chain.cvss_standalone), fontSize: fs.lg, fontWeight: fw.bold, fontFamily: "monospace" }}>
-                  {standalone}
-                </Text>
-              </View>
+              <StatCell value={standalone} label="solo" color={cvssColor(chain.cvss_standalone)} size={fs.xxl} />
             ) : null}
-            {chain.engagement_ids.length > 0 ? (
-              <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, fontFamily: "monospace" }}>
-                {chain.engagement_ids.join(" · ")}
-              </Text>
-            ) : null}
+            <StatCell value={chain.components.length} label="comps" size={fs.xxl} />
+            <StatCell value={findings.length} label="findings" size={fs.xxl} />
+            <StatCell value={artifacts.length} label="artifacts" size={fs.xxl} />
+            <StatCell value={runs.length} label="runs" size={fs.xxl} />
           </View>
 
-          {chain.published_repo ? (
-            <Pressable
-              onPress={() => Linking.openURL(chain.published_repo!).catch(() => {})}
-              style={({ pressed }) => ({
-                flexDirection: "row", alignItems: "center", gap: spacing.sm,
-                backgroundColor: withAlpha(colors.accent, 0.08),
-                borderRadius: radius.md, padding: spacing.md,
-                borderWidth: 1, borderColor: withAlpha(colors.accent, 0.22),
-                opacity: pressed ? 0.85 : 1, alignSelf: "flex-start",
-              })}
-            >
-              <Text style={{ fontSize: 14 }}>🔗</Text>
-              <Text style={{ color: colors.accent, fontSize: fs.md, fontWeight: fw.semibold }}>
-                Public repo{chain.published_at ? ` · ${fmtDate(chain.published_at)}` : ""}
-              </Text>
-            </Pressable>
+          {/* Ops record — the only door into engagements */}
+          {chain.engagement_ids.length > 0 || chain.published_repo ? (
+            <>
+              <SectionHead label="ops record" />
+              <RowGroup>
+                {chain.engagement_ids.map((eid, i) => (
+                  <PressRow
+                    key={eid}
+                    last={i === chain.engagement_ids.length - 1 && !chain.published_repo}
+                    onPress={() => router.push(`/soc/${eid}`)}
+                  >
+                    <MicroLabel color={colors.text.disabled} size={9}>eng</MicroLabel>
+                    <Mono color={colors.text.primary} size={fs.sm} weight="semibold" numberOfLines={1} style={{ flex: 1 }}>
+                      {safe(eid)}
+                    </Mono>
+                    <Mono color={colors.text.disabled} size={fs.lg}>›</Mono>
+                  </PressRow>
+                ))}
+                {chain.published_repo ? (
+                  <PressRow
+                    last
+                    onPress={() => Linking.openURL(chain.published_repo!).catch(() => {})}
+                  >
+                    <MicroLabel color={colors.success} size={9}>pub</MicroLabel>
+                    <Mono color={colors.accent} size={fs.sm} numberOfLines={1} style={{ flex: 1 }}>
+                      {chain.published_repo.replace(/^https?:\/\//, "")}
+                    </Mono>
+                    <Mono color={colors.text.disabled}>{chain.published_at ? fmtDate(chain.published_at) : ""}</Mono>
+                  </PressRow>
+                ) : null}
+              </RowGroup>
+            </>
           ) : null}
-
-          {/* Disclosure pipeline strip */}
-          <PipelineStrip status={chain.status} />
         </View>
 
-        {/* Components — the chain's structure, always visible above segments */}
+        {/* ── Components: the chain's structure ── */}
         {chain.components.length > 0 ? (
-          <View style={{ paddingHorizontal: spacing.lg, gap: spacing.sm }}>
-            <SectionHeader title="COMPONENTS" count={chain.components.length} />
-            {chain.components.map((comp, i) => (
-              <ComponentCard key={comp.skyline_id || comp.name || i} comp={comp} />
-            ))}
+          <View style={{ paddingHorizontal: spacing.md }}>
+            <SectionHead label="components" right={String(chain.components.length)} />
+            <RowGroup>
+              {chain.components.map((comp, i) => {
+                const sevColor = severityColor(comp.severity);
+                const cv = fmtCvss(comp.cvss);
+                return (
+                  <PressRow key={comp.skyline_id || comp.name || String(i)} rail={sevColor} last={i === chain.components.length - 1}>
+                    <View style={{ flex: 1, paddingLeft: spacing.xs }}>
+                      <Text style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.semibold }} numberOfLines={1}>
+                        {safe(comp.name, "component")}
+                      </Text>
+                      {comp.role ? (
+                        <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, lineHeight: 17, marginTop: 2 }} numberOfLines={2}>
+                          {safe(comp.role)}
+                        </Text>
+                      ) : null}
+                      <Mono color={colors.text.disabled} style={{ marginTop: 3 }}>
+                        {[comp.skyline_id, comp.cwe, comp.cve].filter(Boolean).join(" · ") || "—"}
+                      </Mono>
+                    </View>
+                    {comp.severity ? <Chip label={safe(comp.severity)} color={sevColor} /> : null}
+                    {cv ? <Mono color={cvssColor(comp.cvss)} size={fs.lg} weight="bold">{cv}</Mono> : null}
+                  </PressRow>
+                );
+              })}
+            </RowGroup>
           </View>
         ) : null}
 
-        {/* Segment bodies */}
-        <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm }}>
-          {segment === "advisory" ? (
-            advisoryArtifact && advisoryText != null ? (
-              <MarkdownContent content={advisoryText} />
-            ) : advisoryArtifact ? (
-              <View style={{ paddingVertical: spacing.xxl, alignItems: "center" }}>
-                <ActivityIndicator color={colors.accent} />
-              </View>
-            ) : (
-              <EmptySegment emoji="📄" text="No advisory packaged yet" />
-            )
-          ) : null}
+        {/* ── Segments ── */}
+        <View style={{ marginTop: spacing.lg }}>
+          <SegTabs<Segment>
+            tabs={[
+              { key: "advisory", label: "advisory" },
+              { key: "runs", label: "runs", count: runs.length },
+              { key: "findings", label: "fnd", count: findings.length },
+              { key: "artifacts", label: "artf", count: artifacts.length },
+              { key: "coord", label: "coord", count: coordination.length },
+            ]}
+            active={segment}
+            onChange={setSegment}
+          />
 
-          {segment === "runs" ? (
-            runs.length === 0 ? (
-              <EmptySegment emoji="▶️" text="No attributed evidence runs" sub="Runs link to this chain via log_run." />
-            ) : (
-              runs.map((r) => (
-                <View key={r.id} style={{
-                  backgroundColor: colors.gray[800], borderRadius: radius.md,
-                  borderLeftWidth: 3, borderLeftColor: colors.accent,
-                  borderWidth: 1, borderColor: "rgba(255,255,255,0.04)",
-                  padding: spacing.md, gap: spacing.xs,
-                }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                    <Text style={{ color: colors.accent, fontFamily: "monospace", fontSize: fs.md, fontWeight: fw.bold }}>
-                      {safe(r.run_key)}
-                    </Text>
-                    <Text style={{ color: colors.text.tertiary, fontSize: fs.xs, fontFamily: "monospace" }}>
-                      {safe(r.target)}{r.run_date ? ` · ${fmtDate(r.run_date)}` : ""}
-                    </Text>
-                    <View style={{ flex: 1 }} />
-                    {r.verdict ? (
-                      <View style={{
-                        backgroundColor: withAlpha(r.verdict === "fail" ? colors.error : colors.success, 0.14),
-                        borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2,
-                      }}>
-                        <Text style={{
-                          color: r.verdict === "fail" ? colors.error : colors.success,
-                          fontSize: fs.xs, fontWeight: fw.semibold,
-                        }}>
-                          {safe(r.verdict)}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                  {r.purpose ? (
-                    <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium }} numberOfLines={2}>
-                      {safe(r.purpose)}
-                    </Text>
-                  ) : null}
-                  {r.summary ? (
-                    <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, lineHeight: 17 }} numberOfLines={3}>
-                      {safe(r.summary)}
-                    </Text>
-                  ) : null}
+          <View style={{ padding: spacing.md }}>
+            {segment === "advisory" ? (
+              advisoryArtifact && advisoryText != null ? (
+                <MarkdownContent content={advisoryText} />
+              ) : advisoryArtifact ? (
+                <View style={{ paddingVertical: spacing.xxl, alignItems: "center" }}>
+                  <ActivityIndicator color={colors.accent} />
                 </View>
-              ))
-            )
-          ) : null}
+              ) : (
+                <EmptyState text="no advisory packaged" />
+              )
+            ) : null}
 
-          {segment === "findings" ? (
-            findings.length === 0 ? (
-              <EmptySegment emoji="🔎" text="No findings linked to this chain" />
-            ) : (
-              findings.map((f) => (
-                <FindingRow key={f.id} finding={f} onPress={(x) => setDetailFinding(x.id)} />
-              ))
-            )
-          ) : null}
+            {segment === "runs" ? (
+              runs.length === 0 ? (
+                <EmptyState text="no attributed evidence runs" />
+              ) : (
+                <RowGroup>
+                  {runs.map((r, i) => (
+                    <PressRow key={r.id} last={i === runs.length - 1}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                          <Mono color={colors.accent} size={fs.md} weight="bold">{safe(r.run_key)}</Mono>
+                          {r.verdict ? (
+                            <Chip label={safe(r.verdict)} color={r.verdict === "fail" ? colors.error : colors.success} />
+                          ) : null}
+                        </View>
+                        {r.purpose ? (
+                          <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium, marginTop: 3 }} numberOfLines={2}>
+                            {safe(r.purpose)}
+                          </Text>
+                        ) : null}
+                        <Mono color={colors.text.disabled} style={{ marginTop: 3 }}>
+                          {safe(r.target)}{r.run_date ? ` · ${fmtDate(r.run_date)}` : ""}
+                        </Mono>
+                      </View>
+                    </PressRow>
+                  ))}
+                </RowGroup>
+              )
+            ) : null}
 
-          {segment === "artifacts" ? (
-            artifacts.length === 0 ? (
-              <EmptySegment emoji="📦" text="No artifacts recorded" />
-            ) : (
-              artifacts.map((a) => (
-                <Pressable
-                  key={a.id}
-                  onPress={() => { if (a.sanitized) setViewArtifact(a); }}
-                  disabled={!a.sanitized}
-                  style={({ pressed }) => ({
-                    flexDirection: "row", alignItems: "center", gap: spacing.sm,
-                    backgroundColor: colors.gray[800], borderRadius: radius.md,
-                    borderWidth: 1, borderColor: "rgba(255,255,255,0.04)",
-                    padding: spacing.md,
-                    opacity: a.sanitized ? (pressed ? 0.9 : 1) : 0.55,
+            {segment === "findings" ? (
+              findings.length === 0 ? (
+                <EmptyState text="no findings linked" />
+              ) : (
+                <RowGroup>
+                  {findings.map((f, i) => (
+                    <PressRow
+                      key={f.id}
+                      rail={lifecycleColor(f.lifecycle)}
+                      last={i === findings.length - 1}
+                      onPress={() => setDetailFinding(f.id)}
+                    >
+                      <View style={{ flex: 1, paddingLeft: spacing.xs }}>
+                        <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.semibold, lineHeight: 18 }} numberOfLines={2}>
+                          {safe(f.title)}
+                        </Text>
+                        <Mono color={colors.text.disabled} style={{ marginTop: 3 }}>
+                          {[f.skyline_id, f.cve_id, f.discovered_at ? fmtDate(f.discovered_at) : null].filter(Boolean).join(" · ") || "—"}
+                        </Mono>
+                      </View>
+                      <View style={{ alignItems: "flex-end", gap: 4 }}>
+                        {fmtCvss(f.cvss_score) ? (
+                          <Mono color={cvssColor(f.cvss_score)} size={fs.lg} weight="bold">{fmtCvss(f.cvss_score)}</Mono>
+                        ) : null}
+                        <MicroLabel color={lifecycleColor(f.lifecycle)} size={9}>
+                          {lifecycleLabel(f.lifecycle)}
+                        </MicroLabel>
+                      </View>
+                    </PressRow>
+                  ))}
+                </RowGroup>
+              )
+            ) : null}
+
+            {segment === "artifacts" ? (
+              artifacts.length === 0 ? (
+                <EmptyState text="no artifacts recorded" />
+              ) : (
+                <RowGroup>
+                  {artifacts.map((a, i) => (
+                    <PressRow
+                      key={a.id}
+                      last={i === artifacts.length - 1}
+                      onPress={a.sanitized ? () => setViewArtifact(a) : undefined}
+                    >
+                      <Mono color={colors.text.secondary} size={fs.lg}>{artifactIcon(a.kind)}</Mono>
+                      <View style={{ flex: 1 }}>
+                        <Mono color={colors.text.primary} size={fs.md} weight="semibold" numberOfLines={1}>
+                          {safe(a.filename)}
+                        </Mono>
+                        <Mono color={colors.text.disabled} style={{ marginTop: 2 }}>
+                          {safe(a.kind)} · {safe(a.sha8)}{a.push_state ? ` · ${safe(a.push_state)}` : ""}
+                        </Mono>
+                      </View>
+                      {a.sanitized ? (
+                        <Chip label="view" color={colors.success} />
+                      ) : (
+                        <Chip label="internal" color={colors.gray[500]} />
+                      )}
+                    </PressRow>
+                  ))}
+                </RowGroup>
+              )
+            ) : null}
+
+            {segment === "coord" ? (
+              coordination.length === 0 ? (
+                <EmptyState text="no vendor coordination logged" />
+              ) : (
+                <RowGroup>
+                  {coordination.map((c, i) => {
+                    const chColor = channelColor(c.channel);
+                    const stColor = c.status === "held" ? colors.warning : c.status === "done" ? colors.success : colors.gray[400];
+                    return (
+                      <PressRow key={c.id} rail={chColor} last={i === coordination.length - 1}>
+                        <View style={{ flex: 1, paddingLeft: spacing.xs }}>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                            <Chip label={safe(c.channel)} color={chColor} />
+                            <Mono color={colors.text.disabled}>
+                              {DIRECTION_ICON[c.direction] || "·"} {fmtDate(c.event_date)}
+                            </Mono>
+                          </View>
+                          {c.subject ? (
+                            <Text style={{ color: colors.text.primary, fontSize: fs.md, lineHeight: 18, marginTop: 4 }} numberOfLines={3}>
+                              {safe(c.subject)}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Chip label={safe(c.status)} color={stColor} />
+                      </PressRow>
+                    );
                   })}
-                >
-                  <Text style={{ fontSize: 15 }}>{artifactIcon(a.kind)}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.text.primary, fontSize: fs.md, fontWeight: fw.medium }} numberOfLines={1}>
-                      {safe(a.filename)}
-                    </Text>
-                    <Text style={{ color: colors.text.disabled, fontSize: fs.xs, fontFamily: "monospace", marginTop: 1 }}>
-                      {safe(a.kind)} · {safe(a.sha8)}{a.push_state ? ` · ${safe(a.push_state)}` : ""}
-                    </Text>
-                  </View>
-                  {a.sanitized ? (
-                    <Text style={{ color: colors.success, fontSize: fs.xs, fontWeight: fw.semibold }}>view ›</Text>
-                  ) : (
-                    <Text style={{ color: colors.text.disabled, fontSize: fs.xs }}>🔒 internal</Text>
-                  )}
-                </Pressable>
-              ))
-            )
-          ) : null}
-
-          {segment === "coord" ? (
-            coordination.length === 0 ? (
-              <EmptySegment emoji="✉️" text="No vendor coordination logged" />
-            ) : (
-              coordination.map((c) => {
-                const chColor = channelColor(c.channel);
-                return (
-                  <View key={c.id} style={{
-                    backgroundColor: colors.gray[800], borderRadius: radius.md,
-                    borderLeftWidth: 3, borderLeftColor: chColor,
-                    borderWidth: 1, borderColor: "rgba(255,255,255,0.04)",
-                    padding: spacing.md, gap: spacing.xs,
-                  }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-                      <View style={{
-                        backgroundColor: withAlpha(chColor, 0.14), borderRadius: radius.xs,
-                        paddingHorizontal: spacing.sm, paddingVertical: 2,
-                      }}>
-                        <Text style={{ color: chColor, fontSize: fs.xs, fontWeight: fw.bold }}>
-                          {safe(c.channel).toUpperCase()}
-                        </Text>
-                      </View>
-                      <Text style={{ color: colors.text.tertiary, fontSize: fs.xs, fontFamily: "monospace" }}>
-                        {DIRECTION_ICON[c.direction] || "·"} {fmtDate(c.event_date)}
-                      </Text>
-                      <View style={{ flex: 1 }} />
-                      <View style={{
-                        backgroundColor: withAlpha(c.status === "held" ? colors.warning : c.status === "done" ? colors.success : colors.gray[300], 0.12),
-                        borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2,
-                      }}>
-                        <Text style={{
-                          color: c.status === "held" ? colors.warning : c.status === "done" ? colors.success : colors.gray[300],
-                          fontSize: fs.xs, fontWeight: fw.semibold,
-                        }}>
-                          {safe(c.status)}
-                        </Text>
-                      </View>
-                    </View>
-                    {c.subject ? (
-                      <Text style={{ color: colors.text.primary, fontSize: fs.md, lineHeight: 18 }} numberOfLines={3}>
-                        {safe(c.subject)}
-                      </Text>
-                    ) : null}
-                  </View>
-                );
-              })
-            )
-          ) : null}
+                </RowGroup>
+              )
+            ) : null}
+          </View>
         </View>
       </ScrollView>
 
@@ -529,111 +506,7 @@ export default function ChainDetailScreen() {
   );
 }
 
-// ── Pipeline strip ──
-
-function PipelineStrip({ status }: { status: string }) {
-  const currentIdx = CHAIN_STATUS_ORDER.indexOf(status as (typeof CHAIN_STATUS_ORDER)[number]);
-  return (
-    <View style={{
-      backgroundColor: colors.gray[850], borderRadius: radius.md,
-      borderWidth: 1, borderColor: "rgba(255,255,255,0.04)",
-      paddingVertical: spacing.md,
-    }}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: spacing.md }}>
-        {CHAIN_STATUS_ORDER.map((s, i) => {
-          const reached = currentIdx >= 0 && i <= currentIdx;
-          const isCurrent = i === currentIdx;
-          const dotColor = reached ? (isCurrent ? chainStatusColor(status) : withAlpha(chainStatusColor(s), 0.85)) : colors.gray[600];
-          return (
-            <View key={s} style={{ flexDirection: "row", alignItems: "flex-start" }}>
-              <View style={{ alignItems: "center", width: 62 }}>
-                <View style={{
-                  width: isCurrent ? 13 : 9, height: isCurrent ? 13 : 9,
-                  borderRadius: 7, backgroundColor: dotColor,
-                  borderWidth: isCurrent ? 2 : 0,
-                  borderColor: withAlpha(chainStatusColor(status), 0.35),
-                  marginTop: isCurrent ? 0 : 2,
-                }} />
-                <Text numberOfLines={2} style={{
-                  color: isCurrent ? chainStatusColor(status) : reached ? colors.text.secondary : colors.text.disabled,
-                  fontSize: 8, fontWeight: isCurrent ? fw.bold : fw.medium,
-                  textAlign: "center", marginTop: 4, lineHeight: 10,
-                }}>
-                  {chainStatusLabel(s)}
-                </Text>
-              </View>
-              {i < CHAIN_STATUS_ORDER.length - 1 ? (
-                <View style={{
-                  width: 16, height: 2, marginTop: 6,
-                  backgroundColor: currentIdx >= 0 && i < currentIdx ? withAlpha(chainStatusColor(s), 0.6) : colors.gray[600],
-                }} />
-              ) : null}
-            </View>
-          );
-        })}
-      </ScrollView>
-    </View>
-  );
-}
-
-// ── Component card ──
-
-function ComponentCard({ comp }: { comp: ChainComponent }) {
-  const sevColor = severityColor(comp.severity);
-  const cv = fmtCvss(comp.cvss);
-  return (
-    <View style={{
-      backgroundColor: colors.gray[800], borderRadius: radius.md,
-      borderLeftWidth: 3, borderLeftColor: sevColor,
-      borderWidth: 1, borderColor: "rgba(255,255,255,0.04)",
-      padding: spacing.md, gap: spacing.xs + 2,
-    }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-        <Text style={{ color: colors.text.primary, fontSize: fs.lg, fontWeight: fw.semibold, flex: 1 }} numberOfLines={1}>
-          {safe(comp.name, "component")}
-        </Text>
-        {comp.severity ? (
-          <View style={{
-            backgroundColor: withAlpha(sevColor, 0.14), borderRadius: radius.sm,
-            paddingHorizontal: spacing.sm, paddingVertical: 2,
-          }}>
-            <Text style={{ color: sevColor, fontSize: fs.xs, fontWeight: fw.bold }}>
-              {safe(comp.severity).toUpperCase()}
-            </Text>
-          </View>
-        ) : null}
-        {cv ? (
-          <Text style={{ color: cvssColor(comp.cvss), fontSize: fs.md, fontWeight: fw.bold, fontFamily: "monospace" }}>
-            {cv}
-          </Text>
-        ) : null}
-      </View>
-      {comp.role ? (
-        <Text style={{ color: colors.text.secondary, fontSize: fs.md, lineHeight: 17 }} numberOfLines={3}>
-          {safe(comp.role)}
-        </Text>
-      ) : null}
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: 2 }}>
-        {comp.skyline_id ? <TagChip text={comp.skyline_id} color={colors.accent} /> : null}
-        {comp.cwe ? <TagChip text={safe(comp.cwe)} color={colors.text.tertiary} /> : null}
-        {comp.cve ? <TagChip text={safe(comp.cve)} color={colors.brand.orange} /> : null}
-      </View>
-    </View>
-  );
-}
-
-function TagChip({ text, color }: { text: string; color: string }) {
-  return (
-    <View style={{
-      backgroundColor: withAlpha(color, 0.10), borderRadius: radius.xs,
-      paddingHorizontal: spacing.sm, paddingVertical: 2,
-    }}>
-      <Text style={{ color, fontSize: fs.xs, fontFamily: "monospace", fontWeight: fw.semibold }}>{text}</Text>
-    </View>
-  );
-}
-
-// ── Artifact viewer ──
+// ── Artifact viewer (sanitized content only) ──
 
 function ArtifactViewerModal({ artifact, onClose }: { artifact: ArtifactRow | null; onClose: () => void }) {
   const insets = useSafeAreaInsets();
@@ -667,20 +540,21 @@ function ArtifactViewerModal({ artifact, onClose }: { artifact: ArtifactRow | nu
     <Modal visible animationType="slide" onRequestClose={onClose} transparent={false}>
       <View style={{ flex: 1, backgroundColor: colors.bg.base, paddingTop: insets.top }}>
         <View style={{
-          flexDirection: "row", alignItems: "center",
-          paddingHorizontal: spacing.md, paddingVertical: spacing.md + 2,
+          flexDirection: "row", alignItems: "center", gap: spacing.sm,
+          paddingHorizontal: spacing.md, paddingVertical: spacing.md,
           backgroundColor: colors.bg.elevated,
           borderBottomWidth: 1, borderBottomColor: colors.border.subtle,
         }}>
           <Pressable onPress={onClose} hitSlop={16} style={({ pressed }) => ({
-            opacity: pressed ? 0.6 : 1, paddingVertical: spacing.sm, paddingRight: spacing.md,
+            opacity: pressed ? 0.6 : 1,
+            paddingHorizontal: spacing.sm + 2, paddingVertical: 3,
+            borderWidth: 1, borderColor: colors.border.default, borderRadius: radius.xs,
           })}>
-            <Text style={{ color: colors.accent, fontSize: fs.lg, fontWeight: fw.semibold }}>← Back</Text>
+            <Text style={{ color: colors.text.secondary, fontSize: fs.md, fontFamily: MONO, fontWeight: fw.bold }}>‹</Text>
           </Pressable>
+          <MicroLabel color={colors.text.secondary}>artifact</MicroLabel>
           <View style={{ flex: 1 }} />
-          <Text style={{ color: colors.text.tertiary, fontSize: fs.sm, fontFamily: "monospace" }} numberOfLines={1}>
-            {safe(artifact.filename)} · {safe(artifact.sha8)}
-          </Text>
+          <Mono color={colors.text.disabled} numberOfLines={1}>{safe(artifact.sha8)}</Mono>
         </View>
 
         {isImage ? (
@@ -692,19 +566,20 @@ function ArtifactViewerModal({ artifact, onClose }: { artifact: ArtifactRow | nu
             />
           </ScrollView>
         ) : failed ? (
-          <Text style={{ color: colors.text.disabled, textAlign: "center", marginTop: spacing.xxxl }}>
-            Could not load artifact
-          </Text>
+          <EmptyState text="could not load artifact" />
         ) : text == null ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <ActivityIndicator color={colors.accent} />
           </View>
         ) : (
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxxl }}>
+            <Mono color={colors.text.secondary} size={fs.sm} weight="semibold" style={{ marginBottom: spacing.md }}>
+              {safe(artifact.filename)}
+            </Mono>
             {isMarkdown ? (
               <MarkdownContent content={text} />
             ) : (
-              <Text selectable style={{ color: colors.text.secondary, fontFamily: "monospace", fontSize: fs.xs, lineHeight: 17 }}>
+              <Text selectable style={{ color: colors.text.secondary, fontFamily: MONO, fontSize: fs.xs, lineHeight: 17 }}>
                 {text}
               </Text>
             )}
@@ -714,54 +589,3 @@ function ArtifactViewerModal({ artifact, onClose }: { artifact: ArtifactRow | nu
     </Modal>
   );
 }
-
-// ── Shared bits ──
-
-function HeaderBack({ onBack }: { onBack: () => void }) {
-  return (
-    <Pressable onPress={onBack} hitSlop={16} style={({ pressed }) => ({
-      opacity: pressed ? 0.6 : 1, marginBottom: spacing.xs, paddingVertical: spacing.xs, alignSelf: "flex-start",
-    })}>
-      <Text style={{ color: colors.accent, fontSize: fs.lg, fontWeight: fw.medium }}>← Back</Text>
-    </Pressable>
-  );
-}
-
-function SectionHeader({ title, count }: { title: string; count: number }) {
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-      <Text style={{
-        color: colors.text.tertiary, fontSize: fs.xs, fontWeight: fw.semibold,
-        textTransform: "uppercase", letterSpacing: 1,
-      }}>
-        {title}
-      </Text>
-      <Text style={{ color: colors.text.disabled, fontSize: fs.xs, fontFamily: "monospace" }}>{count}</Text>
-      <View style={{ flex: 1, height: 1, backgroundColor: colors.border.subtle }} />
-    </View>
-  );
-}
-
-function EmptySegment({ emoji, text, sub }: { emoji: string; text: string; sub?: string }) {
-  return (
-    <View style={{ alignItems: "center", paddingVertical: spacing.xxxl }}>
-      <Text style={{ fontSize: 36, marginBottom: spacing.sm }}>{emoji}</Text>
-      <Text style={{ color: colors.text.tertiary, fontSize: fs.md }}>{text}</Text>
-      {sub ? <Text style={{ color: colors.text.disabled, fontSize: fs.sm, marginTop: spacing.xs }}>{sub}</Text> : null}
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  tab: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: spacing.sm + 4,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-  },
-  tabActive: {
-    borderBottomColor: colors.accent,
-  },
-});

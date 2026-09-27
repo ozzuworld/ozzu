@@ -10,18 +10,24 @@ const req = createRequire(path.join(FE, "package.json"));
 const rnw = req.resolve("react-native-web");
 const stub = (f) => path.join(__dirname, "stubs", f);
 
-// Redirect the native-coupled edges home.tsx touches to preview stubs, and
+// Redirect the native-coupled edges the screens touch to preview stubs, and
 // react-native -> react-native-web. Everything else (design-tokens,
-// directive-constants) resolves to the REAL source.
+// chainConstants, ContentPanel, the SOC components) resolves to REAL source.
+// bridge-api points at same-origin relative URLs; serve.py proxies those to
+// the live local bridge, so previews render with REAL data.
 const redirect = {
   name: "preview-redirect",
   setup(build) {
     build.onResolve({ filter: /^react-native$/ }, () => ({ path: rnw }));
     build.onResolve({ filter: /^expo-status-bar$/ }, () => ({ path: stub("expo-status-bar.js") }));
     build.onResolve({ filter: /^expo-router$/ }, () => ({ path: stub("expo-router.js") }));
+    build.onResolve({ filter: /^react-native-safe-area-context$/ }, () => ({ path: stub("safe-area-context.js") }));
     build.onResolve({ filter: /lib\/usePhoneLayout$/ }, () => ({ path: stub("usePhoneLayout.js") }));
     build.onResolve({ filter: /lib\/directive-hooks$/ }, () => ({ path: stub("directive-hooks.js") }));
     build.onResolve({ filter: /lib\/business-hooks$/ }, () => ({ path: stub("business-hooks.js") }));
+    build.onResolve({ filter: /lib\/bridge-api$/ }, () => ({ path: stub("bridge-api.js") }));
+    build.onResolve({ filter: /lib\/useBridgeStream$/ }, () => ({ path: stub("useBridgeStream.js") }));
+    build.onResolve({ filter: /lib\/ha-context$/ }, () => ({ path: stub("ha-context.js") }));
   },
 };
 
