@@ -1733,6 +1733,13 @@ async function handleRequest(req, res) {
     "/anisette-servers.json", "/anisette.json",
     "/iphone-pairing", "/ios-setup",
     "/api/manifest", // expo-updates OTA manifest
+    // TV Device-Owner self-update (dir_1790443814736): the updater is a bare
+    // fetch (App.tsx) + native URL.openConnection() (DeviceOwnerModule.kt) —
+    // neither CAN send an Authorization header. App-distribution endpoints,
+    // same open-by-design class as /api/manifest + /ozzu-latest.ipa. Auth
+    // enforcement (2026-09-17) had silently broken the TV update chain:
+    // check → 401 → `if (!res.ok) return` — no log, no update, ever.
+    "/tv/release/check", "/tv/release/download",
   ]);
   // Also allow /api/assets (OTA bundle downloads) by prefix
   const isPublicPath = PUBLIC_ALLOWLIST.has(pathname) || pathname.startsWith("/api/assets");
