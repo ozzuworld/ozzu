@@ -335,7 +335,11 @@ module.exports = function mediaRoutes(ctx) {
             results.push({
               title: r.title,
               infoHash,
-              magnet: r.magnetUrl || null,
+              // SECURITY (SKYLINE-SOC-2026-075): pass through REAL magnet URIs only.
+              // Prowlarr's magnetUrl is often its own proxied download URL
+              // (http://…/N/download?apikey=…) which embeds PROWLARR_API_KEY — echoing
+              // it to clients leaks the key into TV logs/debug output.
+              magnet: /^magnet:/i.test(r.magnetUrl || "") ? r.magnetUrl : null,
               seeders: r.seeders ?? null,
               leechers: r.leechers ?? null,
               size: r.size ?? null,
