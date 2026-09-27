@@ -14,9 +14,15 @@ import {
   setBaseUrl,
   setAccessToken,
   setUserId,
+  resolveServerUrl,
   DEFAULT_BASE_URL,
 } from "./src/lib/jellyfin/client";
-import { getOrCreateDeviceId, loadBaseUrl, loadSession } from "./src/lib/jellyfin/storage";
+import {
+  getOrCreateDeviceId,
+  loadBaseUrl,
+  saveBaseUrl,
+  loadSession,
+} from "./src/lib/jellyfin/storage";
 
 const DEFAULT_BRIDGE = process.env.EXPO_PUBLIC_BRIDGE_URL || "https://home.ozzu.world/bridge";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
@@ -50,6 +56,11 @@ export default function App() {
         configureClient(deviceId);
         const base = (await loadBaseUrl()) || DEFAULT_BASE_URL;
         setBaseUrl(base);
+        // Resolve the ACTUAL reachable server (persisted → LAN → WG → public).
+        // Failure is non-fatal: LoginScreen shows the honest network error +
+        // Retry instead of blaming credentials.
+        const resolved = await resolveServerUrl(base);
+        if (resolved && resolved !== base) void saveBaseUrl(resolved);
         const session = await loadSession();
         if (session?.accessToken && session.userId) {
           setAccessToken(session.accessToken);

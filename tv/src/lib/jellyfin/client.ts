@@ -74,6 +74,59 @@ export function authHeaders(): Record<string, string> {
   return _token ? { Authorization: `MediaBrowser Token=${_token}` } : {};
 }
 
+// ── Server resolution (2026-09-27, dir_1790443814736) ────────────────────────
+// A hardcoded LAN default silently broke login for any device NOT on home WiFi:
+// every call throws at the network layer and LoginScreen's catch-all blamed the
+// credentials. Probe ordered candidates at startup instead — first responder
+// wins — and expose reachability so the UI can tell "wrong password" apart from
+// "no server on this network".
+export const SERVER_CANDIDATES = [
+  "http://192.168.1.9:8096", // home LAN (bridge-01)
+  "http://10.9.0.5:8096", // WG mesh
+  "https://home.ozzu.world/bridge/jellyfin", // public nginx proxy (edge pending)
+];
+
+let _reachable = false;
+export const isServerReachable = () => _reachable;
+
+async function probeServer(url: string, timeoutMs = 2500): Promise<boolean> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${url}/System/Info/Public`, { signal: ctl.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Probe `first` (persisted/default) then SERVER_CANDIDATES; first responder
+ *  becomes the base URL. Returns the resolved URL, or null when NO Jellyfin is
+ *  reachable from this device's current network. */
+export async function resolveServerUrl(first?: string | null): Promise<string | null> {
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const u of [first, ...SERVER_CANDIDATES]) {
+    if (!u) continue;
+    const norm = u.replace(/\/+$/, "");
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      urls.push(norm);
+    }
+  }
+  for (const url of urls) {
+    if (await probeServer(url)) {
+      setBaseUrl(url);
+      _reachable = true;
+      return url;
+    }
+  }
+  _reachable = false;
+  return null;
+}
+
 // Current authenticated user id (set on auth + on bootstrap; read by data calls).
 let _userId = "";
 export const setUserId = (id: string) => {
