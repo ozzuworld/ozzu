@@ -339,7 +339,11 @@ module.exports = function mediaRoutes(ctx) {
               // Prowlarr's magnetUrl is often its own proxied download URL
               // (http://…/N/download?apikey=…) which embeds PROWLARR_API_KEY — echoing
               // it to clients leaks the key into TV logs/debug output.
-              magnet: /^magnet:/i.test(r.magnetUrl || "") ? r.magnetUrl : null,
+              // Real magnet lives in `guid` (verified live: 115/183 results);
+              // magnetUrl is ALWAYS Prowlarr's proxied download URL (0/183 magnets),
+              // so guid-first — the magnet: prefix filter still guarantees no apikey=.
+              magnet: /^magnet:/i.test(r.guid || "") ? r.guid
+                    : /^magnet:/i.test(r.magnetUrl || "") ? r.magnetUrl : null,
               seeders: r.seeders ?? null,
               leechers: r.leechers ?? null,
               size: r.size ?? null,

@@ -1404,7 +1404,7 @@ function sendJSON(res, status, data, req) {
 // LAN/VPN requests pass through without auth. Public requests (through nginx) need API key.
 const TRUSTED_NETS = [
   { prefix: "10.9.0.", label: "WireGuard" },
-  { prefix: "172.168.0.", label: "LAN" },
+  { prefix: "192.168.", label: "LAN" }, // fixed 2026-09-27: was "172.168.0." (typo — matched nothing; LAN devices got 401 keyless, violating the documented LAN/WG-keyless contract + breaking the TV broker lane)
   { prefix: "127.0.0.", label: "localhost" },
   { prefix: "10.128.0.", label: "GCP-internal" },
 ];
@@ -1437,8 +1437,18 @@ function realClientIp(req) {
   }
   return socketIp;
 }
+// CRITICAL (found live 2026-09-27, media deploy window): the public edge/hub nginx
+// (home.ozzu.world → 32.195.174.19) reverse-proxies /bridge/* to this bridge THROUGH
+// the WireGuard mesh — every public internet request arrives with socket source
+// 10.9.0.1 (the hub's mesh IP), which TRUSTED_NETS classified as "WireGuard = no auth
+// needed". Result: the ENTIRE API (directives, /mcp, email, soc) answered keyless from
+// the internet. 10.9.0.1 is the hub ONLY — real mesh devices have their own IPs
+// (kazuma-pc .4, bridge-01 .5, tablet .10, rockpi .21) and keep keyless mesh trust.
+const EDGE_PROXY_IPS = new Set(["10.9.0.1"]);
+
 function isPublicRequest(req) {
   const ip = realClientIp(req);
+  if (EDGE_PROXY_IPS.has(ip)) return true; // via public edge → auth enforced
   if (isLoopback(ip)) return false; // local tooling on the box itself
   return !TRUSTED_NETS.some(net => ip.startsWith(net.prefix));
 }
@@ -6216,7 +6226,8 @@ wss.on("connection", (ws, req) => {
   // Auth gate: public WS connections (via nginx) need a valid token
   if (BRIDGE_API_KEY) {
     const clientIp = realClientIp(req);
-    const isTrusted = isLoopback(clientIp) || TRUSTED_NETS.some(net => clientIp.startsWith(net.prefix));
+    // 10.9.0.1 = public edge proxy (EDGE_PROXY_IPS above) — never trusted, needs ?token=
+    const isTrusted = !EDGE_PROXY_IPS.has(clientIp) && (isLoopback(clientIp) || TRUSTED_NETS.some(net => clientIp.startsWith(net.prefix)));
     if (!isTrusted) {
       const wsUrl = new URL(req.url, `http://localhost:${PORT}`);
       const token = wsUrl.searchParams.get("token");
