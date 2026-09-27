@@ -4,6 +4,7 @@ import type { RootStackParamList } from "./routes";
 import { LoginScreen } from "../screens/LoginScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { DetailScreen } from "../screens/DetailScreen";
+import { DiscoverDetailScreen } from "../screens/DiscoverDetailScreen";
 import { PlayerScreen } from "../screens/PlayerScreen";
 import { SearchScreen } from "../screens/SearchScreen";
 import { colors } from "../lib/theme";
@@ -27,6 +28,7 @@ export function RootNavigator({
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="Detail" component={DetailScreen} />
+      <Stack.Screen name="DiscoverDetail" component={DiscoverDetailScreen} />
       <Stack.Screen name="Player" component={PlayerScreen} />
       <Stack.Screen name="Search" component={SearchScreen} />
     </Stack.Navigator>
