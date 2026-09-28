@@ -35,7 +35,6 @@ import {
   chainStatusColor,
   chainStatusLabel,
   chainStatusEmoji,
-  lifecycleColor,
   lifecycleLabel,
   cvssColor,
   fmtCvss,
@@ -48,6 +47,13 @@ import { safe } from "../../../components/soc/safe";
 
 const ACCENT = colors.accent;
 const HAIRLINE = "rgba(255,255,255,0.04)";
+
+// TaskCard.tsx STATUS_COLOR, verbatim — the only circle colors the sheet has.
+const TASK_CIRCLE: Record<string, string> = {
+  pending: colors.gray[400],
+  in_progress: colors.brand.amberDeep,
+  done: colors.success,
+};
 
 // ── Types (mirror GET /soc/chains/:slug) ──
 
@@ -264,7 +270,12 @@ export default function ChainDetailScreen() {
         {/* 2 — PROGRESS card: label / bar / one colored counts line. Nothing else.
             Same axes as the sheet: bar = done/total, counts = the same breakdown. */}
         <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: HAIRLINE }}>
-          <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11, marginBottom: 8 }}>PROGRESS</Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
+            <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11 }}>PROGRESS</Text>
+            <Text style={{ color: statusColor, fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
+              {findings.length > 0 ? Math.round((publishedCount / findings.length) * 100) : 0}%
+            </Text>
+          </View>
           <ProgressBar done={publishedCount} total={Math.max(findings.length, 1)} color={statusColor} height={6} />
           <View style={{ flexDirection: "row", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
             <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>{unfiledCount} unfiled</Text>
@@ -380,7 +391,7 @@ export default function ChainDetailScreen() {
         </DisclosureSection>
 
         {/* 5 — STATUS segment row (sheet's STATUS, read-only) */}
-        <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, letterSpacing: 2, marginBottom: 8 }}>STATUS</Text>
+        <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>STATUS</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
           {CHAIN_STATUS_ORDER.map((s, i) => {
             const active = i === idx;
@@ -397,18 +408,16 @@ export default function ChainDetailScreen() {
                   borderRadius: 6,
                   backgroundColor: active ? col + "22" : "transparent",
                   borderWidth: 1,
-                  borderColor: active ? col + "66" : past ? col + "33" : HAIRLINE,
+                  borderColor: active ? col + "66" : HAIRLINE,
                 }}
               >
                 <Text
                   numberOfLines={1}
                   style={{
-                    color: active || past ? col : colors.gray[400],
-                    opacity: past ? 0.55 : 1,
+                    color: active ? col : colors.gray[400],
                     fontFamily: "monospace",
-                    fontSize: 8,
+                    fontSize: 9,
                     fontWeight: "bold",
-                    letterSpacing: 0.5,
                   }}
                 >
                   {chainStatusLabel(s).toUpperCase()}
@@ -438,9 +447,8 @@ export default function ChainDetailScreen() {
                 <Text style={{
                   color: groupBy === g ? colors.gray[100] : colors.gray[400],
                   fontFamily: "monospace",
-                  fontSize: 8,
+                  fontSize: 9,
                   fontWeight: "bold",
-                  letterSpacing: 1,
                 }}>
                   {g.toUpperCase()}
                 </Text>
@@ -462,44 +470,73 @@ export default function ChainDetailScreen() {
               <View key={key} style={{ marginBottom: 12 }}>
                 <Pressable
                   onPress={() => toggle(`f:${key}`)}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6, paddingHorizontal: 4 }}
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6, paddingHorizontal: 4 }}
                 >
-                  <Text style={{ color: colors.gray[400], fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</Text>
-                  <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, letterSpacing: 1 }}>
-                    {(groupBy === "severity" ? key : lifecycleLabel(key === "unfiled" ? null : key)).toUpperCase()}
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={{ color: colors.gray[400], fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</Text>
+                    <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 10, letterSpacing: 1 }}>
+                      {(groupBy === "severity" ? key : lifecycleLabel(key === "unfiled" ? null : key)).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>{rows.length}</Text>
                 </Pressable>
                 {!isCollapsed ? (
                   <View style={{ gap: 8 }}>
-                    {rows.map((f) => (
-                      <Pressable
-                        key={f.id}
-                        onPress={() => setDetailFinding(f.id)}
-                        style={({ pressed }) => ({
-                          opacity: pressed ? 0.92 : 1,
-                          transform: [{ scale: pressed ? 0.98 : 1 }],
-                          backgroundColor: colors.gray[800],
-                          borderRadius: 10,
-                          padding: 14,
-                          borderWidth: 1,
-                          borderColor: HAIRLINE,
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 12,
-                        })}
-                      >
-                        <View style={{
-                          width: 22, height: 22, borderRadius: 11,
-                          borderWidth: 2, borderColor: severityColor(f.severity),
-                          alignItems: "center", justifyContent: "center",
-                        }}>
-                          <Text style={{ fontSize: 9 }}>{severityIcon(f.severity)}</Text>
-                        </View>
-                        <Text style={{ flex: 1, color: colors.gray[50], fontSize: 14, lineHeight: 20 }} numberOfLines={2}>
-                          {safe(f.title)}
-                        </Text>
-                      </Pressable>
-                    ))}
+                    {rows.map((f) => {
+                      // TaskCard's three circle states, verbatim: pending =
+                      // gray ring, in_progress = amber ring + dot, done =
+                      // green fill. Finding lifecycle maps onto them.
+                      const state = f.lifecycle === "published" ? "done"
+                        : f.lifecycle ? "in_progress" : "pending";
+                      const isDone = state === "done";
+                      return (
+                        <Pressable
+                          key={f.id}
+                          onPress={() => setDetailFinding(f.id)}
+                          style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
+                        >
+                          <View style={{
+                            backgroundColor: colors.gray[800],
+                            borderRadius: 10,
+                            padding: 14,
+                            marginBottom: 8,
+                            opacity: isDone ? 0.55 : 1,
+                            borderWidth: 1,
+                            borderColor: "rgba(255,255,255,0.03)",
+                            flexDirection: "row",
+                            alignItems: "center",
+                          }}>
+                            <View style={{ marginRight: 12 }}>
+                              <View style={{
+                                width: 18,
+                                height: 18,
+                                borderRadius: 9,
+                                borderWidth: 2,
+                                borderColor: TASK_CIRCLE[state],
+                                backgroundColor: isDone ? colors.success : "transparent",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}>
+                                {state === "in_progress" ? (
+                                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brand.amberDeep }} />
+                                ) : null}
+                              </View>
+                            </View>
+                            <Text
+                              style={{
+                                flex: 1,
+                                color: isDone ? colors.gray[400] : colors.gray[50],
+                                fontSize: 14,
+                                textDecorationLine: isDone ? "line-through" : "none",
+                              }}
+                              numberOfLines={1}
+                            >
+                              {safe(f.title)}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 ) : null}
               </View>
@@ -523,7 +560,6 @@ function BackRow({ onBack }: { onBack: () => void }) {
         <Text style={{ color: colors.gray[300], fontSize: 14 }}>‹</Text>
         <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 11 }}>BACK</Text>
       </Pressable>
-      <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 10, fontWeight: "bold", letterSpacing: 2 }}>KILL CHAIN</Text>
     </View>
   );
 }
