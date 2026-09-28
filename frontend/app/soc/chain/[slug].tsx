@@ -40,7 +40,6 @@ import {
   cvssColor,
   fmtCvss,
   fmtDate,
-  dropLabel,
   artifactIcon,
   channelColor,
   DIRECTION_ICON,
@@ -131,13 +130,14 @@ export default function ChainDetailScreen() {
   const [viewArtifact, setViewArtifact] = useState<ArtifactRow | null>(null);
   const [detailFinding, setDetailFinding] = useState<number | null>(null);
   // Collapsed disclosure rows — the sheet's EXPENSES mechanic. All closed.
+  // Engagements live here too: the sheet has no nav link on its face, so
+  // nothing gets one here either.
   const [collapsed, setCollapsed] = useState<Set<string>>(
-    () => new Set(["components", "runs", "artifacts", "coord", "advisory"]),
+    () => new Set(["engagements", "components", "runs", "artifacts", "coord", "advisory"]),
   );
-  // Accent-link disclosure (the sheet's "+ SET BUDGET" slot).
-  const [opsOpen, setOpsOpen] = useState(false);
-  // FINDINGS view toggle — the sheet's PHASES/STATUS mini-toggle.
-  const [groupBy, setGroupBy] = useState<"lifecycle" | "severity">("lifecycle");
+  // FINDINGS view toggle — the sheet's PHASES/STATUS mini-toggle. Severity
+  // first so the groups never duplicate the STATUS stage row above.
+  const [groupBy, setGroupBy] = useState<"severity" | "lifecycle">("severity");
 
   const toggle = (key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -238,13 +238,9 @@ export default function ChainDetailScreen() {
 
   const statusColor = chainStatusColor(chain.status);
   const idx = CHAIN_STATUS_ORDER.indexOf(chain.status as (typeof CHAIN_STATUS_ORDER)[number]);
-  const stage = idx >= 0 ? idx + 1 : 0;
-  const composed = fmtCvss(chain.cvss_composed);
-  const drop = dropLabel(chain.drop_number);
   const publishedCount = findings.filter((f) => f.lifecycle === "published").length;
   const filedCount = findings.filter((f) => f.lifecycle && f.lifecycle !== "published").length;
   const unfiledCount = findings.length - publishedCount - filedCount;
-  const opsCount = chain.engagement_ids.length + (chain.published_repo ? 1 : 0);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.gray[850], paddingTop: insets.top }}>
@@ -265,53 +261,46 @@ export default function ChainDetailScreen() {
           </View>
         </View>
 
-        {/* 2 — PROGRESS card: label / bar / one colored counts line. Nothing else. */}
+        {/* 2 — PROGRESS card: label / bar / one colored counts line. Nothing else.
+            Same axes as the sheet: bar = done/total, counts = the same breakdown. */}
         <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: HAIRLINE }}>
-          <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11, marginBottom: 8 }}>DISCLOSURE</Text>
-          <ProgressBar done={stage} total={CHAIN_STATUS_ORDER.length} color={statusColor} height={6} />
+          <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11, marginBottom: 8 }}>PROGRESS</Text>
+          <ProgressBar done={publishedCount} total={Math.max(findings.length, 1)} color={statusColor} height={6} />
           <View style={{ flexDirection: "row", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-            {drop ? <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>{drop}</Text> : null}
             <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>{unfiledCount} unfiled</Text>
             <Text style={{ color: colors.brand.amberDeep, fontFamily: "monospace", fontSize: 10 }}>{filedCount} in disclosure</Text>
             <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 10 }}>{publishedCount} published</Text>
-            {composed ? <Text style={{ color: cvssColor(chain.cvss_composed), fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>CVSS {composed}</Text> : null}
           </View>
         </View>
 
-        {/* 3 — accent link slot (the sheet's "+ SET BUDGET") */}
-        <Pressable
-          onPress={() => setOpsOpen((v) => !v)}
-          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, paddingVertical: 4, marginBottom: 8 })}
-        >
-          <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 10, fontWeight: "bold", letterSpacing: 1 }}>
-            {`OPS RECORD (${opsCount}) ${opsOpen ? "▾" : "▸"}`}
-          </Text>
-        </Pressable>
-        {opsOpen ? (
-          <View style={{ marginBottom: 12 }}>
-            {chain.engagement_ids.map((eid) => (
-              <Pressable
+        {/* 3 — collapsed disclosure rows (the sheet's EXPENSES slot). Engagements
+            included: content-named rows only, no invented links. */}
+        <DisclosureSection label={`ENGAGEMENTS (${chain.engagement_ids.length})`} collapsed={collapsed.has("engagements")} onToggle={() => toggle("engagements")}>
+          <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
+            {chain.engagement_ids.map((eid, i) => (
+              <Row
                 key={eid}
+                title={safe(eid)}
+                sub="engagement"
+                right="OPEN"
+                rightColor={ACCENT}
+                last={i === chain.engagement_ids.length - 1}
                 onPress={() => router.push(`/soc/${eid}`)}
-                style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, paddingVertical: 5 })}
-              >
-                <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10 }}>› {safe(eid)}</Text>
-              </Pressable>
+              />
             ))}
             {chain.published_repo ? (
-              <Pressable
+              <Row
+                title={chain.published_repo.replace(/^https?:\/\//, "")}
+                sub={chain.published_at ? `published ${fmtDate(chain.published_at)}` : "published"}
+                right="OPEN"
+                rightColor={colors.success}
+                last={chain.engagement_ids.length === 0}
                 onPress={() => Linking.openURL(chain.published_repo!).catch(() => {})}
-                style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, paddingVertical: 5 })}
-              >
-                <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 10 }}>
-                  › {chain.published_repo.replace(/^https?:\/\//, "")}{chain.published_at ? ` · ${fmtDate(chain.published_at)}` : ""}
-                </Text>
-              </Pressable>
+              />
             ) : null}
           </View>
-        ) : null}
+        </DisclosureSection>
 
-        {/* 4 — collapsed disclosure rows (the sheet's EXPENSES slot) */}
         <DisclosureSection label={`COMPONENTS (${chain.components.length})`} collapsed={collapsed.has("components")} onToggle={() => toggle("components")}>
           <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
             {chain.components.map((comp, i) => {
@@ -435,7 +424,7 @@ export default function ChainDetailScreen() {
             FINDINGS ({findings.length})
           </Text>
           <View style={{ flexDirection: "row", gap: 4 }}>
-            {(["lifecycle", "severity"] as const).map((g) => (
+            {(["severity", "lifecycle"] as const).map((g) => (
               <Pressable
                 key={g}
                 onPress={() => setGroupBy(g)}
@@ -476,47 +465,41 @@ export default function ChainDetailScreen() {
                   style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6, paddingHorizontal: 4 }}
                 >
                   <Text style={{ color: colors.gray[400], fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</Text>
-                  <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>
+                  <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, letterSpacing: 1 }}>
                     {(groupBy === "severity" ? key : lifecycleLabel(key === "unfiled" ? null : key)).toUpperCase()}
                   </Text>
                 </Pressable>
                 {!isCollapsed ? (
                   <View style={{ gap: 8 }}>
-                    {rows.map((f) => {
-                      const cv = fmtCvss(f.cvss_score);
-                      return (
-                        <Pressable
-                          key={f.id}
-                          onPress={() => setDetailFinding(f.id)}
-                          style={({ pressed }) => ({
-                            opacity: pressed ? 0.92 : 1,
-                            transform: [{ scale: pressed ? 0.98 : 1 }],
-                            backgroundColor: colors.gray[800],
-                            borderRadius: 10,
-                            padding: 14,
-                            borderWidth: 1,
-                            borderColor: HAIRLINE,
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 12,
-                          })}
-                        >
-                          <View style={{
-                            width: 22, height: 22, borderRadius: 11,
-                            borderWidth: 2, borderColor: severityColor(f.severity),
-                            alignItems: "center", justifyContent: "center",
-                          }}>
-                            <Text style={{ fontSize: 9 }}>{severityIcon(f.severity)}</Text>
-                          </View>
-                          <Text style={{ flex: 1, color: colors.gray[50], fontSize: 14, lineHeight: 20 }} numberOfLines={2}>
-                            {safe(f.title)}
-                          </Text>
-                          {cv ? (
-                            <Text style={{ color: cvssColor(f.cvss_score), fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>{cv}</Text>
-                          ) : null}
-                        </Pressable>
-                      );
-                    })}
+                    {rows.map((f) => (
+                      <Pressable
+                        key={f.id}
+                        onPress={() => setDetailFinding(f.id)}
+                        style={({ pressed }) => ({
+                          opacity: pressed ? 0.92 : 1,
+                          transform: [{ scale: pressed ? 0.98 : 1 }],
+                          backgroundColor: colors.gray[800],
+                          borderRadius: 10,
+                          padding: 14,
+                          borderWidth: 1,
+                          borderColor: HAIRLINE,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 12,
+                        })}
+                      >
+                        <View style={{
+                          width: 22, height: 22, borderRadius: 11,
+                          borderWidth: 2, borderColor: severityColor(f.severity),
+                          alignItems: "center", justifyContent: "center",
+                        }}>
+                          <Text style={{ fontSize: 9 }}>{severityIcon(f.severity)}</Text>
+                        </View>
+                        <Text style={{ flex: 1, color: colors.gray[50], fontSize: 14, lineHeight: 20 }} numberOfLines={2}>
+                          {safe(f.title)}
+                        </Text>
+                      </Pressable>
+                    ))}
                   </View>
                 ) : null}
               </View>
