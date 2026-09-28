@@ -1,10 +1,11 @@
-// Kill-chain detail — built the way the venture detail sheet is built
-// (ProjectDetailSheet, verified on-screen 2026-09-27): emoji header + full
-// summary, PROGRESS-style disclosure card, then the WORK as a grouped
-// collapsible list — findings grouped by lifecycle like tasks grouped by
-// phase — then components / runs, and document-type content (artifacts,
-// coordination, the advisory README) behind collapsed disclosure rows like
-// the sheet's EXPENSES. Read-only: the app observes, the terminal acts.
+// Kill-chain detail — a 1:1 copy of the venture detail sheet's skeleton
+// (ProjectDetailSheet, verified on-screen + full-page 2026-09-28), with SOC
+// data in the same slots and NOTHING else:
+//   header → PROGRESS card (label / bar / colored counts) → accent link →
+//   collapsed disclosure rows (EXPENSES slot) → STATUS segment row →
+//   TASKS-equivalent (FINDINGS header + view toggle + phase groups + cards)
+// Everything that is not one of those six blocks lives INSIDE the sheet's own
+// mechanisms (collapsed rows, accent link, modal). Read-only by design.
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import {
@@ -129,14 +130,13 @@ export default function ChainDetailScreen() {
   const [advisoryText, setAdvisoryText] = useState<string | null>(null);
   const [viewArtifact, setViewArtifact] = useState<ArtifactRow | null>(null);
   const [detailFinding, setDetailFinding] = useState<number | null>(null);
-  // Collapsed groups — same mechanic as the sheet's collapsedPhases.
-  // Findings groups start open (they are the work); document-type
-  // sections start closed.
+  // Collapsed disclosure rows — the sheet's EXPENSES mechanic. All closed.
   const [collapsed, setCollapsed] = useState<Set<string>>(
-    () => new Set(["artifacts", "coord", "advisory"]),
+    () => new Set(["components", "runs", "artifacts", "coord", "advisory"]),
   );
-  // FINDINGS view toggle — the sheet's PHASES/STATUS mini-toggle:
-  // group the work by lifecycle phase or by severity.
+  // Accent-link disclosure (the sheet's "+ SET BUDGET" slot).
+  const [opsOpen, setOpsOpen] = useState(false);
+  // FINDINGS view toggle — the sheet's PHASES/STATUS mini-toggle.
   const [groupBy, setGroupBy] = useState<"lifecycle" | "severity">("lifecycle");
 
   const toggle = (key: string) => {
@@ -192,8 +192,7 @@ export default function ChainDetailScreen() {
     return () => { mounted = false; };
   }, [advisoryArtifact]);
 
-  // Findings grouped like the sheet's task phase-groups — by lifecycle
-  // phase or by severity, per the FINDINGS view toggle.
+  // Findings grouped like the sheet's task phase-groups.
   const findingGroups = useMemo(() => {
     const keyOf = (f: ChainFinding) =>
       groupBy === "severity" ? (f.severity || "info") : (f.lifecycle || "unfiled");
@@ -240,12 +239,12 @@ export default function ChainDetailScreen() {
   const statusColor = chainStatusColor(chain.status);
   const idx = CHAIN_STATUS_ORDER.indexOf(chain.status as (typeof CHAIN_STATUS_ORDER)[number]);
   const stage = idx >= 0 ? idx + 1 : 0;
-  const pct = Math.round((stage / CHAIN_STATUS_ORDER.length) * 100);
   const composed = fmtCvss(chain.cvss_composed);
   const drop = dropLabel(chain.drop_number);
   const publishedCount = findings.filter((f) => f.lifecycle === "published").length;
   const filedCount = findings.filter((f) => f.lifecycle && f.lifecycle !== "published").length;
   const unfiledCount = findings.length - publishedCount - filedCount;
+  const opsCount = chain.engagement_ids.length + (chain.published_repo ? 1 : 0);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.gray[850], paddingTop: insets.top }}>
@@ -253,7 +252,7 @@ export default function ChainDetailScreen() {
       <BackRow onBack={() => router.back()} />
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        {/* Header — sheet header: emoji + name + FULL summary */}
+        {/* 1 — header: emoji + name + full description (sheet header) */}
         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
           <Text style={{ fontSize: 28 }}>{chainStatusEmoji(chain.status)}</Text>
           <View style={{ flex: 1 }}>
@@ -266,109 +265,118 @@ export default function ChainDetailScreen() {
           </View>
         </View>
 
-        {/* Disclosure card — the sheet's PROGRESS card */}
+        {/* 2 — PROGRESS card: label / bar / one colored counts line. Nothing else. */}
         <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: HAIRLINE }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
-            <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11 }}>DISCLOSURE</Text>
-            <Text style={{ color: statusColor, fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>{pct}%</Text>
-          </View>
+          <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11, marginBottom: 8 }}>DISCLOSURE</Text>
           <ProgressBar done={stage} total={CHAIN_STATUS_ORDER.length} color={statusColor} height={6} />
-          <View style={{ flexDirection: "row", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
-            <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>
-              stage {stage}/{CHAIN_STATUS_ORDER.length} · {chainStatusLabel(chain.status)}
-            </Text>
+          <View style={{ flexDirection: "row", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
             {drop ? <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>{drop}</Text> : null}
-            {composed ? <Text style={{ color: cvssColor(chain.cvss_composed), fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>CVSS {composed}</Text> : null}
-            {chain.published_repo ? <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 10 }}>public</Text> : null}
-          </View>
-          <View style={{ flexDirection: "row", gap: 16, marginTop: 6 }}>
             <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 10 }}>{unfiledCount} unfiled</Text>
             <Text style={{ color: colors.brand.amberDeep, fontFamily: "monospace", fontSize: 10 }}>{filedCount} in disclosure</Text>
             <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 10 }}>{publishedCount} published</Text>
+            {composed ? <Text style={{ color: cvssColor(chain.cvss_composed), fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>CVSS {composed}</Text> : null}
           </View>
         </View>
 
-        {/* Ops record — the only door into engagements */}
-        {chain.engagement_ids.length > 0 || chain.published_repo ? (
-          <SectionCard label={`OPS RECORD (${chain.engagement_ids.length + (chain.published_repo ? 1 : 0)})`}>
-            {chain.engagement_ids.map((eid, i) => (
-              <Row
+        {/* 3 — accent link slot (the sheet's "+ SET BUDGET") */}
+        <Pressable
+          onPress={() => setOpsOpen((v) => !v)}
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, paddingVertical: 4, marginBottom: 8 })}
+        >
+          <Text style={{ color: ACCENT, fontFamily: "monospace", fontSize: 10, fontWeight: "bold", letterSpacing: 1 }}>
+            {`OPS RECORD (${opsCount}) ${opsOpen ? "▾" : "▸"}`}
+          </Text>
+        </Pressable>
+        {opsOpen ? (
+          <View style={{ marginBottom: 12 }}>
+            {chain.engagement_ids.map((eid) => (
+              <Pressable
                 key={eid}
-                title={safe(eid)}
-                sub="engagement"
-                right="›"
-                rightColor={colors.gray[400]}
-                last={i === chain.engagement_ids.length - 1 && !chain.published_repo}
                 onPress={() => router.push(`/soc/${eid}`)}
-              />
+                style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, paddingVertical: 5 })}
+              >
+                <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10 }}>› {safe(eid)}</Text>
+              </Pressable>
             ))}
             {chain.published_repo ? (
-              <Row
-                title={chain.published_repo.replace(/^https?:\/\//, "")}
-                sub={chain.published_at ? `published ${fmtDate(chain.published_at)}` : "published"}
-                right="OPEN"
-                rightColor={ACCENT}
-                last
+              <Pressable
                 onPress={() => Linking.openURL(chain.published_repo!).catch(() => {})}
-              />
+                style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, paddingVertical: 5 })}
+              >
+                <Text style={{ color: colors.success, fontFamily: "monospace", fontSize: 10 }}>
+                  › {chain.published_repo.replace(/^https?:\/\//, "")}{chain.published_at ? ` · ${fmtDate(chain.published_at)}` : ""}
+                </Text>
+              </Pressable>
             ) : null}
-          </SectionCard>
+          </View>
         ) : null}
 
-        {/* Document-type content — collapsed disclosure rows in the sheet's
-            EXPENSES slot: present but closed, above the work, never the face. */}
-        <DisclosureSection
-          label={`ARTIFACTS (${artifacts.length})`}
-          collapsed={collapsed.has("artifacts")}
-          onToggle={() => toggle("artifacts")}
-        >
-          {artifacts.length === 0 ? (
-            <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11, paddingVertical: 8 }}>No artifacts recorded yet</Text>
-          ) : (
-            <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
-              {artifacts.map((a, i) => (
+        {/* 4 — collapsed disclosure rows (the sheet's EXPENSES slot) */}
+        <DisclosureSection label={`COMPONENTS (${chain.components.length})`} collapsed={collapsed.has("components")} onToggle={() => toggle("components")}>
+          <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
+            {chain.components.map((comp, i) => {
+              const cv = fmtCvss(comp.cvss);
+              return (
                 <Row
-                  key={a.id}
-                  title={`${artifactIcon(a.kind)} ${safe(a.filename)}`}
-                  sub={`${safe(a.kind)} · ${safe(a.sha8)}${a.push_state ? ` · ${safe(a.push_state)}` : ""}`}
-                  right={a.sanitized ? "VIEW" : "INTERNAL"}
-                  rightColor={a.sanitized ? colors.success : colors.gray[400]}
-                  last={i === artifacts.length - 1}
-                  onPress={a.sanitized ? () => setViewArtifact(a) : undefined}
+                  key={comp.skyline_id || comp.name || String(i)}
+                  title={`${severityIcon(comp.severity)} ${safe(comp.name, "component")}`}
+                  sub={[comp.skyline_id, comp.role].filter(Boolean).map((s) => safe(String(s))).join(" · ") || undefined}
+                  right={cv || safe(comp.severity || "").toUpperCase()}
+                  rightColor={cv ? cvssColor(comp.cvss) : severityColor(comp.severity)}
+                  last={i === chain.components.length - 1}
                 />
-              ))}
-            </View>
-          )}
+              );
+            })}
+          </View>
         </DisclosureSection>
 
-        <DisclosureSection
-          label={`COORDINATION (${coordination.length})`}
-          collapsed={collapsed.has("coord")}
-          onToggle={() => toggle("coord")}
-        >
-          {coordination.length === 0 ? (
-            <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 11, paddingVertical: 8 }}>No vendor coordination logged</Text>
-          ) : (
-            <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
-              {coordination.map((c, i) => (
-                <Row
-                  key={c.id}
-                  title={safe(c.subject, c.channel)}
-                  sub={`${DIRECTION_ICON[c.direction] || "·"} ${safe(c.channel)} · ${fmtDate(c.event_date)}`}
-                  right={safe(c.status).toUpperCase()}
-                  rightColor={c.status === "held" ? colors.warning : c.status === "done" ? colors.success : channelColor(c.channel)}
-                  last={i === coordination.length - 1}
-                />
-              ))}
-            </View>
-          )}
+        <DisclosureSection label={`EVIDENCE RUNS (${runs.length})`} collapsed={collapsed.has("runs")} onToggle={() => toggle("runs")}>
+          <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
+            {runs.map((r, i) => (
+              <Row
+                key={r.id}
+                title={safe(r.run_key)}
+                sub={[r.purpose, r.target, r.run_date ? fmtDate(r.run_date) : null].filter(Boolean).map((s) => safe(String(s))).join(" · ")}
+                right={r.verdict ? safe(r.verdict).toUpperCase() : ""}
+                rightColor={r.verdict === "fail" ? colors.error : colors.success}
+                last={i === runs.length - 1}
+              />
+            ))}
+          </View>
         </DisclosureSection>
 
-        <DisclosureSection
-          label="ADVISORY"
-          collapsed={collapsed.has("advisory")}
-          onToggle={() => toggle("advisory")}
-        >
+        <DisclosureSection label={`ARTIFACTS (${artifacts.length})`} collapsed={collapsed.has("artifacts")} onToggle={() => toggle("artifacts")}>
+          <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
+            {artifacts.map((a, i) => (
+              <Row
+                key={a.id}
+                title={`${artifactIcon(a.kind)} ${safe(a.filename)}`}
+                sub={`${safe(a.kind)} · ${safe(a.sha8)}${a.push_state ? ` · ${safe(a.push_state)}` : ""}`}
+                right={a.sanitized ? "VIEW" : "INTERNAL"}
+                rightColor={a.sanitized ? colors.success : colors.gray[400]}
+                last={i === artifacts.length - 1}
+                onPress={a.sanitized ? () => setViewArtifact(a) : undefined}
+              />
+            ))}
+          </View>
+        </DisclosureSection>
+
+        <DisclosureSection label={`COORDINATION (${coordination.length})`} collapsed={collapsed.has("coord")} onToggle={() => toggle("coord")}>
+          <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
+            {coordination.map((c, i) => (
+              <Row
+                key={c.id}
+                title={safe(c.subject, c.channel)}
+                sub={`${DIRECTION_ICON[c.direction] || "·"} ${safe(c.channel)} · ${fmtDate(c.event_date)}`}
+                right={safe(c.status).toUpperCase()}
+                rightColor={c.status === "held" ? colors.warning : c.status === "done" ? colors.success : channelColor(c.channel)}
+                last={i === coordination.length - 1}
+              />
+            ))}
+          </View>
+        </DisclosureSection>
+
+        <DisclosureSection label="ADVISORY" collapsed={collapsed.has("advisory")} onToggle={() => toggle("advisory")}>
           {advisoryArtifact && advisoryText != null ? (
             <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: HAIRLINE }}>
               <MarkdownContent content={advisoryText} />
@@ -382,8 +390,7 @@ export default function ChainDetailScreen() {
           )}
         </DisclosureSection>
 
-        {/* STATUS — the sheet's segment row, read-only: the 8-stage pipeline
-            with the current stage filled, like the sheet fills ACTIVE. */}
+        {/* 5 — STATUS segment row (sheet's STATUS, read-only) */}
         <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, letterSpacing: 2, marginBottom: 8 }}>STATUS</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
           {CHAIN_STATUS_ORDER.map((s, i) => {
@@ -394,22 +401,27 @@ export default function ChainDetailScreen() {
               <View
                 key={s}
                 style={{
-                  paddingHorizontal: 10,
-                  paddingVertical: 5,
+                  flexBasis: "23%",
+                  flexGrow: 1,
+                  alignItems: "center",
+                  paddingVertical: 6,
                   borderRadius: 6,
                   backgroundColor: active ? col + "22" : "transparent",
                   borderWidth: 1,
                   borderColor: active ? col + "66" : past ? col + "33" : HAIRLINE,
                 }}
               >
-                <Text style={{
-                  color: active ? col : past ? col : colors.gray[400],
-                  opacity: past ? 0.6 : 1,
-                  fontFamily: "monospace",
-                  fontSize: 9,
-                  fontWeight: "bold",
-                  letterSpacing: 1,
-                }}>
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: active || past ? col : colors.gray[400],
+                    opacity: past ? 0.55 : 1,
+                    fontFamily: "monospace",
+                    fontSize: 8,
+                    fontWeight: "bold",
+                    letterSpacing: 0.5,
+                  }}
+                >
                   {chainStatusLabel(s).toUpperCase()}
                 </Text>
               </View>
@@ -417,8 +429,7 @@ export default function ChainDetailScreen() {
           })}
         </View>
 
-        {/* ── The work: findings grouped in collapsible phase-groups ── */}
-        {/* FINDINGS header + view toggle — the sheet's TASKS (n) + PHASES/STATUS */}
+        {/* 6 — the work: FINDINGS header + toggle, phase groups, task cards */}
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <Text style={{ color: colors.gray[200], fontFamily: "monospace", fontSize: 11, letterSpacing: 1 }}>
             FINDINGS ({findings.length})
@@ -448,70 +459,61 @@ export default function ChainDetailScreen() {
             ))}
           </View>
         </View>
+
         {findings.length === 0 ? (
           <View style={{ alignItems: "center", paddingVertical: 32 }}>
-            <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 12 }}>No findings linked yet</Text>
+            <Text style={{ fontSize: 40, marginBottom: 12 }}>🔐</Text>
+            <Text style={{ color: colors.gray[300], fontSize: 15 }}>No findings linked yet</Text>
+            <Text style={{ color: colors.gray[400], fontSize: 12, marginTop: 4 }}>Findings appear here as they are filed</Text>
           </View>
         ) : (
-          findingGroups.map(([lc, rows]) => {
-            const isCollapsed = collapsed.has(`f:${lc}`);
+          findingGroups.map(([key, rows]) => {
+            const isCollapsed = collapsed.has(`f:${key}`);
             return (
-              <View key={lc} style={{ marginBottom: 12 }}>
+              <View key={key} style={{ marginBottom: 12 }}>
                 <Pressable
-                  onPress={() => toggle(`f:${lc}`)}
-                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6, paddingHorizontal: 4 }}
+                  onPress={() => toggle(`f:${key}`)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6, paddingHorizontal: 4 }}
                 >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text style={{ color: colors.gray[400], fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</Text>
-                    <Text style={{ color: groupBy === "severity" ? severityColor(lc) : lifecycleColor(lc === "unfiled" ? null : lc), fontFamily: "monospace", fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>
-                      {(groupBy === "severity" ? lc : lifecycleLabel(lc === "unfiled" ? null : lc)).toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9 }}>{rows.length}</Text>
+                  <Text style={{ color: colors.gray[400], fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</Text>
+                  <Text style={{ color: colors.gray[300], fontFamily: "monospace", fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>
+                    {(groupBy === "severity" ? key : lifecycleLabel(key === "unfiled" ? null : key)).toUpperCase()}
+                  </Text>
                 </Pressable>
                 {!isCollapsed ? (
                   <View style={{ gap: 8 }}>
                     {rows.map((f) => {
                       const cv = fmtCvss(f.cvss_score);
-                      const sub = [f.skyline_id || f.cve_id, f.discovered_at ? fmtDate(f.discovered_at) : null]
-                        .filter(Boolean).join(" · ");
                       return (
                         <Pressable
                           key={f.id}
                           onPress={() => setDetailFinding(f.id)}
                           style={({ pressed }) => ({
                             opacity: pressed ? 0.92 : 1,
-                            transform: [{ scale: pressed ? 0.99 : 1 }],
+                            transform: [{ scale: pressed ? 0.98 : 1 }],
                             backgroundColor: colors.gray[800],
                             borderRadius: 10,
-                            padding: 12,
+                            padding: 14,
                             borderWidth: 1,
                             borderColor: HAIRLINE,
                             flexDirection: "row",
                             alignItems: "center",
-                            gap: 10,
+                            gap: 12,
                           })}
                         >
                           <View style={{
-                            width: 24, height: 24, borderRadius: 12,
-                            borderWidth: 1.5, borderColor: severityColor(f.severity),
+                            width: 22, height: 22, borderRadius: 11,
+                            borderWidth: 2, borderColor: severityColor(f.severity),
                             alignItems: "center", justifyContent: "center",
                           }}>
-                            <Text style={{ fontSize: 11 }}>{severityIcon(f.severity)}</Text>
+                            <Text style={{ fontSize: 9 }}>{severityIcon(f.severity)}</Text>
                           </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ color: colors.gray[50], fontSize: 13, lineHeight: 18 }} numberOfLines={2}>
-                              {safe(f.title)}
-                            </Text>
-                            {sub ? (
-                              <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, marginTop: 3 }} numberOfLines={1}>
-                                {sub}
-                              </Text>
-                            ) : null}
-                          </View>
-                          <Text style={{ color: cv ? cvssColor(f.cvss_score) : severityColor(f.severity), fontFamily: "monospace", fontSize: 11, fontWeight: "bold" }}>
-                            {cv || safe(f.severity).toUpperCase()}
+                          <Text style={{ flex: 1, color: colors.gray[50], fontSize: 14, lineHeight: 20 }} numberOfLines={2}>
+                            {safe(f.title)}
                           </Text>
+                          {cv ? (
+                            <Text style={{ color: cvssColor(f.cvss_score), fontFamily: "monospace", fontSize: 10, fontWeight: "bold" }}>{cv}</Text>
+                          ) : null}
                         </Pressable>
                       );
                     })}
@@ -521,42 +523,6 @@ export default function ChainDetailScreen() {
             );
           })
         )}
-
-        {/* Components */}
-        {chain.components.length > 0 ? (
-          <SectionCard label={`COMPONENTS (${chain.components.length})`}>
-            {chain.components.map((comp, i) => {
-              const cv = fmtCvss(comp.cvss);
-              return (
-                <Row
-                  key={comp.skyline_id || comp.name || String(i)}
-                  title={`${severityIcon(comp.severity)} ${safe(comp.name, "component")}`}
-                  sub={[comp.skyline_id, comp.role, comp.cwe, comp.cve].filter(Boolean).map((s) => safe(String(s))).join(" · ") || undefined}
-                  right={cv || safe(comp.severity || "").toUpperCase()}
-                  rightColor={cv ? cvssColor(comp.cvss) : severityColor(comp.severity)}
-                  last={i === chain.components.length - 1}
-                />
-              );
-            })}
-          </SectionCard>
-        ) : null}
-
-        {/* Evidence runs */}
-        {runs.length > 0 ? (
-          <SectionCard label={`EVIDENCE RUNS (${runs.length})`}>
-            {runs.map((r, i) => (
-              <Row
-                key={r.id}
-                title={safe(r.run_key)}
-                sub={[r.purpose, r.target, r.run_date ? fmtDate(r.run_date) : null].filter(Boolean).map((s) => safe(String(s))).join(" · ")}
-                right={r.verdict ? safe(r.verdict).toUpperCase() : ""}
-                rightColor={r.verdict === "fail" ? colors.error : colors.success}
-                last={i === runs.length - 1}
-              />
-            ))}
-          </SectionCard>
-        ) : null}
-
       </ScrollView>
 
       <ArtifactViewerModal artifact={viewArtifact} onClose={() => setViewArtifact(null)} />
@@ -565,7 +531,7 @@ export default function ChainDetailScreen() {
   );
 }
 
-// ── Shared blocks (venture-sheet vocabulary) ──
+// ── Sheet vocabulary ──
 
 function BackRow({ onBack }: { onBack: () => void }) {
   return (
@@ -579,21 +545,12 @@ function BackRow({ onBack }: { onBack: () => void }) {
   );
 }
 
-function SectionCard({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <View style={{ backgroundColor: colors.gray[800], borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: HAIRLINE }}>
-      <Text style={{ color: colors.gray[400], fontFamily: "monospace", fontSize: 9, letterSpacing: 2, marginBottom: 8 }}>{label}</Text>
-      {children}
-    </View>
-  );
-}
-
-// Collapsed-by-default disclosure row — the sheet's "EXPENSES (n) ▸" pattern.
+// Collapsed-by-default disclosure row — the sheet's "EXPENSES (n) ▸".
 function DisclosureSection({ label, collapsed, onToggle, children }: {
   label: string; collapsed: boolean; onToggle: () => void; children: React.ReactNode;
 }) {
   return (
-    <View style={{ marginBottom: 16 }}>
+    <View style={{ marginBottom: 14 }}>
       <Pressable
         onPress={onToggle}
         style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: collapsed ? 0 : 8, paddingVertical: 4 }}
