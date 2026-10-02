@@ -124,9 +124,21 @@ async function arrGet(base, key, path, ms = 8000) {
 async function radarrProgress(tmdbId) {
   const key = process.env.RADARR_API_KEY;
   if (!key) return null;
-  const lookup = await arrGet(RADARR_URL, key, `/movie/lookup?term=tmdb:${tmdbId}`);
-  const movie = (Array.isArray(lookup) ? lookup : []).find((m) => m.tmdbId === Number(tmdbId));
-  if (!movie) return null;
+  // DB row FIRST — /movie/lookup returns hasFile:null even when the movie IS
+  // imported (it doesn't merge DB state; bit us live 2026-10-02: NOTLD stuck
+  // at stage "wanted" with a 10.5GB mkv sitting in the library). /movie?tmdbId=
+  // is authoritative. Lookup is only the not-yet-added fallback.
+  const rows = await arrGet(RADARR_URL, key, `/movie?tmdbId=${tmdbId}`).catch(() => null);
+  let movie = Array.isArray(rows) && rows.length ? rows[0] : null;
+  if (!movie) {
+    const lookup = await arrGet(RADARR_URL, key, `/movie/lookup?term=tmdb:${tmdbId}`).catch(() => []);
+    const cand = (Array.isArray(lookup) ? lookup : []).find((m) => m.tmdbId === Number(tmdbId));
+    if (!cand) return null;
+    return {
+      stage: cand.status && cand.status !== "released" ? "unreleased" : "wanted",
+      percent: 0,
+    };
+  }
   let row = null;
   try {
     const q = await arrGet(RADARR_URL, key, "/queue?page=1&pageSize=100");
