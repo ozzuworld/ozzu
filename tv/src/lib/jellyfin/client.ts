@@ -1,8 +1,9 @@
 // Jellyfin SDK client singleton for the Ozzu TV app.
 //
 // The TV reaches Jellyfin on bridge-01 three ways (see resolveServerUrl): LAN
-// direct at home, WG mesh (10.9.0.5:8096), or the public nginx door
-// (home.ozzu.world/bridge/jellyfin -> AWS edge -> WG -> :8096) from anywhere.
+// direct at home, WG mesh (10.9.0.5:8096), or the public nginx doors from
+// anywhere — tv.ozzu.world (root, canonical) with home.ozzu.world/bridge/jellyfin
+// as subpath fallback; both -> AWS edge -> WG -> :8096.
 // A stable deviceId is required so Jellyfin keys sessions/resume consistently.
 
 import { Jellyfin } from "@jellyfin/sdk";
@@ -12,7 +13,8 @@ import type { Api } from "@jellyfin/sdk";
 // bytes must NOT hairpin through the cloud edge when at home (data-sovereignty +
 // bandwidth). resolveServerUrl() below picks the best path per network:
 //   WG mesh:            http://10.9.0.5:8096
-//   nginx public proxy: https://home.ozzu.world/bridge/jellyfin (AWS edge)
+//   nginx public proxy: https://tv.ozzu.world (root door, AWS edge)
+//                       https://home.ozzu.world/bridge/jellyfin (subpath fallback)
 export const DEFAULT_BASE_URL = "http://192.168.1.9:8096";
 const CLIENT_INFO = { name: "Ozzu TV", version: "1.0.0" };
 
@@ -84,7 +86,8 @@ export function authHeaders(): Record<string, string> {
 export const SERVER_CANDIDATES = [
   "http://192.168.1.9:8096", // home LAN (bridge-01)
   "http://10.9.0.5:8096", // WG mesh
-  "https://home.ozzu.world/bridge/jellyfin", // public door via AWS edge (LIVE since 2026-09-27)
+  "https://tv.ozzu.world", // public door — root domain (LIVE 2026-10-02; canonical JF layout)
+  "https://home.ozzu.world/bridge/jellyfin", // public door — subpath fallback (LIVE since 2026-09-27)
 ];
 
 let _reachable = false;
@@ -109,11 +112,12 @@ async function probeServer(url: string, timeoutMs = 2500): Promise<boolean> {
 export async function resolveServerUrl(first?: string | null): Promise<string | null> {
   const seen = new Set<string>();
   const urls: string[] = [];
-  // Order matters: LAN → WG → persisted override → public edge. Home devices
-  // always get the direct LAN path (zero cloud hairpin, zero egress cost);
-  // remote devices fall through to the public door (live since 2026-09-27).
-  const [lan, wg, pub] = SERVER_CANDIDATES;
-  for (const u of [lan, wg, first, pub]) {
+  // Order matters: LAN → WG → persisted override → public doors (root domain
+  // first, subpath as fallback). Home devices always get the direct LAN path
+  // (zero cloud hairpin, zero egress cost); remote devices fall through to the
+  // public edge (tv.ozzu.world root door live since 2026-10-02).
+  const [lan, wg, ...pubs] = SERVER_CANDIDATES;
+  for (const u of [lan, wg, first, ...pubs]) {
     if (!u) continue;
     const norm = u.replace(/\/+$/, "");
     if (!seen.has(norm)) {
