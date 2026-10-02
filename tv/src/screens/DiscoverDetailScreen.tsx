@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Image,
@@ -22,10 +22,12 @@ import {
 } from "../lib/theme";
 import { FocusableButton } from "../components/FocusableButton";
 import { DiscoverRail } from "../components/DiscoverRail";
+import { ProgressBar } from "../components/ProgressBar";
 import { ErrorView, Spinner } from "../components/States";
 import {
   discoverDetail,
-  submitRequest,
+  watchStart,
+  watchState,
   tmdbBackdrop,
   tmdbPoster,
   tmdbProfile,
@@ -35,15 +37,24 @@ import {
   type DiscoverDetail,
   type DiscoverItem,
   type DiscoverMediaType,
+  type WatchState,
 } from "../lib/seerr";
 import { authHeaders, getBaseUrl, getUserId } from "../lib/jellyfin/client";
 import { formatRuntime, ticksToSeconds } from "../lib/format";
 
 // Discovery detail (Seerr lane) — the TMDB catalog counterpart of DetailScreen
-// (Jellyfin lane). Seerr provides the metadata + availability + request flow;
-// when the title is IN the library (availability.jellyfinId), playback goes
-// straight through Jellyfin: movies → Player, series → season/episode picker
-// (raw JF /Shows endpoints, header auth — the SDK's tvApi omits them).
+// (Jellyfin lane). Seerr provides the metadata + availability; playback always
+// goes through Jellyfin: movies → Player, series → next-unwatched (JF NextUp)
+// + season/episode picker (raw JF /Shows endpoints, header auth — the SDK's
+// tvApi omits them).
+//
+// WATCH ORCHESTRATION (KK 2026-10-02: "click watch, it automatically
+// orchestrates everything behind — download, jellyfin playback, casually
+// plays"): one Watch button. Available → play. Not available → POST
+// /media/discover/watch (Seerr request, auto-approved → Sonarr/Radarr → qbit
+// → import; the bridge nudges JF refresh + Seerr scan at the end) → poll GET
+// watch every 8s showing real queue progress → when availability flips, the
+// screen hands off straight to the Player. Re-entry resumes the poll.
 
 interface JfSeason {
   Id: string;
@@ -69,6 +80,12 @@ async function jfGet<T>(path: string): Promise<T> {
 function epThumbUrl(ep: JfEpisode): string | null {
   if (!ep.ImageTags?.Primary) return null;
   return `${getBaseUrl()}/Items/${ep.Id}/Images/Primary?fillWidth=320`;
+}
+
+function fmtSize(bytes: number): string {
+  const gb = bytes / 1e9;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 }
 
 function CastCard({ member }: { member: CastMember }) {
@@ -119,10 +136,15 @@ export function DiscoverDetailScreen() {
   const [detail, setDetail] = useState<DiscoverDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // request state (Seerr → Sonarr/Radarr → library)
-  const [reqPending, setReqPending] = useState(false);
+  // Watch orchestration (Seerr → Sonarr/Radarr → qbit → import → JF → auto-play)
+  const [watch, setWatch] = useState<WatchState | null>(null);
+  const [startingWatch, setStartingWatch] = useState(false);
+  const [orchestrating, setOrchestrating] = useState(false);
   const [requested, setRequested] = useState(false);
   const [reqNote, setReqNote] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const deadlineRef = useRef(0);
+  const autoPlayed = useRef(false);
 
   // Jellyfin episode browser (series that are already in the library)
   const [seasons, setSeasons] = useState<JfSeason[]>([]);
@@ -133,16 +155,122 @@ export function DiscoverDetailScreen() {
   const jellyfinId = detail?.availability?.jellyfinId ?? null;
   const available = isAvailable(detail?.availability);
 
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  // Leaving the screen stops the poll — the download continues server-side and
+  // re-entry resumes from the fresh state.
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
+  const pollOnce = useCallback(async (): Promise<WatchState | null> => {
+    try {
+      const w = await watchState(tmdbId, mediaType as DiscoverMediaType);
+      setWatch(w);
+      return w;
+    } catch {
+      return null;
+    }
+  }, [tmdbId, mediaType]);
+
+  // Movie → its Jellyfin id. Series → next unwatched episode (JF NextUp),
+  // falling back to the first episode that has media.
+  const resolvePlayTarget = useCallback(
+    async (jfId: string): Promise<string> => {
+      if (mediaType !== "tv") return jfId;
+      const uid = getUserId();
+      if (!uid) return jfId;
+      try {
+        const next = await jfGet<{ Items?: { Id: string }[] }>(
+          `/Users/${uid}/Items/NextUp?seriesId=${jfId}&limit=1`
+        );
+        if (next.Items?.length) return next.Items[0].Id;
+      } catch {
+        /* NextUp unavailable — fall through */
+      }
+      try {
+        const eps = await jfGet<{ Items?: { Id: string }[] }>(
+          `/Shows/${jfId}/Episodes?userId=${uid}&limit=1&fields=MediaSources`
+        );
+        if (eps.Items?.length) return eps.Items[0].Id;
+      } catch {
+        /* picker below still works */
+      }
+      return jfId;
+    },
+    [mediaType]
+  );
+
+  const playNow = useCallback(
+    async (jfId: string) => {
+      autoPlayed.current = true;
+      stopPolling();
+      setOrchestrating(false);
+      const target = await resolvePlayTarget(jfId);
+      nav.navigate("Player", { itemId: target });
+    },
+    [nav, resolvePlayTarget, stopPolling]
+  );
+
+  // The "casually playback" moment: the poll saw availability flip → hand
+  // straight to the player (once per screen life).
+  const tryAutoPlay = useCallback(
+    (w: WatchState | null) => {
+      if (autoPlayed.current) return;
+      const a = w?.availability;
+      if (!a || !isAvailable(a) || !a.jellyfinId) return;
+      autoPlayed.current = true;
+      stopPolling();
+      setDetail((d) => (d ? { ...d, availability: a } : d));
+      setReqNote("In your library — starting…");
+      setTimeout(() => void playNow(a.jellyfinId as string), 900);
+    },
+    [playNow, stopPolling]
+  );
+
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return;
+    deadlineRef.current = Date.now() + 45 * 60 * 1000; // cap: huge grabs finish server-side
+    pollRef.current = setInterval(() => {
+      if (Date.now() > deadlineRef.current) {
+        stopPolling();
+        setOrchestrating(false);
+        setReqNote(
+          "Still on its way — it lands in your library automatically. Check Recently Added in a bit."
+        );
+        return;
+      }
+      void pollOnce().then((w) => {
+        if (!w) return;
+        setDetail((d) => (d && w.availability ? { ...d, availability: w.availability } : d));
+        tryAutoPlay(w);
+      });
+    }, 8000);
+  }, [pollOnce, stopPolling, tryAutoPlay]);
+
   const load = useCallback(async () => {
     setError(null);
     try {
-      const d = await discoverDetail(tmdbId, mediaType as DiscoverMediaType);
+      const [d, w] = await Promise.all([
+        discoverDetail(tmdbId, mediaType as DiscoverMediaType),
+        watchState(tmdbId, mediaType as DiscoverMediaType).catch(() => null),
+      ]);
       setDetail(d);
-      setRequested(d.availability?.requested ?? false);
+      setWatch(w);
+      const req = d.availability?.requested ?? (w?.requests?.length ?? 0) > 0;
+      setRequested(req);
+      // Re-entry while a download is in flight → resume the progress poll.
+      if (!isAvailable(d.availability) && req) {
+        setOrchestrating(true);
+        startPolling();
+      }
     } catch (e: any) {
       setError(e?.message || "Couldn't load details.");
     }
-  }, [tmdbId, mediaType]);
+  }, [tmdbId, mediaType, startPolling]);
 
   useEffect(() => {
     load();
@@ -182,28 +310,70 @@ export function DiscoverDetailScreen() {
     })();
   }, [jellyfinId, activeSeason]);
 
-  const doRequest = async () => {
-    if (!detail || reqPending) return;
-    setReqPending(true);
+  // The Watch click: play now, or fire the auto-approved pipeline and ride it.
+  const onWatch = async () => {
+    if (!detail || startingWatch || orchestrating) return;
+    if (available && jellyfinId) {
+      void playNow(jellyfinId);
+      return;
+    }
+    setStartingWatch(true);
     setReqNote(null);
     try {
-      const r = await submitRequest(detail.tmdbId, detail.mediaType, "all");
-      if (r.created) {
-        setRequested(true);
-        setReqNote("Requested — Seerr handed it to the download pipeline. It appears here when Jellyfin imports it.");
-      } else if (r.reason === "nothing_to_request") {
-        setReqNote(r.message || "Nothing left to request — already in your library.");
-      } else if (r.reason === "duplicate") {
-        setRequested(true);
-        setReqNote("Already requested — it's in the pipeline.");
-      } else {
-        setReqNote(r.message || "Request accepted.");
+      const r = await watchStart(detail.tmdbId, detail.mediaType, "all");
+      if (r.action === "play" && r.availability?.jellyfinId) {
+        void playNow(r.availability.jellyfinId);
+        return;
       }
+      if (r.action === "none") {
+        setReqNote(r.message || "Nothing to request — refreshing…");
+        void load(); // availability likely just flipped; refresh state
+        return;
+      }
+      // "requested" (fresh or duplicate) → the pipeline is running.
+      setRequested(true);
+      setOrchestrating(true);
+      autoPlayed.current = false;
+      startPolling();
+      const w = await pollOnce(); // immediate first state so progress shows at once
+      if (w) tryAutoPlay(w);
     } catch (e: any) {
-      setReqNote(`Request failed: ${e?.message || "unknown error"}`);
+      setReqNote(`Couldn't start the download: ${e?.message || "unknown error"}`);
     } finally {
-      setReqPending(false);
+      setStartingWatch(false);
     }
+  };
+
+  // ── progress card content (real arr-queue numbers via GET watch) ──
+  const p = watch?.progress ?? null;
+  const progressHeadline = (): string => {
+    if (!p || p.stage === "wanted" || p.stage === "unmonitored" || p.stage === "unknown")
+      return "Searching indexers — the grab usually starts within a minute…";
+    if (p.stage === "unreleased")
+      return "Not released yet — it grabs itself automatically on release day.";
+    if (p.stage === "downloading") return `Downloading — ${p.percent}%`;
+    if (p.stage === "partial")
+      return `Episodes ready: ${p.have ?? 0} of ${p.aired ?? 0} — the rest still downloading.`;
+    if (p.stage === "imported") return "Downloaded — importing into Jellyfin…";
+    return "On its way…";
+  };
+  const progressFraction = (): number | null => {
+    if (!p) return null;
+    if (p.stage === "downloading" || p.stage === "partial")
+      return Math.max(0, Math.min(1, (p.percent ?? 0) / 100));
+    if (p.stage === "imported") return 1;
+    return null;
+  };
+  const progressSubline = (): string => {
+    if (!p) return "";
+    if (p.stage === "downloading") {
+      const bits: string[] = [];
+      if (p.sizeLeft != null && p.sizeLeft > 0) bits.push(`${fmtSize(p.sizeLeft)} left`);
+      if (p.title) bits.push(p.title.length > 60 ? `${p.title.slice(0, 57)}…` : p.title);
+      return bits.join(" · ");
+    }
+    if (p.stage === "partial" && p.queued) return `${p.queued} more in the download queue`;
+    return "";
   };
 
   if (error) return <ErrorView message={error} onRetry={load} />;
@@ -277,35 +447,34 @@ export function DiscoverDetailScreen() {
           </View>
         </View>
 
-        {/* ── action row ── */}
+        {/* ── action row: ONE Watch button drives everything ── */}
         <View style={styles.actions}>
-          {mediaType === "movie" && jellyfinId ? (
+          {available && jellyfinId ? (
+            <FocusableButton label="Watch" icon="▶" primary hasTVPreferredFocus onPress={onWatch} />
+          ) : orchestrating ? (
+            <FocusableButton label="On its way" icon="⏳" onPress={undefined} />
+          ) : (
             <FocusableButton
-              label="Play"
+              label={startingWatch ? "Starting…" : "Watch"}
               icon="▶"
               primary
               hasTVPreferredFocus
-              onPress={() => nav.navigate("Player", { itemId: jellyfinId })}
-            />
-          ) : !available ? (
-            <FocusableButton
-              label={reqPending ? "Requesting…" : requested ? "Requested" : "Request"}
-              icon="＋"
-              primary={!requested}
-              hasTVPreferredFocus
-              onPress={reqPending || requested ? undefined : doRequest}
-            />
-          ) : (
-            <FocusableButton
-              label="Back"
-              icon="←"
-              // series-in-library hands first focus to the season picker below
-              hasTVPreferredFocus={!(mediaType === "tv" && jellyfinId)}
-              onPress={() => nav.goBack()}
+              onPress={onWatch}
             />
           )}
           {!!reqNote && <Text style={styles.reqNote}>{reqNote}</Text>}
         </View>
+
+        {/* ── download progress (orchestration in flight) ── */}
+        {(orchestrating || (requested && !available)) && !autoPlayed.current ? (
+          <View style={styles.progressCard}>
+            <Text style={styles.progressTitle}>{progressHeadline()}</Text>
+            {progressFraction() != null ? (
+              <ProgressBar fraction={progressFraction() as number} height={6} style={styles.progressTrack} />
+            ) : null}
+            {!!progressSubline() ? <Text style={styles.progressSub}>{progressSubline()}</Text> : null}
+          </View>
+        ) : null}
 
         {/* ── series in library: season picker + episodes ── */}
         {mediaType === "tv" && jellyfinId ? (
@@ -319,7 +488,8 @@ export function DiscoverDetailScreen() {
                     <FocusableButton
                       key={s.Id}
                       label={s.IndexNumber ? `Season ${s.IndexNumber}` : s.Name || `Season ${i + 1}`}
-                      hasTVPreferredFocus={i === 0}
+                      // Watch owns first focus (casual flow); picker is secondary
+                      hasTVPreferredFocus={false}
                       onPress={() => setActiveSeason(s.Id)}
                       style={active ? styles.seasonActive : undefined}
                     />
@@ -475,6 +645,25 @@ const styles = StyleSheet.create({
     fontSize: fontSize.caption,
     lineHeight: 20,
   },
+  progressCard: {
+    marginHorizontal: screenPad,
+    marginBottom: spacing.lg,
+    marginTop: -spacing.sm,
+    padding: spacing.lg,
+    backgroundColor: colors.bg.elevated,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+    maxWidth: 900,
+  },
+  progressTitle: {
+    color: colors.text.primary,
+    fontSize: fontSize.body,
+    fontWeight: fontWeight.semibold,
+  },
+  progressTrack: { marginTop: 2 },
+  progressSub: { color: colors.text.tertiary, fontSize: fontSize.caption },
   section: { paddingHorizontal: screenPad, marginBottom: spacing.xl },
   railSection: { marginTop: spacing.sm },
   sectionTitle: {

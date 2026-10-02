@@ -358,7 +358,7 @@ module.exports = function mediaRoutes(ctx) {
         await Promise.all(workers);
         results.sort((a, b) => b.score - a.score);
         sendJSON(res, 200, { query: q, type, count: results.length, results: results.slice(0, limit) });
-        log?.info?.(`[media] search "${q}" (${type}) → ${results.length} resolvable of ${all.length}`);
+        log?.bridge?.info?.(`[media] search "${q}" (${type}) → ${results.length} resolvable of ${all.length}`);
       } catch (err) {
         sendJSON(res, err.code || 500, { error: err.message });
       }
@@ -402,7 +402,7 @@ module.exports = function mediaRoutes(ctx) {
           stream: streamUrls(infoHash, file.idx),
           fileCount: listed.files.length,
         });
-        log?.info?.(`[media] resolve ${infoHash} → file ${file.idx} (${file.path})`);
+        log?.bridge?.info?.(`[media] resolve ${infoHash} → file ${file.idx} (${file.path})`);
       } catch (err) {
         sendJSON(res, 502, { error: `resolve: ${err.message}` });
       }
@@ -430,7 +430,7 @@ module.exports = function mediaRoutes(ctx) {
         if (!/^[a-f0-9]{40}$/.test(infoHash)) { sendJSON(res, 400, { error: "infoHash must be 40-hex" }); return true; }
         const r = await fetchWithTimeout(`${STREMIO_URL}/${infoHash}/remove`, {}, 10000);
         sendJSON(res, r.ok ? 200 : 502, { ok: r.ok, infoHash });
-        log?.info?.(`[media] broker remove ${infoHash} → ${r.status}`);
+        log?.bridge?.info?.(`[media] broker remove ${infoHash} → ${r.status}`);
       } catch (err) {
         sendJSON(res, 502, { error: `stremio: ${err.message}` });
       }

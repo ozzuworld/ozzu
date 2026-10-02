@@ -179,6 +179,69 @@ export function listRequests(): Promise<{ count: number; results: RequestRow[] }
   return call("/media/discover/requests", undefined, T);
 }
 
+// ── Watch orchestration (dir_1790443814736, KK 2026-10-02) ──────────────────
+// "Click Watch → everything happens behind → Jellyfin plays." POST watch starts
+// the pipeline (Seerr request, auto-approved → Sonarr/Radarr → qbit → import →
+// the bridge nudges JF refresh + Seerr scan); GET watch is the one-stop poll:
+// availability + request rows + REAL arr queue progress (percent/bytes).
+
+export type ProgressStage =
+  | "wanted"
+  | "unreleased"
+  | "unmonitored"
+  | "downloading"
+  | "partial"
+  | "imported"
+  | "unknown";
+
+export interface WatchProgress {
+  stage: ProgressStage | string;
+  percent: number;
+  sizeLeft?: number | null;
+  size?: number | null;
+  eta?: string | null;
+  queued?: number | null;
+  have?: number | null;
+  aired?: number | null;
+  statusText?: string | null;
+  title?: string | null;
+}
+
+export interface WatchState {
+  availability: Availability | null;
+  requests: { id: number | null; status: number | null }[];
+  progress: WatchProgress | null;
+  nudged?: boolean;
+}
+
+export interface WatchStartResult {
+  action: "play" | "requested" | "none";
+  created?: boolean;
+  reason?: "nothing_to_request" | "duplicate";
+  message?: string;
+  requestId?: number | null;
+  status?: number | null;
+  availability?: Availability | null;
+}
+
+/** One-stop orchestration state for the Watch button (poll target). */
+export function watchState(tmdbId: number, mediaType: DiscoverMediaType): Promise<WatchState> {
+  return call(`/media/discover/watch?type=${mediaType}&tmdbId=${tmdbId}`, undefined, T);
+}
+
+/** The Watch click: play-now when available, else fire the auto-approved request. */
+export function watchStart(
+  tmdbId: number,
+  mediaType: DiscoverMediaType,
+  seasons?: number[] | "all"
+): Promise<WatchStartResult> {
+  return call(
+    "/media/discover/watch",
+    { method: "POST", body: JSON.stringify({ tmdbId, mediaType, seasons }) },
+    T
+  );
+}
+
 // ── display helpers ──────────────────────────────────────────────────────────
 
 export function isAvailable(a: Availability | null | undefined): boolean {
