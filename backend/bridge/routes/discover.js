@@ -349,6 +349,13 @@ module.exports = function discoverRoutes(ctx) {
           sendJSON(res, 400, { error: "tmdbId (numeric) is required" }, req);
           return true;
         }
+        // Same dedupe guard as POST watch (Seerr's 409 is state-dependent).
+        const pre = await seerrGet(`/${mediaType}/${tmdbId}`).catch(() => null);
+        const preAvail = pre ? availabilityOf(pre.mediaInfo) : null;
+        if (preAvail && preAvail.requested) {
+          sendJSON(res, 200, { ok: true, created: false, reason: "duplicate", message: "A request already exists." }, req);
+          return true;
+        }
         const payload = { mediaId: tmdbId, mediaType };
         if (mediaType === "tv") payload.seasons = Array.isArray(body.seasons) && body.seasons.length ? body.seasons : "all";
         const r = await fetchWithTimeout(`${SEERR_URL}/api/v1/request`, {
@@ -440,6 +447,14 @@ module.exports = function discoverRoutes(ctx) {
         const availability = availabilityOf(d.mediaInfo);
         if (availability && (availability.status === 4 || availability.status === 5) && availability.jellyfinId) {
           sendJSON(res, 200, { action: "play", availability }, req);
+          return true;
+        }
+        // Dedupe guard: Seerr only 409s in SOME states — re-POSTing an approved
+        // movie mid-processing slips through and creates duplicate requests
+        // (observed live 2026-10-02: #4/#5/#6 for one title). An active request
+        // already exists → report it, never create another.
+        if (availability && availability.requested) {
+          sendJSON(res, 200, { action: "requested", created: false, reason: "duplicate", availability }, req);
           return true;
         }
         const payload = { mediaId: tmdbId, mediaType };
